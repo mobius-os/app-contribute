@@ -601,6 +601,18 @@ for alias, (name, rec, etag) in aliases.items():
   except Exception as exc:
     print("contribute: PUT %s error: %s" % (name, exc), file=sys.stderr)
     continue
+  if new_status in ("merged", "closed"):
+    try:
+      _call(
+        "POST",
+        "/api/github/contributions/%s/%s/cleanup-staging" % (
+          APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
+        ),
+        {},
+      )
+    except Exception as exc:
+      print("contribute: staging cleanup %s failed: %s" % (name, exc),
+            file=sys.stderr)
   if attention_notice:
     try:
       _notify_attention(updated, attention_notice)

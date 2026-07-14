@@ -211,8 +211,9 @@ export default function ContributeApp({ appId, token }) {
   }, [runLiveRefresh])
 
   // Send = direct PR submit. The platform claims the prepared record,
-  // recomputes the branch diff, pushes to the owner's fork, opens the PR,
-  // and returns the updated ledger record. On a partner-actionable failure the
+  // recomputes the branch diff, safely fast-forwards a stale reusable fork,
+  // pushes to it, opens the PR, and returns the updated ledger record. On a
+  // partner-actionable failure the
   // server rolls the record back to `prepared` with last_submit_error, and the
   // card stays ready for feedback/retry instead of handing off to an agent chat.
   const onSend = useCallback(async (rec) => {

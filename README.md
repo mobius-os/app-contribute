@@ -28,8 +28,10 @@ contribution. This app is the dashboard for that loop:
     would go public: the action ("New PR to…", "Comment on…"), the full
     markdown-rendered body draft, and a structured diff only when you ask for
     the excerpt or full patch. **Send PR for review** calls the platform submit
-    endpoint directly; the server recomputes the reviewed branch diff, pushes
-    to your fork, opens the PR on GitHub, and records the URL. Non-PR records are
+    endpoint directly; the server recomputes the reviewed branch diff, safely
+    fast-forwards a stale reusable fork, pushes the reviewed branch, opens the
+    PR on GitHub, and records the URL. A diverged fork is left untouched and the
+    send stops with an actionable error. Non-PR records are
     review-only for now; **Leave feedback** returns to the chat that prepared
     the record. **Dismiss** marks the record
     abandoned — a compare-and-swap write when the
@@ -43,6 +45,10 @@ contribution. This app is the dashboard for that loop:
     submitting right now. State is refreshed on open; the daily background job
     also checks for comments, reviews, and failing checks that need follow-up.
   - **History** — merged, closed, commented, and abandoned.
+
+When a tracked PR becomes merged or closed, Contribute removes only its
+disposable local staging checkout. The ledger record, reviewed diff, reusable
+GitHub fork, and GitHub topic branch remain available.
 
 The GitHub token stays server-side and never reaches this app. The app can read
 GitHub state and can call the single prepared-contribution submit endpoint after

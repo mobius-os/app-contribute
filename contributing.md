@@ -185,9 +185,11 @@ No agent turn is needed after that click. The platform endpoint:
 3. verifies the commit carries the Möbius Agent co-author trailer,
 4. normalizes the tip commit author/committer to the connected owner while
    preserving the reviewed diff,
-5. pushes the branch to the owner's fork,
-6. creates a review-ready PR with the approved `title` and `body_draft`, and
-7. records `url`, `number`, and `status: "open"` back into the ledger.
+5. safely fast-forwards a stale reusable fork default branch from upstream
+   (and stops without rewriting it if the fork has diverged),
+6. pushes the branch to the owner's fork,
+7. creates a review-ready PR with the approved `title` and `body_draft`, and
+8. records `url`, `number`, and `status: "open"` back into the ledger.
 
 If any preflight fails, the endpoint rolls the record back to `prepared` with
 `last_submit_error`; the partner can press Leave feedback to return to the
@@ -294,6 +296,7 @@ gh api graphql -f query='mutation($id: ID!, $body: String!) {
 | **403 "OAuth App access restrictions"** | Org hasn't approved the Möbius OAuth app. Have the partner reconnect with a **`public_repo`-scoped PAT** (Connect card) — safer than full `repo`, which also grants read of the owner's PRIVATE repos through the read passthrough. |
 | **`gh: command not found`** | Platform image too old; a platform update is needed. |
 | **`git push fork` fails right after the fork** | Forks are created async — wait 2s and retry, up to 3×, before treating it as real. |
+| **Push says `workflow` scope is required, but the reviewed diff does not change a workflow** | The reusable fork is stale and lacks an identical workflow file. Current platforms safely sync the fork during Send; on an older platform, update it before retrying. Do not rebase the reviewed PR onto the stale fork. |
 | **Empty search results** | Normal while the ecosystem is young; not an error. |
 
 ---

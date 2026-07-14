@@ -324,7 +324,11 @@ function ReviewActions({ rec, onSend, onFeedback, onDismiss }) {
         <p className="co-review-note">
           Only prepared PRs can be sent to GitHub from here right now.
         </p>
-      ) : null}
+      ) : (
+        <p className="co-review-note">
+          Send may bring your GitHub fork up to date before opening the PR.
+        </p>
+      )}
       {sendNote && <p className="co-review-note">{sendNote}</p>}
       {note && <p className="co-review-error">{note}</p>}
     </>

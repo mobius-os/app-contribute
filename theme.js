@@ -486,8 +486,15 @@ export const CSS = `
 .co-confirm-actions .co-btn { flex: 1 1 0; min-width: 0; }
 /* Undrop lives on a dropped card in History — a single, content-width button. */
 .co-history-actions { display: flex; gap: 8px; margin-top: 2px; }
-.co-review-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
-.co-review-error { margin: 0; font-size: 13px; line-height: 1.5; color: var(--danger); }
+.co-review-note {
+  margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted);
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+.co-review-error {
+  margin: 0; font-size: 13px; line-height: 1.5; color: var(--danger);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
 
 /* mobius-ui:Empty v1 — app-owned copy; library candidate. */
 .co-empty {
