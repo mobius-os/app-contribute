@@ -38,6 +38,7 @@
   "source_files": [
     "theme.js",
     "domain.js",
+    "source-map.js",
     "diff.js",
     "api.js",
     "storage.js",
@@ -48,6 +49,7 @@
     "ui/DiffView.jsx",
     "ui/FileDiffList.jsx",
     "ui/ContributionCard.jsx",
-    "ui/Feed.jsx"
+    "ui/Feed.jsx",
+    "ui/SourceMap.jsx"
   ]
 }

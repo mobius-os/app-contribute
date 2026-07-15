@@ -31,6 +31,29 @@ export async function fetchGithubStatus(token) {
   }
 }
 
+// Fetch-free local Git metadata for the Sources view. The endpoint is narrow:
+// refs, ancestry/diff magnitudes, working-tree counts, and capped path names —
+// never source contents or absolute paths. A failure leaves the contribution
+// feed usable and lets the Sources view offer an explicit retry.
+export async function fetchSourceStatus(token) {
+  try {
+    const r = await fetch('/api/github/source-status', {
+      headers: authHeaders(token),
+    })
+    if (!r.ok) {
+      return {
+        ok: false,
+        unsupported: r.status === 404,
+        status: r.status,
+      }
+    }
+    const body = await r.json()
+    return { ok: true, data: body }
+  } catch {
+    return { ok: false, offline: true, status: 0 }
+  }
+}
+
 // POSTs one read-only GraphQL document; returns response.data or null.
 // Callers leave records stale on null — the refresh is best-effort polish,
 // and GitHub returns null nodes (not errors) for anything inaccessible.

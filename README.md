@@ -13,6 +13,13 @@ a bug or adds a feature, it can offer to share that change upstream so it
 ships to every Möbius user — but only with your explicit go-ahead on each
 contribution. This app is the dashboard for that loop:
 
+- **Sources** — a fetch-free map of the platform and every installed app.
+  Each project keeps two relationships separate: the recorded update source
+  versus your live `main`, and the ready/open contribution branches attached
+  to that project. Tree-delta counts avoid treating installation bookkeeping
+  commits as source changes; staged, unstaged, untracked, and conflicted files
+  are shown independently. Filters surface attention, different trees, working
+  files, active PRs, or aligned projects.
 - **Stat tiles** — Merged / Open / Ready at a glance.
 - **Connection card** — connect GitHub right here, in the app. Two paths to
   the same server-side credential: the GitHub **device flow** (shown when the
@@ -63,7 +70,8 @@ on install and update, so the skill always matches the app version.
 ## Requirements
 
 - A Möbius platform version that provides the `/api/github/*` surface
-  (`/api/github/status` and the read-only `/api/github/graphql`). On an older
+  (`/api/github/status`, fetch-free `/api/github/source-status`, and the
+  read-only `/api/github/graphql`). On an older
   platform the connection card says so and points you to update. If the status
   request 404s, ask your agent to update the platform.
 - This app declares `permissions.github_access: true` in its manifest. That

@@ -23,10 +23,16 @@ import {
   groupRecords,
 } from './domain.js'
 import { abandonPrepared, cacheFeed, loadFullDiff, loadLedger, restoreAbandoned } from './storage.js'
-import { fetchGithubStatus, fetchLiveStates, submitContribution } from './api.js'
+import {
+  fetchGithubStatus,
+  fetchLiveStates,
+  fetchSourceStatus,
+  submitContribution,
+} from './api.js'
 import { StatTiles } from './ui/StatTiles.jsx'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
 import { Feed } from './ui/Feed.jsx'
+import { SourceMap } from './ui/SourceMap.jsx'
 
 // The one icon that isn't chrome: the empty-state mark. A branch merging up
 // into a trunk — the same motif as the app icon, so the two read as kin.
@@ -64,7 +70,7 @@ function Header({ appId, fromCache }) {
       </span>
       <div>
         <h1 className="co-title">Contribute</h1>
-        <span className="co-subtitle">What your agent has shared upstream</span>
+        <span className="co-subtitle">Your local work and its path upstream</span>
         {fromCache && (
           <span className="co-offline-note">Offline — showing your last synced feed.</span>
         )}
@@ -95,6 +101,13 @@ export default function ContributeApp({ appId, token }) {
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'unknown' })
   const [loading, setLoading] = useState(true)
+  const [view, setViewState] = useState(() => {
+    try { return sessionStorage.getItem('contribute-view-v1') || 'sources' }
+    catch { return 'sources' }
+  })
+  const [sourceSnapshot, setSourceSnapshot] = useState(null)
+  const [sourceLoading, setSourceLoading] = useState(true)
+  const [sourceError, setSourceError] = useState('')
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
   const recordsRef = useRef(records)
@@ -124,6 +137,26 @@ export default function ContributeApp({ appId, token }) {
       cacheFeed(next)
     }
   }, [fetchRefreshed])
+
+  // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
+  // A 404 specifically means this app source arrived before the companion
+  // backend route was restarted into the running server, so say that plainly.
+  const refreshSources = useCallback(async () => {
+    setSourceLoading(true)
+    const result = await fetchSourceStatus(token)
+    if (result.ok) {
+      setSourceSnapshot(result.data)
+      setSourceError('')
+      window.mobius?.signal?.('source_map_viewed', {
+        source_count: 1 + (result.data?.apps?.length || 0),
+      })
+    } else {
+      setSourceError(result.unsupported ? 'restart' : 'unavailable')
+    }
+    setSourceLoading(false)
+  }, [token])
+
+  useEffect(() => { refreshSources() }, [refreshSources])
 
   // Re-read connection status after an in-app connect/disconnect, and — when we
   // land connected and have a real (non-cached) ledger — re-run the live
@@ -209,6 +242,11 @@ export default function ContributeApp({ appId, token }) {
       window.removeEventListener('focus', rescan)
     }
   }, [runLiveRefresh])
+
+  const setView = useCallback((next) => {
+    setViewState(next)
+    try { sessionStorage.setItem('contribute-view-v1', next) } catch { /* optional */ }
+  }, [])
 
   // Send = direct PR submit. The platform claims the prepared record,
   // recomputes the branch diff, safely fast-forwards a stale reusable fork,
@@ -302,25 +340,64 @@ export default function ContributeApp({ appId, token }) {
   const stats = useMemo(() => countStats(records), [records])
   const groups = useMemo(() => groupRecords(records), [records])
   const isEmpty = records.length === 0
+  const sourceCount = sourceSnapshot
+    ? 1 + (sourceSnapshot.apps?.length || 0)
+    : null
+  const activeCount = stats.open + stats.ready
 
   return (
     <div className="co-root">
       <style>{CSS}</style>
-      <div className="co-page">
+      <div className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
         <Header appId={appId} fromCache={fromCache} />
-        <StatTiles stats={stats} />
-        <ConnectionCard conn={conn} token={token} onChanged={refreshConnection} />
-        {/* Hold the feed area blank until the first load resolves so an empty
-            ledger doesn't flash the sell-the-loop copy before data arrives. */}
-        {loading ? null : isEmpty ? <EmptyState /> : (
-          <Feed
-            groups={groups}
-            onSend={onSend}
-            onFeedback={onFeedback}
-            onDismiss={onDismiss}
-            onRestore={onRestore}
-            loadDiff={loadFullDiff}
+        <nav className="co-tabs" role="tablist" aria-label="Contribute views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'sources'}
+            className={view === 'sources' ? 'is-active' : ''}
+            onClick={() => setView('sources')}
+          >
+            Sources {sourceCount !== null && <span>{sourceCount}</span>}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'contributions'}
+            className={view === 'contributions' ? 'is-active' : ''}
+            onClick={() => setView('contributions')}
+          >
+            Contributions {activeCount > 0 && <span>{activeCount}</span>}
+          </button>
+        </nav>
+
+        {view === 'sources' ? (
+          <SourceMap
+            snapshot={sourceSnapshot}
+            records={records}
+            conn={conn}
+            loading={sourceLoading}
+            error={sourceError}
+            onRetry={refreshSources}
+            onShowContributions={() => setView('contributions')}
           />
+        ) : (
+          <div className="co-contributions-view">
+            <StatTiles stats={stats} />
+            <ConnectionCard conn={conn} token={token} onChanged={refreshConnection} />
+            {/* Hold the feed area blank until the first load resolves so an empty
+                ledger doesn't flash the sell-the-loop copy before data arrives. */}
+            {loading ? null : isEmpty ? <EmptyState /> : (
+              <Feed
+                groups={groups}
+                onSend={onSend}
+                onFeedback={onFeedback}
+                onDismiss={onDismiss}
+                onRestore={onRestore}
+                loadDiff={loadFullDiff}
+              />
+            )}
+          </div>
         )}
       </div>
     </div>
