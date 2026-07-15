@@ -5,6 +5,7 @@ import {
   contributionRelationship,
   formatSourceDelta,
   projectMatchesFilter,
+  projectForks,
   projectStatus,
   sourceSummary,
 } from '../source-map.js'
@@ -45,7 +46,7 @@ test('tree equality wins over bookkeeping-only ahead history', () => {
   assert.equal(contribute.ahead, 1)
   assert.equal(contribute.different, false)
   assert.equal(projectStatus(contribute).label, 'Aligned')
-  assert.equal(projectMatchesFilter(contribute, 'different'), false)
+  assert.equal(projectMatchesFilter(contribute, 'changed'), false)
 })
 
 test('active records for an uninstalled repo stay visible', () => {
@@ -68,7 +69,46 @@ test('attention and relationship labels preserve real PR head topology', () => {
   assert.equal(contributionRelationship(project.contributions[0], project), 'Published as eeeeeee')
 })
 
+test('joins configured and contribution-discovered forks without duplication', () => {
+  const forks = projectForks({
+    canonical_repo: 'mobius-os/mobius',
+    forks: [{ repo: 'owner/mobius', ref: 'fork/main', sha: 'aaaa' }],
+  }, [{
+    id: 'pr', head_repository: 'owner/mobius', last_submit_fork_sha: 'bbbb',
+  }])
+  assert.equal(forks.length, 1)
+  assert.equal(forks[0].repo, 'owner/mobius')
+  assert.equal(forks[0].sha, 'aaaa')
+  assert.deepEqual(forks[0].contributions.map((rec) => rec.id), ['pr'])
+})
+
+test('install-managed deltas are visible without counting as customization', () => {
+  const adapted = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'adapted',
+      tree: {
+        available: true, files: 3, authored_files: 0, managed_files: 3,
+        insertions: 10, deletions: 2,
+      },
+      origin: {
+        local_ahead: 1,
+        local_behind: 0,
+        local_tree: {
+          available: true, files: 3, authored_files: 0, managed_files: 3,
+          insertions: 10, deletions: 2,
+        },
+      },
+    },
+    apps: [],
+  }, [])[0]
+  assert.equal(adapted.different, false)
+  assert.equal(adapted.adapted, true)
+  assert.equal(projectStatus(adapted).label, 'Install-managed')
+  assert.equal(formatSourceDelta(adapted), '3 install-managed')
+})
+
 test('formats authoritative endpoint tree delta', () => {
-  assert.equal(formatSourceDelta(snapshot.platform), '4 files differ · +12 −3')
+  assert.equal(formatSourceDelta(snapshot.platform), '4 source files')
   assert.equal(formatSourceDelta(snapshot.apps[0]), 'Source trees match')
 })

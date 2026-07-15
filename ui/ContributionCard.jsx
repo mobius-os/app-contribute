@@ -384,6 +384,7 @@ export function ContributionCard({
   onDismiss,
   onRestore,
   loadDiff,
+  reviewOnly = false,
 }) {
   const status = rec.status || 'prepared'
   const statusLabel = STATUS_LABELS[status] || status
@@ -408,8 +409,11 @@ export function ContributionCard({
   const hasLink =
     typeof rec.url === 'string' && rec.url.startsWith('https://github.com/')
   const reviewable =
-    status === 'prepared' && typeof onSend === 'function' &&
-    typeof onDismiss === 'function'
+    status === 'prepared' && (
+      reviewOnly || (
+        typeof onSend === 'function' && typeof onDismiss === 'function'
+      )
+    )
   const hasPlan = reviewable && rec.plan && typeof rec.plan === 'object'
   const wholeCardTarget = hasLink || hasPlan
   const reviewLabel =
@@ -432,7 +436,7 @@ export function ContributionCard({
 
   return (
     <div
-      className={`co-card${wholeCardTarget ? ' is-clickable' : ''}`}
+      className={`co-card${wholeCardTarget ? ' is-clickable' : ''}${reviewOnly ? ' is-stack-layer' : ''}`}
       onClick={handleCardClick}
     >
       <div className="co-card-top">
@@ -480,12 +484,14 @@ export function ContributionCard({
       {reviewable && (!hasPlan || expanded) && (
         <div className="co-review">
           {hasPlan && <ReviewPlan rec={rec} loadDiff={loadDiff} />}
-          <ReviewActions
-            rec={rec}
-            onSend={onSend}
-            onFeedback={onFeedback}
-            onDismiss={onDismiss}
-          />
+          {!reviewOnly && (
+            <ReviewActions
+              rec={rec}
+              onSend={onSend}
+              onFeedback={onFeedback}
+              onDismiss={onDismiss}
+            />
+          )}
         </div>
       )}
       {status === 'abandoned' && typeof onRestore === 'function' && (

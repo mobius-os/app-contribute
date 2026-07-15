@@ -1,4 +1,6 @@
 import { ContributionCard } from './ContributionCard.jsx'
+import { ContributionStack } from './ContributionStack.jsx'
+import { preparedContributionUnits } from '../stack.js'
 
 // The grouped feed. domain.groupRecords partitions the ledger into three
 // buckets; each renders as a section only when it has rows, so the layout
@@ -15,8 +17,18 @@ import { ContributionCard } from './ContributionCard.jsx'
 //   History          — merged/closed/commented/abandoned and any unknown
 //                      future status. A dropped (abandoned) card gets an Undrop
 //                      button (onRestore) to send it back to Ready for review.
-export function Feed({ groups, onSend, onFeedback, onDismiss, onRestore, loadDiff }) {
+export function Feed({
+  groups,
+  records,
+  onSend,
+  onSendStack,
+  onFeedback,
+  onDismiss,
+  onRestore,
+  loadDiff,
+}) {
   const { ready, open, history } = groups
+  const readyUnits = preparedContributionUnits(ready, records)
   return (
     <>
       {ready.length > 0 && (
@@ -26,10 +38,18 @@ export function Feed({ groups, onSend, onFeedback, onDismiss, onRestore, loadDif
             Review exactly what would go public. Sending a PR publishes it to
             GitHub directly; feedback returns to the source chat.
           </p>
-          {ready.map((rec) => (
+          {readyUnits.map((unit) => unit.type === 'stack' ? (
+            <ContributionStack
+              key={'stack:' + unit.id}
+              unit={unit}
+              onSendStack={onSendStack}
+              onFeedback={onFeedback}
+              loadDiff={loadDiff}
+            />
+          ) : (
             <ContributionCard
-              key={rec.id}
-              rec={rec}
+              key={unit.record.id}
+              rec={unit.record}
               onSend={onSend}
               onFeedback={onFeedback}
               onDismiss={onDismiss}

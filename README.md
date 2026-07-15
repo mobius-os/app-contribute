@@ -48,6 +48,13 @@ contribution. This app is the dashboard for that loop:
     its cache, but dismissing waits until you're back online). Records
     staged by an older agent without a review plan still show the plain
     card with both buttons.
+    Dependent PRs can be prepared as a **stack**: Contribute renders their
+    `base → branch` topology as one linked review, keeps every incremental
+    body and diff independently inspectable, and uses a second explicit
+    confirmation to publish the enumerated chain parent-first. True stacks
+    use dedicated upstream `stack/**` branches and therefore require upstream
+    push permission; independent contributions continue through the safer
+    reusable-fork path.
   - **Open** — PRs and issues live on GitHub, plus anything the agent is
     submitting right now. State is refreshed on open; the daily background job
     also checks for comments, reviews, and failing checks that need follow-up.
@@ -120,7 +127,15 @@ shape:
     "body_draft": "…",          // the exact text that would go public
     "branch": "…", "repo_path": "…",
     "base_sha": "…", "head_sha": "…", "diff_sha256": "…",
-    "diff_stat": "…"              // diff_excerpt is legacy — omit it
+    "diff_stat": "…",             // diff_excerpt is legacy — omit it
+    "stack": {                     // optional: one complete 2–12 PR chain
+      "id": "notes-flow",
+      "name": "Notes flow",
+      "position": 2,
+      "total": 3,
+      "parent_record_id": "notes-flow-01",
+      "base_branch": "stack/notes-flow/01-model"
+    }
   }
 }
 ```

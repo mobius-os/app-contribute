@@ -138,6 +138,7 @@ Contribute needs to submit it directly after approval:
 plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
        repo, target_url?, title?, body_draft, branch?, repo_path?,
        base_sha?, head_sha?, diff_sha256?, diff_stat,
+       stack?: {id, name?, position, total, parent_record_id, base_branch},
        diff_excerpt?}         # diff_stat REQUIRED; diff_excerpt legacy (unused)
 ```
 
@@ -199,12 +200,71 @@ record, and stop again.
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
 
+### The green light for a PR stack
+
+When 2–12 prepared PR records carry one complete `plan.stack` chain,
+Contribute groups them into one visual review and shows **Send N-PR stack**.
+The second, explicit confirmation lists every title and `base → branch` pair;
+that one click approves exactly those enumerated pushes and PR creations.
+
+Before the first public push, the platform rechecks every record, every stored
+diff, every parent SHA, the full branch topology, commit attribution, and the
+whole stack's ability to merge with current upstream. It then publishes the
+branches and opens the PRs from parent to child. If a later layer fails after a
+parent PR was already created, the successful record remains open and every
+unsent record returns to `prepared` with the durable error — retry never hides
+the partial public state.
+
+**True stacks require upstream push permission.** GitHub cannot use a branch
+that exists only in the contributor's fork as the base of a PR in the upstream
+repository. The stack path therefore publishes dedicated `stack/**` branches
+directly to upstream, and the server refuses before pushing anything unless the
+connected owner has `permissions.push` there. Without that permission, prepare
+independent fork PRs instead; never simulate a stack by publishing a cumulative
+diff that differs from the reviewed `.diff`.
+
 ---
 
 ## Prepare the branch
 
 Run these during preparation, after the partner agrees to stage a PR for review.
 Do not fork, push, or create a PR here.
+
+### Prepare a linked PR stack
+
+Use a stack only when the changes have a real dependency or review order. Each
+layer is its own reviewed commit and its `.diff` is **incremental against the
+previous layer**, never the cumulative diff against `main`.
+
+1. Choose one privacy-safe stack id, for example `chat-settlement`. Every branch
+   must start `stack/<stack-id>/`, followed by an ordered descriptive suffix:
+   `stack/chat-settlement/01-runtime`, `.../02-ui`, `.../03-tests`.
+2. Prepare layer 1 from the current upstream/default base SHA. Prepare layer 2
+   from layer 1's exact `head_sha`, and so on. Use one durable linked worktree
+   per record under `/data/contrib/<record-id>/worktree`.
+3. Set the connected owner's repo-local author/committer identity **before every
+   commit**. Standalone send can normalize one tip commit; stack send cannot
+   rewrite a parent without invalidating every child's reviewed ancestry.
+4. Store the canonical `base_sha..head_sha` diff and hash for each layer exactly
+   as for a standalone PR.
+5. Put this additive object in every plan (positions are 1-based and complete):
+
+```json
+"stack": {
+  "id": "chat-settlement",
+  "name": "Chat settlement",
+  "position": 2,
+  "total": 3,
+  "parent_record_id": "chat-settlement-01",
+  "base_branch": "stack/chat-settlement/01-runtime"
+}
+```
+
+Layer 1 has an empty `parent_record_id` and `base_branch` equal to upstream's
+default branch (normally `main`). Every later `parent_record_id` names the
+immediately preceding ledger record, `base_branch` equals that record's branch,
+and its `base_sha` equals that record's `head_sha`. Re-read all records and diffs
+as one review unit before saying the stack is ready.
 
 ### An app with a real origin (most catalog apps)
 

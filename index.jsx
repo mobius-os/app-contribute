@@ -28,6 +28,7 @@ import {
   fetchLiveStates,
   fetchSourceStatus,
   submitContribution,
+  submitContributionStack,
 } from './api.js'
 import { StatTiles } from './ui/StatTiles.jsx'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
@@ -70,7 +71,7 @@ function Header({ appId, fromCache }) {
       </span>
       <div>
         <h1 className="co-title">Contribute</h1>
-        <span className="co-subtitle">Your local work and its path upstream</span>
+        <span className="co-subtitle">Review work and see where it sits upstream</span>
         {fromCache && (
           <span className="co-offline-note">Offline — showing your last synced feed.</span>
         )}
@@ -102,12 +103,13 @@ export default function ContributeApp({ appId, token }) {
   const [conn, setConn] = useState({ state: 'unknown' })
   const [loading, setLoading] = useState(true)
   const [view, setViewState] = useState(() => {
-    try { return sessionStorage.getItem('contribute-view-v1') || 'sources' }
-    catch { return 'sources' }
+    try { return sessionStorage.getItem('contribute-view-v2') || 'contributions' }
+    catch { return 'contributions' }
   })
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [sourceLoading, setSourceLoading] = useState(true)
   const [sourceError, setSourceError] = useState('')
+  const pageRef = useRef(null)
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
   const recordsRef = useRef(records)
@@ -245,13 +247,21 @@ export default function ContributeApp({ appId, token }) {
 
   const setView = useCallback((next) => {
     setViewState(next)
-    try { sessionStorage.setItem('contribute-view-v1', next) } catch { /* optional */ }
+    try { sessionStorage.setItem('contribute-view-v2', next) } catch { /* optional */ }
   }, [])
 
+  // Contributions is one long reading feed; Repository map owns two internal
+  // panes on desktop. Reset the shared page scroller at the boundary so a deep
+  // feed position never shifts the map header or couples the two scroll modes.
+  useEffect(() => {
+    pageRef.current?.scrollTo({ top: 0, left: 0 })
+  }, [view])
+
   // Send = direct PR submit. The platform claims the prepared record,
-  // recomputes the branch diff, safely fast-forwards a stale reusable fork,
-  // pushes to it, opens the PR, and returns the updated ledger record. On a
-  // partner-actionable failure the
+  // recomputes the branch diff, adapts it to a strictly-behind reusable fork
+  // without changing the fork's default branch, pushes the topic branch, opens
+  // the PR, and returns the updated ledger record. On a partner-actionable
+  // failure the
   // server rolls the record back to `prepared` with last_submit_error, and the
   // card stays ready for feedback/retry instead of handing off to an agent chat.
   const onSend = useCallback(async (rec) => {
@@ -272,6 +282,39 @@ export default function ContributeApp({ appId, token }) {
       cacheFeed(recordsRef.current.map((r) => (r.id === rec.id ? next : r)))
     }
     return { error: outcome.error || 'Could not submit this PR.' }
+  }, [appId, token])
+
+  // One explicit confirmation can publish an exact, already-reviewed chain.
+  // The response may contain partial progress (for example, parent opened and
+  // child creation bounced), so merge every returned ledger record rather
+  // than treating the stack as all-or-nothing after public work has begun.
+  const onSendStack = useCallback(async (stackRecords) => {
+    const outcome = await submitContributionStack({
+      appId,
+      token,
+      recordIds: stackRecords.map((rec) => rec.id),
+    })
+    const updates = outcome.ok || outcome.records || []
+    if (updates.length > 0) {
+      const byId = new Map(updates.map((rec) => [rec.id, rec]))
+      setRecords((prev) => {
+        const next = prev.map((rec) => {
+          const update = byId.get(rec.id)
+          return update ? { ...update, path: rec.path } : rec
+        })
+        recordsRef.current = next
+        cacheFeed(next)
+        return next
+      })
+    }
+    if (outcome.ok) {
+      window.mobius?.signal?.('contribution_stack_submitted', {
+        stack_id: stackRecords[0]?.plan?.stack?.id || '',
+        item_count: outcome.submitted?.length || 0,
+      })
+      return { ok: true, submitted: outcome.submitted?.length || 0 }
+    }
+    return { error: outcome.error || 'Could not submit this PR stack.' }
   }, [appId, token])
 
   // Feedback = return to the chat that created the contribution, with a small
@@ -341,25 +384,17 @@ export default function ContributeApp({ appId, token }) {
   const groups = useMemo(() => groupRecords(records), [records])
   const isEmpty = records.length === 0
   const sourceCount = sourceSnapshot
-    ? 1 + (sourceSnapshot.apps?.length || 0)
+    ? [sourceSnapshot.platform, ...(sourceSnapshot.apps || [])]
+        .filter((source) => source?.available).length
     : null
   const activeCount = stats.open + stats.ready
 
   return (
     <div className="co-root">
       <style>{CSS}</style>
-      <div className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
+      <div ref={pageRef} className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
         <Header appId={appId} fromCache={fromCache} />
         <nav className="co-tabs" role="tablist" aria-label="Contribute views">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'sources'}
-            className={view === 'sources' ? 'is-active' : ''}
-            onClick={() => setView('sources')}
-          >
-            Sources {sourceCount !== null && <span>{sourceCount}</span>}
-          </button>
           <button
             type="button"
             role="tab"
@@ -368,6 +403,15 @@ export default function ContributeApp({ appId, token }) {
             onClick={() => setView('contributions')}
           >
             Contributions {activeCount > 0 && <span>{activeCount}</span>}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'sources'}
+            className={view === 'sources' ? 'is-active' : ''}
+            onClick={() => setView('sources')}
+          >
+            Repository map {sourceCount !== null && <span>{sourceCount}</span>}
           </button>
         </nav>
 
@@ -390,7 +434,9 @@ export default function ContributeApp({ appId, token }) {
             {loading ? null : isEmpty ? <EmptyState /> : (
               <Feed
                 groups={groups}
+                records={records}
                 onSend={onSend}
+                onSendStack={onSendStack}
                 onFeedback={onFeedback}
                 onDismiss={onDismiss}
                 onRestore={onRestore}

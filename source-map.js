@@ -70,11 +70,20 @@ export function attachSourceProjects(snapshot, records) {
 
 function decorateProject(project, contributions) {
   const workingFiles = Number(project?.working?.files || 0)
-  const different = Number(project?.tree?.files || 0) > 0
+  const comparisonTree = project?.origin?.local_tree || project?.tree
+  const authoredFiles = Number(
+    comparisonTree?.authored_files ?? comparisonTree?.files ?? 0,
+  )
+  const managedFiles = Number(comparisonTree?.managed_files || 0)
+  const originAhead = Number(project?.origin?.local_ahead ?? project?.ahead ?? 0)
+  const originBehind = Number(project?.origin?.local_behind ?? project?.behind ?? 0)
+  const different = authoredFiles > 0
+  const forks = projectForks(project, contributions)
   const contributionAttention = contributions.some((rec) => rec.needs_attention)
   const attention = (
     project?.state === 'conflict' ||
     project?.state === 'diverged' ||
+    originBehind > 0 ||
     workingFiles > 0 ||
     contributionAttention
   )
@@ -85,9 +94,47 @@ function decorateProject(project, contributions) {
     contributions,
     contributionCounts: { ready, open },
     different,
+    adapted: managedFiles > 0,
+    authoredFiles,
+    managedFiles,
+    comparisonTree,
+    originAhead,
+    originBehind,
+    forks,
     workingFiles,
     attention,
   }
+}
+
+export function projectForks(project, contributions = []) {
+  const forks = new Map()
+  for (const fork of project?.forks || []) {
+    const key = repoKey(fork?.repo)
+    if (!key) continue
+    forks.set(key, { ...fork, repo: fork.repo, contributions: [] })
+  }
+  for (const rec of contributions) {
+    const repo = rec?.head_repository
+    const key = repoKey(repo)
+    if (!key || key === repoKey(project?.canonical_repo)) continue
+    const existing = forks.get(key) || {
+      repo,
+      ref: null,
+      sha: null,
+      ahead: null,
+      behind: null,
+      tree: null,
+      contributions: [],
+    }
+    existing.contributions.push(rec)
+    if (!existing.sha && rec.last_submit_fork_sha) existing.sha = rec.last_submit_fork_sha
+    if (!existing.branch && rec.last_submit_fork_branch) {
+      existing.branch = rec.last_submit_fork_branch
+    }
+    if (!existing.sync && rec.last_submit_fork_sync) existing.sync = rec.last_submit_fork_sync
+    forks.set(key, existing)
+  }
+  return [...forks.values()].sort((a, b) => a.repo.localeCompare(b.repo))
 }
 
 export function sourceSummary(projects) {
@@ -96,17 +143,17 @@ export function sourceSummary(projects) {
     out.different += Number(project.different)
     out.working += Number(project.workingFiles || 0)
     out.active += project.contributions?.length || 0
+    out.forks += project.forks?.length || 0
+    out.adapted += Number(project.adapted)
     out.attention += Number(project.attention)
     return out
-  }, { sources: 0, different: 0, working: 0, active: 0, attention: 0 })
+  }, { sources: 0, different: 0, working: 0, active: 0, forks: 0, adapted: 0, attention: 0 })
 }
 
 export function projectMatchesFilter(project, filter) {
   if (filter === 'attention') return project.attention
-  if (filter === 'different') return project.different
-  if (filter === 'working') return project.workingFiles > 0
-  if (filter === 'prs') return project.contributions.length > 0
-  if (filter === 'aligned') return project.state === 'aligned'
+  if (filter === 'changed') return project.different || project.workingFiles > 0
+  if (filter === 'shared') return project.contributions.length > 0 || project.forks.length > 0
   return true
 }
 
@@ -120,6 +167,10 @@ export function projectStatus(project) {
   if (project.workingFiles > 0) {
     return { label: project.workingFiles + ' working', tone: 'warn' }
   }
+  if (project.originBehind > 0 && project.originAhead > 0) {
+    return { label: 'Both sides changed', tone: 'warn' }
+  }
+  if (project.originBehind > 0) return { label: 'Origin ahead', tone: 'accent' }
   if (project.state === 'diverged') {
     return { label: 'Both sides changed', tone: 'warn' }
   }
@@ -127,7 +178,8 @@ export function projectStatus(project) {
     return { label: project.detached ? 'Detached' : project.branch, tone: 'warn' }
   }
   if (project.state === 'incoming') return { label: 'Update available', tone: 'accent' }
-  if (project.state === 'customized') return { label: 'Different', tone: 'accent' }
+  if (project.state === 'customized' || project.different) return { label: 'Different', tone: 'accent' }
+  if (project.state === 'adapted') return { label: 'Install-managed', tone: 'quiet' }
   if (project.state === 'local_only') return { label: 'Local only', tone: 'quiet' }
   return { label: 'Aligned', tone: 'ok' }
 }
@@ -152,7 +204,11 @@ export function contributionRelationship(rec, project) {
 export function formatSourceDelta(project) {
   const tree = project?.tree
   if (!tree?.available) return 'Source comparison unavailable'
-  if (!tree.files) return 'Source trees match'
-  const files = tree.files + (tree.files === 1 ? ' file differs' : ' files differ')
-  return files + ' · +' + tree.insertions + ' −' + tree.deletions
+  const authored = Number(tree.authored_files ?? tree.files ?? 0)
+  const managed = Number(tree.managed_files || 0)
+  if (!authored && !managed) return 'Source trees match'
+  const parts = []
+  if (authored) parts.push(authored + (authored === 1 ? ' source file' : ' source files'))
+  if (managed) parts.push(managed + ' install-managed')
+  return parts.join(' · ')
 }

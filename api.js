@@ -157,3 +157,44 @@ export async function submitContribution({ appId, token, rec }) {
     return { error: String((err && err.message) || err) }
   }
 }
+
+// Batch approval path for one immutable PR stack. recordIds is the exact
+// ordered list rendered in the confirmation, so the server cannot silently
+// include a layer the partner did not review. The response always carries the
+// latest known records, including partial success after a durable retry.
+export async function submitContributionStack({ appId, token, recordIds }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' + encodeURIComponent(appId) + '/submit-stack',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record_ids: recordIds }),
+      }
+    )
+    let body = null
+    try { body = await r.json() } catch { body = null }
+    if (r.ok) {
+      return {
+        ok: Array.isArray(body?.records) ? body.records : [],
+        submitted: Array.isArray(body?.submitted) ? body.submitted : [],
+      }
+    }
+    const detail = body?.detail
+    if (detail && typeof detail === 'object') {
+      return {
+        error: detail.message || 'Could not submit this PR stack.',
+        records: Array.isArray(detail.records) ? detail.records : [],
+        submitted: Array.isArray(detail.submitted) ? detail.submitted : [],
+      }
+    }
+    return {
+      error: typeof detail === 'string' ? detail : 'Could not submit this PR stack.',
+    }
+  } catch (err) {
+    if (window.mobius && window.mobius.online === false) {
+      return { error: 'You are offline — publishing a PR stack needs a connection.' }
+    }
+    return { error: String((err && err.message) || err) }
+  }
+}
