@@ -1,5 +1,10 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
-import { stackMeta, stackProgress, stackReadiness } from '../stack.js'
+import {
+  stackLandingReadiness,
+  stackMeta,
+  stackProgress,
+  stackReadiness,
+} from '../stack.js'
 import { blockedReviewCount, reviewStateFor } from '../review.js'
 import { ContributionCard } from './ContributionCard.jsx'
 import { Icon } from './Icons.jsx'
@@ -29,8 +34,10 @@ function StackRail({ records }) {
 
 export function ContributionStack({
   unit,
+  action = 'send',
   reviewStatus,
   onSendStack,
+  onLandStack,
   onFeedback,
   loadDiff,
 }) {
@@ -38,11 +45,14 @@ export function ContributionStack({
   const [sending, setSending] = useState(false)
   const [sendElapsed, setSendElapsed] = useState(0)
   const [note, setNote] = useState('')
+  const isLandingAction = action === 'land'
   const progress = stackProgress(unit)
   const ready = unit.records.filter((rec) => rec.status === 'prepared')
-  const readiness = stackReadiness(unit)
-  const blocked = blockedReviewCount(unit.records, reviewStatus)
-  const canSend = readiness.ok && blocked === 0
+  const readiness = isLandingAction
+    ? stackLandingReadiness(unit)
+    : stackReadiness(unit)
+  const blocked = isLandingAction ? 0 : blockedReviewCount(unit.records, reviewStatus)
+  const canAct = readiness.ok && blocked === 0
   const keepPrivateRef = useRef(null)
   const readinessId = useId()
   const confirmDescriptionId = useId()
@@ -52,8 +62,8 @@ export function ContributionStack({
   }, [confirming])
 
   useEffect(() => {
-    if (!canSend && confirming) setConfirming(false)
-  }, [canSend, confirming])
+    if (!canAct && confirming) setConfirming(false)
+  }, [canAct, confirming])
 
   useEffect(() => {
     if (!sending) {
@@ -67,20 +77,25 @@ export function ContributionStack({
     return () => window.clearInterval(timer)
   }, [sending])
 
-  async function send() {
-    if (!canSend) return
+  async function runAction() {
+    if (!canAct) return
     setSending(true)
     setNote('')
     try {
-      const outcome = (await onSendStack(unit.records)) || {}
+      const handler = isLandingAction ? onLandStack : onSendStack
+      const outcome = (await handler?.(unit.records)) || {}
       if (outcome.ok) {
-        setNote(`${outcome.submitted || ready.length} linked pull requests opened on GitHub.`)
+        setNote(isLandingAction
+          ? `${outcome.landed || unit.records.length} verified changes landed together.`
+          : `${outcome.submitted || ready.length} linked pull requests opened on GitHub.`)
         setConfirming(false)
       } else if (outcome.pending) {
         setNote('Publishing is still in progress for this chain. Contribute will update each change as it finishes.')
         setConfirming(false)
       } else {
-        setNote(outcome.error || 'Could not submit this PR stack.')
+        setNote(outcome.error || (isLandingAction
+          ? 'Could not land this PR stack.'
+          : 'Could not submit this PR stack.'))
       }
     } finally {
       setSending(false)
@@ -108,8 +123,14 @@ export function ContributionStack({
           <span className="co-stack-kicker">{progress.total} related changes</span>
           <h3>{unit.name}</h3>
           <p>
-            {progress.ready > 0 ? `${progress.ready} ready to send` : 'Everything has been sent'}
-            {progress.open > 0 ? ` · ${progress.open} being reviewed` : ''}
+            {progress.landing > 0
+              ? 'Landing the verified stack…'
+              : progress.ready > 0
+                ? `${progress.ready} ready to send`
+                : isLandingAction && readiness.ok
+                  ? 'Every check passed · ready to land'
+                  : 'Everything has been sent'}
+            {progress.open > 0 && !isLandingAction ? ` · ${progress.open} being reviewed` : ''}
             {progress.merged > 0 ? ` · ${progress.merged} complete` : ''}
           </p>
         </div>
@@ -138,14 +159,25 @@ export function ContributionStack({
       </details>
 
       {blocked > 0 ? (
-        <div id={readinessId} className="co-stack-warning" role="status">
+        <div
+          id={readinessId}
+          className={'co-stack-warning' + (isLandingAction && readiness.code !== 'failed' ? ' is-progress' : '')}
+          role="status"
+        >
           <strong>{blocked} {blocked === 1 ? 'change needs' : 'changes need'} another look</strong>
           <span>Sending is paused until the agent updates the review.</span>
         </div>
-      ) : !readiness.ok && readiness.code !== 'settled' ? (
+      ) : !readiness.ok && !['settled', 'landing'].includes(readiness.code) ? (
         <div id={readinessId} className="co-stack-warning" role="status">
-          <strong>Not ready to send</strong>
+          <strong>{isLandingAction
+            ? readiness.code === 'failed' ? 'Automated checks failed' : 'Waiting to land'
+            : 'Not ready to send'}</strong>
           <span>{readiness.message}</span>
+        </div>
+      ) : readiness.code === 'landing' ? (
+        <div id={readinessId} className="co-stack-warning is-progress" role="status">
+          <strong>Landing in progress</strong>
+          <span>The verified changes are being applied together.</span>
         </div>
       ) : null}
 
@@ -153,18 +185,21 @@ export function ContributionStack({
         <div
           className="co-stack-confirm"
           role="alertdialog"
-          aria-label="Confirm PR stack publish"
+          aria-label={isLandingAction ? 'Confirm PR stack landing' : 'Confirm PR stack publish'}
           aria-describedby={confirmDescriptionId}
         >
-          <strong>Send {ready.length} related {ready.length === 1 ? 'change' : 'changes'} for review?</strong>
+          <strong>{isLandingAction
+            ? `Land ${unit.records.length} green changes together?`
+            : `Send ${ready.length} related ${ready.length === 1 ? 'change' : 'changes'} for review?`}</strong>
           <p id={confirmDescriptionId}>
-            This will open the linked pull {ready.length === 1 ? 'request' : 'requests'} on GitHub.
-            Nothing is merged automatically.
+            {isLandingAction
+              ? 'This advances the unchanged upstream branch to the top reviewed commit in one step. It stops safely if upstream moved.'
+              : <>This will open the linked pull {ready.length === 1 ? 'request' : 'requests'} on GitHub. Nothing is merged automatically.</>}
           </p>
           <details className="co-stack-confirm-details">
             <summary>Technical order</summary>
             <ol>
-              {ready.map((rec) => {
+              {(isLandingAction ? unit.records : ready).map((rec) => {
                 const meta = stackMeta(rec)
                 return (
                   <li key={rec.id}>
@@ -177,15 +212,15 @@ export function ContributionStack({
           </details>
           <div className="co-confirm-actions">
             <button ref={keepPrivateRef} type="button" className="co-btn co-btn-sm" disabled={sending} onClick={() => setConfirming(false)}>
-              Keep private
+              {isLandingAction ? 'Keep open' : 'Keep private'}
             </button>
-            <button type="button" className="co-btn co-btn-primary" disabled={sending} onClick={send}>
-              {sending ? 'Sending…' : 'Send for review'}
+            <button type="button" className="co-btn co-btn-primary" disabled={sending} onClick={runAction}>
+              {sending ? (isLandingAction ? 'Landing…' : 'Sending…') : (isLandingAction ? 'Land stack' : 'Send for review')}
             </button>
           </div>
           {sending ? (
             <p className="co-review-note" role="status" aria-live="polite">
-              Publishing the reviewed pull requests in order
+              {isLandingAction ? 'Landing the verified changes together' : 'Publishing the reviewed pull requests in order'}
               {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
             </p>
           ) : null}
@@ -195,20 +230,22 @@ export function ContributionStack({
           <button
             type="button"
             className="co-icon-btn co-send-btn is-primary"
-            disabled={!canSend}
-            aria-label={blocked > 0 ? 'Fresh review required before sending' : 'Send related changes for review'}
-            title={blocked > 0 ? 'Fresh review required' : 'Send for review'}
+            disabled={!canAct}
+            aria-label={isLandingAction
+              ? (canAct ? 'Land green stack' : readiness.message)
+              : (blocked > 0 ? 'Fresh review required before sending' : 'Send related changes for review')}
+            title={isLandingAction ? (canAct ? 'Land stack' : 'Not ready to land') : (blocked > 0 ? 'Fresh review required' : 'Send for review')}
             aria-describedby={
-              !canSend && (blocked > 0 || readiness.code !== 'settled')
+              !canAct && (blocked > 0 || readiness.code !== 'settled')
                 ? readinessId
                 : undefined
             }
             onClick={() => setConfirming(true)}
           >
-            <Icon name="send" />
-            <span>Send</span>
+            <Icon name={isLandingAction ? 'merge' : 'send'} />
+            <span>{isLandingAction ? 'Land' : 'Send'}</span>
           </button>
-          <button
+          {!isLandingAction && <button
             type="button"
             className="co-icon-btn"
             onClick={feedback}
@@ -216,12 +253,12 @@ export function ContributionStack({
             title={blocked > 0 ? 'Ask agent to update' : 'Give feedback'}
           >
             <Icon name="feedback" />
-          </button>
+          </button>}
         </div>
       )}
       {note && (
         <p
-          className={note.includes('opened') || note.startsWith('Publishing')
+          className={note.includes('opened') || note.includes('landed') || note.startsWith('Publishing')
             ? 'co-review-note'
             : 'co-review-error'}
           role="status"

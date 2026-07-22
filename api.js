@@ -251,3 +251,50 @@ export async function submitContributionStack({ appId, token, recordIds }) {
     }
   }
 }
+
+// One explicit landing confirmation advances an unchanged app repository from
+// the stack's reviewed base to its green top commit. The server owns every
+// invariant and returns all durable records so a partial/lost response can be
+// reconciled without guessing or blindly retrying a public action.
+export async function landContributionStack({ appId, token, recordIds }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' + encodeURIComponent(appId) + '/land-stack',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record_ids: recordIds }),
+      }
+    )
+    let body = null
+    try { body = await r.json() } catch { body = null }
+    if (r.ok) {
+      if (!Array.isArray(body?.records) || body.records.length === 0) {
+        return {
+          uncertain: true,
+          error: 'We could not confirm the landing. Checking the saved contributions now…',
+        }
+      }
+      return {
+        ok: body.records,
+        targetBranch: body.target_branch || '',
+        landedSha: body.landed_sha || '',
+      }
+    }
+    const detail = body?.detail
+    if (detail && typeof detail === 'object') {
+      return {
+        error: detail.message || 'Could not land this PR stack.',
+        records: Array.isArray(detail.records) ? detail.records : [],
+      }
+    }
+    return {
+      error: typeof detail === 'string' ? detail : 'Could not land this PR stack.',
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved stack before offering a retry…',
+    }
+  }
+}

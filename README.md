@@ -77,6 +77,13 @@ contribution. This app is the dashboard for that loop:
     cannot be sent. A retry can keep an already-open or draft parent in view;
     if that parent has merged, Contribute asks the agent to refresh the
     remaining layers on `main` instead of silently changing the reviewed diff.
+    Once every PR is open and green, an unprotected app repository gets a
+    separate **Land** confirmation. The server rechecks every diff, commit,
+    branch, PR relationship, and CI result, then advances unchanged `main` to
+    the stack tip in one exact-base fast-forward. If `main` moved or any rule,
+    protection, failed check, or stale ref is present, nothing is changed.
+    Protected repositories—including the Möbius platform—keep GitHub's normal
+    merge or merge-queue flow.
     A durable upstream conflict remains **Needs update** until the agent
     refreshes the reviewed contribution; retryable service errors do not mask
     a later fresh local check. If the browser loses a submit response,
@@ -130,7 +137,7 @@ shape:
   "number": 42,
   "url": "https://github.com/mobius-os/app-notes/pull/42",
   "title": "Fix note reordering",
-  "status": "prepared | submitting | draft | open | merged | closed | commented | abandoned",
+  "status": "prepared | submitting | draft | open | landing | merged | closed | commented | abandoned",
   "branch": "fix/notes-reorder",
   "chat_id": "…",
   "created_at": "2026-07-06T09:00:00Z",

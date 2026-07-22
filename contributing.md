@@ -240,6 +240,28 @@ connected owner has `permissions.push` there. Without that permission, prepare
 independent fork PRs instead; never simulate a stack by publishing a cumulative
 diff that differs from the reviewed `.diff`.
 
+### Landing a green app stack
+
+Once every public layer is open and every GitHub check is green, Contribute can
+show **Land** for the complete stack. This is a second public action with its own
+explicit confirmation; preparing or sending the PRs never authorizes landing.
+
+Landing is deliberately narrow. The platform re-verifies every reviewed diff,
+local and upstream branch tip, PR base/head pair, and CI result; requires the
+repository's default branch to still equal layer 1's reviewed `base_sha`; proves
+the top commit is a fast-forward containing the exact chain; and then advances
+that one upstream ref with an exact-base lease. All layers are recorded merged
+only after that single push succeeds. If upstream moved, a check is pending or
+failed, a PR was retargeted, or any commit changed, nothing is overwritten and
+the records return to `open` with the blocker.
+
+Atomic landing is for **unprotected app repositories only**. Any classic branch
+protection or active repository rule stops the operation even when the connected
+owner is an administrator; use GitHub's ordinary merge or merge queue instead.
+In particular, `mobius-os/mobius` keeps its protected, strict CI flow. App
+workflows may still run once on the resulting push to `main`; that is post-landing
+validation, not a second pre-merge run of the child PR.
+
 ---
 
 ## Prepare the branch

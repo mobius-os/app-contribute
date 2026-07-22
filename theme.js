@@ -750,6 +750,7 @@ export const CSS = `
   color: var(--muted); font-size: 12px; line-height: 1.45;
 }
 .co-stack-warning strong { color: var(--danger); font-size: 12.5px; }
+.co-stack-warning.is-progress strong { color: var(--accent); }
 .co-stack-confirm {
   margin-top: 12px; padding: 12px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
