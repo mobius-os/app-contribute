@@ -14,6 +14,8 @@ const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8'
 test('send actions keep a visible label instead of relying on the icon alone', () => {
   assert.match(cardSource, /<span>Send<\/span>/)
   assert.match(stackSource, /<span>Send for review<\/span>/)
+  assert.match(stackSource, /isLandingAction \? 'Land stack' : 'Send for review'/)
+  assert.match(stackSource, /Land stack/)
 })
 
 test('single and stacked sends expose elapsed progress to assistive technology', () => {
@@ -74,6 +76,10 @@ test('blocked contributions have one calm full-width recovery action', () => {
 test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(apiSource, /uncertain: true/g)
   assert.match(appSource, /resolveUncertainSubmission/)
+  assert.match(appSource, /resolveUncertainLanding/)
+  assert.match(apiSource, /landContributionStack/)
+  assert.match(stackSource, /Check landing status/)
+  assert.match(stackSource, /canRecoverLanding \? 'Check'/)
   assert.match(appSource, /return \{ pending: true, record: next \}/)
   assert.match(appSource, /summary\.state === 'publishing'/)
   assert.match(cardSource, /Publishing is still in progress/)

@@ -1,6 +1,6 @@
 import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
-import { preparedContributionUnits } from '../stack.js'
+import { preparedContributionUnits, publicContributionUnits } from '../stack.js'
 import { reviewStateFor } from '../review.js'
 
 // The grouped feed. domain.groupRecords partitions the ledger into three
@@ -24,6 +24,7 @@ export function Feed({
   reviewStatus,
   onSend,
   onSendStack,
+  onLandStack,
   onFeedback,
   onDismiss,
   onRestore,
@@ -32,6 +33,7 @@ export function Feed({
 }) {
   const { ready, open, history } = groups
   const readyUnits = preparedContributionUnits(ready, records)
+  const openUnits = publicContributionUnits(open, records)
   const needsAttention = readyUnits.filter((unit) => (
     unit.records || [unit.record]
   ).some((rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'))
@@ -95,10 +97,20 @@ export function Feed({
             <h2 className="co-section-title">Open</h2>
             <span>{open.length}</span>
           </div>
-          {open.map((rec) => (
+          {openUnits.map((unit) => unit.type === 'stack' ? (
+            <ContributionStack
+              key={'open-stack:' + unit.id}
+              unit={unit}
+              action="land"
+              onLandStack={onLandStack}
+              onFeedback={onFeedback}
+              onSetAutopilot={onSetAutopilot}
+              loadDiff={loadDiff}
+            />
+          ) : (
             <ContributionCard
-              key={rec.id}
-              rec={rec}
+              key={unit.record.id}
+              rec={unit.record}
               onFeedback={onFeedback}
               onSetAutopilot={onSetAutopilot}
             />

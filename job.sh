@@ -147,7 +147,7 @@ for name in names:
 def _is_target(rec):
   return (
     rec.get("type") in ("pr", "issue")
-    and rec.get("status") in ("draft", "open")
+    and rec.get("status") in ("draft", "open", "landing")
     and isinstance(rec.get("url"), str)
     and rec["url"].startswith("https://github.com/")
   )
@@ -656,6 +656,8 @@ for alias, (name, rec, etag) in aliases.items():
   new_status = _live_status(node)
   patch, attention_notice = _attention_update(rec, node)
   was = rec.get("status")
+  if was == "landing" and new_status in ("open", "draft"):
+    new_status = None
   if new_status and new_status != was:
     patch["status"] = new_status
     if new_status in ("merged", "closed"):

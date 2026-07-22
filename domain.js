@@ -6,7 +6,7 @@
 // GitHub state back into them; this app writes two things of its own — the
 // offline feed cache and the Dismiss CAS flip (storage.js). Shape:
 //   { id, type: pr|issue|issue_comment|discussion_comment, repo, number?,
-//     url?, title, status: prepared|submitting|draft|open|merged|closed|
+//     url?, title, status: prepared|submitting|draft|open|landing|merged|closed|
 //     commented|abandoned, branch?, chat_id?, created_at, updated_at,
 //     summary, last_submit_error?, last_pushed_branch_url?,
 //     needs_attention?, attention?, plan? }
@@ -16,8 +16,8 @@
 // review card renders its file list from the sibling storage file
 // contributions/<id>.diff, and falls back to parsing diff_stat when that
 // blob is missing, so diff_stat is the one diff field it always needs.
-// `submitting`
-// means the platform submit endpoint claimed the record (in flight); `commented` is the
+// `submitting` means the platform submit endpoint claimed the record (in
+// flight); `landing` is the atomic green-stack claim; `commented` is the
 // terminal status for comment actions.
 
 export const TYPE_LABELS = {
@@ -30,6 +30,7 @@ export const TYPE_LABELS = {
 export const STATUS_LABELS = {
   prepared: 'Ready',
   submitting: 'Publishing',
+  landing: 'Landing',
   draft: 'Draft',
   open: 'Sent',
   merged: 'Merged',
@@ -48,6 +49,7 @@ export const STATUS_LABELS = {
 export const STATUS_NARRATION = {
   prepared: 'Waiting for your OK',
   submitting: 'Publishing — this can take up to a minute',
+  landing: 'Landing the verified stack — this can take up to a minute',
   draft: 'Sent as a draft — maintainers review it once it is marked ready',
   open: 'Sent — maintainers will review it; this can take days',
   merged: 'Merged — this improvement is now shared with everyone',
@@ -144,6 +146,27 @@ export function resolveUncertainSubmission(rec, ledger) {
   return { state: 'unchanged', record: stored }
 }
 
+export function resolveUncertainLanding(records, ledger) {
+  if (!Array.isArray(records) || records.length === 0 || ledger?.fromCache ||
+      !Array.isArray(ledger?.records)) {
+    return { state: 'unconfirmed', records: [] }
+  }
+  const ids = new Set(records.map((rec) => rec?.id).filter(Boolean))
+  const stored = ledger.records.filter((rec) => ids.has(rec?.id))
+  if (stored.length !== ids.size) return { state: 'unconfirmed', records: stored }
+  if (stored.every((rec) => rec.status === 'merged')) {
+    return { state: 'landed', records: stored }
+  }
+  if (stored.some((rec) => rec.status === 'landing')) {
+    return { state: 'landing', records: stored }
+  }
+  if (stored.every((rec) => rec.status === 'open') &&
+      stored.some((rec) => rec.last_land_error)) {
+    return { state: 'blocked', records: stored }
+  }
+  return { state: 'unchanged', records: stored }
+}
+
 // An unchanged prepared row is not conclusive immediately after a lost POST:
 // the request may still be waiting to claim the record. Give the follow-up
 // ledger read its bounded retry before deciding that the result is unknown.
@@ -201,6 +224,7 @@ export function groupRecords(records) {
     if (rec.status === 'prepared') ready.push(rec)
     else if (
       rec.status === 'submitting' ||
+      rec.status === 'landing' ||
       rec.status === 'draft' ||
       rec.status === 'open'
     ) open.push(rec)
@@ -223,6 +247,7 @@ export function countStats(records) {
     if (rec.status === 'merged') merged += 1
     else if (
       rec.status === 'submitting' ||
+      rec.status === 'landing' ||
       rec.status === 'draft' ||
       rec.status === 'open'
     ) open += 1  // submitting counts as Open so an in-flight record never vanishes from the tiles
@@ -238,7 +263,7 @@ export function countStats(records) {
 export function buildRefreshQuery(records) {
   const targets = records.filter((rec) =>
     (rec.type === 'pr' || rec.type === 'issue') &&
-    (rec.status === 'draft' || rec.status === 'open') &&
+    (rec.status === 'draft' || rec.status === 'open' || rec.status === 'landing') &&
     typeof rec.url === 'string' &&
     rec.url.startsWith('https://github.com/'))
   if (targets.length === 0) return null
@@ -250,7 +275,7 @@ export function buildRefreshQuery(records) {
     // GraphQL string-literal escaping the URL needs.
     return alias + ': resource(url: ' + JSON.stringify(rec.url) + ') {' +
       ' __typename' +
-      ' ... on PullRequest { state isDraft }' +
+      ' ... on PullRequest { state isDraft statusCheckRollup { state } }' +
       ' ... on Issue { state } }'
   })
   return { query: 'query { ' + parts.join(' ') + ' }', aliases }
@@ -278,15 +303,28 @@ export function liveStatusFor(node) {
 // mutates the inputs; records without a verdict pass through unchanged.
 export function applyLiveStates(records, aliases, data) {
   if (!data) return records
-  const statusById = new Map()
+  const liveById = new Map()
   for (const [alias, recId] of Object.entries(aliases)) {
     const status = liveStatusFor(data[alias])
-    if (status) statusById.set(recId, status)
+    if (!status) continue
+    const node = data[alias]
+    const checks = node?.__typename === 'PullRequest'
+      ? (node.statusCheckRollup?.state || 'NONE')
+      : ''
+    liveById.set(recId, { status, checks })
   }
-  if (statusById.size === 0) return records
+  if (liveById.size === 0) return records
   return records.map((rec) => {
-    const status = statusById.get(rec.id)
-    return status && status !== rec.status ? { ...rec, status } : rec
+    const live = liveById.get(rec.id)
+    if (!live) return rec
+    const next = live.checks ? { ...rec, live_checks_state: live.checks } : rec
+    // `landing` is a durable public-action journal, not a display overlay. An
+    // OPEN verdict can be a momentary GitHub lag after the default ref moved;
+    // only a terminal MERGED/CLOSED result may settle the journal here.
+    if (rec.status === 'landing' && ['open', 'draft'].includes(live.status)) {
+      return next
+    }
+    return live.status !== next.status ? { ...next, status: live.status } : next
   })
 }
 
