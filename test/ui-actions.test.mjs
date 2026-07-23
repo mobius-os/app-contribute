@@ -107,10 +107,34 @@ test('GitHub account settings live in the app toolbar', () => {
 })
 
 test('background checks have one shared accessible toolbar indicator', () => {
-  assert.match(appSource, /const checking = loading \|\| conn\.state === 'unknown'/)
+  assert.match(appSource, /const checking = loading \|\| conn\.state === 'checking'/)
+  assert.match(appSource, /useState\(\{ state: 'checking' \}\)/)
   assert.match(appSource, /className="co-toolbar-check" role="status" aria-live="polite"/)
   assert.match(appSource, /Checking…/)
   assert.doesNotMatch(appSource, /activeChecks|whileChecking/)
+})
+
+test('GitHub connection failures stay visible and recoverable', () => {
+  assert.doesNotMatch(connectionSource, /if \(state === 'unknown'\) return null/)
+  assert.match(connectionSource, /GitHub status unavailable/)
+  assert.match(connectionSource, /Check GitHub again/)
+  assert.match(connectionSource, /Try GitHub again/)
+  assert.match(connectionSource, /GitHub sign-in cancelled/)
+  assert.match(connectionSource, /transport\.cancel\(\{/)
+  assert.match(connectionSource, /flow === 'pending' \|\| flow === 'cancelling'/)
+  assert.match(connectionSource, /Starting GitHub sign-in…/)
+  assert.match(connectionSource, /disabled=\{cancelling\}/)
+  assert.match(connectionSource, /existingAttempt/)
+  assert.match(connectionSource, /conn\?\.activeAttempt\?\.attemptId/)
+  assert.match(connectionSource, /const statusConnected = state === 'connected'/)
+  assert.doesNotMatch(connectionSource, /flow === 'complete' \|\| state === 'connected'/)
+  assert.match(appSource, /connectionRequestRef/)
+  assert.match(appSource, /requestId !== connectionRequestRef\.current/)
+  assert.match(connectionSource, /status\?\.state === 'connected'/)
+  assert.match(connectionSource, /status\?\.state === 'disconnected'/)
+  assert.match(connectionSource, /Stop its local poll before clearing/)
+  assert.match(connectionSource, /role=\{flow === 'cancelled' \? 'status' : 'alert'\}/)
+  assert.doesNotMatch(connectionSource, /setInterval/)
 })
 
 test('the Projects summary reserves its row while source checks refresh', () => {

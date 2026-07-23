@@ -1,5 +1,6 @@
 {
   "name": "app-contribute",
+  "version": "0.5.2",
   "private": true,
   "scripts": {
     "test": "node --test test/*.test.mjs"

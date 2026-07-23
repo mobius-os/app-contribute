@@ -617,6 +617,7 @@ export const CSS = `
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .co-conn-error { margin: 2px 0 0; font-size: 13px; color: var(--danger); line-height: 1.45; }
+.co-conn-note { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
 .co-conn-divider {
   display: flex; align-items: center; gap: 10px;
   font-size: 11px; color: var(--muted); letter-spacing: 0;

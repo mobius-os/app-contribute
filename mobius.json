@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "See what your agent has proposed upstream \u2014 pull requests, issues, and comments across the M\u00f6bius ecosystem, from prepared to merged.",
   "author": "mobius-os",
   "license": "MIT",
@@ -17,7 +17,8 @@
   "permissions": {
     "cross_app_access": "none",
     "share_with_apps": "none",
-    "github_access": true
+    "github_access": true,
+    "github_connect": true
   },
   "runtime": {
     "imports": [
@@ -46,6 +47,7 @@
     "diff.js",
     "parse-unified-diff.js",
     "api.js",
+    "github-connection.js",
     "storage.js",
     "contributing.md",
     "ui/Icons.jsx",

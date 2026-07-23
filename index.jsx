@@ -6,7 +6,8 @@
 //   domain.js   — pure logic: grouping, counts, the batched live-refresh query
 //   storage.js  — the window.mobius.storage ledger layer (+ offline cache,
 //                 the full-diff read, and the Dismiss CAS flip)
-//   api.js      — same-origin /api/github/* reads (status + read-only GraphQL)
+//   api.js      — same-origin /api/github/* transport
+//   github-connection.js — bounded connection-attempt state machine
 //   ui/*.jsx    — one React component per file (owned copies, not shared imports)
 //
 // Only App lives here: it owns ledger + connection state, runs the best-effort
@@ -127,7 +128,7 @@ function EmptyState() {
 export default function ContributeApp({ appId, token }) {
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
-  const [conn, setConn] = useState({ state: 'unknown' })
+  const [conn, setConn] = useState({ state: 'checking' })
   const [loading, setLoading] = useState(true)
   const [omittedCount, setOmittedCount] = useState(0)
   const [view, setViewState] = useState(() => {
@@ -151,6 +152,7 @@ export default function ContributeApp({ appId, token }) {
   const recordsRef = useRef(records)
   useEffect(() => { recordsRef.current = records }, [records])
   const connRef = useRef(conn)
+  const connectionRequestRef = useRef(0)
   useEffect(() => { connRef.current = conn }, [conn])
 
   // Every local ledger result must update the render, the callback mirror, and
@@ -235,12 +237,16 @@ export default function ContributeApp({ appId, token }) {
   // land connected and have a real (non-cached) ledger — re-run the live
   // refresh now that GitHub is reachable. Passed to ConnectionCard as onChanged.
   const refreshConnection = useCallback(async () => {
+    const requestId = connectionRequestRef.current + 1
+    connectionRequestRef.current = requestId
     const status = await fetchGithubStatus(token)
+    if (requestId !== connectionRequestRef.current) return connRef.current
     connRef.current = status
     setConn(status)
     if (status.state === 'connected' && !fromCache) {
       runLiveRefresh(recordsRef.current)
     }
+    return status
   }, [token, fromCache, runLiveRefresh])
 
   // Mount: read the ledger and the connection status together, then run the
@@ -594,10 +600,10 @@ export default function ContributeApp({ appId, token }) {
     [sourceProjects],
   )
   const isEmpty = records.length === 0
-  // The toolbar reflects only the app's first connection/feed read. Project
-  // checks narrate themselves in the reserved Projects row below, while quiet
-  // return-to-app validation should not flash beside the GitHub account menu.
-  const checking = loading || conn.state === 'unknown'
+  // The toolbar reflects only the app's first connection/feed read. Once that
+  // read settles, an unavailable GitHub status is rendered as a retryable
+  // content state instead of leaving "Checking…" visible forever.
+  const checking = loading || conn.state === 'checking'
 
   return (
     <div className="co-root">
@@ -676,6 +682,7 @@ export default function ContributeApp({ appId, token }) {
               conn={conn}
               token={token}
               onChanged={refreshConnection}
+              onRetry={refreshConnection}
               placement="content"
             />
             {/* Hold the feed area blank until the first load resolves so an empty
