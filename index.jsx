@@ -761,7 +761,6 @@ export default function ContributeApp({ appId, token }) {
                 onSetAutopilot={onSetAutopilot}
                 onRetryAutopilot={onRetryAutopilot}
                 autopilotOn={autopilotDefault}
-                autopilotBudget={conn?.autopilot_budget || null}
                 loadDiff={loadFullDiff}
               />
             )}

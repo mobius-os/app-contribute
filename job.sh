@@ -631,7 +631,7 @@ ACTIONABLE_ATTENTION = frozenset((
 def _respond_autopilot(rec, attention):
   # Ask the platform to run a background response round for this record's new
   # review event. Returns True when the event is handled by the loop (claimed,
-  # deduped, deferred by budget, escalated, or retrying) — meaning DON'T notify.
+  # deduped, escalated, or retrying) — meaning DON'T notify.
   # Returns False only when the backend has no /respond endpoint (older
   # platform), so the caller falls back to the classic notification.
   path = "/api/github/contributions/%s/%s/respond" % (

@@ -222,12 +222,12 @@ contacted only three times ever: **merged 🎉**, **closed without merging**, or
 
 The consent, claim, and round budget live in a platform database row — never in
 the agent-writable ledger — so a tampered ledger can't authorize or forge an
-action. Autopilot's model spend is capped at a configurable share of your weekly
-allowance (default 10%, set in the platform's Settings); when the cap is reached
-the loop pauses and resumes automatically at the next weekly reset, shown as a
-banner in the feed. The background agent follows the `review-followup.md` skill,
-which keeps every public action server-mediated and source-only, treats reviewer
-text as untrusted, and escalates rather than guessing.
+action. Each contribution gets at most five rounds; exhausting them (or repeated
+failures) escalates to you instead of continuing silently, and you can pause a
+PR's autopilot at any time. The background agent follows the
+`review-followup.md` skill, which keeps every public action server-mediated and
+source-only, treats reviewer text as untrusted, and escalates rather than
+guessing.
 
 ## License
 
