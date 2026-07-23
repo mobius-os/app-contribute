@@ -27,3 +27,17 @@ test('GitHub data and credential management are separately reviewable grants', (
   assert.equal(manifest.permissions.github_access, true)
   assert.equal(manifest.permissions.github_connect, true)
 })
+
+test('install manifest ships the autopilot module imported by the card', () => {
+  assert.ok(manifest.source_files.includes('autopilot.js'))
+})
+
+test('install manifest ships the review-followup skill for the background loop', () => {
+  assert.ok(manifest.skills.includes('review-followup.md'))
+  assert.ok(manifest.source_files.includes('review-followup.md'))
+})
+
+test('schedule runs often enough for a responsive review loop', () => {
+  // The autopilot loop keys off this cadence to detect + respond to reviews.
+  assert.equal(manifest.schedule.default, '*/15 * * * *')
+})

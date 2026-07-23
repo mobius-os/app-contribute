@@ -82,6 +82,29 @@ export async function cacheFeed(records) {
   }
 }
 
+const SETTINGS_FILE = 'settings.json'
+
+// App-level preferences (not per-contribution). Currently just the global
+// "grant autopilot on new sends" default, consulted only at Send time — job.sh
+// keys off each record's grant, never this file. Missing/unreadable → defaults.
+export async function loadAppSettings() {
+  try {
+    const raw = await window.mobius.storage.get(SETTINGS_FILE)
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch {
+    return {}
+  }
+}
+
+export async function saveAppSettings(settings) {
+  try {
+    await window.mobius.storage.set(SETTINGS_FILE, settings || {})
+    return true
+  } catch {
+    return false
+  }
+}
+
 // The staged full diff sits beside its record as raw text. null = absent
 // (a comment-only plan, or a v1 record) or unreadable — the card shows a
 // quiet "no diff stored" either way.

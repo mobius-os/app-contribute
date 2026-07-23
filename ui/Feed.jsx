@@ -18,6 +18,29 @@ import { reviewStateFor } from '../review.js'
 //   History          — merged/closed/commented/abandoned and any unknown
 //                      future status. A dropped (abandoned) card gets an Undrop
 //                      button (onRestore) to send it back to Ready for review.
+// The passive budget banner. Autopilot pauses don't notify (the three-event
+// rule); the app surfaces it here instead. `autopilotBudget` is the read-only
+// shape from /api/github/status.
+function BudgetBanner({ budget }) {
+  if (!budget || !budget.paused) return null
+  const when = budget.resume_at
+    ? new Date(budget.resume_at).toLocaleDateString(undefined, {
+        month: 'short', day: 'numeric',
+      })
+    : null
+  const reason = budget.reason === 'headroom'
+    ? 'Your weekly model allowance is nearly used up'
+    : budget.reason === 'disabled'
+      ? 'Autopilot is switched off in Settings'
+      : 'Autopilot has used its share of your weekly allowance'
+  return (
+    <div className="co-budget-banner" role="status">
+      <strong>Autopilot paused.</strong> {reason}
+      {when ? ` — it resumes ${when}.` : '.'}
+    </div>
+  )
+}
+
 export function Feed({
   groups,
   records,
@@ -27,6 +50,10 @@ export function Feed({
   onFeedback,
   onDismiss,
   onRestore,
+  onSetAutopilot,
+  onRetryAutopilot,
+  autopilotOn = true,
+  autopilotBudget = null,
   loadDiff,
 }) {
   const { ready, open, history } = groups
@@ -54,12 +81,14 @@ export function Feed({
         onSend={onSend}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
+        autopilotOn={autopilotOn}
         loadDiff={loadDiff}
       />
     )
   }
   return (
     <>
+      <BudgetBanner budget={autopilotBudget} />
       {needsAttention.length > 0 && (
         <section className="co-section is-attention">
           <div>
@@ -95,7 +124,12 @@ export function Feed({
             <span>{open.length}</span>
           </div>
           {open.map((rec) => (
-            <ContributionCard key={rec.id} rec={rec} onFeedback={onFeedback} />
+            <ContributionCard
+              key={rec.id}
+              rec={rec}
+              onFeedback={onFeedback}
+              onSetAutopilot={onSetAutopilot}
+            />
           ))}
         </section>
       )}

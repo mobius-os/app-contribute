@@ -97,6 +97,10 @@ export const PROBLEM_HEADLINES = {
   missing_diff_hash: 'The reviewed change is incomplete — your agent can restage it',
   invalid_plan: 'The prepared review is incomplete — your agent can restage it',
   review_unavailable: 'This review could not be verified — ask your agent to check it',
+  // Autopilot attention types (see autopilot.js). human_required is the only
+  // one that interrupts the owner; merge_conflict is normally handled silently.
+  human_required: 'Autopilot needs your input to continue',
+  merge_conflict: 'This contribution needs a refresh to merge cleanly',
 }
 
 export function problemHeadline(code) {

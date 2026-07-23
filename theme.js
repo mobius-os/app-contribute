@@ -1278,6 +1278,44 @@ export const CSS = `
   white-space: pre-wrap; overflow-wrap: anywhere;
   user-select: text; -webkit-user-select: text; cursor: text;
 }
+.co-review-note--autopilot { color: var(--accent, #3b7); font-size: 12px; }
+.co-budget-banner {
+  margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+  background: var(--surface-2, rgba(255,180,0,0.08));
+  border: 1px solid var(--border); font-size: 13px; line-height: 1.5;
+  color: var(--fg);
+}
+.co-autopilot-default {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 12px;
+  font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.co-autopilot-default input { cursor: pointer; }
+.co-autopilot {
+  margin: 8px 0; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2, rgba(60,120,90,0.06));
+}
+.co-autopilot.is-escalated { border-color: var(--danger); }
+.co-autopilot.is-responding { border-color: var(--accent, #3b7); }
+.co-autopilot-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.co-autopilot-badge { font-size: 12px; font-weight: 600; }
+.co-autopilot-toggle {
+  font-size: 12px; padding: 3px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: transparent; color: var(--fg);
+  cursor: pointer;
+}
+.co-autopilot-toggle:disabled { opacity: 0.5; cursor: default; }
+.co-autopilot-line { margin: 6px 0 0; font-size: 13px; line-height: 1.5; }
+.co-autopilot-error { margin: 6px 0 0; font-size: 12px; color: var(--danger); }
+.co-autopilot-rounds { margin: 8px 0 0; padding: 0; list-style: none; }
+.co-autopilot-rounds li {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+  font-size: 12px; padding: 3px 0; border-top: 1px solid var(--border);
+}
+.co-autopilot-round-label { font-weight: 600; }
+.co-autopilot-round-summary { color: var(--muted); overflow-wrap: anywhere; }
+.co-autopilot-round-when { margin-left: auto; color: var(--muted); }
 
 /* mobius-ui:Empty v1 — app-owned copy; library candidate. */
 .co-empty {

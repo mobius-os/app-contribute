@@ -168,9 +168,9 @@ for i, (name, rec, etag) in enumerate(targets):
   parts.append(
     "%s: resource(url: %s) { __typename "
     "... on PullRequest { "
-    "state isDraft updatedAt reviewDecision "
-    "comments(last: 1) { nodes { url createdAt author { login } } } "
-    "reviews(last: 1) { nodes { url submittedAt state author { login } } } "
+    "state isDraft updatedAt reviewDecision mergeable "
+    "comments(last: 10) { nodes { url createdAt author { login } } } "
+    "reviews(last: 10) { nodes { url submittedAt state author { login } } } "
     "commits(last: 1) { nodes { commit { statusCheckRollup { "
     "state "
     "contexts(first: 30) { nodes { __typename "
@@ -181,7 +181,7 @@ for i, (name, rec, etag) in enumerate(targets):
     "} "
     "... on Issue { "
     "state updatedAt "
-    "comments(last: 1) { nodes { url createdAt author { login } } } "
+    "comments(last: 10) { nodes { url createdAt author { login } } } "
     "} }" % (alias, url_lit)
   )
 query = "query { " + " ".join(parts) + " }"
@@ -233,26 +233,66 @@ def _first_node(conn):
   return None
 
 
-def _author_name(node):
+def _all_nodes(conn):
+  nodes = conn.get("nodes") if isinstance(conn, dict) else None
+  return [n for n in nodes if isinstance(n, dict)] if isinstance(nodes, list) else []
+
+
+def _author_login(node):
   author = node.get("author") if isinstance(node, dict) else None
-  login = author.get("login") if isinstance(author, dict) else ""
-  return login or "GitHub"
+  return author.get("login") if isinstance(author, dict) else ""
 
 
-def _latest_event(node):
+def _author_name(node):
+  return _author_login(node) or "GitHub"
+
+
+# The connected GitHub login, fetched once per run. Autopilot's own replies post
+# AS this login, so an autopilot record must ignore events it authored — without
+# this the next pass would see the agent's reply as "new activity" and re-trigger
+# the loop forever. Non-autopilot records keep counting every author.
+_CONNECTED_LOGIN = None
+_CONNECTED_LOGIN_READ = False
+
+
+def _connected_login():
+  global _CONNECTED_LOGIN, _CONNECTED_LOGIN_READ
+  if not _CONNECTED_LOGIN_READ:
+    _CONNECTED_LOGIN_READ = True
+    try:
+      out = subprocess.run(
+        ["gh", "api", "user", "-q", ".login"],
+        capture_output=True, text=True, timeout=15,
+      )
+      if out.returncode == 0:
+        _CONNECTED_LOGIN = (out.stdout or "").strip() or None
+    except Exception:
+      _CONNECTED_LOGIN = None
+  return _CONNECTED_LOGIN
+
+
+def _latest_event(node, ignore_login=None):
+  # Scan the last N comments/reviews and pick the newest, optionally skipping
+  # events authored by ignore_login (autopilot's own replies).
   if not isinstance(node, dict):
     return None
   events = []
-  comment = _first_node(node.get("comments"))
-  if comment and comment.get("createdAt"):
+  for comment in _all_nodes(node.get("comments")):
+    if not comment.get("createdAt"):
+      continue
+    if ignore_login and _author_login(comment) == ignore_login:
+      continue
     events.append({
       "kind": "comment",
       "at": comment["createdAt"],
       "url": comment.get("url") or "",
       "author": _author_name(comment),
     })
-  review = _first_node(node.get("reviews"))
-  if review and review.get("submittedAt"):
+  for review in _all_nodes(node.get("reviews")):
+    if not review.get("submittedAt"):
+      continue
+    if ignore_login and _author_login(review) == ignore_login:
+      continue
     events.append({
       "kind": "review",
       "state": review.get("state") or "",
@@ -440,6 +480,11 @@ def _checks_message(checks, branch):
   return "Checks failing: %s." % ", ".join(parts)
 
 
+def _is_autopilot(rec):
+  block = rec.get("autopilot") if isinstance(rec.get("autopilot"), dict) else None
+  return bool(block and block.get("enabled"))
+
+
 def _attention_update(rec, node):
   patch = {}
   notify = None
@@ -449,6 +494,10 @@ def _attention_update(rec, node):
   def set_if_changed(key, value):
     if (value or rec.get(key)) and rec.get(key) != value:
       patch[key] = value
+
+  # Autopilot records ignore events they authored (see _connected_login) so the
+  # agent's own replies never re-trigger the loop.
+  ignore_login = _connected_login() if _is_autopilot(rec) else None
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
@@ -460,7 +509,13 @@ def _attention_update(rec, node):
   previous_review = rec.get("last_review_decision")
   set_if_changed("last_review_decision", review_decision)
 
-  latest = _latest_event(node)
+  # Merge-conflict detection (autopilot event). GitHub reports MERGEABLE /
+  # CONFLICTING / UNKNOWN; only a definite CONFLICTING is actionable.
+  mergeable = node.get("mergeable") or ""
+  previous_mergeable = rec.get("last_mergeable")
+  set_if_changed("last_mergeable", mergeable)
+
+  latest = _latest_event(node, ignore_login=ignore_login)
   baseline = (
     rec.get("last_github_activity_at") or
     rec.get("submitted_at") or
@@ -515,6 +570,15 @@ def _attention_update(rec, node):
       "event_at": latest["at"],
       "detected_at": now,
     }
+  elif mergeable == "CONFLICTING" and previous_mergeable != "CONFLICTING":
+    attention = {
+      "type": "merge_conflict",
+      "key": "merge_conflict:%s" % _record_head(rec),
+      "title": "Needs a refresh to merge",
+      "message": "New upstream changes conflict with this contribution.",
+      "url": rec.get("url") or "",
+      "detected_at": now,
+    }
 
   if (
     not attention
@@ -555,6 +619,37 @@ def _notify_attention(rec, attention):
     "source_id": str(rec.get("id") or ""),
     "target": "/shell/?app=%s" % APP_ID,
   })
+
+
+# Attention types the background loop handles autonomously. Mirrors
+# autopilot.js ACTIONABLE_ATTENTION — keep the two in step.
+ACTIONABLE_ATTENTION = frozenset((
+  "changes_requested", "checks_failed", "github_activity", "merge_conflict",
+))
+
+
+def _respond_autopilot(rec, attention):
+  # Ask the platform to run a background response round for this record's new
+  # review event. Returns True when the event is handled by the loop (claimed,
+  # deduped, deferred by budget, escalated, or retrying) — meaning DON'T notify.
+  # Returns False only when the backend has no /respond endpoint (older
+  # platform), so the caller falls back to the classic notification.
+  path = "/api/github/contributions/%s/%s/respond" % (
+    APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
+  )
+  try:
+    _call("POST", path, {"attention": attention})
+    return True
+  except urllib.error.HTTPError as exc:
+    if exc.code == 404:
+      # Old backend without the autopilot routes — fall back to notifying.
+      return False
+    # 409 (already handled / in flight) and every other status are normal
+    # loop states the next pass reconciles; never notify for them.
+    return True
+  except Exception:
+    # Transient error — leave the attention on the record for the next pass.
+    return True
 
 
 now = (
@@ -616,17 +711,41 @@ for alias, (name, rec, etag) in aliases.items():
     except Exception as exc:
       print("contribute: staging cleanup %s failed: %s" % (name, exc),
             file=sys.stderr)
+  # Attention routing. For an autopilot record we hand actionable events to the
+  # background loop (POST /respond) and stay SILENT — the owner is contacted only
+  # on merged / closed / human_required (the last sent server-side by /escalate).
+  # For a classic record, or an autopilot event the loop doesn't handle, notify
+  # exactly as before. A 404 from /respond (old backend) falls back to notify.
   if attention_notice:
-    try:
-      _notify_attention(updated, attention_notice)
-    except Exception:
-      pass
+    handled = False
+    if _is_autopilot(updated) and attention_notice.get("type") in ACTIONABLE_ATTENTION:
+      handled = _respond_autopilot(updated, attention_notice)
+    if not handled:
+      try:
+        _notify_attention(updated, attention_notice)
+      except Exception:
+        pass
   if new_status == "merged" and was != "merged":
     title = rec.get("title") or "contribution"
     try:
       _call("POST", "/api/notifications/send", {
         "title": "Contribution merged 🎉",
         "body": "Your %s was merged — it ships to everyone 🎉" % title,
+        "source_id": str(rec.get("id") or ""),
+        "target": "/shell/?app=%s" % APP_ID,
+      })
+    except Exception:
+      pass
+  # PR rejected: a close without a merge is a terminal outcome the owner should
+  # hear about once (parity with the merged 🎉 notification). Non-autopilot
+  # records historically got no close notification; sending it for all closed
+  # PRs is strictly more informative and never noisy (one per record, ever).
+  if new_status == "closed" and was != "closed":
+    title = rec.get("title") or "contribution"
+    try:
+      _call("POST", "/api/notifications/send", {
+        "title": "Contribution closed",
+        "body": "Your %s was closed on GitHub without merging." % title,
         "source_id": str(rec.get("id") or ""),
         "target": "/shell/?app=%s" % APP_ID,
       })

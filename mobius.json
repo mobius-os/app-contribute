@@ -30,11 +30,12 @@
     "esm_deps": []
   },
   "schedule": {
-    "default": "0 * * * *",
+    "default": "*/15 * * * *",
     "job": "job.sh"
   },
   "skills": [
-    "contributing.md"
+    "contributing.md",
+    "review-followup.md"
   ],
   "source_files": [
     "theme.js",
@@ -44,12 +45,14 @@
     "refresh.js",
     "stack.js",
     "source-map.js",
+    "autopilot.js",
     "diff.js",
     "parse-unified-diff.js",
     "api.js",
     "github-connection.js",
     "storage.js",
     "contributing.md",
+    "review-followup.md",
     "ui/Icons.jsx",
     "ui/ConnectionCard.jsx",
     "ui/MarkdownView.jsx",

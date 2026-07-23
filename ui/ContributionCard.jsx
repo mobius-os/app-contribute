@@ -10,6 +10,13 @@ import {
 } from '../domain.js'
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
+import {
+  autopilotState,
+  autopilotNarration,
+  autopilotRounds,
+  isAutopilotResponding,
+  needsHuman,
+} from '../autopilot.js'
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
@@ -400,7 +407,7 @@ function ReviewPlan({ rec, loadDiff }) {
 
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
-function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
+function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss, autopilotOn = true }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
   const [sendElapsed, setSendElapsed] = useState(0)
@@ -577,6 +584,13 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
         <p className="co-review-note">
           Only prepared PRs can be sent to GitHub from here right now.
         </p>
+      ) : autopilotOn && !blocked ? (
+        // Disclose the one-click grant right at the Send button: sending
+        // authorizes the background loop to answer reviews on this PR for you.
+        <p className="co-review-note co-review-note--autopilot">
+          After you send, autopilot answers reviews and pushes fixes for you —
+          you're only pinged if it needs you.
+        </p>
       ) : null}
       {sending && (
         <p className="co-review-note" role="status" aria-live="polite">
@@ -638,6 +652,68 @@ function UndropAction({ rec, onRestore }) {
   )
 }
 
+// Autopilot state for a shipped PR: the plain-language line, a Pause/Resume
+// control, and the rounds timeline. The `autopilot` block on the record is a
+// display-only mirror of a platform DB row — Pause/Resume calls the platform
+// endpoint (onSetAutopilot), never a ledger write. Round summaries are plain
+// text rendered without markdown (they may quote untrusted reviewer text).
+function AutopilotPanel({ rec, onSetAutopilot }) {
+  const block = autopilotState(rec)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState(null)
+  if (!block || typeof onSetAutopilot !== 'function') return null
+
+  const enabled = !!block.enabled
+  const line = autopilotNarration(rec)
+  const rounds = autopilotRounds(rec)
+  const responding = isAutopilotResponding(rec)
+  const escalated = needsHuman(rec)
+
+  const toggle = async () => {
+    setBusy(true)
+    setNote(null)
+    const next = !enabled
+    const outcome = (await onSetAutopilot(rec, next)) || {}
+    if (outcome.error) setNote(outcome.error)
+    setBusy(false)
+  }
+
+  return (
+    <div className={`co-autopilot${escalated ? ' is-escalated' : ''}${responding ? ' is-responding' : ''}`}>
+      <div className="co-autopilot-head">
+        <span className="co-autopilot-badge">
+          {responding ? 'Autopilot working' : enabled ? 'Autopilot on' : 'Autopilot paused'}
+        </span>
+        <button
+          type="button"
+          className="co-autopilot-toggle"
+          onClick={toggle}
+          disabled={busy}
+        >
+          {busy ? '…' : enabled ? 'Pause' : 'Resume'}
+        </button>
+      </div>
+      {line ? <p className="co-autopilot-line">{line}</p> : null}
+      {note ? <p className="co-autopilot-error">{note}</p> : null}
+      {rounds.length > 0 && (
+        <ul className="co-autopilot-rounds">
+          {rounds.slice(0, 6).map((round, i) => (
+            <li key={i}>
+              <span className="co-autopilot-round-label">{round.label}</span>
+              {round.summary ? (
+                <span className="co-autopilot-round-summary">{round.summary}</span>
+              ) : null}
+              {round.when ? (
+                <span className="co-autopilot-round-when">{timeAgo(round.when)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export function ContributionCard({
   rec,
   reviewState,
@@ -645,6 +721,8 @@ export function ContributionCard({
   onFeedback,
   onDismiss,
   onRestore,
+  onSetAutopilot,
+  autopilotOn = true,
   loadDiff,
   reviewOnly = false,
 }) {
@@ -723,6 +801,9 @@ export function ContributionCard({
         </div>
       )}
       <AttentionCallout rec={rec} onFeedback={onFeedback} />
+      {status !== 'prepared' && autopilotState(rec) ? (
+        <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
+      ) : null}
       <SubmitErrorAlert rec={rec} reviewState={reviewState} />
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
@@ -745,6 +826,7 @@ export function ContributionCard({
               onSend={onSend}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
+              autopilotOn={autopilotOn}
             />
           )}
         </div>
@@ -757,6 +839,7 @@ export function ContributionCard({
             onSend={onSend}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
+              autopilotOn={autopilotOn}
           />
         </div>
       )}

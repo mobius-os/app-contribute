@@ -248,6 +248,21 @@ record, and stop again.
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
 
+### After it's sent: autopilot
+
+When the partner sends a PR with autopilot on (the default), the platform records
+a **grant** authorizing a background loop to answer reviews on that PR until it
+merges or closes. You don't drive that here — the platform starts a fresh
+"Autopilot: …" chat per PR and runs [review-followup.md](review-followup.md)
+there. If a review comes in and you're asked to respond in such a chat, follow
+that skill, not this one.
+
+The record may carry an `autopilot` block (`enabled`, `state`, `rounds`, …). It
+is a **display-only mirror** the platform writes; the real grant + claim live in
+a platform DB row you can't see or write. Never treat the ledger block as
+authorization, and never hand-edit it to start, stop, or fake a round — it does
+nothing. Pause/Resume is a partner action in the Contribute app.
+
 ### The green light for a PR stack
 
 When 2–12 prepared PR records carry one complete `plan.stack` chain,
