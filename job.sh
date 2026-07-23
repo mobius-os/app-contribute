@@ -247,40 +247,18 @@ def _author_name(node):
   return _author_login(node) or "GitHub"
 
 
-# The connected GitHub login, fetched once per run. Autopilot's own replies post
-# AS this login, so an autopilot record must ignore events it authored — without
-# this the next pass would see the agent's reply as "new activity" and re-trigger
-# the loop forever. Non-autopilot records keep counting every author.
-_CONNECTED_LOGIN = None
-_CONNECTED_LOGIN_READ = False
-
-
-def _connected_login():
-  global _CONNECTED_LOGIN, _CONNECTED_LOGIN_READ
-  if not _CONNECTED_LOGIN_READ:
-    _CONNECTED_LOGIN_READ = True
-    try:
-      out = subprocess.run(
-        ["gh", "api", "user", "-q", ".login"],
-        capture_output=True, text=True, timeout=15,
-      )
-      if out.returncode == 0:
-        _CONNECTED_LOGIN = (out.stdout or "").strip() or None
-    except Exception:
-      _CONNECTED_LOGIN = None
-  return _CONNECTED_LOGIN
-
-
-def _latest_event(node, ignore_login=None):
-  # Scan the last N comments/reviews and pick the newest, optionally skipping
-  # events authored by ignore_login (autopilot's own replies).
+def _latest_event(node, ignore_urls=None):
+  # Scan the last N comments/reviews and pick the newest. The platform mirrors
+  # exact URLs returned by its own reply calls, so skip only those events—not
+  # every comment written under the owner's GitHub identity.
   if not isinstance(node, dict):
     return None
+  ignored = ignore_urls if isinstance(ignore_urls, set) else set()
   events = []
   for comment in _all_nodes(node.get("comments")):
     if not comment.get("createdAt"):
       continue
-    if ignore_login and _author_login(comment) == ignore_login:
+    if comment.get("url") in ignored:
       continue
     events.append({
       "kind": "comment",
@@ -291,7 +269,7 @@ def _latest_event(node, ignore_login=None):
   for review in _all_nodes(node.get("reviews")):
     if not review.get("submittedAt"):
       continue
-    if ignore_login and _author_login(review) == ignore_login:
+    if review.get("url") in ignored:
       continue
     events.append({
       "kind": "review",
@@ -495,9 +473,11 @@ def _attention_update(rec, node):
     if (value or rec.get(key)) and rec.get(key) != value:
       patch[key] = value
 
-  # Autopilot records ignore events they authored (see _connected_login) so the
-  # agent's own replies never re-trigger the loop.
-  ignore_login = _connected_login() if _is_autopilot(rec) else None
+  block = rec.get("autopilot") if _is_autopilot(rec) else {}
+  ignore_urls = set(
+    str(url) for url in (block.get("ignored_event_urls") or [])
+    if isinstance(url, str) and url
+  )
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
@@ -515,7 +495,7 @@ def _attention_update(rec, node):
   previous_mergeable = rec.get("last_mergeable")
   set_if_changed("last_mergeable", mergeable)
 
-  latest = _latest_event(node, ignore_login=ignore_login)
+  latest = _latest_event(node, ignore_urls=ignore_urls)
   baseline = (
     rec.get("last_github_activity_at") or
     rec.get("submitted_at") or
@@ -624,7 +604,7 @@ def _notify_attention(rec, attention):
 # Attention types the background loop handles autonomously. Mirrors
 # autopilot.js ACTIONABLE_ATTENTION — keep the two in step.
 ACTIONABLE_ATTENTION = frozenset((
-  "changes_requested", "checks_failed", "github_activity", "merge_conflict",
+  "changes_requested", "checks_failed", "github_activity",
 ))
 
 
@@ -632,20 +612,32 @@ def _respond_autopilot(rec, attention):
   # Ask the platform to run a background response round for this record's new
   # review event. Returns True when the event is handled by the loop (claimed,
   # deduped, escalated, or retrying) — meaning DON'T notify.
-  # Returns False only when the backend has no /respond endpoint (older
-  # platform), so the caller falls back to the classic notification.
+  # Returns False when the platform cannot or will not act autonomously (older
+  # platform, missing grant, or permanent request failure), so the caller falls
+  # back to the classic notification.
   path = "/api/github/contributions/%s/%s/respond" % (
     APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
   )
   try:
-    _call("POST", path, {"attention": attention})
+    raw, _ = _call("POST", path, {"attention": attention})
+    try:
+      result = json.loads(raw) if raw else {}
+    except (TypeError, json.JSONDecodeError):
+      result = {}
+    # A stale/forged display mirror must not hide the review from the owner.
+    # The platform's DB grant is authoritative, so fall back to the classic
+    # notification when it says this record was never granted (or was paused).
+    if isinstance(result, dict) and result.get("status") == "not_granted":
+      return False
     return True
   except urllib.error.HTTPError as exc:
-    if exc.code == 404:
-      # Old backend without the autopilot routes — fall back to notifying.
+    if 400 <= exc.code < 500 and exc.code not in (409, 429):
+      # Old backend (404), rejected authority (401/403), or invalid durable
+      # attention: this pass cannot act autonomously, so preserve the classic
+      # owner-visible path. Busy and rate-limited rounds remain quiet retries.
       return False
-    # 409 (already handled / in flight) and every other status are normal
-    # loop states the next pass reconciles; never notify for them.
+    # 409 (already handled / in flight), 429, and server failures are normal
+    # retry states the next pass reconciles; never notify for them.
     return True
   except Exception:
     # Transient error — leave the attention on the record for the next pass.
@@ -670,6 +662,20 @@ for alias, (name, rec, etag) in aliases.items():
       patch["needs_attention"] = False
       patch["attention"] = None
   if not patch:
+    # A prior pass may have durably written the attention and then lost the
+    # /respond call. Retry that same stable key until the platform claims or
+    # dedupes it; otherwise one transient restart silently strands the review.
+    pending = (
+      rec.get("attention")
+      if rec.get("needs_attention") and isinstance(rec.get("attention"), dict)
+      else None
+    )
+    if (
+      pending
+      and _is_autopilot(rec)
+      and pending.get("type") in ACTIONABLE_ATTENTION
+    ):
+      _respond_autopilot(rec, pending)
     continue
   if not etag:
     print("contribute: skip %s — storage version unavailable" % name,
@@ -712,17 +718,27 @@ for alias, (name, rec, etag) in aliases.items():
       print("contribute: staging cleanup %s failed: %s" % (name, exc),
             file=sys.stderr)
   # Attention routing. For an autopilot record we hand actionable events to the
-  # background loop (POST /respond) and stay SILENT — the owner is contacted only
-  # on merged / closed / human_required (the last sent server-side by /escalate).
-  # For a classic record, or an autopilot event the loop doesn't handle, notify
-  # exactly as before. A 404 from /respond (old backend) falls back to notify.
-  if attention_notice:
+  # background loop (POST /respond) and stay SILENT — the owner is normally
+  # contacted only on merged / closed / human_required (the last sent
+  # server-side by /escalate). For a classic record, or an autopilot event the
+  # loop cannot handle, notify exactly as before.
+  attention_to_route = attention_notice
+  if (
+    not attention_to_route
+    and updated.get("needs_attention")
+    and isinstance(updated.get("attention"), dict)
+  ):
+    attention_to_route = updated["attention"]
+  if attention_to_route:
     handled = False
-    if _is_autopilot(updated) and attention_notice.get("type") in ACTIONABLE_ATTENTION:
-      handled = _respond_autopilot(updated, attention_notice)
+    if (
+      _is_autopilot(updated)
+      and attention_to_route.get("type") in ACTIONABLE_ATTENTION
+    ):
+      handled = _respond_autopilot(updated, attention_to_route)
     if not handled:
       try:
-        _notify_attention(updated, attention_notice)
+        _notify_attention(updated, attention_to_route)
       except Exception:
         pass
   if new_status == "merged" and was != "merged":

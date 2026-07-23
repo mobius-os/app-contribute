@@ -16,7 +16,6 @@ export const ACTIONABLE_ATTENTION = new Set([
   'changes_requested',
   'checks_failed',
   'github_activity',
-  'merge_conflict',
 ])
 
 // The escalation flag the platform sets when the agent must hand back to a

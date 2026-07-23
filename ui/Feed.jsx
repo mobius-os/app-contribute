@@ -28,7 +28,6 @@ export function Feed({
   onDismiss,
   onRestore,
   onSetAutopilot,
-  onRetryAutopilot,
   autopilotOn = true,
   loadDiff,
 }) {

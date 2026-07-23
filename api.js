@@ -108,6 +108,7 @@ export async function fetchGithubStatus(token) {
       classicTokenUrl: s.classic_token_url || '',
       classicWorkflowTokenUrl: s.classic_workflow_token_url || '',
       activeAttempt,
+      autopilotAvailable: s.autopilot_available === true,
     }
   } catch (error) {
     // Network failure (offline, backend restarting) — not a platform verdict.
@@ -358,8 +359,8 @@ export async function submitContributionStack({ appId, token, recordIds }) {
 // Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
 // a ledger write — the grant lives in a platform DB row the app can't edit, so
 // flipping the (display-only) ledger `autopilot` block could never actually stop
-// the loop. Resume also clears any human_required flag and resets the round
-// budget. Returns { ok } or { error }.
+// the loop. Resume also clears any human_required flag and resets the five-round
+// count. Returns { ok } or { error }.
 export async function setAutopilot({ appId, token, recordId, enabled }) {
   try {
     const r = await fetch(
@@ -376,30 +377,6 @@ export async function setAutopilot({ appId, token, recordId, enabled }) {
     let body = null
     try { body = await r.json() } catch { body = null }
     return { error: body?.detail || 'Could not update autopilot.' }
-  } catch {
-    return { error: 'The response was lost. Try again in a moment.' }
-  }
-}
-
-// "Retry now" — ask the platform to run a response round immediately rather than
-// waiting for the next scheduled pass. The attention already on the record is
-// what job.sh would have sent; we forward it verbatim.
-export async function retryAutopilot({ appId, token, recordId, attention }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) + '/' +
-        encodeURIComponent(recordId) + '/respond',
-      {
-        method: 'POST',
-        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attention: attention || {} }),
-      }
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok) return { ok: body?.status || 'ok' }
-    return { error: body?.detail || 'Could not start a response round.' }
   } catch {
     return { error: 'The response was lost. Try again in a moment.' }
   }

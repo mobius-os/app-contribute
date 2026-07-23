@@ -39,7 +39,6 @@ import {
   fetchLiveStates,
   fetchReviewStatus,
   fetchSourceStatus,
-  retryAutopilot,
   setAutopilot,
   submitContribution,
   submitContributionStack,
@@ -401,7 +400,10 @@ export default function ContributeApp({ appId, token }) {
   // card stays ready for feedback/retry instead of handing off to an agent chat.
   const onSend = useCallback(async (rec) => {
     const outcome = await submitContribution({
-      appId, token, rec, autopilot: autopilotDefault,
+      appId,
+      token,
+      rec,
+      autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
     })
     if (outcome.ok) {
       const next = { ...outcome.ok, path: rec.path }
@@ -481,17 +483,6 @@ export default function ContributeApp({ appId, token }) {
     }
     return { error: outcome.error || 'Could not update autopilot.' }
   }, [appId, token, applyRecordUpdates])
-
-  // "Retry now": run a response round immediately for a record's current
-  // attention instead of waiting for the next scheduled pass.
-  const onRetryAutopilot = useCallback(async (rec) => {
-    const outcome = await retryAutopilot({
-      appId, token, recordId: rec.id, attention: rec.attention || {},
-    })
-    if (outcome.error) return { error: outcome.error }
-    refreshReviewStatus()
-    return { ok: outcome.ok }
-  }, [appId, token, refreshReviewStatus])
 
   const onToggleAutopilotDefault = useCallback(async (next) => {
     setAutopilotDefault(next)
@@ -734,7 +725,7 @@ export default function ContributeApp({ appId, token }) {
             {/* Global autopilot default. On = a Send grants the background
                 review-response loop for that PR; per-PR Pause/Resume still wins.
                 Consulted only at Send time — never overrides a stamped grant. */}
-            {!loading && (
+            {!loading && conn?.autopilotAvailable && (
               <label className="co-autopilot-default">
                 <input
                   type="checkbox"
@@ -759,8 +750,9 @@ export default function ContributeApp({ appId, token }) {
                 onDismiss={onDismiss}
                 onRestore={onRestore}
                 onSetAutopilot={onSetAutopilot}
-                onRetryAutopilot={onRetryAutopilot}
-                autopilotOn={autopilotDefault}
+                autopilotOn={
+                  conn?.autopilotAvailable === true && autopilotDefault
+                }
                 loadDiff={loadFullDiff}
               />
             )}

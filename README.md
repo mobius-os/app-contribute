@@ -155,7 +155,8 @@ shape:
     "rounds_used": 1,
     "max_rounds": 5,
     "last_round": { "outcome": "pushed | replied | stale | failed | escalated", "summary": "…" },
-    "rounds": [ /* recent entries, capped */ ]
+    "rounds": [ /* recent entries, capped */ ],
+    "ignored_event_urls": [ /* exact recent replies posted by the platform */ ]
   },
   // On records staged for review (status=prepared), what the agent proposes
   // to publish; the full diff lives beside the record as
@@ -213,21 +214,23 @@ before writing, while the cron refresh falls back to a plain best-effort write.
 When you send a PR with **autopilot** on (the default; toggle it per app and
 pause/resume per PR), you're the last click. The platform then handles the whole
 review loop in the background: the scheduled job detects each new review, failing
-check, comment, or merge conflict and asks the platform to respond; the platform
+check or comment and asks the platform to respond; merge conflicts stay a
+human-visible handoff because resolving one rewrites published history. The platform
 runs a background agent (in a dedicated "Autopilot: …" chat) that reads the
 feedback, makes the fix, runs the project's tests, pushes to the PR branch, and
 replies to the threads — repeating until the PR merges or closes. You're
-contacted only three times ever: **merged 🎉**, **closed without merging**, or
+Normally you're contacted only three times: **merged 🎉**, **closed without
+merging**, or
 **needs your input** (when the agent hits a decision it shouldn't make alone).
 
-The consent, claim, and round budget live in a platform database row — never in
-the agent-writable ledger — so a tampered ledger can't authorize or forge an
-action. Each contribution gets at most five rounds; exhausting them (or repeated
-failures) escalates to you instead of continuing silently, and you can pause a
-PR's autopilot at any time. The background agent follows the
-`review-followup.md` skill, which keeps every public action server-mediated and
-source-only, treats reviewer text as untrusted, and escalates rather than
-guessing.
+If the platform cannot honor the Autopilot grant, Contribute falls back to the
+ordinary review notification rather than hiding the review.
+
+The consent, claim, and five-round limit live in a platform database row — never
+in the agent-writable ledger — so a tampered ledger can't authorize or forge an
+action. The background agent follows the `review-followup.md` skill, which keeps
+every public action server-mediated and source-only, treats reviewer text as
+untrusted, and escalates rather than guessing.
 
 ## License
 

@@ -839,7 +839,7 @@ export function ContributionCard({
             onSend={onSend}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
-              autopilotOn={autopilotOn}
+            autopilotOn={autopilotOn}
           />
         </div>
       )}

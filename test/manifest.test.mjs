@@ -41,3 +41,33 @@ test('schedule runs often enough for a responsive review loop', () => {
   // The autopilot loop keys off this cadence to detect + respond to reviews.
   assert.equal(manifest.schedule.default, '*/15 * * * *')
 })
+
+test('scheduled autopilot retries durable attention after a lost respond call', () => {
+  const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  assert.match(source, /A prior pass may have durably written the attention/)
+  assert.match(source, /_respond_autopilot\(rec, pending\)/)
+  assert.match(source, /result\.get\("status"\) == "not_granted"/)
+  assert.match(source, /400 <= exc\.code < 500 and exc\.code not in \(409, 429\)/)
+})
+
+test('scheduled autopilot ignores exact own replies, not all owner activity', () => {
+  const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  assert.match(source, /ignored_event_urls/)
+  assert.match(source, /comment\.get\("url"\) in ignored/)
+  assert.doesNotMatch(source, /gh", "api", "user"/)
+  assert.doesNotMatch(source, /ignore_login/)
+})
+
+test('merge conflicts remain a human handoff, not an authorized rewrite', () => {
+  const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  const actionable = source.match(
+    /ACTIONABLE_ATTENTION = frozenset\(\(([^]*?)\)\)/,
+  )?.[1] || ''
+  assert.doesNotMatch(actionable, /merge_conflict/)
+  const skill = readFileSync(
+    new URL('../review-followup.md', import.meta.url), 'utf8',
+  )
+  assert.doesNotMatch(skill, /"rewrite"/)
+  assert.doesNotMatch(skill, /re_request_review/)
+  assert.match(skill, /merge conflict[\s\S]*escalate it/)
+})
