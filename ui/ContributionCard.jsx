@@ -254,7 +254,7 @@ function LabelOutcomeRow({ label, labels, tone = '' }) {
 // a Send bounced stays visible while the partner fixes it.
 function SubmitErrorAlert({ rec, reviewState }) {
   const blocked = reviewState?.state === 'needs_refresh'
-  if (!blocked && (reviewState?.state === 'ready' || !rec.last_submit_error)) return null
+  if (!blocked && !rec.last_submit_error) return null
   const message = blocked
     ? (reviewState.message || 'The staged source no longer matches this review.')
     : rec.last_submit_error
@@ -264,11 +264,19 @@ function SubmitErrorAlert({ rec, reviewState }) {
   // returns '' and the raw message becomes the headline (lenient fallback).
   const code = reviewState?.code || (rec.last_submit_error ? 'previous_submit_failure' : '')
   const headline = problemHeadline(code)
+  const branchWasPushed = (
+    typeof rec.last_pushed_branch_url === 'string' &&
+    rec.last_pushed_branch_url.startsWith('https://github.com/')
+  )
 
   return (
     <div className="co-alert" role="status">
       <strong>{headline || (blocked ? 'Fresh review needed' : 'Could not send')}</strong>
-      <p className="co-alert-reassurance">Nothing was pushed. Your agent can update it safely.</p>
+      <p className="co-alert-reassurance">
+        {branchWasPushed
+          ? 'The reviewed branch was pushed, but Contribute could not confirm a new pull request.'
+          : 'Nothing was published. Your agent can update it safely.'}
+      </p>
       {headline ? (
         <details className="co-alert-details">
           <summary>Technical details</summary>
@@ -277,8 +285,7 @@ function SubmitErrorAlert({ rec, reviewState }) {
       ) : (
         <p className="co-alert-text">{message}</p>
       )}
-      {typeof rec.last_pushed_branch_url === 'string' &&
-        rec.last_pushed_branch_url.startsWith('https://github.com/') ? (
+      {branchWasPushed ? (
         <a
           className="co-review-link"
           href={rec.last_pushed_branch_url}

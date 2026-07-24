@@ -66,7 +66,8 @@ test('agent handoffs use a new project-specific chat instead of an invalid open-
 test('blocked contributions have one calm full-width recovery action', () => {
   assert.match(cardSource, /className="co-action-block"/)
   assert.match(cardSource, /Refresh in chat/)
-  assert.match(cardSource, /Nothing was pushed/)
+  assert.match(cardSource, /Nothing was published/)
+  assert.match(cardSource, /The reviewed branch was pushed/)
   assert.doesNotMatch(cardSource, /Sending is paused until/)
 })
 
