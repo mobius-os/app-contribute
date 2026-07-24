@@ -407,7 +407,7 @@ function ReviewPlan({ rec, loadDiff }) {
 
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
-function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss, autopilotOn = true }) {
+function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
   const [sendElapsed, setSendElapsed] = useState(0)
@@ -584,13 +584,6 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss, autopi
         <p className="co-review-note">
           Only prepared PRs can be sent to GitHub from here right now.
         </p>
-      ) : autopilotOn && !blocked ? (
-        // Disclose the one-click grant right at the Send button: sending
-        // authorizes the background loop to answer reviews on this PR for you.
-        <p className="co-review-note co-review-note--autopilot">
-          After you send, autopilot answers reviews and pushes fixes for you —
-          you're only pinged if it needs you.
-        </p>
       ) : null}
       {sending && (
         <p className="co-review-note" role="status" aria-live="polite">
@@ -722,7 +715,6 @@ export function ContributionCard({
   onDismiss,
   onRestore,
   onSetAutopilot,
-  autopilotOn = true,
   loadDiff,
   reviewOnly = false,
 }) {
@@ -826,7 +818,6 @@ export function ContributionCard({
               onSend={onSend}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
-              autopilotOn={autopilotOn}
             />
           )}
         </div>
@@ -839,7 +830,6 @@ export function ContributionCard({
             onSend={onSend}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
-            autopilotOn={autopilotOn}
           />
         </div>
       )}

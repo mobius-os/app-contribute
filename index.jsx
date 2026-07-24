@@ -657,6 +657,8 @@ export default function ContributeApp({ appId, token }) {
             token={token}
             onChanged={refreshConnection}
             placement="toolbar"
+            autopilotDefault={autopilotDefault}
+            onToggleAutopilotDefault={onToggleAutopilotDefault}
           />
         </Header>
         <nav className="co-tabs" role="tablist" aria-label="Contribute views">
@@ -722,19 +724,6 @@ export default function ContributeApp({ appId, token }) {
               onRetry={refreshConnection}
               placement="content"
             />
-            {/* Global autopilot default. On = a Send grants the background
-                review-response loop for that PR; per-PR Pause/Resume still wins.
-                Consulted only at Send time — never overrides a stamped grant. */}
-            {!loading && conn?.autopilotAvailable && (
-              <label className="co-autopilot-default">
-                <input
-                  type="checkbox"
-                  checked={autopilotDefault}
-                  onChange={(e) => onToggleAutopilotDefault(e.target.checked)}
-                />
-                <span>Autopilot new sends — answer reviews for me automatically</span>
-              </label>
-            )}
             {/* Hold the feed area blank until the first load resolves so an empty
                 ledger doesn't flash the sell-the-loop copy before data arrives. */}
             {loading ? null : isEmpty ? (
@@ -750,9 +739,6 @@ export default function ContributeApp({ appId, token }) {
                 onDismiss={onDismiss}
                 onRestore={onRestore}
                 onSetAutopilot={onSetAutopilot}
-                autopilotOn={
-                  conn?.autopilotAvailable === true && autopilotDefault
-                }
                 loadDiff={loadFullDiff}
               />
             )}
