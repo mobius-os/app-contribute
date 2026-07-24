@@ -168,9 +168,9 @@ for i, (name, rec, etag) in enumerate(targets):
   parts.append(
     "%s: resource(url: %s) { __typename "
     "... on PullRequest { "
-    "state isDraft updatedAt reviewDecision "
-    "comments(last: 1) { nodes { url createdAt author { login } } } "
-    "reviews(last: 1) { nodes { url submittedAt state author { login } } } "
+    "state isDraft updatedAt reviewDecision mergeable "
+    "comments(last: 10) { nodes { url createdAt author { login } } } "
+    "reviews(last: 10) { nodes { url submittedAt state author { login } } } "
     "commits(last: 1) { nodes { commit { statusCheckRollup { "
     "state "
     "contexts(first: 30) { nodes { __typename "
@@ -181,7 +181,7 @@ for i, (name, rec, etag) in enumerate(targets):
     "} "
     "... on Issue { "
     "state updatedAt "
-    "comments(last: 1) { nodes { url createdAt author { login } } } "
+    "comments(last: 10) { nodes { url createdAt author { login } } } "
     "} }" % (alias, url_lit)
   )
 query = "query { " + " ".join(parts) + " }"
@@ -233,26 +233,44 @@ def _first_node(conn):
   return None
 
 
-def _author_name(node):
+def _all_nodes(conn):
+  nodes = conn.get("nodes") if isinstance(conn, dict) else None
+  return [n for n in nodes if isinstance(n, dict)] if isinstance(nodes, list) else []
+
+
+def _author_login(node):
   author = node.get("author") if isinstance(node, dict) else None
-  login = author.get("login") if isinstance(author, dict) else ""
-  return login or "GitHub"
+  return author.get("login") if isinstance(author, dict) else ""
 
 
-def _latest_event(node):
+def _author_name(node):
+  return _author_login(node) or "GitHub"
+
+
+def _latest_event(node, ignore_urls=None):
+  # Scan the last N comments/reviews and pick the newest. The platform mirrors
+  # exact URLs returned by its own reply calls, so skip only those events—not
+  # every comment written under the owner's GitHub identity.
   if not isinstance(node, dict):
     return None
+  ignored = ignore_urls if isinstance(ignore_urls, set) else set()
   events = []
-  comment = _first_node(node.get("comments"))
-  if comment and comment.get("createdAt"):
+  for comment in _all_nodes(node.get("comments")):
+    if not comment.get("createdAt"):
+      continue
+    if comment.get("url") in ignored:
+      continue
     events.append({
       "kind": "comment",
       "at": comment["createdAt"],
       "url": comment.get("url") or "",
       "author": _author_name(comment),
     })
-  review = _first_node(node.get("reviews"))
-  if review and review.get("submittedAt"):
+  for review in _all_nodes(node.get("reviews")):
+    if not review.get("submittedAt"):
+      continue
+    if review.get("url") in ignored:
+      continue
     events.append({
       "kind": "review",
       "state": review.get("state") or "",
@@ -440,6 +458,11 @@ def _checks_message(checks, branch):
   return "Checks failing: %s." % ", ".join(parts)
 
 
+def _is_autopilot(rec):
+  block = rec.get("autopilot") if isinstance(rec.get("autopilot"), dict) else None
+  return bool(block and block.get("enabled"))
+
+
 def _attention_update(rec, node):
   patch = {}
   notify = None
@@ -449,6 +472,12 @@ def _attention_update(rec, node):
   def set_if_changed(key, value):
     if (value or rec.get(key)) and rec.get(key) != value:
       patch[key] = value
+
+  block = rec.get("autopilot") if _is_autopilot(rec) else {}
+  ignore_urls = set(
+    str(url) for url in (block.get("ignored_event_urls") or [])
+    if isinstance(url, str) and url
+  )
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
@@ -460,7 +489,13 @@ def _attention_update(rec, node):
   previous_review = rec.get("last_review_decision")
   set_if_changed("last_review_decision", review_decision)
 
-  latest = _latest_event(node)
+  # Merge-conflict detection (autopilot event). GitHub reports MERGEABLE /
+  # CONFLICTING / UNKNOWN; only a definite CONFLICTING is actionable.
+  mergeable = node.get("mergeable") or ""
+  previous_mergeable = rec.get("last_mergeable")
+  set_if_changed("last_mergeable", mergeable)
+
+  latest = _latest_event(node, ignore_urls=ignore_urls)
   baseline = (
     rec.get("last_github_activity_at") or
     rec.get("submitted_at") or
@@ -515,6 +550,15 @@ def _attention_update(rec, node):
       "event_at": latest["at"],
       "detected_at": now,
     }
+  elif mergeable == "CONFLICTING" and previous_mergeable != "CONFLICTING":
+    attention = {
+      "type": "merge_conflict",
+      "key": "merge_conflict:%s" % _record_head(rec),
+      "title": "Needs a refresh to merge",
+      "message": "New upstream changes conflict with this contribution.",
+      "url": rec.get("url") or "",
+      "detected_at": now,
+    }
 
   if (
     not attention
@@ -557,6 +601,49 @@ def _notify_attention(rec, attention):
   })
 
 
+# Attention types the background loop handles autonomously. Mirrors
+# autopilot.js ACTIONABLE_ATTENTION — keep the two in step.
+ACTIONABLE_ATTENTION = frozenset((
+  "changes_requested", "checks_failed", "github_activity",
+))
+
+
+def _respond_autopilot(rec, attention):
+  # Ask the platform to run a background response round for this record's new
+  # review event. Returns True when the event is handled by the loop (claimed,
+  # deduped, escalated, or retrying) — meaning DON'T notify.
+  # Returns False when the platform cannot or will not act autonomously (older
+  # platform, missing grant, or permanent request failure), so the caller falls
+  # back to the classic notification.
+  path = "/api/github/contributions/%s/%s/respond" % (
+    APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
+  )
+  try:
+    raw, _ = _call("POST", path, {"attention": attention})
+    try:
+      result = json.loads(raw) if raw else {}
+    except (TypeError, json.JSONDecodeError):
+      result = {}
+    # A stale/forged display mirror must not hide the review from the owner.
+    # The platform's DB grant is authoritative, so fall back to the classic
+    # notification when it says this record was never granted (or was paused).
+    if isinstance(result, dict) and result.get("status") == "not_granted":
+      return False
+    return True
+  except urllib.error.HTTPError as exc:
+    if 400 <= exc.code < 500 and exc.code not in (409, 429):
+      # Old backend (404), rejected authority (401/403), or invalid durable
+      # attention: this pass cannot act autonomously, so preserve the classic
+      # owner-visible path. Busy and rate-limited rounds remain quiet retries.
+      return False
+    # 409 (already handled / in flight), 429, and server failures are normal
+    # retry states the next pass reconciles; never notify for them.
+    return True
+  except Exception:
+    # Transient error — leave the attention on the record for the next pass.
+    return True
+
+
 now = (
   datetime.datetime.now(datetime.timezone.utc)
   .replace(microsecond=0)
@@ -575,6 +662,20 @@ for alias, (name, rec, etag) in aliases.items():
       patch["needs_attention"] = False
       patch["attention"] = None
   if not patch:
+    # A prior pass may have durably written the attention and then lost the
+    # /respond call. Retry that same stable key until the platform claims or
+    # dedupes it; otherwise one transient restart silently strands the review.
+    pending = (
+      rec.get("attention")
+      if rec.get("needs_attention") and isinstance(rec.get("attention"), dict)
+      else None
+    )
+    if (
+      pending
+      and _is_autopilot(rec)
+      and pending.get("type") in ACTIONABLE_ATTENTION
+    ):
+      _respond_autopilot(rec, pending)
     continue
   if not etag:
     print("contribute: skip %s — storage version unavailable" % name,
@@ -616,17 +717,51 @@ for alias, (name, rec, etag) in aliases.items():
     except Exception as exc:
       print("contribute: staging cleanup %s failed: %s" % (name, exc),
             file=sys.stderr)
-  if attention_notice:
-    try:
-      _notify_attention(updated, attention_notice)
-    except Exception:
-      pass
+  # Attention routing. For an autopilot record we hand actionable events to the
+  # background loop (POST /respond) and stay SILENT — the owner is normally
+  # contacted only on merged / closed / human_required (the last sent
+  # server-side by /escalate). For a classic record, or an autopilot event the
+  # loop cannot handle, notify exactly as before.
+  attention_to_route = attention_notice
+  if (
+    not attention_to_route
+    and updated.get("needs_attention")
+    and isinstance(updated.get("attention"), dict)
+  ):
+    attention_to_route = updated["attention"]
+  if attention_to_route:
+    handled = False
+    if (
+      _is_autopilot(updated)
+      and attention_to_route.get("type") in ACTIONABLE_ATTENTION
+    ):
+      handled = _respond_autopilot(updated, attention_to_route)
+    if not handled:
+      try:
+        _notify_attention(updated, attention_to_route)
+      except Exception:
+        pass
   if new_status == "merged" and was != "merged":
     title = rec.get("title") or "contribution"
     try:
       _call("POST", "/api/notifications/send", {
         "title": "Contribution merged 🎉",
         "body": "Your %s was merged — it ships to everyone 🎉" % title,
+        "source_id": str(rec.get("id") or ""),
+        "target": "/shell/?app=%s" % APP_ID,
+      })
+    except Exception:
+      pass
+  # PR rejected: a close without a merge is a terminal outcome the owner should
+  # hear about once (parity with the merged 🎉 notification). Non-autopilot
+  # records historically got no close notification; sending it for all closed
+  # PRs is strictly more informative and never noisy (one per record, ever).
+  if new_status == "closed" and was != "closed":
+    title = rec.get("title") or "contribution"
+    try:
+      _call("POST", "/api/notifications/send", {
+        "title": "Contribution closed",
+        "body": "Your %s was closed on GitHub without merging." % title,
         "source_id": str(rec.get("id") or ""),
         "target": "/shell/?app=%s" % APP_ID,
       })

@@ -146,10 +146,11 @@ test('problem codes map to short human headlines, unknown falls back to raw', ()
   // (routes/github.py) — an invented key is dead copy, a missing real code
   // silently drops its friendly headline.
   assert.deepEqual(Object.keys(PROBLEM_HEADLINES).sort(), [
-    'branch_moved', 'diff_mismatch', 'invalid_ancestry', 'invalid_checkout',
-    'invalid_plan', 'invalid_stack', 'missing_checkout', 'missing_coauthor',
-    'missing_diff', 'missing_diff_hash', 'parent_merged', 'review_changed',
-    'review_unavailable', 'upstream_conflict', 'working_changes',
+    'branch_moved', 'diff_mismatch', 'human_required', 'invalid_ancestry',
+    'invalid_checkout', 'invalid_plan', 'invalid_stack', 'merge_conflict',
+    'missing_checkout', 'missing_coauthor', 'missing_diff', 'missing_diff_hash',
+    'parent_merged', 'review_changed', 'review_unavailable', 'upstream_conflict',
+    'working_changes',
   ])
   // Unknown / empty / non-string codes return '' so the caller shows the raw
   // backend message unchanged (lenient read).

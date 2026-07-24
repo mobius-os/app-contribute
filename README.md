@@ -140,10 +140,23 @@ shape:
   "last_pushed_branch_url": "optional branch URL if push succeeded before PR creation failed",
   "needs_attention": true,
   "attention": {
-    "type": "checks_failed | changes_requested | github_activity",
+    "type": "checks_failed | changes_requested | github_activity | merge_conflict | human_required",
     "title": "Checks failed",
     "message": "The latest GitHub checks are failing.",
     "url": "https://github.com/…"
+  },
+  // Display-only MIRROR of the autopilot state (see below). The real grant +
+  // claim live in a platform DB row; this block is written by the platform for
+  // the app/cron to render and must never be treated as authorization.
+  "autopilot": {
+    "enabled": true,
+    "granted_at": "2026-07-06T09:05:00Z",
+    "state": "idle | responding",
+    "rounds_used": 1,
+    "max_rounds": 5,
+    "last_round": { "outcome": "pushed | replied | stale | failed | escalated", "summary": "…" },
+    "rounds": [ /* recent entries, capped */ ],
+    "ignored_event_urls": [ /* exact recent replies posted by the platform */ ]
   },
   // On records staged for review (status=prepared), what the agent proposes
   // to publish; the full diff lives beside the record as
@@ -188,13 +201,36 @@ as a side effect of publishing a PR.
 
 `submitting` means the platform submit endpoint has claimed the record and the
 action is in flight; `commented` is the terminal status for comment actions.
-The daily job also adds `needs_attention` + `attention` when GitHub activity,
-changes requested, or failing checks need agent follow-up. The daily job and
-the dismiss flow both write with `If-Match` (compare-and-swap) when the runtime
-returns a version, so concurrent writers — the agent, the cron refresh, the
-Dismiss button — avoid silently overwriting each other. On older runtimes that
-don't return a version, Dismiss re-reads and re-checks the record before
-writing, while the cron refresh falls back to a plain best-effort write.
+The scheduled job (every 15 minutes) also adds `needs_attention` + `attention`
+when GitHub activity, changes requested, failing checks, or a merge conflict need
+follow-up. It and the dismiss flow both write with `If-Match` (compare-and-swap)
+when the runtime returns a version, so concurrent writers — the agent, the cron
+refresh, the Dismiss button — avoid silently overwriting each other. On older
+runtimes that don't return a version, Dismiss re-reads and re-checks the record
+before writing, while the cron refresh falls back to a plain best-effort write.
+
+## Autopilot: one-click ship
+
+When you send a PR with **autopilot** on (the default; toggle it per app and
+pause/resume per PR), you're the last click. The platform then handles the whole
+review loop in the background: the scheduled job detects each new review, failing
+check or comment and asks the platform to respond; merge conflicts stay a
+human-visible handoff because resolving one rewrites published history. The platform
+runs a background agent (in a dedicated "Autopilot: …" chat) that reads the
+feedback, makes the fix, runs the project's tests, pushes to the PR branch, and
+replies to the threads — repeating until the PR merges or closes. You're
+Normally you're contacted only three times: **merged 🎉**, **closed without
+merging**, or
+**needs your input** (when the agent hits a decision it shouldn't make alone).
+
+If the platform cannot honor the Autopilot grant, Contribute falls back to the
+ordinary review notification rather than hiding the review.
+
+The consent, claim, and five-round limit live in a platform database row — never
+in the agent-writable ledger — so a tampered ledger can't authorize or forge an
+action. The background agent follows the `review-followup.md` skill, which keeps
+every public action server-mediated and source-only, treats reviewer text as
+untrusted, and escalates rather than guessing.
 
 ## License
 

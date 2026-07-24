@@ -32,13 +32,14 @@ import {
   summarizeSubmissionResolutions,
 } from './domain.js'
 import { indexReviewStatus } from './review.js'
-import { abandonPrepared, cacheFeed, loadFullDiff, loadLedger, restoreAbandoned } from './storage.js'
+import { abandonPrepared, cacheFeed, loadAppSettings, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator } from './refresh.js'
 import {
   fetchGithubStatus,
   fetchLiveStates,
   fetchReviewStatus,
   fetchSourceStatus,
+  setAutopilot,
   submitContribution,
   submitContributionStack,
 } from './api.js'
@@ -145,6 +146,9 @@ export default function ContributeApp({ appId, token }) {
   const [reviewStatus, setReviewStatus] = useState({
     state: 'loading', byId: {}, checkedAt: '',
   })
+  // Whether a new Send grants autopilot. Default on; consulted only at Send
+  // time (job.sh keys off each record's stamped grant, never this preference).
+  const [autopilotDefault, setAutopilotDefault] = useState(true)
   const pageRef = useRef(null)
   const tabRefs = useRef({})
   // Latest records for callbacks (the connect-flow refresh) that must not take
@@ -256,11 +260,15 @@ export default function ContributeApp({ appId, token }) {
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const [ledger, status] = await Promise.all([
+      const [ledger, status, appSettings] = await Promise.all([
         loadLedger(),
         fetchGithubStatus(token),
+        loadAppSettings(),
       ])
       if (cancelled) return
+      if (typeof appSettings.autopilot_default === 'boolean') {
+        setAutopilotDefault(appSettings.autopilot_default)
+      }
       const recs = ledger.records
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
@@ -391,7 +399,12 @@ export default function ContributeApp({ appId, token }) {
   // server rolls the record back to `prepared` with last_submit_error, and the
   // card stays ready for feedback/retry instead of handing off to an agent chat.
   const onSend = useCallback(async (rec) => {
-    const outcome = await submitContribution({ appId, token, rec })
+    const outcome = await submitContribution({
+      appId,
+      token,
+      rec,
+      autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
+    })
     if (outcome.ok) {
       const next = { ...outcome.ok, path: rec.path }
       applyRecordUpdates(next)
@@ -451,7 +464,31 @@ export default function ContributeApp({ appId, token }) {
     }
     refreshReviewStatus()
     return { error: outcome.error || 'Could not submit this PR.' }
-  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
+  }, [appId, token, autopilotDefault, applyRecordUpdates, refreshReviewStatus])
+
+  // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
+  // write); on success we re-read that record so the mirrored autopilot block
+  // and any cleared human_required flag land in the feed.
+  const onSetAutopilot = useCallback(async (rec, enabled) => {
+    const outcome = await setAutopilot({
+      appId, token, recordId: rec.id, enabled,
+    })
+    if (outcome.ok) {
+      try {
+        const ledger = await loadLedger()
+        const fresh = ledger.records.find((r) => r.id === rec.id)
+        if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+      } catch { /* the next refresh reconciles */ }
+      return { ok: true }
+    }
+    return { error: outcome.error || 'Could not update autopilot.' }
+  }, [appId, token, applyRecordUpdates])
+
+  const onToggleAutopilotDefault = useCallback(async (next) => {
+    setAutopilotDefault(next)
+    const settings = await loadAppSettings()
+    saveAppSettings({ ...settings, autopilot_default: next })
+  }, [])
 
   // One explicit confirmation can publish an exact, already-reviewed chain.
   // The response may contain partial progress (for example, parent opened and
@@ -685,6 +722,19 @@ export default function ContributeApp({ appId, token }) {
               onRetry={refreshConnection}
               placement="content"
             />
+            {/* Global autopilot default. On = a Send grants the background
+                review-response loop for that PR; per-PR Pause/Resume still wins.
+                Consulted only at Send time — never overrides a stamped grant. */}
+            {!loading && conn?.autopilotAvailable && (
+              <label className="co-autopilot-default">
+                <input
+                  type="checkbox"
+                  checked={autopilotDefault}
+                  onChange={(e) => onToggleAutopilotDefault(e.target.checked)}
+                />
+                <span>Autopilot new sends — answer reviews for me automatically</span>
+              </label>
+            )}
             {/* Hold the feed area blank until the first load resolves so an empty
                 ledger doesn't flash the sell-the-loop copy before data arrives. */}
             {loading ? null : isEmpty ? (
@@ -699,6 +749,10 @@ export default function ContributeApp({ appId, token }) {
                 onFeedback={onFeedback}
                 onDismiss={onDismiss}
                 onRestore={onRestore}
+                onSetAutopilot={onSetAutopilot}
+                autopilotOn={
+                  conn?.autopilotAvailable === true && autopilotDefault
+                }
                 loadDiff={loadFullDiff}
               />
             )}

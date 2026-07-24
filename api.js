@@ -108,6 +108,7 @@ export async function fetchGithubStatus(token) {
       classicTokenUrl: s.classic_token_url || '',
       classicWorkflowTokenUrl: s.classic_workflow_token_url || '',
       activeAttempt,
+      autopilotAvailable: s.autopilot_available === true,
     }
   } catch (error) {
     // Network failure (offline, backend restarting) — not a platform verdict.
@@ -256,7 +257,7 @@ export function disconnect(token, { signal, timeoutMs = 60000 } = {}) {
 // GitHub, and writes the URL back to the record. The token stays server-side;
 // this app receives only the updated ledger record or an actionable error plus
 // the rolled-back record when available.
-export async function submitContribution({ appId, token, rec }) {
+export async function submitContribution({ appId, token, rec, autopilot = true }) {
   try {
     const r = await fetch(
       '/api/github/contributions/' +
@@ -265,7 +266,11 @@ export async function submitContribution({ appId, token, rec }) {
         '/submit',
       {
         method: 'POST',
-        headers: authHeaders(token),
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        // The one-click grant: a successful submit authorizes the background
+        // review-response loop for this PR (see review-followup.md). The owner
+        // can flip the global default off in the app's Autopilot setting.
+        body: JSON.stringify({ autopilot: !!autopilot }),
       }
     )
     let body = null
@@ -348,5 +353,31 @@ export async function submitContributionStack({ appId, token, recordIds }) {
       uncertain: true,
       error: 'The response was lost. Checking the saved contributions before offering a retry…',
     }
+  }
+}
+
+// Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
+// a ledger write — the grant lives in a platform DB row the app can't edit, so
+// flipping the (display-only) ledger `autopilot` block could never actually stop
+// the loop. Resume also clears any human_required flag and resets the five-round
+// count. Returns { ok } or { error }.
+export async function setAutopilot({ appId, token, recordId, enabled }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(recordId) + '/autopilot',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !!enabled }),
+      }
+    )
+    if (r.ok) return { ok: true }
+    let body = null
+    try { body = await r.json() } catch { body = null }
+    return { error: body?.detail || 'Could not update autopilot.' }
+  } catch {
+    return { error: 'The response was lost. Try again in a moment.' }
   }
 }

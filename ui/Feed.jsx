@@ -27,6 +27,8 @@ export function Feed({
   onFeedback,
   onDismiss,
   onRestore,
+  onSetAutopilot,
+  autopilotOn = true,
   loadDiff,
 }) {
   const { ready, open, history } = groups
@@ -54,6 +56,7 @@ export function Feed({
         onSend={onSend}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
+        autopilotOn={autopilotOn}
         loadDiff={loadDiff}
       />
     )
@@ -95,7 +98,12 @@ export function Feed({
             <span>{open.length}</span>
           </div>
           {open.map((rec) => (
-            <ContributionCard key={rec.id} rec={rec} onFeedback={onFeedback} />
+            <ContributionCard
+              key={rec.id}
+              rec={rec}
+              onFeedback={onFeedback}
+              onSetAutopilot={onSetAutopilot}
+            />
           ))}
         </section>
       )}
