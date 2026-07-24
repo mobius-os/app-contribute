@@ -28,7 +28,6 @@ export function Feed({
   onDismiss,
   onRestore,
   onSetAutopilot,
-  autopilotOn = true,
   loadDiff,
 }) {
   const { ready, open, history } = groups
@@ -56,7 +55,6 @@ export function Feed({
         onSend={onSend}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
-        autopilotOn={autopilotOn}
         loadDiff={loadDiff}
       />
     )

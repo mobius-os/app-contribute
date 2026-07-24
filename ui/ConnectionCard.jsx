@@ -129,6 +129,8 @@ export function ConnectionCard({
   onRetry,
   placement = 'content',
   deviceTransport,
+  autopilotDefault = true,
+  onToggleAutopilotDefault,
 }) {
   // Device-flow machine: idle | starting | pending | failed | cancelled |
   // complete.
@@ -546,8 +548,8 @@ export function ConnectionCard({
           type="button"
           className="co-github-menu"
           aria-expanded={settingsOpen}
-          aria-label={`${settingsOpen ? 'Close' : 'Open'} GitHub settings for ${login}`}
-          title={settingsOpen ? 'Close GitHub settings' : 'GitHub account and settings'}
+          aria-label={`${settingsOpen ? 'Close' : 'Open'} Contribute settings`}
+          title={settingsOpen ? 'Close Contribute settings' : 'Contribute settings'}
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <Icon name="github" size={17} />
@@ -557,6 +559,25 @@ export function ConnectionCard({
 
         {settingsOpen && (
           <div className="co-conn-settings">
+            {conn?.autopilotAvailable &&
+              typeof onToggleAutopilotDefault === 'function' && (
+              <label className="co-autopilot-setting">
+                <input
+                  type="checkbox"
+                  checked={autopilotDefault}
+                  onChange={(event) => (
+                    onToggleAutopilotDefault(event.target.checked)
+                  )}
+                />
+                <span>
+                  <strong>Autopilot</strong>
+                  <small>
+                    Handles reviews and pushes fixes for contributions you
+                    approve and send. Only pings you when it needs help.
+                  </small>
+                </span>
+              </label>
+            )}
             <p className="co-conn-hint">
               Reviewed PRs publish through <strong>{login}</strong>. Public actions
               still require your explicit approval.

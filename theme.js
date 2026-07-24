@@ -540,6 +540,21 @@ export const CSS = `
   padding: 14px; border: 1px solid var(--border); border-radius: 13px;
   background: var(--surface); box-shadow: 0 14px 36px color-mix(in srgb, #000 28%, transparent);
 }
+.co-autopilot-setting {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 0 0 10px; border-bottom: 1px solid var(--border);
+  color: var(--muted); cursor: pointer;
+}
+.co-autopilot-setting input { margin-top: 3px; cursor: pointer; }
+.co-autopilot-setting > span {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.co-autopilot-setting strong {
+  color: var(--text); font-size: 13px; font-weight: 650;
+}
+.co-autopilot-setting small {
+  font-size: 12px; line-height: 1.45; color: var(--muted);
+}
 
 /* GitHub device flow, shown inline when disconnected. The card switches to a
    column layout so the controls stack; every control uses the shared theme
@@ -1243,12 +1258,6 @@ export const CSS = `
   white-space: pre-wrap; overflow-wrap: anywhere;
   user-select: text; -webkit-user-select: text; cursor: text;
 }
-.co-review-note--autopilot { color: var(--accent, #3b7); font-size: 12px; }
-.co-autopilot-default {
-  display: flex; align-items: center; gap: 8px; margin: 0 0 12px;
-  font-size: 13px; color: var(--muted); cursor: pointer;
-}
-.co-autopilot-default input { cursor: pointer; }
 .co-autopilot {
   margin: 8px 0; padding: 10px 12px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--surface-2, rgba(60,120,90,0.06));

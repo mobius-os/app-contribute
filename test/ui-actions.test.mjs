@@ -115,11 +115,12 @@ test('GitHub setup defaults to full PR access and migrates older connections', (
   assert.doesNotMatch(connectionSource, /Workflow access is optional/)
 })
 
-test('GitHub account settings live in the app toolbar', () => {
+test('Contribute settings live in the app toolbar', () => {
   assert.match(appSource, /placement="toolbar"/)
   assert.match(appSource, /placement="content"/)
   assert.match(connectionSource, /className="co-github-menu"/)
-  assert.match(connectionSource, /GitHub account and settings/)
+  assert.match(connectionSource, /Contribute settings/)
+  assert.match(connectionSource, /className="co-autopilot-setting"/)
   assert.match(themeSource, /\.co-conn-settings \{[\s\S]*?position: absolute/)
 })
 
