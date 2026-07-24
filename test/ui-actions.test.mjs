@@ -83,6 +83,7 @@ test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(appSource, /resolveUncertainSubmission/)
   assert.match(appSource, /resolveUncertainLanding/)
   assert.match(apiSource, /landContributionStack/)
+  assert.match(apiSource, /detail\.code === 'landing_unconfirmed'/)
   assert.match(stackSource, /Check landing status/)
   assert.match(stackSource, /canRecoverLanding \? 'Check'/)
   assert.match(appSource, /return \{ pending: true, record: next \}/)

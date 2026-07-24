@@ -396,6 +396,7 @@ export async function landContributionStack({ appId, token, recordIds }) {
     const detail = body?.detail
     if (detail && typeof detail === 'object') {
       return {
+        uncertain: detail.code === 'landing_unconfirmed',
         error: detail.message || 'Could not land this PR stack.',
         records: Array.isArray(detail.records) ? detail.records : [],
       }
