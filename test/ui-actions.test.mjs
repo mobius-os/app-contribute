@@ -98,11 +98,12 @@ test('the token form explains an empty submit instead of silently doing nothing'
   assert.match(connectionSource, /aria-invalid=\{!!patError\}/)
 })
 
-test('GitHub account settings live in the app toolbar', () => {
+test('Contribute settings live in the app toolbar', () => {
   assert.match(appSource, /placement="toolbar"/)
   assert.match(appSource, /placement="content"/)
   assert.match(connectionSource, /className="co-github-menu"/)
-  assert.match(connectionSource, /GitHub account and settings/)
+  assert.match(connectionSource, /Contribute settings/)
+  assert.match(connectionSource, /className="co-autopilot-setting"/)
   assert.match(themeSource, /\.co-conn-settings \{[\s\S]*?position: absolute/)
 })
 
