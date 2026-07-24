@@ -13,9 +13,14 @@ const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8'
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
   assert.match(cardSource, /<span>Send<\/span>/)
-  assert.match(stackSource, /<span>Send for review<\/span>/)
-  assert.match(stackSource, /isLandingAction \? 'Land stack' : 'Send for review'/)
-  assert.match(stackSource, /Land stack/)
+  assert.match(
+    stackSource,
+    /<span>\{isLandingAction \? 'Land stack' : 'Send for review'\}<\/span>/,
+  )
+  assert.match(
+    stackSource,
+    /<span>\{canRecoverLanding \? 'Check' : isLandingAction \? 'Land' : 'Send'\}<\/span>/,
+  )
 })
 
 test('single and stacked sends expose elapsed progress to assistive technology', () => {

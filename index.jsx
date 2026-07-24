@@ -589,6 +589,7 @@ export default function ContributeApp({ appId, token }) {
         item_count: outcome.ok.length,
         target_branch: outcome.targetBranch || '',
       })
+      refreshReviewStatus()
       return { ok: true, landed: outcome.ok.length }
     }
     if (outcome.uncertain) {
@@ -612,6 +613,7 @@ export default function ContributeApp({ appId, token }) {
         })))
       }
       if (resolution.state === 'landed') {
+        refreshReviewStatus()
         return { ok: true, landed: resolution.records.length }
       }
       if (resolution.state === 'landing') {
@@ -625,6 +627,7 @@ export default function ContributeApp({ appId, token }) {
         })
         const recoveredUpdates = recovered.ok || recovered.records || []
         if (recoveredUpdates.length > 0) applyRecordUpdates(recoveredUpdates)
+        refreshReviewStatus()
         if (recovered.ok) return { ok: true, landed: recovered.ok.length }
         return {
           pending: recovered.uncertain,
@@ -632,14 +635,17 @@ export default function ContributeApp({ appId, token }) {
         }
       }
       if (resolution.state === 'blocked') {
+        refreshReviewStatus()
         return { error: resolution.records.find((rec) => rec.last_land_error)?.last_land_error || 'Nothing was changed.' }
       }
+      refreshReviewStatus()
       return {
         error: 'We could not confirm the landing. Reopen Contribute before trying again.',
       }
     }
+    refreshReviewStatus()
     return { error: outcome.error || 'Could not land this PR stack.' }
-  }, [appId, token, applyRecordUpdates])
+  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
   // Feedback = return to the chat that created the contribution, with a small
   // draft already pointing at the exact record. Attention follow-ups can pass
