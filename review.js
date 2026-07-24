@@ -35,10 +35,10 @@ export function reviewStateFor(rec, reviewStatus) {
   if (rec?.status === 'prepared' && rec?.last_submit_error) {
     const upstreamConflict = /no longer merges cleanly|merge conflict/i
       .test(rec.last_submit_error)
-    if (upstreamConflict || !direct) {
+    if (upstreamConflict) {
       return {
         state: 'needs_refresh',
-        code: upstreamConflict ? 'upstream_conflict' : 'previous_submit_failure',
+        code: 'upstream_conflict',
         message: rec.last_submit_error,
       }
     }

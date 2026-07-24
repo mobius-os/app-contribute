@@ -21,12 +21,11 @@ test('indexes only recognized review verdicts', () => {
   assert.equal(indexed.checkedAt, '2026-07-15T02:00:00Z')
 })
 
-test('keeps a persisted submit failure visible when a status is unavailable', () => {
+test('an unchecked retryable failure does not bounce a review into attention', () => {
   const state = reviewStateFor({
     id: 'old', status: 'prepared', last_submit_error: 'Branch changed.',
   }, { state: 'unavailable', byId: {} })
-  assert.equal(state.state, 'needs_refresh')
-  assert.equal(state.code, 'previous_submit_failure')
+  assert.equal(state, null)
 })
 
 test('a persisted remote submit blocker wins over a local ready verdict', () => {
