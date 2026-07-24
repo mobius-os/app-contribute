@@ -33,7 +33,7 @@ import {
 } from './domain.js'
 import { indexReviewStatus } from './review.js'
 import { abandonPrepared, cacheFeed, loadAppSettings, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
-import { createRefreshCoordinator } from './refresh.js'
+import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
   fetchGithubStatus,
   fetchLiveStates,
@@ -334,13 +334,18 @@ export default function ContributeApp({ appId, token }) {
 
   useEffect(() => {
     const requestRefresh = refreshCoordinatorRef.current
+    const refreshOnForeground = (event) => {
+      if (isVisibleFrameMessage(event, window.parent)) requestRefresh()
+    }
     document.addEventListener('visibilitychange', requestRefresh)
     window.addEventListener('focus', requestRefresh)
     window.addEventListener('online', requestRefresh)
+    window.addEventListener('message', refreshOnForeground)
     return () => {
       document.removeEventListener('visibilitychange', requestRefresh)
       window.removeEventListener('focus', requestRefresh)
       window.removeEventListener('online', requestRefresh)
+      window.removeEventListener('message', refreshOnForeground)
     }
   }, [])
 
