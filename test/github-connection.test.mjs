@@ -4,11 +4,11 @@ import test from 'node:test'
 import {
   connectCancel,
   connectPoll,
-  connectToken,
   disconnect,
 } from '../api.js'
 import {
   ConnectionAttemptError,
+  hasFullPrAccess,
   runDeviceConnection,
 } from '../github-connection.js'
 
@@ -22,6 +22,33 @@ function started(overrides = {}) {
     ...overrides,
   }
 }
+
+test('full PR access requires repository and workflow grants', () => {
+  assert.equal(hasFullPrAccess(), false)
+  assert.equal(hasFullPrAccess(['public_repo']), false)
+  assert.equal(hasFullPrAccess(['workflow']), false)
+  assert.equal(hasFullPrAccess(['public_repo', 'workflow']), true)
+  assert.equal(hasFullPrAccess(['repo', 'workflow']), true)
+})
+
+test('new device connections request workflow access by default', async () => {
+  let requestedWorkflow = null
+  const result = await runDeviceConnection({
+    transport: {
+      async start({ workflow }) {
+        requestedWorkflow = workflow
+        return started()
+      },
+      async poll() {
+        return { status: 'complete', login: 'octocat' }
+      },
+    },
+    wait: async () => {},
+  })
+
+  assert.equal(requestedWorkflow, true)
+  assert.equal(result.status, 'complete')
+})
 
 test('resumes a persisted attempt without starting a replacement', async () => {
   let starts = 0
@@ -305,7 +332,7 @@ test('identified poll requests abort at their request deadline', async (t) => {
   )
 })
 
-test('PAT connect and disconnect cannot leave the account UI waiting forever', async (t) => {
+test('disconnect cannot leave the account UI waiting forever', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => {
     globalThis.fetch = originalFetch
@@ -318,16 +345,14 @@ test('PAT connect and disconnect cannot leave the account UI waiting forever', a
     }, { once: true })
   })
 
-  for (const request of [
-    () => connectToken('test-token', 'github-token', { timeoutMs: 5 }),
+  await assert.rejects(
     () => disconnect('test-token', { timeoutMs: 5 }),
-  ]) {
-    await assert.rejects(request(), (error) => {
+    (error) => {
       assert.equal(error.code, 'request_timeout')
       assert.match(error.message, /timed out/)
       return true
-    })
-  }
+    },
+  )
 })
 
 test('poll and cancel requests target the exact platform attempt', async (t) => {

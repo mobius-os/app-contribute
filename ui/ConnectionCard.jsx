@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { connectToken, disconnect } from '../api.js'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { disconnect } from '../api.js'
 import {
   createGithubDeviceTransport,
+  hasFullPrAccess,
   runDeviceConnection,
 } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
@@ -15,15 +16,11 @@ import { Icon } from './Icons.jsx'
 //   unknown      — the probe failed (offline / restarting); render a retryable
 //                  status while the feed continues to show from cache
 //   connected    — "Connected as <login>" + an inline-confirm Disconnect
-//   disconnected — the connect UI: device flow (when device_flow_available) and
-//                  a classic-PAT fallback (always)
+//   disconnected — the GitHub device-flow connection UI
 //
 // The state machine consumes the platform's identified connection-attempt
 // transport. Keeping that boundary explicit lets a future generic accounts
 // service replace the GitHub routes without another UI rewrite.
-
-const TOKEN_CREATE_URL =
-  'https://github.com/settings/tokens/new?scopes=public_repo&description=Mobius'
 
 function DeviceFlowControl({
   flow,
@@ -134,28 +131,22 @@ export function ConnectionCard({
   deviceTransport,
 }) {
   // Device-flow machine: idle | starting | pending | failed | cancelled |
-  // complete. PAT submission is independent state so the token form works
-  // while a device flow is pending.
+  // complete.
   const [flow, setFlow] = useState('idle')
-  const [flowPurpose, setFlowPurpose] = useState('standard')
   const [userCode, setUserCode] = useState('')
   const [verificationUri, setVerificationUri] = useState('')
   const [deviceIssue, setDeviceIssue] = useState(null)
-  const [pat, setPat] = useState('')
-  const [patSubmitting, setPatSubmitting] = useState(false)
-  const [patError, setPatError] = useState('')
   const [connectedLogin, setConnectedLogin] = useState('')
   const [justConnected, setJustConnected] = useState(false)
   const [disconnectConfirm, setDisconnectConfirm] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // The classic-PAT form is collapsed behind a disclosure when the device flow
-  // is available, so the default connect view is just the one-tap button.
-  const [patOpen, setPatOpen] = useState(false)
+  const [accessMigration, setAccessMigration] = useState('idle')
+  const [accessMigrationError, setAccessMigrationError] = useState('')
   const [statusRetrying, setStatusRetrying] = useState(false)
-  const patInputRef = useRef(null)
   const flowControllerRef = useRef(null)
+  const accessMigrationRef = useRef(false)
   const attemptIdRef = useRef('')
   const pollGenRef = useRef(0)
   const connectedTimerRef = useRef(null)
@@ -182,7 +173,6 @@ export function ConnectionCard({
     setUserCode('')
     setVerificationUri('')
     attemptIdRef.current = ''
-    setPat('')
     setDeviceIssue(null)
     setJustConnected(true)
     if (connectedTimerRef.current) clearTimeout(connectedTimerRef.current)
@@ -190,8 +180,7 @@ export function ConnectionCard({
       connectedTimerRef.current = null
       setJustConnected(false)
     }, 3000)
-    // Activation conversion — both the device flow and the PAT path funnel
-    // through here, so one signal covers the bottom of the connect funnel.
+    // Activation conversion for the device-flow funnel.
     window.mobius?.signal?.('github_connected')
     // Tell the parent so it re-fetches status and re-runs the live refresh
     // now that GitHub is reachable.
@@ -202,10 +191,7 @@ export function ConnectionCard({
     setFlow('idle')
   }, [onChanged])
 
-  const startDeviceFlow = useCallback(async (
-    workflow = false,
-    existingAttempt = null,
-  ) => {
+  const startDeviceFlow = useCallback(async (existingAttempt = null) => {
     stopDeviceFlow()
     attemptIdRef.current = ''
     const controller = new AbortController()
@@ -214,17 +200,16 @@ export function ConnectionCard({
     setDeviceIssue(null)
     setUserCode('')
     setVerificationUri('')
-    setFlowPurpose(workflow ? 'workflow' : 'standard')
     setFlow('starting')
     window.mobius?.signal?.('github_connect_started', {
       method: 'device',
-      workflow,
+      workflow: true,
     })
 
     const result = await runDeviceConnection({
       transport,
       existingAttempt,
-      workflow,
+      workflow: true,
       signal: controller.signal,
       onPending: (started) => {
         if (
@@ -278,7 +263,7 @@ export function ConnectionCard({
       || flow !== 'idle'
       || !conn?.activeAttempt?.attemptId
     ) return
-    startDeviceFlow(false, conn.activeAttempt)
+    startDeviceFlow(conn.activeAttempt)
   }, [
     conn?.activeAttempt,
     conn?.state,
@@ -362,59 +347,6 @@ export function ConnectionCard({
     }
   }, [transport, stopDeviceFlow, finishConnected])
 
-  const submitPat = useCallback(async (e) => {
-    e.preventDefault()
-    const value = pat.trim()
-    if (!value) {
-      setPatError('Enter a GitHub personal access token.')
-      patInputRef.current?.focus()
-      return
-    }
-    setPatError('')
-    setPatSubmitting(true)
-    window.mobius?.signal?.('github_connect_started', { method: 'pat' })
-    try {
-      const res = await connectToken(token, value)
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        if (res.status >= 500) {
-          const status = await Promise.resolve(onChanged?.()).catch(() => null)
-          if (status?.state === 'connected') {
-            stopDeviceFlow()
-            setPat('')
-            window.mobius?.signal?.('github_connected')
-            return
-          }
-        }
-        setPatError(data.detail || 'Could not connect with that token.')
-        return
-      }
-      const data = await res.json()
-      // A PAT can land while a device poll is mid-flight — bump the generation
-      // so a late poll resolution can't overwrite this success.
-      stopDeviceFlow()
-      await finishConnected(data.login)
-    } catch (error) {
-      // The server may have committed the credential before the response was
-      // lost. Re-read the account authority before inviting a duplicate retry.
-      const status = await Promise.resolve(onChanged?.()).catch(() => null)
-      if (status?.state === 'connected') {
-        stopDeviceFlow()
-        setPat('')
-        setPatError('')
-        window.mobius?.signal?.('github_connected')
-        return
-      }
-      setPatError(
-        error?.code === 'request_timeout'
-          ? error.message
-          : 'Could not reach the GitHub connection service.',
-      )
-    } finally {
-      setPatSubmitting(false)
-    }
-  }, [pat, token, stopDeviceFlow, finishConnected])
-
   const doDisconnect = useCallback(async () => {
     // A workflow-upgrade attempt can coexist with the connected account menu.
     // Stop its local poll before clearing both credentials and attempts.
@@ -464,6 +396,53 @@ export function ConnectionCard({
     }
   }, [token, onChanged, stopDeviceFlow])
 
+  const migrateLimitedConnection = useCallback(async () => {
+    if (accessMigrationRef.current) return
+    accessMigrationRef.current = true
+    stopDeviceFlow()
+    setAccessMigration('disconnecting')
+    setAccessMigrationError('')
+    try {
+      const res = await disconnect(token)
+      if (!res.ok) {
+        const status = await Promise.resolve(onChanged?.()).catch(() => null)
+        if (status?.state !== 'disconnected') {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.detail || 'Could not reset GitHub access.')
+        }
+      } else {
+        await onChanged?.()
+      }
+      setAccessMigration('required')
+      window.mobius?.signal?.('github_access_reconnect_required')
+    } catch (error) {
+      setAccessMigration('failed')
+      setAccessMigrationError(
+        error?.message || 'Could not reset GitHub access.',
+      )
+      accessMigrationRef.current = false
+    }
+  }, [token, onChanged, stopDeviceFlow])
+
+  // Full PR access is now the connection contract. Existing public_repo-only
+  // credentials cannot be elevated silently by GitHub, so retire them once
+  // when Contribute opens and let the owner authorize the complete scope set.
+  // Only the content placement owns this migration; the toolbar copy is a
+  // second view of the same connection and must not race the DELETE.
+  useEffect(() => {
+    if (
+      placement !== 'content'
+      || conn?.state !== 'connected'
+      || hasFullPrAccess(conn?.scopes)
+    ) return
+    migrateLimitedConnection()
+  }, [
+    conn?.scopes,
+    conn?.state,
+    migrateLimitedConnection,
+    placement,
+  ])
+
   const retryStatus = useCallback(async () => {
     if (statusRetrying) return
     setStatusRetrying(true)
@@ -512,7 +491,36 @@ export function ConnectionCard({
   // warnings remain in the contribution content where their copy has room.
   const statusConnected = state === 'connected'
   if (placement === 'toolbar' && !statusConnected) return null
-  if (placement !== 'toolbar' && statusConnected) return null
+  if (placement !== 'toolbar' && statusConnected) {
+    if (hasFullPrAccess(conn?.scopes)) return null
+    return (
+      <div className="co-conn" role="status" aria-live="polite">
+        <span className="co-conn-dot is-warn" aria-hidden="true" />
+        <div className="co-conn-body">
+          <p className="co-conn-title">Updating GitHub access</p>
+          <p className="co-conn-text">
+            Contribute now connects with full PR access so workflow changes and
+            stale forks do not interrupt reviewed sends. Your older connection
+            is being signed out; reconnect once to approve the updated access.
+          </p>
+          {accessMigration === 'failed' ? (
+            <div className="co-conn-actions">
+              <button
+                type="button"
+                className="co-btn co-btn-sm"
+                onClick={migrateLimitedConnection}
+              >
+                Try signing out again
+              </button>
+              <p className="co-conn-error" role="alert">
+                {accessMigrationError}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   if (state === 'unsupported') {
     return (
@@ -531,8 +539,7 @@ export function ConnectionCard({
 
   if (statusConnected) {
     const login = connectedLogin || conn?.login || 'your account'
-    const workflowEnabled = conn?.scopes?.includes('workflow')
-    const workflowFlow = flowPurpose === 'workflow'
+    const workflowEnabled = hasFullPrAccess(conn?.scopes)
     return (
       <div className={'co-conn is-connected is-toolbar' + (settingsOpen ? ' is-open' : '')}>
         <button
@@ -556,27 +563,14 @@ export function ConnectionCard({
             </p>
             {workflowEnabled ? (
               <p className="co-conn-hint">
-                Workflow access is enabled for reviewed workflow changes and
-                safe fast-forwards of stale forks.
+                Full PR access is enabled for reviewed workflow changes and
+                safe handling of stale forks.
               </p>
             ) : (
-              <div className="co-conn-device">
-                <p className="co-conn-hint">
-                  Workflow access is optional. It is only needed for reviewed
-                  workflow changes or to safely update a stale fork.
-                </p>
-                <DeviceFlowControl
-                  flow={workflowFlow ? flow : 'idle'}
-                  issue={workflowFlow ? deviceIssue : null}
-                  userCode={userCode}
-                  verificationUri={verificationUri}
-                  onStart={() => startDeviceFlow(true)}
-                  onCancel={cancelPending}
-                  startLabel="Enable workflow access"
-                  retryLabel="Try enabling workflow access again"
-                  buttonClassName="co-btn co-btn-sm"
-                />
-              </div>
+              <p className="co-conn-hint">
+                This older connection is being reset. Reconnect once to grant
+                the full PR access Contribute now requires.
+              </p>
             )}
             {disconnectError && (
               <p className="co-conn-error" role="status" aria-live="polite">{disconnectError}</p>
@@ -617,62 +611,22 @@ export function ConnectionCard({
     )
   }
 
-  // Disconnected — the connect flow. Device flow when the server offers it,
-  // classic-PAT fallback always. When the device flow IS available the PAT form
-  // is collapsed behind an "Advanced" disclosure so the default view is one tap;
-  // when it is the only path, the form stays open as before.
+  // Disconnected — one deliberate connection path: GitHub's device flow.
   const deviceFlowAvailable = !!conn?.deviceFlowAvailable
-  const patForm = (
-    <form className="co-conn-pat" onSubmit={submitPat}>
-      <p className="co-conn-hint">
-        Paste a <strong>classic</strong> personal access token with the{' '}
-        <code>public_repo</code> scope (
-        <a href={TOKEN_CREATE_URL} target="_blank" rel="noopener noreferrer">
-          create one
-        </a>
-        ).
-      </p>
-      <div className="co-conn-form">
-        <input
-          ref={patInputRef}
-          className="co-conn-input"
-          type="password"
-          name="github-token"
-          value={pat}
-          onChange={(e) => setPat(e.target.value)}
-          placeholder="ghp_…"
-          autoComplete="off"
-          spellCheck={false}
-          aria-invalid={!!patError}
-          aria-describedby={patError ? 'co-github-token-error' : undefined}
-          aria-label="GitHub personal access token"
-        />
-        <button
-          className="co-btn co-btn-primary co-btn-block"
-          type="submit"
-          disabled={patSubmitting}
-        >
-          {patSubmitting ? 'Connecting…' : 'Connect with token'}
-        </button>
-      </div>
-      {patError && (
-        <p id="co-github-token-error" className="co-conn-error" role="status" aria-live="polite">
-          {patError}
-        </p>
-      )}
-    </form>
-  )
   return (
     <div className="co-conn is-column">
       <div className="co-conn-row">
         <span className="co-conn-dot is-accent" aria-hidden="true" />
         <div className="co-conn-body">
-          <p className="co-conn-title">Connect GitHub to contribute</p>
+          <p className="co-conn-title">
+            {accessMigration === 'required'
+              ? 'Reconnect GitHub to continue'
+              : 'Connect GitHub to contribute'}
+          </p>
           <p className="co-conn-text">
-            When your agent improves a Möbius app or the platform, it can share
-            that fix upstream so it ships to everyone. Connect your GitHub
-            account to turn that on — your agent still asks before every public
-            action.
+            {accessMigration === 'required'
+              ? 'Contribute now requests full PR access so reviewed workflow changes and stale forks can be handled without another sign-in.'
+              : 'When your agent improves a Möbius app or the platform, it can share that fix upstream so it ships to everyone. Full PR access avoids interruptions from workflow changes and stale forks; your agent still asks before every public action.'}
           </p>
         </div>
       </div>
@@ -684,7 +638,7 @@ export function ConnectionCard({
             issue={deviceIssue}
             userCode={userCode}
             verificationUri={verificationUri}
-            onStart={() => startDeviceFlow(false)}
+            onStart={() => startDeviceFlow()}
             onCancel={cancelPending}
             startLabel="Connect with GitHub"
             retryLabel="Try GitHub again"
@@ -693,20 +647,11 @@ export function ConnectionCard({
         </div>
       )}
 
-      {deviceFlowAvailable ? (
-        <div className="co-conn-advanced">
-          <button
-            type="button"
-            className="co-conn-advanced-toggle"
-            aria-expanded={patOpen}
-            onClick={() => setPatOpen((open) => !open)}
-          >
-            Advanced: use a token instead
-          </button>
-          {patOpen ? patForm : null}
-        </div>
-      ) : (
-        patForm
+      {!deviceFlowAvailable && (
+        <p className="co-conn-note" role="status">
+          GitHub sign-in is not configured for this Möbius instance. Configure it,
+          then try again.
+        </p>
       )}
     </div>
   )

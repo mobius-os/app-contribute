@@ -92,10 +92,27 @@ test('cards use explicit links and detail buttons instead of a clickable contain
   assert.match(cardSource, /className="co-card-title"/)
 })
 
-test('the token form explains an empty submit instead of silently doing nothing', () => {
-  assert.match(connectionSource, /Enter a GitHub personal access token\./)
-  assert.match(connectionSource, /disabled=\{patSubmitting\}/)
-  assert.match(connectionSource, /aria-invalid=\{!!patError\}/)
+test('GitHub setup exposes only the device-flow connection path', () => {
+  assert.doesNotMatch(connectionSource, /personal access token|connectToken|patSubmitting/)
+  assert.doesNotMatch(connectionSource, /Advanced: use a token instead/)
+  assert.doesNotMatch(apiSource, /connectToken|classicTokenUrl|classicWorkflowTokenUrl/)
+  assert.match(connectionSource, /GitHub sign-in is not configured/)
+})
+
+test('GitHub setup defaults to full PR access and migrates older connections', () => {
+  assert.match(connectionSource, /workflow: true/)
+  assert.match(
+    connectionSource,
+    /onStart=\{\(\) => startDeviceFlow\(\)\}/,
+  )
+  assert.match(
+    connectionSource,
+    /conn\?\.state !== 'connected'[\s\S]*?hasFullPrAccess\(conn\?\.scopes\)/,
+  )
+  assert.match(connectionSource, /migrateLimitedConnection\(\)/)
+  assert.match(connectionSource, /Reconnect GitHub to continue/)
+  assert.doesNotMatch(connectionSource, /use a token instead/)
+  assert.doesNotMatch(connectionSource, /Workflow access is optional/)
 })
 
 test('GitHub account settings live in the app toolbar', () => {
@@ -130,7 +147,6 @@ test('GitHub connection failures stay visible and recoverable', () => {
   assert.doesNotMatch(connectionSource, /flow === 'complete' \|\| state === 'connected'/)
   assert.match(appSource, /connectionRequestRef/)
   assert.match(appSource, /requestId !== connectionRequestRef\.current/)
-  assert.match(connectionSource, /status\?\.state === 'connected'/)
   assert.match(connectionSource, /status\?\.state === 'disconnected'/)
   assert.match(connectionSource, /Stop its local poll before clearing/)
   assert.match(connectionSource, /role=\{flow === 'cancelled' \? 'status' : 'alert'\}/)
