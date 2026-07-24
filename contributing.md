@@ -216,8 +216,10 @@ published, confirm no private data appears in the branch, commit message, branch
 name, body, or diff, and confirm the branch is back on `main` when the prep
 steps require it.
 
-Status stays `prepared`. Then tell the partner what you found and staged in one
-short paragraph, closing with "staged in the Contribute app for your review".
+Status stays `prepared`. Then give the partner one short, text-only handoff:
+summarize what is staged and say it is waiting for their review. A prepared
+review is not an app build completion. Do not navigate the workspace, place an
+app, or link a completion notification to an app as part of this handoff.
 
 ---
 
