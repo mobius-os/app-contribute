@@ -126,8 +126,9 @@ don't propose.
 
 Hard stop #1 is the gate. In practice:
 
-1. Propose the contribution plainly ("Want me to prepare this PR privately in
-   Contribute for your review?").
+1. Propose the contribution through the clarifying-question tool, not as a prose
+   aside. Offer two neutral choices such as **Prepare privately** and **Not
+   now**, and say that nothing goes public without a later approval.
 2. Wait for that yes.
 3. Prepare everything needed for review and direct submission, then stop.
 
