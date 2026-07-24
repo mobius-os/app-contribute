@@ -467,10 +467,10 @@ gh api graphql -f query='mutation($id: ID!, $body: String!) {
 
 | Symptom | What it means / what to do |
 |---------|----------------------------|
-| **403 "OAuth App access restrictions"** | Org hasn't approved the Möbius OAuth app. Have the partner reconnect with a **`public_repo`-scoped PAT** (Connect card) — safer than full `repo`, which also grants read of the owner's PRIVATE repos through the read passthrough. |
+| **403 "OAuth App access restrictions"** | The organization has not approved the Möbius GitHub app. Ask an organization owner to approve it, then reconnect through Contribute. |
 | **`gh: command not found`** | Platform image too old; a platform update is needed. |
 | **`git push fork` fails right after the fork** | Forks are created async — wait 2s and retry, up to 3×, before treating it as real. |
-| **Push says `workflow` scope is required, but the reviewed diff does not change a workflow** | The reusable fork is stale and lacks an identical workflow file. Current platforms keep the fork default branch untouched and adapt only the reviewed topic commit; on an older platform, update the fork before retrying. |
+| **Push says `workflow` scope is required, but the reviewed diff does not change a workflow** | The reusable fork is stale and lacks an identical workflow file. Update Contribute and reconnect GitHub so the full PR scope set is granted, then retry the unchanged review. |
 | **Empty search results** | Normal while the ecosystem is young; not an error. |
 
 ---

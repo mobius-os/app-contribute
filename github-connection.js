@@ -9,6 +9,15 @@ const DEFAULT_EXPIRES_IN_SECONDS = 900
 const DEFAULT_REQUEST_TIMEOUT_MS = 60000
 const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3
 
+export function hasFullPrAccess(scopes) {
+  if (!Array.isArray(scopes)) return false
+  const granted = new Set(scopes)
+  return (
+    granted.has('workflow')
+    && (granted.has('public_repo') || granted.has('repo'))
+  )
+}
+
 export class ConnectionAttemptError extends Error {
   constructor(message, {
     code = 'connection_error',
@@ -86,7 +95,7 @@ export function createGithubDeviceTransport(
   { requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
 ) {
   return {
-    async start({ workflow = false, signal } = {}) {
+    async start({ workflow = true, signal } = {}) {
       const response = await connectStart(token, {
         workflow,
         signal,
@@ -210,7 +219,7 @@ function issueFromError(error, fallback) {
 export async function runDeviceConnection({
   transport,
   existingAttempt = null,
-  workflow = false,
+  workflow = true,
   signal,
   onPending = () => {},
   onProgress = () => {},

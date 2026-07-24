@@ -105,8 +105,6 @@ export async function fetchGithubStatus(token) {
       login: s.login || '',
       scopes: Array.isArray(s.scopes) ? s.scopes : [],
       deviceFlowAvailable: !!s.device_flow_available,
-      classicTokenUrl: s.classic_token_url || '',
-      classicWorkflowTokenUrl: s.classic_workflow_token_url || '',
       activeAttempt,
       autopilotAvailable: s.autopilot_available === true,
     }
@@ -191,7 +189,7 @@ export async function fetchLiveStates(token, query) {
 // server-approved retry delay.
 export function connectStart(
   token,
-  { workflow = false, signal, timeoutMs = 45000 } = {},
+  { workflow = true, signal, timeoutMs = 45000 } = {},
 ) {
   return fetchWithDeadline('/api/github/connect/start', {
     method: 'POST',
@@ -223,22 +221,6 @@ export function connectCancel(
     method: 'POST',
     headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
     body: JSON.stringify({ attempt_id: attemptId }),
-    signal,
-  }, timeoutMs)
-}
-
-// PAT fallback: exchange a classic personal access token for the stored
-// credential. On rejection the server's detail (fine-grained token,
-// missing scope) is human-readable — surface it verbatim.
-export function connectToken(
-  token,
-  pat,
-  { signal, timeoutMs = 60000 } = {},
-) {
-  return fetchWithDeadline('/api/github/connect/token', {
-    method: 'POST',
-    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: pat }),
     signal,
   }, timeoutMs)
 }

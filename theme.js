@@ -556,16 +556,14 @@ export const CSS = `
   font-size: 12px; line-height: 1.45; color: var(--muted);
 }
 
-/* Connect flow (device + PAT), shown inline when disconnected. The card
-   switches to a column layout so the controls stack; every control uses the
-   shared theme tokens and a 44px min touch target. */
+/* GitHub device flow, shown inline when disconnected. The card switches to a
+   column layout so the controls stack; every control uses the shared theme
+   tokens and a 44px min touch target. */
 .co-conn.is-column { flex-direction: column; align-items: stretch; gap: 13px; }
 .co-conn-row { display: flex; align-items: flex-start; gap: 10px; }
 .co-conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .co-conn-body .co-conn-actions { margin-top: 10px; }
 .co-conn-device { display: flex; flex-direction: column; gap: 10px; }
-.co-conn-pat { display: flex; flex-direction: column; gap: 8px; margin: 0; }
-.co-conn-form { display: flex; flex-direction: column; gap: 8px; }
 
 /* mobius-ui:Button v1 — app-owned copy; library candidate. */
 .co-btn {
@@ -602,20 +600,6 @@ export const CSS = `
 }
 /* /mobius-ui:Button */
 
-/* mobius-ui:Input v1 — app-owned copy; library candidate. */
-.co-conn-input {
-  display: block; width: 100%; box-sizing: border-box; min-height: 44px;
-  padding: 11px 12px; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 10px; outline: none;
-  font-family: var(--mono, var(--font)); font-size: 16px;
-  transition: border-color .15s ease, box-shadow .15s ease;
-}
-.co-conn-input:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-dim);
-}
-/* /mobius-ui:Input */
-
 /* The one-time device code: large, monospaced, selectable as a whole. */
 .co-conn-code {
   font-family: var(--mono, var(--font)); font-size: 30px; font-weight: 700;
@@ -633,25 +617,6 @@ export const CSS = `
 }
 .co-conn-error { margin: 2px 0 0; font-size: 13px; color: var(--danger); line-height: 1.45; }
 .co-conn-note { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
-.co-conn-divider {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 11px; color: var(--muted); letter-spacing: 0;
-}
-.co-conn-divider::before, .co-conn-divider::after {
-  content: ''; flex: 1; height: 1px; background: var(--border);
-}
-/* The classic-PAT form, collapsed behind a quiet disclosure when the one-tap
-   device flow is the recommended path. */
-.co-conn-advanced { display: flex; flex-direction: column; gap: 12px; }
-.co-conn-advanced-toggle {
-  align-self: center; min-height: 44px; padding: 6px 10px;
-  border: 0; background: transparent; cursor: pointer;
-  font-family: var(--font); font-size: 12.5px; color: var(--muted);
-}
-@media (hover: hover) {
-  .co-conn-advanced-toggle:hover { color: var(--text); }
-}
-
 .co-section { margin-top: 24px; }
 .co-section-headline { display: flex; align-items: center; gap: 8px; }
 .co-section-headline > span {
