@@ -28,6 +28,7 @@ import {
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
   reconcileLedgerSnapshot,
+  resolveUncertainLanding,
   resolveUncertainSubmission,
   summarizeSubmissionResolutions,
 } from './domain.js'
@@ -39,6 +40,7 @@ import {
   fetchLiveStates,
   fetchReviewStatus,
   fetchSourceStatus,
+  landContributionStack,
   setAutopilot,
   submitContribution,
   submitContributionStack,
@@ -569,6 +571,82 @@ export default function ContributeApp({ appId, token }) {
     return { error: outcome.error || 'Could not submit this PR stack.' }
   }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
+  // Landing is a second public action with its own explicit confirmation. The
+  // platform advances only an unchanged, unprotected app branch after proving
+  // the exact reviewed chain and every PR's CI result. As with Send, a lost
+  // browser response is reconciled from the durable ledger before any retry.
+  const onLandStack = useCallback(async (stackRecords) => {
+    const outcome = await landContributionStack({
+      appId,
+      token,
+      recordIds: stackRecords.map((rec) => rec.id),
+    })
+    const updates = outcome.ok || outcome.records || []
+    if (updates.length > 0) applyRecordUpdates(updates)
+    if (outcome.ok) {
+      window.mobius?.signal?.('contribution_stack_landed', {
+        stack_id: stackRecords[0]?.plan?.stack?.id || '',
+        item_count: outcome.ok.length,
+        target_branch: outcome.targetBranch || '',
+      })
+      refreshReviewStatus()
+      return { ok: true, landed: outcome.ok.length }
+    }
+    if (outcome.uncertain) {
+      let resolution = { state: 'unconfirmed', records: [] }
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 450))
+        }
+        try {
+          resolution = resolveUncertainLanding(stackRecords, await loadLedger())
+        } catch {
+          resolution = { state: 'unconfirmed', records: [] }
+        }
+        if (resolution.state !== 'unconfirmed') break
+      }
+      if (resolution.records.length > 0) {
+        applyRecordUpdates(resolution.records.map((rec, index) => ({
+          ...rec,
+          path: stackRecords.find((item) => item.id === rec.id)?.path ||
+            stackRecords[index]?.path,
+        })))
+      }
+      if (resolution.state === 'landed') {
+        refreshReviewStatus()
+        return { ok: true, landed: resolution.records.length }
+      }
+      if (resolution.state === 'landing') {
+        // The durable `landing` journal is explicit prior approval. Repeating
+        // the same endpoint cannot push again: the platform takes the source
+        // lock, reads the exact upstream ref, and only settles the saved result.
+        const recovered = await landContributionStack({
+          appId,
+          token,
+          recordIds: stackRecords.map((rec) => rec.id),
+        })
+        const recoveredUpdates = recovered.ok || recovered.records || []
+        if (recoveredUpdates.length > 0) applyRecordUpdates(recoveredUpdates)
+        refreshReviewStatus()
+        if (recovered.ok) return { ok: true, landed: recovered.ok.length }
+        return {
+          pending: recovered.uncertain,
+          error: recovered.error || 'Landing is still being reconciled from its saved journal.',
+        }
+      }
+      if (resolution.state === 'blocked') {
+        refreshReviewStatus()
+        return { error: resolution.records.find((rec) => rec.last_land_error)?.last_land_error || 'Nothing was changed.' }
+      }
+      refreshReviewStatus()
+      return {
+        error: 'We could not confirm the landing. Reopen Contribute before trying again.',
+      }
+    }
+    refreshReviewStatus()
+    return { error: outcome.error || 'Could not land this PR stack.' }
+  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
+
   // Feedback = return to the chat that created the contribution, with a small
   // draft already pointing at the exact record. Attention follow-ups can pass
   // a more specific draft. Older records may not have
@@ -740,6 +818,7 @@ export default function ContributeApp({ appId, token }) {
                 reviewStatus={reviewStatus}
                 onSend={onSend}
                 onSendStack={onSendStack}
+                onLandStack={onLandStack}
                 onFeedback={onFeedback}
                 onDismiss={onDismiss}
                 onRestore={onRestore}

@@ -4,11 +4,14 @@ import assert from 'node:assert/strict'
 import {
   PROBLEM_HEADLINES,
   STATUS_NARRATION,
+  applyLiveStates,
+  buildRefreshQuery,
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
   problemHeadline,
   reconcileLedgerSnapshot,
   resolveUncertainSubmission,
+  resolveUncertainLanding,
   statusNarration,
   summarizeSubmissionResolutions,
 } from '../domain.js'
@@ -80,6 +83,56 @@ test('a lost submit response is reconciled from the durable ledger', () => {
   assert.equal(unchanged.state, 'unchanged')
   assert.equal(isSubmissionResolutionSettled(unchanged), false)
   assert.equal(isSubmissionResolutionSettled({ state: 'publishing' }), true)
+})
+
+test('a lost stack landing response is reconciled from the durable ledger', () => {
+  const records = [{ id: 'one' }, { id: 'two' }]
+  assert.equal(resolveUncertainLanding(records, {
+    fromCache: false,
+    records: [{ id: 'one', status: 'merged' }, { id: 'two', status: 'merged' }],
+  }).state, 'landed')
+  assert.equal(resolveUncertainLanding(records, {
+    fromCache: false,
+    records: [{ id: 'one', status: 'landing' }, { id: 'two', status: 'landing' }],
+  }).state, 'landing')
+  assert.equal(resolveUncertainLanding(records, {
+    fromCache: false,
+    records: [
+      { id: 'one', status: 'open', last_land_error: 'CI pending' },
+      { id: 'two', status: 'open', last_land_error: 'CI pending' },
+    ],
+  }).state, 'blocked')
+})
+
+test('live PR refresh carries the CI rollup used by stack landing', () => {
+  const records = [{
+    id: 'one', type: 'pr', status: 'open',
+    url: 'https://github.com/mobius-os/app-demo/pull/1',
+  }]
+  const request = buildRefreshQuery(records)
+  assert.match(request.query, /statusCheckRollup \{ state \}/)
+  const next = applyLiveStates(records, request.aliases, {
+    r0: {
+      __typename: 'PullRequest', state: 'OPEN', isDraft: false,
+      statusCheckRollup: { state: 'SUCCESS' },
+    },
+  })
+  assert.equal(next[0].live_checks_state, 'SUCCESS')
+
+  const landing = [{ ...records[0], status: 'landing' }]
+  const landingRequest = buildRefreshQuery(landing)
+  assert.ok(landingRequest, 'an interrupted landing remains refreshable')
+  const stillLanding = applyLiveStates(landing, landingRequest.aliases, {
+    r0: {
+      __typename: 'PullRequest', state: 'OPEN', isDraft: false,
+      statusCheckRollup: { state: 'SUCCESS' },
+    },
+  })
+  assert.equal(stillLanding[0].status, 'landing', 'an OPEN lag cannot erase the journal')
+  const settled = applyLiveStates(landing, landingRequest.aliases, {
+    r0: { __typename: 'PullRequest', state: 'MERGED', isDraft: false },
+  })
+  assert.equal(settled[0].status, 'merged', 'a terminal GitHub result settles the journal')
 })
 
 test('submitting stays publishing until every reconciled pull request is durable', () => {

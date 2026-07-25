@@ -3,7 +3,9 @@ import test from 'node:test'
 import {
   groupContributionUnits,
   preparedContributionUnits,
+  publicContributionUnits,
   stackMeta,
+  stackLandingReadiness,
   stackProgress,
   stackReadiness,
 } from '../stack.js'
@@ -54,7 +56,7 @@ test('a ready child keeps its already-open parent visible in batch review', () =
   const units = preparedContributionUnits(records.slice(1), records)
   assert.equal(units.length, 1)
   assert.deepEqual(units[0].records.map((rec) => rec.status), ['open', 'prepared', 'prepared'])
-  assert.deepEqual(stackProgress(units[0]), { ready: 2, open: 1, merged: 0, total: 3 })
+  assert.deepEqual(stackProgress(units[0]), { ready: 2, open: 1, landing: 0, merged: 0, total: 3 })
 })
 
 test('batch review keeps an already-public draft parent in the chain', () => {
@@ -93,4 +95,27 @@ test('malformed stack intent never falls back to a standalone send card', () => 
   assert.equal(units.length, 1)
   assert.equal(units[0].type, 'stack')
   assert.equal(stackReadiness(units[0]).ok, false)
+})
+
+test('public stacks stay grouped and land only after every CI rollup is green', () => {
+  const records = [layer(1, 'open'), layer(2, 'open'), layer(3, 'open')]
+    .map((rec) => ({ ...rec, live_checks_state: 'SUCCESS' }))
+  const units = publicContributionUnits(records, records)
+  assert.equal(units.length, 1)
+  assert.equal(units[0].type, 'stack')
+  assert.equal(stackLandingReadiness(units[0]).ok, true)
+
+  records[1] = { ...records[1], live_checks_state: 'PENDING' }
+  const waiting = publicContributionUnits(records, records)[0]
+  assert.equal(stackLandingReadiness(waiting).code, 'pending')
+})
+
+test('an in-flight atomic landing cannot be started twice', () => {
+  const records = [layer(1, 'open'), layer(2, 'landing'), layer(3, 'open')]
+    .map((rec) => ({ ...rec, live_checks_state: 'SUCCESS' }))
+  const unit = publicContributionUnits(records, records)[0]
+  assert.equal(stackLandingReadiness(unit).code, 'landing')
+  assert.deepEqual(stackProgress(unit), {
+    ready: 0, open: 3, landing: 1, merged: 0, total: 3,
+  })
 })
