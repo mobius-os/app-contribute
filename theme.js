@@ -564,6 +564,31 @@ export const CSS = `
 .co-conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .co-conn-body .co-conn-actions { margin-top: 10px; }
 .co-conn-device { display: flex; flex-direction: column; gap: 10px; }
+.co-conn-steps {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0; padding: 0; list-style: none;
+}
+.co-conn-step {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface2, var(--surface)) 66%, transparent);
+}
+.co-conn-step-head { display: flex; align-items: flex-start; gap: 9px; }
+.co-conn-step-head > div {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.co-conn-step-head strong { font-size: 13px; line-height: 1.35; color: var(--text); }
+.co-conn-step-head small { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.co-conn-step-number {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 23px; height: 23px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); font-size: 11px; font-weight: 750;
+}
+.co-conn-code-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch;
+  gap: 8px;
+}
 
 /* mobius-ui:Button v1 — app-owned copy; library candidate. */
 .co-btn {
@@ -600,13 +625,18 @@ export const CSS = `
 }
 /* /mobius-ui:Button */
 
-/* The one-time device code: large, monospaced, selectable as a whole. */
+/* The one-time device code stays genuinely selectable as a fallback when a
+   sandboxed browser does not grant clipboard access. */
 .co-conn-code {
-  font-family: var(--mono, var(--font)); font-size: 30px; font-weight: 700;
-  letter-spacing: 0; text-align: center; padding: 14px 12px;
+  display: flex; align-items: center; justify-content: center; min-width: 0;
+  font-family: var(--mono, var(--font)); font-size: clamp(21px, 7vw, 28px); font-weight: 700;
+  letter-spacing: 0; text-align: center; padding: 10px 8px;
   border-radius: 10px; background: var(--surface2, var(--bg));
-  border: 1px dashed var(--border); color: var(--text); user-select: all;
+  border: 1px dashed var(--border); color: var(--text);
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
+.co-conn-copy { white-space: nowrap; }
+.co-conn-copy-status { min-height: 18px; margin: -4px 0 0; font-size: 12px; color: var(--muted); }
 .co-conn-wait { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .co-conn-waiting { margin: 0; font-size: 13px; color: var(--muted); }
 .co-conn-hint { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
