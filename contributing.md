@@ -143,6 +143,58 @@ Send button. Never treat `{}` / no selection as "yes" for a public action.
 
 ---
 
+## Review the code before every contribution
+
+MANDATORY for every PR, no exceptions. Run it after the code is written and
+**before** you build the review commit, so the branch the partner reviews is
+already the cleaned-up version. Reading and editing local source needs no
+approval and publishes nothing.
+
+Two passes over the branch diff, in order.
+
+**Pass 1 — strip the slop.** Read your own diff as a hostile reviewer of
+machine-written code and delete what a careful human would not have written:
+comments restating what the line already says or breaking the file's existing
+comment style, defensive `try`/`except` and existence checks on paths that are
+already trusted, casts and broad types that only silence a complaint, nesting an
+early return would flatten, and near-duplicates of a helper the codebase already
+has. Behavior stays identical unless you are fixing a clear bug, and the edits
+stay minimal and local.
+
+**Pass 2 — audit the structure, ambitiously.** Do not stop at "this could be
+tidier". Ask whether the change can be reframed so that branches, flags,
+helpers, or whole layers disappear rather than move. Treat each of these as a
+presumptive blocker you must either fix or justify:
+
+- the diff pushes a file from under 1000 lines to over it;
+- new ad-hoc conditionals or special cases are bolted into a flow that did not
+  care about them before;
+- feature-specific logic leaks into a shared or general-purpose path;
+- an abstraction, wrapper, or layer of indirection is added that does not buy
+  clarity;
+- optionality, `Any`, or loosely shaped dict payloads paper over an invariant
+  that should be explicit at the boundary;
+- logic lands somewhere other than the layer that already owns the concept, or
+  duplicates a canonical helper;
+- related updates can leave state half-applied, or independent work is
+  serialized for no reason.
+
+You are reviewing your own diff, so act on the findings instead of listing them:
+fix what surfaces, then re-read the diff. Anything you deliberately decline —
+a justified large file, a special case that has to live where it is — gets one
+sentence of justification in `body_draft`, so a reviewer never has to ask why
+the obvious decomposition was skipped.
+
+One limit keeps this from becoming scope creep: the restructuring stays inside
+the change you already agreed to build. A finding that would sprawl into
+unrelated subsystems is a follow-up you name for the partner, not something you
+fold into this PR.
+
+This section is the floor, not the ceiling. If the instance has a richer
+code-quality or slop-removal skill installed, apply it here too.
+
+---
+
 ## Prepare for review
 
 Nothing goes public here. For a PR, create a durable branch under `/data`, commit
@@ -211,7 +263,8 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   stop #3). Compute the hash from the exact `.diff` bytes you store.
 
 Before you tell the partner it is ready, review the staged record yourself:
-re-read the stored `.diff`, confirm the body draft is exactly what should be
+re-read the stored `.diff`, confirm both quality passes above actually ran
+against the committed branch, confirm the body draft is exactly what should be
 published, confirm no private data appears in the branch, commit message, branch
 name, body, or diff, and confirm the branch is back on `main` when the prep
 steps require it.

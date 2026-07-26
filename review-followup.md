@@ -82,16 +82,24 @@ you hold the live round. `<base>` below is
 4. **Do the work in the worktree.** Implement in-scope changes. A merge conflict
    requires a history rewrite that the current grant does not authorize:
    escalate it rather than rebasing or force-pushing.
-5. **Run the project's tests** before pushing. If they still fail after two
+5. **Run the mandatory quality passes** over what you just wrote — the two
+   passes in *Review the code before every contribution* in
+   [contributing.md](contributing.md), applied **within this round's scope
+   only**. Your grant authorizes answering the review, not restructuring the
+   codebase: strip the slop and fix local structural problems in your own new
+   code, and when the structural pass surfaces something genuinely larger, say
+   so in the `/reply` instead of doing it. A finding that needs a rewrite the
+   grant does not cover is an `/escalate`, never a quiet force-push.
+6. **Run the project's tests** before pushing. If they still fail after two
    honest attempts, escalate — don't push red.
-6. **Re-read the FULL diff.** Then write the new `head_sha` and `diff_sha256`
+7. **Re-read the FULL diff.** Then write the new `head_sha` and `diff_sha256`
    onto the ledger record (a CAS storage write, same as preparing) so `/update`
    can bind to exactly what you reviewed.
-7. **Push and reply.** `POST /update` with the new head; then `POST /reply` for
+8. **Push and reply.** `POST /update` with the new head; then `POST /reply` for
    each thread you addressed, using its `in_reply_to` id when it is a review
    thread. Keep replies factual and scoped. Do not mark a draft ready or invent
    a review re-request; those are different GitHub actions.
-8. **Complete.** `POST /complete` with `outcome` and a one-sentence summary.
+9. **Complete.** `POST /complete` with `outcome` and a one-sentence summary.
 
 If a round has nothing to push (a plain question) you may `/reply` then
 `/complete` with `outcome: "replied"`. If you can do neither safely, `/escalate`.
