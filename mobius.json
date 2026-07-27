@@ -1,8 +1,8 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.9",
-  "description": "See what your agent has proposed upstream \u2014 pull requests, issues, and comments across the M\u00f6bius ecosystem, from prepared to merged.",
+  "version": "0.5.10",
+  "description": "See what your agent has proposed upstream — pull requests, issues, and comments across the Möbius ecosystem, from prepared to merged.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-contribute",
