@@ -127,19 +127,31 @@ don't propose.
 Hard stop #1 is the gate. In practice:
 
 1. Propose the contribution through the clarifying-question tool, not as a prose
-   aside. Offer two neutral choices such as **Prepare privately** and **Not
-   now**, and say that nothing goes public without a later approval.
-2. Wait for that yes.
-3. Prepare everything needed for review and direct submission, then stop.
+   aside. When the partner may still want to improve the candidate, offer three
+   paths: **Prepare privately**, **Refine first**, and **Not now**. Say that
+   preparation stays private and nothing goes public without a later approval.
+2. Wait and classify the response:
+   - **Prepare privately** is approval for preparation only. Prepare everything
+     needed for review and direct submission, then stop.
+   - **Refine first**, or actionable free-text feedback about the candidate,
+     defers the contribution decision; it does not decline it. Do not prepare
+     yet. Apply the feedback within the approved scope, verify the revised
+     change, then offer preparation once for that revised version. If the
+     partner selected **Refine first** without saying what to change, ask for
+     that open-ended feedback in plain chat. Each completed, partner-requested
+     refinement can earn one new offer; never repeat the card when no material
+     work changed.
+   - **Not now** declines preparation. Leave the change local and do not
+     re-offer the same version.
+3. An unanswered, timed-out, disabled, or empty-response card stops the flow
+   without preparing. Silence is neither approval nor refinement, so do not
+   immediately re-ask or treat `{}` / no selection as a yes.
 
-Anything but yes → stop. Preparing is still private: a local branch/commit and a
+Anything except an explicit **Prepare privately** remains non-approval.
+Refinement feedback changes when the question is asked again, never what the
+agent may publish. Preparing is still private: a local branch/commit and a
 Contribute record, not a fork, push, PR, issue, or comment. The next public step
 happens only after the partner presses **Send PR for review** in Contribute.
-
-An unanswered, timed-out, disabled, or empty-response question card is **not**
-approval. If the review surface expires or returns no answer, leave the
-prepared record private and ask again in plain chat or wait for the Contribute
-Send button. Never treat `{}` / no selection as "yes" for a public action.
 
 ---
 
