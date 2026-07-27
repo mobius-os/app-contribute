@@ -82,12 +82,12 @@ you hold the live round. `<base>` below is
 4. **Do the work in the worktree.** Implement in-scope changes. A merge conflict
    requires a history rewrite that the current grant does not authorize:
    escalate it rather than rebasing or force-pushing.
-5. **Run the mandatory quality passes** over what you just wrote — the two
-   passes in *Review the code before every contribution* in
+5. **Run the proportional quality review** over what you just wrote — the two
+   passes in *Review the code before every PR* in
    [contributing.md](contributing.md), applied **within this round's scope
    only**. Your grant authorizes answering the review, not restructuring the
-   codebase: strip the slop and fix local structural problems in your own new
-   code, and when the structural pass surfaces something genuinely larger, say
+   codebase: strip the slop and fix local structural problems motivated by your
+   new code. When the structural pass surfaces something genuinely larger, say
    so in the `/reply` instead of doing it. A finding that needs a rewrite the
    grant does not cover is an `/escalate`, never a quiet force-push.
 6. **Run the project's tests** before pushing. If they still fail after two
