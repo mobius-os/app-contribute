@@ -14,6 +14,8 @@ import {
   resolveUncertainLanding,
   statusNarration,
   summarizeSubmissionResolutions,
+  SETUP_COMPLETIONS_KEY,
+  syncSetupCompletion,
 } from '../domain.js'
 
 test('record updates preserve enumerated paths while replacing stale fields', () => {
@@ -214,4 +216,50 @@ test('problem codes map to short human headlines, unknown falls back to raw', ()
   for (const headline of Object.values(PROBLEM_HEADLINES)) {
     assert.ok(headline.length > 0 && !headline.includes('!'))
   }
+})
+
+test('setup completion mirrors definitive connection verdicts into the shared store record', () => {
+  const makeStorage = (initial = {}) => {
+    const values = { ...initial }
+    return {
+      getItem: (k) => (k in values ? values[k] : null),
+      setItem: (k, v) => { values[k] = v },
+      values,
+    }
+  }
+  const read = (storage) => JSON.parse(storage.values[SETUP_COMPLETIONS_KEY] || '{}')
+
+  // connected → writes { completedAt } under the STRING app id (the App
+  // Store keys its per-app tag lookup by String(installedApp.id)).
+  const s1 = makeStorage()
+  assert.equal(syncSetupCompletion(7, 'connected', s1), true)
+  assert.ok(read(s1)['7'].completedAt)
+
+  // Already recorded → no rewrite (avoids a redundant cross-frame fanout).
+  assert.equal(syncSetupCompletion(7, 'connected', s1), false)
+
+  // Preserves other apps' entries — the record is shared by every catalog app.
+  const s2 = makeStorage({
+    [SETUP_COMPLETIONS_KEY]: JSON.stringify({ 3: { completedAt: 'x' } }),
+  })
+  syncSetupCompletion(7, 'connected', s2)
+  assert.deepEqual(Object.keys(read(s2)).sort(), ['3', '7'])
+
+  // disconnected → clears only this app's entry so the Setup tag returns.
+  assert.equal(syncSetupCompletion(7, 'disconnected', s2), true)
+  assert.deepEqual(Object.keys(read(s2)), ['3'])
+  // Clearing an absent entry is a no-op, not a write.
+  assert.equal(syncSetupCompletion(7, 'disconnected', s2), false)
+
+  // Transient states never touch the record.
+  for (const state of ['checking', 'unknown', 'unsupported', '', undefined]) {
+    assert.equal(syncSetupCompletion(7, state, s1), false)
+  }
+
+  // Corrupt existing JSON degrades to a fresh record instead of throwing.
+  const s3 = makeStorage({ [SETUP_COMPLETIONS_KEY]: 'not json{' })
+  assert.equal(syncSetupCompletion(7, 'connected', s3), false)
+  // Guard inputs: missing storage or app id are safe no-ops.
+  assert.equal(syncSetupCompletion(null, 'connected', s1), false)
+  assert.equal(syncSetupCompletion(7, 'connected', null), false)
 })

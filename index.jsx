@@ -31,6 +31,7 @@ import {
   resolveUncertainLanding,
   resolveUncertainSubmission,
   summarizeSubmissionResolutions,
+  syncSetupCompletion,
 } from './domain.js'
 import { indexReviewStatus } from './review.js'
 import { abandonPrepared, cacheFeed, loadAppSettings, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
@@ -160,6 +161,15 @@ export default function ContributeApp({ appId, token }) {
   const connRef = useRef(conn)
   const connectionRequestRef = useRef(0)
   useEffect(() => { connRef.current = conn }, [conn])
+
+  // Keep the App Store's "Setup" tag truthful: every settled connection
+  // status — initial load, in-app connect, disconnect — lands here via
+  // setConn. The frame's virtual localStorage forwards the shared completion
+  // key to the shell, which fans it out to every mounted app frame,
+  // including the App Store's.
+  useEffect(() => {
+    try { syncSetupCompletion(appId, conn.state, window.localStorage) } catch {}
+  }, [appId, conn.state])
 
   // Every local ledger result must update the render, the callback mirror, and
   // the offline cache together. Keeping that write in one place prevents a
