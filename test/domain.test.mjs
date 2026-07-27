@@ -260,9 +260,16 @@ test('setup completion mirrors definitive connection verdicts into the shared st
     assert.equal(syncSetupCompletion(7, state, s1), false)
   }
 
-  // Corrupt existing JSON degrades to a fresh record instead of throwing.
+  // Unparseable existing JSON is a safe no-op: the sync reports no change
+  // and leaves the stored value untouched rather than replacing it.
   const s3 = makeStorage({ [SETUP_COMPLETIONS_KEY]: 'not json{' })
   assert.equal(syncSetupCompletion(7, 'connected', s3), false)
+  assert.equal(s3.values[SETUP_COMPLETIONS_KEY], 'not json{')
+  // Parseable-but-wrong-shape data (not a plain object) does degrade to a
+  // fresh record so a definitive verdict can still land.
+  const s4 = makeStorage({ [SETUP_COMPLETIONS_KEY]: JSON.stringify([1, 2]) })
+  assert.equal(syncSetupCompletion(7, 'connected', s4), true)
+  assert.ok(read(s4)['7'].completedAt)
   // Guard inputs: missing storage or app id are safe no-ops.
   assert.equal(syncSetupCompletion(null, 'connected', s1), false)
   assert.equal(syncSetupCompletion(7, 'connected', null), false)

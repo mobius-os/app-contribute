@@ -338,7 +338,9 @@ export function applyLiveStates(records, aliases, data) {
 // complete, `disconnected` clears it so the tag truthfully returns after a
 // disconnect. Transient states (checking / unknown / unsupported) leave the
 // record untouched. `storage` is a localStorage-like object injected by the
-// caller; returns true when the record was actually changed.
+// caller; returns true when the record was actually changed. Unparseable
+// existing data is a safe no-op (returns false, stored value left alone);
+// only parseable-but-wrong-shape data is replaced by a fresh record.
 export const SETUP_COMPLETIONS_KEY = 'mobius:setup-complete:v1'
 
 export function syncSetupCompletion(appId, connState, storage) {
