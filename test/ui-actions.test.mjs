@@ -112,6 +112,16 @@ test('GitHub setup exposes only the device-flow connection path', () => {
   assert.match(connectionSource, /GitHub sign-in is not configured/)
 })
 
+test('GitHub device flow copies the code before opening the login link', () => {
+  assert.match(
+    connectionSource,
+    /Copy the code[\s\S]*Copy code[\s\S]*Open GitHub and log in[\s\S]*Open GitHub/,
+  )
+  assert.match(connectionSource, /navigator\.clipboard\?\.writeText/)
+  assert.match(connectionSource, /document\.execCommand\?\.\('copy'\)/)
+  assert.match(themeSource, /user-select: text; -webkit-user-select: text/)
+})
+
 test('GitHub setup defaults to full PR access and migrates older connections', () => {
   assert.match(connectionSource, /workflow: true/)
   assert.match(

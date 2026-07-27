@@ -7,6 +7,32 @@ import {
 } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
 
+async function copyDeviceCode(code) {
+  // Clipboard access can be unavailable inside a sandboxed app frame. Keep
+  // selection as a real fallback instead of making the primary action fail.
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(code)
+      return
+    }
+  } catch {
+    // Fall through to the user-gesture-compatible selection path below.
+  }
+
+  const input = document.createElement('textarea')
+  input.value = code
+  input.readOnly = true
+  input.setAttribute('aria-hidden', 'true')
+  input.style.position = 'fixed'
+  input.style.opacity = '0'
+  input.style.pointerEvents = 'none'
+  document.body.appendChild(input)
+  input.select()
+  const copied = document.execCommand?.('copy')
+  input.remove()
+  if (!copied) throw new Error('Clipboard copy was unavailable.')
+}
+
 // The GitHub connection card — the FULL connect flow, owned by this app (the
 // platform's connect endpoints accept this app's github_connect token). Four
 // top-level states off fetchGithubStatus:
@@ -33,6 +59,22 @@ function DeviceFlowControl({
   retryLabel,
   buttonClassName,
 }) {
+  const [copyState, setCopyState] = useState('idle')
+
+  useEffect(() => {
+    setCopyState('idle')
+  }, [userCode])
+
+  const handleCopy = useCallback(async () => {
+    setCopyState('copying')
+    try {
+      await copyDeviceCode(userCode)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+  }, [userCode])
+
   if (flow === 'starting') {
     return (
       <div className="co-conn-wait" aria-busy="true">
@@ -54,16 +96,60 @@ function DeviceFlowControl({
     const cancelling = flow === 'cancelling'
     return (
       <>
-        <p className="co-conn-hint">
-          Open{' '}
-          <a href={verificationUri} target="_blank" rel="noopener noreferrer">
-            {verificationUri || 'github.com/login/device'}
-          </a>
-          {' '}and enter this code:
-        </p>
-        <div className="co-conn-code" aria-label="GitHub device code">
-          {userCode}
-        </div>
+        <ol className="co-conn-steps">
+          <li className="co-conn-step">
+            <div className="co-conn-step-head">
+              <span className="co-conn-step-number" aria-hidden="true">1</span>
+              <div>
+                <strong>Copy the code</strong>
+                <small>You’ll paste it into GitHub in the next step.</small>
+              </div>
+            </div>
+            <div className="co-conn-code-row">
+              <code className="co-conn-code" aria-label="GitHub device code">
+                {userCode}
+              </code>
+              <button
+                type="button"
+                className="co-btn co-btn-sm co-conn-copy"
+                onClick={handleCopy}
+                disabled={copyState === 'copying' || cancelling}
+              >
+                {copyState === 'copied'
+                  ? 'Copied'
+                  : (copyState === 'copying' ? 'Copying…' : 'Copy code')}
+              </button>
+            </div>
+            <p
+              className={copyState === 'failed' ? 'co-conn-error' : 'co-conn-copy-status'}
+              role="status"
+              aria-live="polite"
+            >
+              {copyState === 'copied'
+                ? 'Code copied to your clipboard.'
+                : (copyState === 'failed'
+                    ? 'Couldn’t copy automatically. Press and hold the code to copy it.'
+                    : '')}
+            </p>
+          </li>
+          <li className="co-conn-step">
+            <div className="co-conn-step-head">
+              <span className="co-conn-step-number" aria-hidden="true">2</span>
+              <div>
+                <strong>Open GitHub and log in</strong>
+                <small>Paste the code when GitHub asks for it.</small>
+              </div>
+            </div>
+            <a
+              className="co-btn co-btn-primary co-btn-block"
+              href={verificationUri}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open GitHub
+            </a>
+          </li>
+        </ol>
         <div className="co-conn-wait" aria-busy="true">
           <p className="co-conn-waiting" role="status" aria-live="polite">
             {cancelling ? 'Cancelling GitHub sign-in…' : 'Waiting for GitHub…'}

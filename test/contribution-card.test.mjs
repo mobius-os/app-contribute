@@ -17,7 +17,9 @@ async function cardRenderer() {
         import { renderToStaticMarkup } from 'react-dom/server'
         import { ContributionCard } from './ui/ContributionCard.jsx'
         export function renderCard(rec) {
-          return renderToStaticMarkup(React.createElement(ContributionCard, { rec }))
+          return renderToStaticMarkup(React.createElement(ContributionCard, {
+            rec, onSend: () => {}, onDismiss: () => {},
+          }))
         }
       `,
       loader: 'jsx',
@@ -87,6 +89,36 @@ test('fully applied published labels stay compact', async (t) => {
   assert.match(html, /bug/)
   assert.match(html, /area: ui/)
   assert.doesNotMatch(html, /Labels need attention|Requested|do not send it again/)
+})
+
+test('partial reconciliation evidence suggests dismissal without settling the record', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'possible-landing',
+    type: 'pr',
+    status: 'prepared',
+    title: 'Reconcile prepared records',
+    repo: 'mobius-os/app-contribute',
+    plan: { action: 'pr', title: 'Reconcile prepared records' },
+    reconciliation_hint: {
+      type: 'already_landed',
+      title: 'Looks already landed',
+      message: '2 of 4 distinctive additions are already on main.',
+      landing_pr: {
+        url: 'https://github.com/mobius-os/app-contribute/pull/42',
+      },
+    },
+  })
+
+  assert.match(html, /Looks already landed/)
+  assert.match(html, /2 of 4 distinctive additions are already on main\./)
+  assert.match(html, /View possible landing PR/)
+  assert.match(html, />Dismiss</)
+  assert.match(html, /Waiting for your OK/)
 })
 
 async function autopilotCardRenderer() {

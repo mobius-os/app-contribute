@@ -166,6 +166,10 @@ test('status narration leads each lifecycle state with human copy', () => {
     'Sent — maintainers will review it; this can take days',
   )
   assert.equal(statusNarration({ status: 'closed' }), 'Not merged — tap to see why')
+  assert.equal(
+    statusNarration({ status: 'superseded' }),
+    'Superseded — the improvement reached main through another contribution',
+  )
   // Every narration key resolves through the helper and stays calm (no shout).
   for (const [status, copy] of Object.entries(STATUS_NARRATION)) {
     assert.equal(statusNarration({ status }), copy)
