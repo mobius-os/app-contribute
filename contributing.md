@@ -143,14 +143,15 @@ Send button. Never treat `{}` / no selection as "yes" for a public action.
 
 ---
 
-## Review the code before every contribution
+## Review the code before every PR
 
-MANDATORY for every PR, no exceptions. Run it after the code is written and
-**before** you build the review commit, so the branch the partner reviews is
-already the cleaned-up version. Reading and editing local source needs no
-approval and publishes nothing.
+Review the branch after the code is written and **before** you build the review
+commit, so the partner sees the cleaned-up version. Right-size the pass to the
+change: a one-line or docs-only PR needs a careful reread, not a ritual audit;
+a behavioral or structural change earns proportionally deeper review. Reading
+and editing local source needs no approval and publishes nothing.
 
-Two passes over the branch diff, in order.
+Use two passes over the branch diff, in order.
 
 **Pass 1 — strip the slop.** Read your own diff as a hostile reviewer of
 machine-written code and delete what a careful human would not have written:
@@ -161,16 +162,17 @@ early return would flatten, and near-duplicates of a helper the codebase already
 has. Behavior stays identical unless you are fixing a clear bug, and the edits
 stay minimal and local.
 
-**Pass 2 — audit the structure, ambitiously.** Do not stop at "this could be
-tidier". Ask whether the change can be reframed so that branches, flags,
-helpers, or whole layers disappear rather than move. Treat each of these as a
-presumptive blocker you must either fix or justify:
+**Pass 2 — audit the structure the change itself motivates.** Ask whether the
+new behavior sits at the layer that owns it and whether a simpler framing can
+remove branches, flags, helpers, or layers. These are review signals, not
+context-free blockers:
 
-- the diff pushes a file from under 1000 lines to over it;
+- hand-written source crosses roughly 1000 lines because of the diff (generated
+  files, fixtures, data, and long-form prose do not count);
 - new ad-hoc conditionals or special cases are bolted into a flow that did not
   care about them before;
 - feature-specific logic leaks into a shared or general-purpose path;
-- an abstraction, wrapper, or layer of indirection is added that does not buy
+- an abstraction, wrapper, or layer of indirection is added without buying
   clarity;
 - optionality, `Any`, or loosely shaped dict payloads paper over an invariant
   that should be explicit at the boundary;
@@ -179,19 +181,15 @@ presumptive blocker you must either fix or justify:
 - related updates can leave state half-applied, or independent work is
   serialized for no reason.
 
-You are reviewing your own diff, so act on the findings instead of listing them:
-fix what surfaces, then re-read the diff. Anything you deliberately decline —
-a justified large file, a special case that has to live where it is — gets one
-sentence of justification in `body_draft`, so a reviewer never has to ask why
-the obvious decomposition was skipped.
+Act on findings that are motivated by this change and make the agreed behavior
+clearer or safer, then re-read the diff. Keep unrelated refactors out of the PR.
+When an obvious signal is deliberately left alone, record one sentence in the
+private `plan.prior_work.summary` review evidence — never in the public
+`body_draft` merely to narrate internal process. A larger finding becomes a
+follow-up for the partner rather than silent scope expansion.
 
-One limit keeps this from becoming scope creep: the restructuring stays inside
-the change you already agreed to build. A finding that would sprawl into
-unrelated subsystems is a follow-up you name for the partner, not something you
-fold into this PR.
-
-This section is the floor, not the ceiling. If the instance has a richer
-code-quality or slop-removal skill installed, apply it here too.
+If the instance has a richer code-quality or slop-removal skill installed,
+apply it proportionally here too.
 
 ---
 
@@ -263,7 +261,7 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   stop #3). Compute the hash from the exact `.diff` bytes you store.
 
 Before you tell the partner it is ready, review the staged record yourself:
-re-read the stored `.diff`, confirm both quality passes above actually ran
+re-read the stored `.diff`, confirm the proportional quality review above ran
 against the committed branch, confirm the body draft is exactly what should be
 published, confirm no private data appears in the branch, commit message, branch
 name, body, or diff, and confirm the branch is back on `main` when the prep
