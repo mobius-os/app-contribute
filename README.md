@@ -138,7 +138,7 @@ shape:
   "number": 42,
   "url": "https://github.com/mobius-os/app-notes/pull/42",
   "title": "Fix note reordering",
-  "status": "prepared | submitting | draft | open | landing | merged | closed | commented | abandoned",
+  "status": "prepared | submitting | draft | open | landing | merged | superseded | closed | commented | abandoned",
   "branch": "fix/notes-reorder",
   "chat_id": "…",
   "created_at": "2026-07-06T09:00:00Z",
@@ -209,7 +209,16 @@ as a side effect of publishing a PR.
 
 `submitting` means the platform submit endpoint has claimed the record and the
 action is in flight; `commented` is the terminal status for comment actions.
-The scheduled job (every 15 minutes) also adds `needs_attention` + `attention`
+The scheduled job (every 15 minutes) also reconciles prepared PR records whose
+reviewed work reached the target repository's main through another path. Exact
+reviewed commits or diffs become `merged`; an exact merged branch or a strong
+match of distinctive added identifiers becomes `superseded`. Both keep the
+landing PR or commit reference. Weaker identifier evidence leaves the record
+prepared and adds a **Looks already landed** dismissal hint instead. Every
+reconciliation write uses the record version originally read, so a concurrent
+Send, Drop, or agent refresh wins.
+
+The scheduled job also adds `needs_attention` + `attention`
 when GitHub activity, changes requested, failing checks, or a merge conflict need
 follow-up. It and the dismiss flow both write with `If-Match` (compare-and-swap)
 when the runtime returns a version, so concurrent writers — the agent, the cron

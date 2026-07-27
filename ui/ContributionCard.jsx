@@ -357,6 +357,27 @@ function AttentionCallout({ rec, onFeedback }) {
   )
 }
 
+function ReconciliationHint({ hint, onDismiss }) {
+  if (!hint || hint.type !== 'already_landed') return null
+  const landingUrl = hint.landing_pr?.url
+  return (
+    <div className="co-reconciliation-hint" role="status">
+      <div>
+        <strong>{hint.title || 'Looks already landed'}</strong>
+        <p>{hint.message || 'Parts of this change are already on main, but the match is not conclusive.'}</p>
+        {typeof landingUrl === 'string' && landingUrl.startsWith('https://github.com/') ? (
+          <a href={landingUrl} target="_blank" rel="noopener noreferrer">
+            View possible landing PR
+          </a>
+        ) : null}
+      </div>
+      <button type="button" className="co-btn co-btn-sm" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
@@ -504,6 +525,12 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
 
   return (
     <div className="co-action-block">
+      {!confirmingDismiss ? (
+        <ReconciliationHint
+          hint={rec.reconciliation_hint}
+          onDismiss={() => setConfirmingDismiss(true)}
+        />
+      ) : null}
       {confirmingDismiss ? (
         <div
           className="co-confirm"
@@ -808,7 +835,7 @@ export function ContributionCard({
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
       {hasPlan && (
-        <div className="co-card-footer">
+        <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button
             type="button"
             className="co-details-toggle"

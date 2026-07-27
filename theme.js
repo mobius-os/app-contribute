@@ -777,7 +777,8 @@ export const CSS = `
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
-.co-chip.is-merged {
+.co-chip.is-merged,
+.co-chip.is-superseded {
   background: color-mix(in srgb, var(--green) 14%, transparent);
   color: var(--green);
 }
@@ -869,6 +870,28 @@ export const CSS = `
   margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+.co-reconciliation-hint {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px; padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.co-reconciliation-hint > div {
+  min-width: 0; display: flex; flex-direction: column; gap: 4px;
+}
+.co-reconciliation-hint strong {
+  font-size: 13px; line-height: 1.35; color: var(--text);
+}
+.co-reconciliation-hint p {
+  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted);
+}
+.co-reconciliation-hint a {
+  align-self: flex-start; font-size: 12px; color: var(--accent);
+  text-underline-offset: 2px;
+}
+.co-reconciliation-hint .co-btn { flex: 0 0 auto; }
 
 /* Review view: the staged plan a prepared card expands into. Prose stays in
    the app font; the diff is monospace and scrolls INSIDE its own block (both
@@ -1146,6 +1169,11 @@ export const CSS = `
   margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--border);
 }
 .co-card-footer.is-actions-only { justify-content: flex-end; }
+.co-card-footer.is-reconciliation {
+  align-items: stretch; flex-direction: column;
+}
+.co-card-footer.is-reconciliation .co-details-toggle { align-self: flex-start; }
+.co-card-footer.is-reconciliation .co-action-block { width: 100%; align-items: stretch; }
 .co-action-block {
   min-width: 0; display: flex; flex: 0 1 auto; flex-direction: column;
   align-items: flex-end; gap: 7px;

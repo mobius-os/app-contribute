@@ -6,8 +6,8 @@
 // GitHub state back into them; this app writes two things of its own — the
 // offline feed cache and the Dismiss CAS flip (storage.js). Shape:
 //   { id, type: pr|issue|issue_comment|discussion_comment, repo, number?,
-//     url?, title, status: prepared|submitting|draft|open|landing|merged|closed|
-//     commented|abandoned, branch?, chat_id?, created_at, updated_at,
+//     url?, title, status: prepared|submitting|draft|open|landing|merged|
+//     superseded|closed|commented|abandoned, branch?, chat_id?, created_at, updated_at,
 //     summary, last_submit_error?, last_pushed_branch_url?,
 //     needs_attention?, attention?, plan? }
 // A prepared record staged for review carries `plan`: { action, repo,
@@ -34,6 +34,7 @@ export const STATUS_LABELS = {
   draft: 'Draft',
   open: 'Sent',
   merged: 'Merged',
+  superseded: 'Already shared',
   closed: 'Not merged',
   commented: 'Commented',
   // Status VALUE stays `abandoned` (the platform ledger contract); only the
@@ -53,6 +54,7 @@ export const STATUS_NARRATION = {
   draft: 'Sent as a draft — maintainers review it once it is marked ready',
   open: 'Sent — maintainers will review it; this can take days',
   merged: 'Merged — this improvement is now shared with everyone',
+  superseded: 'Superseded — the improvement reached main through another contribution',
   closed: 'Not merged — tap to see why',
   commented: 'Comment posted',
   abandoned: 'Dropped — you can undrop it from History anytime',
@@ -214,7 +216,7 @@ export function reconcileLedgerSnapshot(current, snapshot) {
 // Feed groups: Ready to propose (waiting on the owner's go-ahead), Open
 // (live on GitHub, or in flight to it — `submitting` sits here because the
 // platform has claimed it and it is seconds from public), History (settled:
-// merged/closed/commented/abandoned). An unknown future status lands in
+// merged/superseded/closed/commented/abandoned). An unknown future status lands in
 // History so it degrades to visible-but-quiet instead of vanishing.
 export function groupRecords(records) {
   const ready = []

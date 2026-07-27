@@ -15,6 +15,12 @@ test('install manifest ships the refresh coordinator imported by the entry point
   assert.ok(manifest.source_files.includes('refresh.js'))
 })
 
+test('install manifest ships the prepared-record reconciliation pass', () => {
+  assert.ok(manifest.source_files.includes('prepared_reconcile.py'))
+  const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  assert.match(source, /prepared_reconcile\.py/)
+})
+
 test('install manifest ships the label outcome helper imported by the review card', () => {
   assert.ok(manifest.source_files.includes('labels.js'))
 })

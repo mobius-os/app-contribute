@@ -1,7 +1,13 @@
 #!/bin/bash
 # Contribute — scheduled ledger refresh (cron).
 #
-# For every pr/issue ledger record that is still draft/open, ask GitHub for
+# First reconcile prepared PR records whose reviewed work already reached the
+# target repository's main by another path. Strong commit, reviewed-diff,
+# merged-branch, or distinctive-identifier evidence settles the record with a
+# landing reference; partial identifier evidence only adds a dismissible hint.
+# That pass is independently CAS-safe and never sends a notification.
+#
+# Then, for every pr/issue ledger record that is still draft/open, ask GitHub for
 # its live state, latest activity, and check status in ONE batched GraphQL call
 # (aliased resource() nodes, ~1 rate-limit point total), write back any change,
 # and fire a celebratory push the first time something merges. The mini-app UI
@@ -53,6 +59,12 @@ command -v gh >/dev/null 2>&1 || exit 0
 gh auth status >/dev/null 2>&1 || exit 0
 
 mkdir -p /data/cron-logs
+
+# Keep prepared reconciliation separate from the established live-PR polling
+# below: different target states, evidence, and failure modes should not turn
+# one proven path into a conditional branch of the other.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+python3 "$SCRIPT_DIR/prepared_reconcile.py" 2>>/data/cron-logs/contribute.log
 
 # The refresh logic is pure I/O against the local storage API (urllib) plus gh
 # for the GraphQL round-trip. A quoted heredoc keeps the shell out of it; all
