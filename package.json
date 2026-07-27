@@ -3,7 +3,7 @@
   "version": "0.5.7",
   "private": true,
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs && python3 -m unittest discover -s test -p 'test_*.py'"
   },
   "type": "module"
 }
