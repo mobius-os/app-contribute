@@ -330,6 +330,40 @@ export function applyLiveStates(records, aliases, data) {
   })
 }
 
+// The App Store's per-app "Setup" tag reads a shared localStorage record
+// keyed by installed app id; each catalog app with `setup.scope: 'app'` owns
+// writing its entry when its setup finishes (Reflection does the same).
+// Contribute's one setup step is the GitHub connection, so mirror each
+// definitive connection verdict into the record: `connected` marks setup
+// complete, `disconnected` clears it so the tag truthfully returns after a
+// disconnect. Transient states (checking / unknown / unsupported) leave the
+// record untouched. `storage` is a localStorage-like object injected by the
+// caller; returns true when the record was actually changed. Unparseable
+// existing data is a safe no-op (returns false, stored value left alone);
+// only parseable-but-wrong-shape data is replaced by a fresh record.
+export const SETUP_COMPLETIONS_KEY = 'mobius:setup-complete:v1'
+
+export function syncSetupCompletion(appId, connState, storage) {
+  if (appId == null || !storage) return false
+  if (connState !== 'connected' && connState !== 'disconnected') return false
+  try {
+    const parsed = JSON.parse(storage.getItem(SETUP_COMPLETIONS_KEY) || '{}')
+    const data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    const id = String(appId)
+    if (connState === 'connected') {
+      if (data[id]?.completedAt) return false
+      data[id] = { completedAt: new Date().toISOString() }
+    } else {
+      if (!(id in data)) return false
+      delete data[id]
+    }
+    storage.setItem(SETUP_COMPLETIONS_KEY, JSON.stringify(data))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function timeAgo(iso) {
   if (!iso) return ''
   const t = Date.parse(iso)
