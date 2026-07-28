@@ -105,6 +105,15 @@ test('cards use explicit links and detail buttons instead of a clickable contain
   assert.match(cardSource, /className="co-card-title"/)
 })
 
+// Narration copy must not promise interactions the card no longer has: the
+// whole-card tap was deliberately removed, so no status line may say "tap".
+test('status narration never promises a tap', async () => {
+  const { STATUS_NARRATION } = await import('../domain.js')
+  for (const copy of Object.values(STATUS_NARRATION)) {
+    assert.doesNotMatch(copy, /\btap\b/i)
+  }
+})
+
 test('GitHub setup exposes only the device-flow connection path', () => {
   assert.doesNotMatch(connectionSource, /personal access token|connectToken|patSubmitting/)
   assert.doesNotMatch(connectionSource, /Advanced: use a token instead/)
