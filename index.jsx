@@ -20,6 +20,7 @@ import { CSS } from './theme.js'
 import {
   actionableSourceProjects,
   attachSourceProjects,
+  prepareAllAction,
 } from './source-map.js'
 import {
   applyLiveStates,
@@ -33,7 +34,12 @@ import {
   summarizeSubmissionResolutions,
   syncSetupCompletion,
 } from './domain.js'
-import { indexReviewStatus } from './review.js'
+import {
+  addressAllAction,
+  indexReviewStatus,
+  partitionReviewUnits,
+} from './review.js'
+import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, loadAppSettings, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
@@ -47,6 +53,7 @@ import {
   submitContributionStack,
 } from './api.js'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
+import { BatchAction } from './ui/BatchAction.jsx'
 import { Feed } from './ui/Feed.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { SourceOverview } from './ui/SourceOverview.jsx'
@@ -65,7 +72,16 @@ const MERGE_MARK = (
   </svg>
 )
 
-const CONTRIBUTION_VIEWS = ['contributions', 'sources']
+const CONTRIBUTION_VIEWS = ['prs', 'issues', 'sources']
+const ISSUE_TYPES = new Set(['issue', 'issue_comment', 'discussion_comment'])
+
+function reviewUnitLabel(unit) {
+  if (unit.type === 'stack') {
+    const ready = unit.records.filter((rec) => rec.status === 'prepared').length
+    return `${unit.name || 'Related pull requests'} · ${ready} ready`
+  }
+  return unit.record?.plan?.title || unit.record?.title || 'Untitled pull request'
+}
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -116,14 +132,18 @@ function Header({ appId, fromCache, omittedCount, checking, children }) {
 // the ConnectionCard directly above already says whether GitHub is wired up, so
 // this stays focused on the review task rather than implying that contributions
 // can be created from this app.
-function EmptyState() {
+function EmptyState({ view }) {
+  const issues = view === 'issues'
   return (
     <div className="co-empty">
       <div className="co-empty-mark">{MERGE_MARK}</div>
-      <h2 className="co-empty-title">No contributions to review</h2>
+      <h2 className="co-empty-title">
+        {issues ? 'No issues or comments yet' : 'No pull requests to review'}
+      </h2>
       <p className="co-empty-text">
-        Changes your agent prepares for upstream review will appear here. You
-        can inspect each change before anything is shared publicly.
+        {issues
+          ? 'Issue drafts and follow-up comments prepared for review will appear here.'
+          : 'Pull requests prepared for upstream review will appear here. You can inspect each change before anything is shared publicly.'}
       </p>
     </div>
   )
@@ -138,9 +158,10 @@ export default function ContributeApp({ appId, token }) {
   const [view, setViewState] = useState(() => {
     try {
       const saved = sessionStorage.getItem('contribute-view-v2')
-      return CONTRIBUTION_VIEWS.includes(saved) ? saved : 'contributions'
+      if (saved === 'contributions') return 'prs'
+      return CONTRIBUTION_VIEWS.includes(saved) ? saved : 'prs'
     }
-    catch { return 'contributions' }
+    catch { return 'prs' }
   })
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [sourceLoading, setSourceLoading] = useState(true)
@@ -362,7 +383,7 @@ export default function ContributeApp({ appId, token }) {
   }, [])
 
   const setView = useCallback((next) => {
-    if (!CONTRIBUTION_VIEWS.includes(next)) next = 'contributions'
+    if (!CONTRIBUTION_VIEWS.includes(next)) next = 'prs'
     setViewState(next)
     try { sessionStorage.setItem('contribute-view-v2', next) } catch { /* optional */ }
   }, [])
@@ -390,13 +411,40 @@ export default function ContributeApp({ appId, token }) {
     if (!action || window.parent === window) {
       return { ok: false, reason: 'standalone' }
     }
+    if (action.autoSend === true) {
+      const startChat = window.mobius?.chat?.start
+      if (typeof startChat !== 'function') {
+        return { ok: false, reason: 'chat-start-unavailable' }
+      }
+      const title = action.event === 'address_all_contributions'
+        ? 'Address Contribute follow-ups'
+        : 'Prepare Contribute projects'
+      return startChat({ title, draft: action.draft }).then(({ chatId }) => {
+        window.parent.postMessage(
+          { type: 'moebius:open-chat', chatId },
+          '*',
+        )
+        window.mobius?.signal?.('source_agent_handoff', {
+          action: action.event,
+          project: project?.key || 'all',
+        })
+        return { ok: true, chatId }
+      }).catch((error) => ({
+        ok: false,
+        reason: 'chat-start-failed',
+        error: error?.message || 'Could not start the agent chat.',
+      }))
+    }
     window.parent.postMessage(
-      { type: 'moebius:new-chat', draft: action.draft },
-      window.location.origin,
+      {
+        type: 'moebius:new-chat',
+        draft: action.draft,
+      },
+      '*',
     )
     window.mobius?.signal?.('source_agent_handoff', {
       action: action.event,
-      project: project.key,
+      project: project?.key || 'all',
     })
     return { ok: true }
   }, [])
@@ -431,6 +479,15 @@ export default function ContributeApp({ appId, token }) {
       })
       refreshReviewStatus()
       return { ok: true, record: next, url: outcome.url || next.url }
+    }
+    if (outcome.alreadyHandled) {
+      try {
+        const ledger = await loadLedger()
+        const fresh = ledger.records.find((item) => item.id === rec.id)
+        if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+      } catch { /* the ordinary refresh below remains authoritative */ }
+      refreshReviewStatus()
+      return { alreadyHandled: true }
     }
     if (outcome.record) {
       const next = { ...outcome.record, path: rec.path }
@@ -528,6 +585,18 @@ export default function ContributeApp({ appId, token }) {
       })
       refreshReviewStatus()
       return { ok: true, submitted: outcome.submitted?.length || 0 }
+    }
+    if (outcome.alreadyHandled) {
+      try {
+        const ledger = await loadLedger()
+        const wanted = new Set(stackRecords.map((rec) => rec.id))
+        const fresh = ledger.records
+          .filter((rec) => wanted.has(rec.id))
+          .map((rec) => ({ ...rec, path: stackRecords.find((item) => item.id === rec.id)?.path }))
+        if (fresh.length > 0) applyRecordUpdates(fresh)
+      } catch { /* the ordinary refresh below remains authoritative */ }
+      refreshReviewStatus()
+      return { alreadyHandled: true }
     }
     if (outcome.uncertain) {
       let resolutions = stackRecords.map(() => ({ state: 'unconfirmed', record: null }))
@@ -720,7 +789,36 @@ export default function ContributeApp({ appId, token }) {
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
-  const groups = useMemo(() => groupRecords(records), [records])
+  const prRecords = useMemo(
+    () => records.filter((rec) => rec.type === 'pr'),
+    [records],
+  )
+  const issueRecords = useMemo(
+    () => records.filter((rec) => ISSUE_TYPES.has(rec.type)),
+    [records],
+  )
+  const visibleRecords = view === 'issues' ? issueRecords : prRecords
+  const prGroups = useMemo(() => groupRecords(prRecords), [prRecords])
+  const issueGroups = useMemo(() => groupRecords(issueRecords), [issueRecords])
+  const groups = view === 'issues' ? issueGroups : prGroups
+  const readyPrUnits = useMemo(() => {
+    const units = preparedContributionUnits(prGroups.ready, prRecords)
+    return partitionReviewUnits(units, reviewStatus).readyToSend
+  }, [prGroups.ready, prRecords, reviewStatus])
+  const readyPrCount = readyPrUnits.reduce(
+    (total, unit) => total + unit.records.filter(
+      (rec) => rec.status === 'prepared',
+    ).length,
+    0,
+  )
+  const readyPrItems = readyPrUnits.map((unit) => ({
+    id: `${unit.type}:${unit.id}`,
+    label: reviewUnitLabel(unit),
+  }))
+  const addressAll = useMemo(
+    () => addressAllAction(prRecords, reviewStatus),
+    [prRecords, reviewStatus],
+  )
   const sourceProjects = useMemo(
     () => attachSourceProjects(sourceSnapshot, records),
     [sourceSnapshot, records],
@@ -729,7 +827,69 @@ export default function ContributeApp({ appId, token }) {
     () => actionableSourceProjects(sourceProjects),
     [sourceProjects],
   )
-  const isEmpty = records.length === 0
+  const prepareAll = useMemo(
+    () => prepareAllAction(sourceProjects),
+    [sourceProjects],
+  )
+  const isEmpty = visibleRecords.length === 0
+
+  const onSendAllReady = useCallback(async (onProgress) => {
+    let sent = 0
+    let alreadyHandled = 0
+    for (let index = 0; index < readyPrUnits.length; index += 1) {
+      const unit = readyPrUnits[index]
+      const readyInUnit = unit.records.filter(
+        (rec) => rec.status === 'prepared',
+      ).length
+      onProgress?.({
+        done: index,
+        total: readyPrUnits.length,
+        label: reviewUnitLabel(unit),
+      })
+      const outcome = unit.type === 'stack'
+        ? await onSendStack(unit.records)
+        : await onSend(unit.record)
+      if (outcome?.ok) {
+        sent += readyInUnit
+        continue
+      }
+      if (outcome?.alreadyHandled) {
+        alreadyHandled += readyInUnit
+        continue
+      }
+      if (outcome?.pending) {
+        return {
+          pending: true,
+          message: sent > 0
+            ? `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'}; publishing paused while the next result is confirmed.`
+            : 'Publishing paused while the first result is confirmed.',
+        }
+      }
+      const reason = outcome?.error || 'the next pull request needs attention'
+      return {
+        error: sent > 0
+          ? `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'}, then stopped: ${reason}`
+          : `Nothing was sent: ${reason}`,
+      }
+    }
+    if (sent > 0) {
+      window.mobius?.signal?.('contribution_batch_submitted', {
+        item_count: sent,
+      })
+    }
+    if (alreadyHandled > 0) {
+      return {
+        ok: true,
+        message: sent > 0
+          ? `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'}; ${alreadyHandled} ${alreadyHandled === 1 ? 'was' : 'were'} already handled.`
+          : 'Everything in this batch had already been handled. The list is refreshed.',
+      }
+    }
+    return {
+      ok: true,
+      message: `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'} for review.`,
+    }
+  }, [readyPrUnits, onSend, onSendStack])
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
   // content state instead of leaving "Checking…" visible forever.
@@ -758,17 +918,32 @@ export default function ContributeApp({ appId, token }) {
           <button
             type="button"
             role="tab"
-            id="co-tab-contributions"
-            aria-controls="co-panel-contributions"
-            aria-selected={view === 'contributions'}
-            tabIndex={view === 'contributions' ? 0 : -1}
-            data-view="contributions"
-            ref={(node) => { tabRefs.current.contributions = node }}
-            className={view === 'contributions' ? 'is-active' : ''}
-            onClick={() => setView('contributions')}
+            id="co-tab-prs"
+            aria-controls="co-panel-prs"
+            aria-selected={view === 'prs'}
+            tabIndex={view === 'prs' ? 0 : -1}
+            data-view="prs"
+            ref={(node) => { tabRefs.current.prs = node }}
+            className={view === 'prs' ? 'is-active' : ''}
+            onClick={() => setView('prs')}
             onKeyDown={onTabKeyDown}
           >
-            Contributions
+            Pull requests
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="co-tab-issues"
+            aria-controls="co-panel-issues"
+            aria-selected={view === 'issues'}
+            tabIndex={view === 'issues' ? 0 : -1}
+            data-view="issues"
+            ref={(node) => { tabRefs.current.issues = node }}
+            className={view === 'issues' ? 'is-active' : ''}
+            onClick={() => setView('issues')}
+            onKeyDown={onTabKeyDown}
+          >
+            Issues
           </button>
           <button
             type="button"
@@ -797,19 +972,47 @@ export default function ContributeApp({ appId, token }) {
             onRetry={refreshSources}
             focusRequest={sourceFocus}
             onAskAgent={onAskSourceAgent}
+            prepareAll={prepareAll}
           />
         ) : (
           <div
-            id="co-panel-contributions"
+            id={view === 'issues' ? 'co-panel-issues' : 'co-panel-prs'}
             className="co-contributions-view"
             role="tabpanel"
-            aria-labelledby="co-tab-contributions"
+            aria-labelledby={view === 'issues' ? 'co-tab-issues' : 'co-tab-prs'}
           >
-            <SourceOverview
-              projects={actionableProjects}
-              loading={sourceLoading}
-              onViewAll={() => setView('sources')}
-            />
+            {view === 'prs' ? (
+              <>
+                <SourceOverview
+                  projects={actionableProjects}
+                  loading={sourceLoading}
+                  onViewAll={() => setView('sources')}
+                />
+                <BatchAction
+                  count={addressAll?.count || 0}
+                  eyebrow="Agent follow-up"
+                  title={`${addressAll?.count || 0} pull ${(addressAll?.count || 0) === 1 ? 'request could' : 'requests could'} use an agent pass`}
+                  description="Starts one private handoff with every active follow-up already listed. Nothing is published automatically."
+                  actionLabel="Address all"
+                  onAction={async () => {
+                    const outcome = await onAskSourceAgent(null, addressAll)
+                    return outcome.ok
+                      ? { ok: true, message: 'Starting one agent chat with every follow-up listed.' }
+                      : { error: outcome.error || 'Open Contribute inside Möbius to start an agent handoff.' }
+                  }}
+                />
+                <BatchAction
+                  count={readyPrCount}
+                  eyebrow="Reviewed and ready"
+                  title={`${readyPrCount} pull ${readyPrCount === 1 ? 'request is' : 'requests are'} ready to send`}
+                  description="One press sends every ready pull request in order. Contribute stops if anything changed."
+                  actionLabel="Send all ready"
+                  busyLabel="Sending…"
+                  items={readyPrItems}
+                  onAction={onSendAllReady}
+                />
+              </>
+            ) : null}
             <ConnectionCard
               conn={conn}
               token={token}
@@ -820,11 +1023,13 @@ export default function ContributeApp({ appId, token }) {
             {/* Hold the feed area blank until the first load resolves so an empty
                 ledger doesn't flash the sell-the-loop copy before data arrives. */}
             {loading ? null : isEmpty ? (
-              actionableProjects.length > 0 ? null : <EmptyState />
+              view === 'prs' && actionableProjects.length > 0
+                ? null
+                : <EmptyState view={view} />
             ) : (
               <Feed
                 groups={groups}
-                records={records}
+                records={visibleRecords}
                 reviewStatus={reviewStatus}
                 onSend={onSend}
                 onSendStack={onSendStack}

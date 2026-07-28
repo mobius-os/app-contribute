@@ -5,6 +5,8 @@ import {
   attachSourceProjects,
   contributionRelationship,
   formatSourceDelta,
+  prepareAllAction,
+  preparableSourceProjects,
   projectAgentAction,
   projectMatchesFilter,
   projectOverview,
@@ -273,4 +275,38 @@ test('agent actions prepare local changes and guard public app publishing', () =
   const publish = projectAgentAction(localApp)
   assert.equal(publish.label, 'Ask agent to publish')
   assert.match(publish.draft, /confirm the repository name and visibility/)
+})
+
+test('prepare all batches only projects with eligible local contribution changes', () => {
+  const projects = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'customized', ahead: 1, behind: 0,
+      tree: { available: true, files: 3 },
+      working: { available: true, files: 0 },
+    },
+    apps: [
+      {
+        ...snapshot.apps[0],
+        state: 'working',
+        working: { available: true, files: 2 },
+      },
+      {
+        key: 'app:incoming', kind: 'app', name: 'Incoming', available: true,
+        canonical_repo: 'mobius-os/app-incoming', state: 'incoming',
+        ahead: 0, behind: 2, working: { available: true, files: 0 },
+      },
+    ],
+  }, [])
+
+  const candidates = preparableSourceProjects(projects)
+  assert.deepEqual(candidates.map((project) => project.name), ['Möbius', 'Contribute'])
+  const action = prepareAllAction(projects)
+  assert.equal(action.label, 'Prepare all (2)')
+  assert.equal(action.event, 'prepare_all_contributions')
+  assert.equal(action.autoSend, true)
+  assert.match(action.draft, /- Möbius — mobius-os\/mobius/)
+  assert.match(action.draft, /- Contribute — mobius-os\/app-contribute/)
+  assert.doesNotMatch(action.draft, /Incoming/)
+  assert.match(action.draft, /Do not publish, push, open an issue, or open a pull request/)
 })

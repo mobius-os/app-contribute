@@ -7,6 +7,7 @@ import {
   recordBranch,
 } from '../source-map.js'
 import { groupContributionUnits, stackMeta } from '../stack.js'
+import { BatchAction } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 
 const FILTERS = [
@@ -443,7 +444,17 @@ function LoadingState() {
   )
 }
 
-export function SourceMap({ snapshot, projects, conn, loading, error, onRetry, focusRequest, onAskAgent }) {
+export function SourceMap({
+  snapshot,
+  projects,
+  conn,
+  loading,
+  error,
+  onRetry,
+  focusRequest,
+  onAskAgent,
+  prepareAll,
+}) {
   const [filter, setFilter] = useState('all')
   const filtered = useMemo(
     () => projects.filter((project) => projectMatchesFilter(project, filter)),
@@ -540,6 +551,22 @@ export function SourceMap({ snapshot, projects, conn, loading, error, onRetry, f
         <div className="co-source-warning" role="status">
           Refresh failed — keeping the last repository map on screen.
         </div>
+      ) : null}
+
+      {prepareAll ? (
+        <BatchAction
+          count={prepareAll.count}
+          eyebrow="Private preparation"
+          title={`${prepareAll.count} local ${prepareAll.count === 1 ? 'change is' : 'changes are'} ready to inspect`}
+          description="Starts one agent handoff to inspect each change and stage the worthwhile ones here. Nothing is published."
+          actionLabel="Prepare all"
+          onAction={async () => {
+            const outcome = await (onAskAgent?.(null, prepareAll) || {})
+            return outcome.ok
+              ? { ok: true, message: 'Starting one preparation chat…' }
+              : { error: outcome.error || 'Open Contribute inside Möbius to prepare these changes.' }
+          }}
+        />
       ) : null}
 
       <div className="co-source-toolbar">

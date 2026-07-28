@@ -9,6 +9,7 @@ const apiSource = readFileSync(new URL('../api.js', import.meta.url), 'utf8')
 const connectionSource = readFileSync(new URL('../ui/ConnectionCard.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
 const sourceOverviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
+const batchActionSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
@@ -63,19 +64,68 @@ test('review details show reviewed labels and truthful published outcomes', () =
 
 test('agent handoffs use a new project-specific chat instead of an invalid open-chat event', () => {
   assert.match(appSource, /type: 'moebius:new-chat'/)
+  assert.match(appSource, /window\.mobius\?\.chat\?\.start/)
+  assert.match(appSource, /type: 'moebius:open-chat', chatId/)
+  assert.match(appSource, /action\.autoSend === true/)
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
   assert.match(sourceMapSource, /A new chat opens with this project already identified\./)
   assert.match(sourceOverviewSource, /Review local and shared source updates in Projects/)
   assert.doesNotMatch(connectionSource, /onAskAgent/)
-  assert.match(appSource, /No contributions to review/)
+  assert.match(appSource, /No pull requests to review/)
+  assert.match(appSource, /No issues or comments yet/)
+  assert.match(sourceMapSource, /actionLabel="Prepare all"/)
+})
+
+test('pull requests and issues have distinct top-level review tabs', () => {
+  assert.match(appSource, /Pull requests/)
+  assert.match(appSource, />\s*Issues\s*</)
+  assert.match(appSource, /ISSUE_TYPES\.has\(rec\.type\)/)
+  assert.match(appSource, /aria-labelledby=\{view === 'issues' \? 'co-tab-issues' : 'co-tab-prs'\}/)
+})
+
+test('prepare, address, and send batches share one explained action surface', () => {
+  assert.match(sourceMapSource, /<BatchAction/)
+  assert.match(appSource, /<BatchAction/)
+  assert.match(appSource, /actionLabel="Address all"/)
+  assert.match(appSource, /Starting one agent chat/)
+  assert.match(appSource, /eyebrow="Agent follow-up"/)
+  assert.match(appSource, /Nothing is published automatically/)
+  assert.match(appSource, /actionLabel="Send all ready"/)
+  assert.match(appSource, /Contribute stops if anything changed/)
+  assert.doesNotMatch(batchActionSource, /role="alertdialog"/)
+  assert.doesNotMatch(batchActionSource, /Keep private/)
+  assert.match(batchActionSource, /className="co-batch-queue"/)
+  assert.match(batchActionSource, /onClick=\{run\}/)
+  assert.match(batchActionSource, /'Starting…'/)
+  assert.match(appSource, /busyLabel="Sending…"/)
+  assert.match(batchActionSource, /aria-busy=\{busy\}/)
+  assert.match(batchActionSource, /busyRef\.current/)
+  assert.match(appSource, /Everything in this batch had already been handled\. The list is refreshed\./)
+  assert.match(themeSource, /\.co-batch-action \{/)
+  assert.doesNotMatch(themeSource, /\.co-batch-action\.is-attention/)
 })
 
 test('blocked contributions have one calm full-width recovery action', () => {
   assert.match(cardSource, /className="co-action-block"/)
-  assert.match(cardSource, /Refresh in chat/)
+  assert.match(cardSource, /<span>Refresh<\/span>/)
+  assert.match(cardSource, /aria-label="Refresh contribution in chat"/)
+  assert.doesNotMatch(cardSource, /Draft follow-up/)
+  assert.match(cardSource, /'Agent update'/)
   assert.match(cardSource, /Nothing was published/)
   assert.match(cardSource, /The reviewed branch was pushed/)
+  assert.match(cardSource, /co-alert' \+ \(blocked \? ' is-follow-up'/)
+  assert.match(themeSource, /\.co-section\.is-follow-up/)
+  assert.match(themeSource, /\.co-alert\.is-follow-up/)
   assert.doesNotMatch(cardSource, /Sending is paused until/)
+})
+
+test('published check follow-ups use the same calm refresh treatment', () => {
+  assert.match(cardSource, /className="co-icon-btn co-refresh-btn is-primary"/)
+  assert.match(themeSource, /\.co-attention \{[^}]*var\(--accent\)[^}]*var\(--accent\)/)
+  assert.doesNotMatch(
+    themeSource,
+    /\.co-attention \{[^}]*var\(--danger\)/,
+  )
 })
 
 test('lost single and stacked submit responses reconcile durable state', () => {

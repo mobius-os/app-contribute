@@ -1,7 +1,7 @@
 import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits } from '../stack.js'
-import { reviewStateFor } from '../review.js'
+import { partitionReviewUnits, reviewStateFor } from '../review.js'
 
 // The grouped feed. domain.groupRecords partitions the ledger into three
 // buckets; each renders as a section only when it has rows, so the layout
@@ -34,10 +34,10 @@ export function Feed({
   const { ready, open, history } = groups
   const readyUnits = preparedContributionUnits(ready, records)
   const openUnits = publicContributionUnits(open, records)
-  const needsAttention = readyUnits.filter((unit) => (
-    unit.records || [unit.record]
-  ).some((rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'))
-  const readyToSend = readyUnits.filter((unit) => !needsAttention.includes(unit))
+  const { needsAttention, readyToSend } = partitionReviewUnits(
+    readyUnits,
+    reviewStatus,
+  )
 
   function renderUnit(unit) {
     return unit.type === 'stack' ? (
@@ -64,14 +64,14 @@ export function Feed({
   return (
     <>
       {needsAttention.length > 0 && (
-        <section className="co-section is-attention">
+        <section className="co-section is-follow-up">
           <div>
             <div className="co-section-headline">
-              <h2 className="co-section-title">Needs attention</h2>
+              <h2 className="co-section-title">Agent follow-up</h2>
               <span>{needsAttention.length}</span>
             </div>
             <p className="co-section-hint">
-              These need an update before they can be sent.
+              These can be refreshed privately before they are sent.
             </p>
           </div>
           {needsAttention.map(renderUnit)}

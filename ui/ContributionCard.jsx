@@ -272,7 +272,7 @@ function SubmitErrorAlert({ rec, reviewState }) {
   )
 
   return (
-    <div className="co-alert" role="status">
+    <div className={'co-alert' + (blocked ? ' is-follow-up' : '')} role="status">
       <strong>{headline || (blocked ? 'Fresh review needed' : 'Could not send')}</strong>
       <p className="co-alert-reassurance">
         {branchWasPushed
@@ -351,8 +351,15 @@ function AttentionCallout({ rec, onFeedback }) {
         ) : null}
       </div>
       {typeof onFeedback === 'function' ? (
-        <button type="button" className="co-btn co-btn-sm" onClick={handleAskAgent}>
-          Draft follow-up
+        <button
+          type="button"
+          className="co-icon-btn co-refresh-btn is-primary"
+          aria-label="Refresh contribution in chat"
+          title="Refresh in chat"
+          onClick={handleAskAgent}
+        >
+          <Icon name="feedback" />
+          <span>Refresh</span>
         </button>
       ) : null}
     </div>
@@ -570,10 +577,12 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
             <button
               type="button"
               className="co-icon-btn co-refresh-btn is-primary"
+              aria-label="Refresh contribution in chat"
+              title="Refresh in chat"
               onClick={feedback}
             >
               <Icon name="feedback" />
-              <span>Refresh in chat</span>
+              <span>Refresh</span>
             </button>
           ) : isPr ? (
             <button
@@ -756,7 +765,7 @@ export function ContributionCard({
 }) {
   const status = rec.status || 'prepared'
   const blocked = status === 'prepared' && reviewState?.state === 'needs_refresh'
-  const statusLabel = blocked ? 'Needs update' : (STATUS_LABELS[status] || status)
+  const statusLabel = blocked ? 'Agent update' : (STATUS_LABELS[status] || status)
   // The one plain-language line under the chip. A blocked card leads with its
   // SubmitErrorAlert instead, and an attention record with its callout, so both
   // suppress the calm lifecycle narration here.

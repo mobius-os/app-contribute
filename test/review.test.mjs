@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  addressAllAction,
+  contributionsNeedingAttention,
   blockedReviewCount,
   indexReviewStatus,
+  partitionReviewUnits,
   reviewStateFor,
   summarizeReviewStatus,
 } from '../review.js'
@@ -69,4 +72,80 @@ test('summarizes ready, blocked, and unchecked reviews', () => {
     total: 3, ready: 1, needsRefresh: 1, unchecked: 1,
   })
   assert.equal(blockedReviewCount(records, review), 1)
+})
+
+test('batch and feed share the same needs-attention partition', () => {
+  const units = [
+    {
+      type: 'record', id: 'ready',
+      record: { id: 'ready', status: 'prepared' },
+      records: [{ id: 'ready', status: 'prepared' }],
+    },
+    {
+      type: 'record', id: 'blocked',
+      record: { id: 'blocked', status: 'prepared' },
+      records: [{ id: 'blocked', status: 'prepared' }],
+    },
+    {
+      type: 'stack', id: 'stack',
+      records: [
+        { id: 'stack-1', status: 'open' },
+        { id: 'stack-2', status: 'prepared' },
+      ],
+    },
+  ]
+  const partition = partitionReviewUnits(units, {
+    byId: {
+      ready: { state: 'ready' },
+      blocked: { state: 'needs_refresh' },
+      'stack-2': { state: 'ready' },
+    },
+  })
+  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked'])
+  assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
+})
+
+test('address all collects active local and published blockers but not history', () => {
+  const records = [
+    {
+      id: 'local', type: 'pr', status: 'prepared', repo: 'mobius-os/app-local',
+      plan: { title: 'Refresh local change' },
+    },
+    {
+      id: 'live', type: 'pr', status: 'open', repo: 'mobius-os/app-live',
+      title: 'Fix live checks', url: 'https://github.com/mobius-os/app-live/pull/8',
+      needs_attention: true,
+      attention: { title: 'Checks failed', message: 'One test is red.' },
+    },
+    {
+      id: 'history', type: 'pr', status: 'merged', title: 'Already merged',
+      needs_attention: true,
+    },
+    {
+      id: 'issue', type: 'issue', status: 'open', title: 'An issue',
+      needs_attention: true,
+    },
+    { id: 'clean', type: 'pr', status: 'open', title: 'Clean PR' },
+  ]
+  const review = {
+    byId: {
+      local: {
+        state: 'needs_refresh',
+        message: 'The source branch moved.',
+      },
+    },
+  }
+
+  assert.deepEqual(
+    contributionsNeedingAttention(records, review).map((rec) => rec.id),
+    ['local', 'live'],
+  )
+  const action = addressAllAction(records, review)
+  assert.equal(action.count, 2)
+  assert.equal(action.autoSend, true)
+  assert.match(action.draft, /Refresh local change — mobius-os\/app-local/)
+  assert.match(action.draft, /The source branch moved\./)
+  assert.match(action.draft, /Checks failed — One test is red\./)
+  assert.match(action.draft, /Do not push, reply, publish, merge/)
+  assert.doesNotMatch(action.draft, /Already merged|An issue|Clean PR/)
 })

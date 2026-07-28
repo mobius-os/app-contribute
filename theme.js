@@ -100,8 +100,8 @@ export const CSS = `
   font-size: 12px; color: var(--muted);
 }
 
-/* Sources / Contributions top-level split. The page shell is always wide;
-   Projects alone fills it while Contributions stays at a 680px reading measure. */
+/* Projects / Pull requests / Issues top-level split. The page shell is always
+   wide; Projects alone fills it while the review feeds stay at 680px. */
 .co-page.is-sources {
   padding-bottom: 12px;
   display: flex; flex-direction: column; overflow: hidden;
@@ -625,6 +625,47 @@ export const CSS = `
 }
 /* /mobius-ui:Button */
 
+.co-batch-action {
+  position: relative; width: min(100%, 680px); margin: 0 auto 14px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: 12px 18px; padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.co-batch-copy { min-width: 0; }
+.co-batch-copy > span {
+  display: block; margin-bottom: 3px; color: var(--accent);
+  font-size: 10px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase;
+}
+.co-batch-copy > strong {
+  display: block; color: var(--text); font-size: 14px; line-height: 1.35;
+}
+.co-batch-copy > p {
+  margin: 3px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.45;
+}
+.co-batch-button { align-self: center; white-space: nowrap; }
+.co-batch-queue {
+  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 9px;
+  padding-top: 13px; border-top: 1px solid var(--border);
+}
+.co-batch-queue > strong { font-size: 12px; color: var(--muted); font-weight: 620; }
+.co-batch-list {
+  max-height: 180px; margin: 2px 0 0; padding: 0; overflow-y: auto;
+  list-style: none; border: 1px solid var(--border); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 64%, transparent);
+}
+.co-batch-list > li {
+  min-height: 38px; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 7px 10px;
+  color: var(--text); font-size: 11.5px; line-height: 1.35;
+}
+.co-batch-list > li > span { min-width: 0; }
+.co-batch-list > li > small { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+.co-batch-list > li[data-state="sending"] > small { color: var(--accent); font-weight: 700; }
+.co-batch-list > li[data-state="sent"] { color: var(--muted); }
+.co-batch-list > li + li { border-top: 1px solid var(--border); }
+
 /* The one-time device code stays genuinely selectable as a fallback when a
    sandboxed browser does not grant clipboard access. */
 .co-conn-code {
@@ -657,9 +698,9 @@ export const CSS = `
 }
 .co-section-title { margin: 0; font-size: 14px; font-weight: 680; color: var(--text); letter-spacing: -0.01em; }
 .co-section-hint { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
-.co-section.is-attention .co-section-headline > span {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
+.co-section.is-follow-up .co-section-headline > span {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 .co-history {
   border: 1px solid var(--border); border-radius: 13px; overflow: hidden;
@@ -686,7 +727,7 @@ export const CSS = `
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 13px; padding: 14px 15px; margin-top: 9px;
 }
-.co-card.is-blocked { border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); }
+.co-card.is-blocked { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 /* /mobius-ui:Card */
 
 /* A stack is one approval surface containing individually reviewable layers.
@@ -813,8 +854,8 @@ export const CSS = `
   color: var(--green);
 }
 .co-chip.is-needs-refresh {
-  background: color-mix(in srgb, var(--danger) 13%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 /* The one plain-language line under the chip: what this state means for the
    owner, in a calm muted voice below the title. */
@@ -874,6 +915,13 @@ export const CSS = `
 .co-alert > strong { color: var(--text); font-size: 13px; line-height: 1.35; }
 .co-alert-reassurance { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .co-alert .co-btn { align-self: flex-start; }
+.co-alert.is-follow-up {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.co-alert.is-follow-up .co-alert-text {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
 /* The raw Git message, tucked behind a Details disclosure under the headline. */
 .co-alert-details > summary {
   cursor: pointer; font-size: 12px; color: var(--muted); min-height: 38px;
@@ -886,9 +934,9 @@ export const CSS = `
 .co-attention {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
   margin-top: 10px; padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
 .co-attention-copy {
   min-width: 0; display: flex; flex-direction: column; gap: 4px;
@@ -1370,6 +1418,7 @@ export const CSS = `
   .co-sources.is-detail-open > .co-sources-head,
   .co-sources.is-detail-open > .co-source-note,
   .co-sources.is-detail-open > .co-source-warning,
+  .co-sources.is-detail-open > .co-batch-action,
   .co-sources.is-detail-open > .co-source-toolbar { display: none; }
   .co-sources-head { flex-direction: column; gap: 9px; }
   .co-sources-fresh { width: 100%; justify-content: space-between; }
@@ -1416,6 +1465,8 @@ export const CSS = `
   .co-source-toolbar { align-items: stretch; }
   .co-source-filters { width: 100%; }
   .co-source-filter { flex: 1 0 auto; text-align: center; }
+  .co-batch-action { grid-template-columns: 1fr; padding: 13px; }
+  .co-batch-button { width: 100%; }
   .co-history > summary > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .co-source-row { min-height: 55px; padding: 8px 9px; }
   .co-source-detail { padding: 12px 9px 14px; }
