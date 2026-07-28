@@ -149,12 +149,17 @@ def identifier_presence(
     return present, total, present / total
 
 
-def identifier_presence_in_text(identifiers: dict[str, set[str]], text: str) -> tuple[int, int, float]:
-    values = {value for group in identifiers.values() for value in group}
-    total = len(values)
+def identifier_set_presence(
+    identifiers: dict[str, set[str]],
+    available: dict[str, set[str]],
+) -> tuple[int, int, float]:
+    total = sum(len(values) for values in identifiers.values())
     if total == 0:
         return 0, 0, 0.0
-    present = sum(1 for value in values if value in text)
+    present = sum(
+        len(values.intersection(available.get(path, set())))
+        for path, values in identifiers.items()
+    )
     return present, total, present / total
 
 
@@ -418,6 +423,7 @@ class LocalMain:
         self.ready: dict[tuple[str, str], str | None] = {}
         self.patch_maps: dict[tuple[str, str], dict[str, str]] = {}
         self.file_cache: dict[tuple[str, str, str], str | None] = {}
+        self.review_base_file_cache: dict[tuple[str, str, str], str | None] = {}
 
     @staticmethod
     def _git(path: str, args: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str] | None:
@@ -592,31 +598,93 @@ class LocalMain:
         self.file_cache[key] = text
         return text
 
+    def identifiers_introduced_after_base(
+        self,
+        repo: str,
+        base: str,
+        main_sha: str,
+        review_base_sha: str,
+        identifiers: dict[str, set[str]],
+    ) -> dict[str, set[str]]:
+        """Keep only identifiers absent before the reviewed change."""
+        local_path = self.ensure(repo, base, main_sha)
+        if not local_path or not review_base_sha:
+            return {}
+        present = self._git(
+            local_path,
+            ["cat-file", "-e", f"{review_base_sha}^{{commit}}"],
+            timeout=10,
+        )
+        if not present or present.returncode != 0:
+            return {}
+
+        introduced: dict[str, set[str]] = {}
+        for file_path, values in identifiers.items():
+            key = (repo, review_base_sha, file_path)
+            if key not in self.review_base_file_cache:
+                result = self._git(
+                    local_path,
+                    ["show", f"{review_base_sha}:{file_path}"],
+                    timeout=20,
+                )
+                self.review_base_file_cache[key] = (
+                    result.stdout if result and result.returncode == 0 else None
+                )
+            base_text = self.review_base_file_cache[key] or ""
+            new_values = {value for value in values if value not in base_text}
+            if new_values:
+                introduced[file_path] = new_values
+        return introduced
+
     def identifier_commit(
         self,
         repo: str,
         base: str,
         main_sha: str,
+        review_base_sha: str,
         identifiers: dict[str, set[str]],
     ) -> str:
         path = self.ensure(repo, base, main_sha)
         values = sorted({value for group in identifiers.values() for value in group})
         paths = sorted(identifiers)
-        if not path or not values or not paths:
+        if not path or not review_base_sha or not values or not paths:
             return ""
         regex = "(" + "|".join(re.escape(value) for value in values) + ")"
         candidates = self._git(
             path,
-            ["log", "--format=%H", "-n", "30", "-G", regex, main_sha, "--"] + paths,
+            [
+                "log",
+                "--format=%H",
+                "-n",
+                "30",
+                "-G",
+                regex,
+                f"{review_base_sha}..{main_sha}",
+                "--",
+            ] + paths,
             timeout=45,
         )
         if not candidates or candidates.returncode != 0:
             return ""
         for sha in dict.fromkeys(candidates.stdout.splitlines()):
-            shown = self._git(path, ["show", "--format=", "--no-ext-diff", sha], timeout=20)
+            shown = self._git(
+                path,
+                [
+                    "show",
+                    "--format=",
+                    "--no-ext-diff",
+                    "--unified=0",
+                    sha,
+                    "--",
+                ] + paths,
+                timeout=20,
+            )
             if not shown or shown.returncode != 0:
                 continue
-            if strong_identifier_presence(*identifier_presence_in_text(identifiers, shown.stdout)):
+            added_identifiers = distinctive_identifiers(shown.stdout)
+            if strong_identifier_presence(
+                *identifier_set_presence(identifiers, added_identifiers),
+            ):
                 return sha
         return ""
 
@@ -691,23 +759,40 @@ def identifier_landing(
     repo: str,
     base: str,
     main_sha: str,
+    review_base_sha: str,
     identifiers: dict[str, set[str]],
 ) -> tuple[Landing | None, dict[str, Any] | None]:
+    introduced = local.identifiers_introduced_after_base(
+        repo,
+        base,
+        main_sha,
+        review_base_sha,
+        identifiers,
+    )
+    if not introduced:
+        return None, None
+
     main_files = {
         path: (
             local.main_file(repo, base, main_sha, path)
             or github.main_file(repo, base, path)
         )
-        for path in identifiers
+        for path in introduced
     }
-    present, total, ratio = identifier_presence(identifiers, main_files)
+    present, total, ratio = identifier_presence(introduced, main_files)
     if not partial_identifier_presence(present, total, ratio):
         return None, None
 
     landed_commit = ""
     landing_pull = None
     if strong_identifier_presence(present, total, ratio):
-        landed_commit = local.identifier_commit(repo, base, main_sha, identifiers)
+        landed_commit = local.identifier_commit(
+            repo,
+            base,
+            main_sha,
+            review_base_sha,
+            introduced,
+        )
         if landed_commit:
             landing_pull = github.pull_for_commit(repo, landed_commit, base)
             return Landing(
@@ -719,10 +804,10 @@ def identifier_landing(
 
     hint = {
         "type": "already_landed",
-        "title": "Looks already landed",
+        "title": "Possible overlap on main",
         "message": (
-            f"{present} of {total} distinctive additions are already on {base}, "
-            "but the match is not strong enough to clear this automatically."
+            f"{present} of {total} distinctive identifiers appear on {base}, "
+            "but no attributable landing after the reviewed base was proven."
         ),
         "main_identifiers_present": present,
         "main_identifiers_total": total,
@@ -792,12 +877,14 @@ def reconcile_record(
     landing = exact_landing(github, local, repo, base, main_sha, record, review_diff)
     hint = None
     if not landing and review_diff:
+        plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
         landing, hint = identifier_landing(
             github,
             local,
             repo,
             base,
             main_sha,
+            str(plan.get("base_sha") or ""),
             distinctive_identifiers(review_diff),
         )
 
