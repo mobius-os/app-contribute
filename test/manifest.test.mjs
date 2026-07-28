@@ -25,6 +25,10 @@ test('install manifest ships the label outcome helper imported by the review car
   assert.ok(manifest.source_files.includes('labels.js'))
 })
 
+test('install manifest ships the shared batch action used by Projects and PRs', () => {
+  assert.ok(manifest.source_files.includes('ui/BatchAction.jsx'))
+})
+
 test('install manifest ships the GitHub connection-attempt controller', () => {
   assert.ok(manifest.source_files.includes('github-connection.js'))
 })

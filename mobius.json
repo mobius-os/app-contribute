@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.11",
+  "version": "0.5.16",
   "description": "See what your agent has proposed upstream — pull requests, issues, and comments across the Möbius ecosystem, from prepared to merged.",
   "author": "mobius-os",
   "license": "MIT",
@@ -56,6 +56,7 @@
     "contributing.md",
     "review-followup.md",
     "ui/Icons.jsx",
+    "ui/BatchAction.jsx",
     "ui/ConnectionCard.jsx",
     "ui/MarkdownView.jsx",
     "ui/DiffView.jsx",

@@ -317,6 +317,33 @@ export function actionableSourceProjects(projects) {
   return (projects || []).filter((project) => projectOverview(project))
 }
 
+export function preparableSourceProjects(projects) {
+  return (projects || []).filter(
+    (project) => projectAgentAction(project)?.event === 'prepare_contribution',
+  )
+}
+
+export function prepareAllAction(projects) {
+  const candidates = preparableSourceProjects(projects)
+  if (candidates.length === 0) return null
+  const projectList = candidates.map((project) => {
+    const repo = project.canonical_repo ? ` — ${project.canonical_repo}` : ''
+    return `- ${project.name || 'Unnamed project'}${repo}`
+  }).join('\n')
+  return {
+    label: `Prepare all (${candidates.length})`,
+    event: 'prepare_all_contributions',
+    count: candidates.length,
+    draft: [
+      'Prepare private upstream contributions for every eligible local change below:',
+      '',
+      projectList,
+      '',
+      'Inspect each project, check for overlapping upstream work, and stage every worthwhile contribution in Contribute for my review. Do not publish, push, open an issue, or open a pull request. If a project is not ready or should stay local, leave it untouched and explain why.',
+    ].join('\n'),
+  }
+}
+
 // Agent handoffs are specific to the inspected project and conservative about
 // public work: the button only opens a drafted chat, and publishing prompts ask
 // the agent to confirm the destination before creating anything on GitHub.

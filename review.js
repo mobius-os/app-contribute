@@ -67,3 +67,89 @@ export function blockedReviewCount(records, reviewStatus) {
     rec?.status === 'prepared' &&
     reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh').length
 }
+
+const ACTIVE_PR_STATUSES = new Set([
+  'prepared',
+  'submitting',
+  'landing',
+  'draft',
+  'open',
+])
+
+function hasPublishedAttention(rec) {
+  return rec?.needs_attention === true ||
+    (typeof rec?.attention?.title === 'string' && !!rec.attention.title.trim()) ||
+    (typeof rec?.attention?.message === 'string' && !!rec.attention.message.trim())
+}
+
+export function attentionReason(rec, reviewStatus) {
+  const attention = rec?.attention || {}
+  const review = reviewStateFor(rec, reviewStatus)
+  const details = [
+    typeof attention.title === 'string' ? attention.title.trim() : '',
+    typeof attention.message === 'string' ? attention.message.trim() : '',
+  ].filter(Boolean)
+  if (details.length > 0) return details.join(' — ')
+  if (review?.state === 'needs_refresh') {
+    return review.message || 'This changed after it was reviewed and needs to be refreshed.'
+  }
+  if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
+    return rec.last_submit_error.trim()
+  }
+  return 'This contribution needs another look.'
+}
+
+// The batch handoff deliberately covers only active pull requests. A stale
+// attention flag on a merged, closed, superseded, or dropped record belongs in
+// History and must never bring settled work back into the action queue.
+export function contributionsNeedingAttention(records, reviewStatus) {
+  return (Array.isArray(records) ? records : []).filter((rec) => {
+    if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
+    return hasPublishedAttention(rec) ||
+      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
+  })
+}
+
+export function addressAllAction(records, reviewStatus) {
+  const attentionRecords = contributionsNeedingAttention(records, reviewStatus)
+  if (attentionRecords.length === 0) return null
+  const list = attentionRecords.map((rec) => {
+    const title = rec.plan?.title || rec.title || rec.summary || 'Untitled pull request'
+    const repo = rec.repo ? ` — ${rec.repo}` : ''
+    const url = rec.attention?.url || rec.url || ''
+    return [
+      `- ${title}${repo}`,
+      `  ${attentionReason(rec, reviewStatus)}`,
+      url ? `  ${url}` : '',
+    ].filter(Boolean).join('\n')
+  })
+  return {
+    event: 'address_all_contributions',
+    count: attentionRecords.length,
+    draft: [
+      'Address every active Contribute pull request that needs attention:',
+      '',
+      ...list,
+      '',
+      'Inspect each blocker, explain what can be fixed privately, and prepare the required updates.',
+      'Do not push, reply, publish, merge, or otherwise change GitHub without the approval required for that exact public action.',
+      'If a merge conflict or owner decision is required, leave it flagged and explain the next choice.',
+    ].join('\n'),
+  }
+}
+
+export function partitionReviewUnits(units, reviewStatus) {
+  const needsAttention = []
+  const readyToSend = []
+  for (const unit of units || []) {
+    const records = unit.records || (unit.record ? [unit.record] : [])
+    if (records.some(
+      (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
+    )) {
+      needsAttention.push(unit)
+    } else {
+      readyToSend.push(unit)
+    }
+  }
+  return { needsAttention, readyToSend }
+}
