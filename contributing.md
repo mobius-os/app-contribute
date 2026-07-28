@@ -127,19 +127,81 @@ don't propose.
 Hard stop #1 is the gate. In practice:
 
 1. Propose the contribution through the clarifying-question tool, not as a prose
-   aside. Offer two neutral choices such as **Prepare privately** and **Not
-   now**, and say that nothing goes public without a later approval.
-2. Wait for that yes.
-3. Prepare everything needed for review and direct submission, then stop.
+   aside. When the partner may still want to improve the candidate, offer three
+   paths: **Prepare privately**, **Refine first**, and **Not now**. Say that
+   preparation stays private and nothing goes public without a later approval.
+2. Wait and classify the response:
+   - **Prepare privately** is approval for preparation only. Prepare everything
+     needed for review and direct submission, then stop.
+   - **Refine first**, or actionable free-text feedback about the candidate,
+     defers the contribution decision; it does not decline it. Do not prepare
+     yet. Apply the feedback within the approved scope, verify the revised
+     change, then offer preparation once for that revised version. If the
+     partner selected **Refine first** without saying what to change, ask for
+     that open-ended feedback in plain chat. Each completed, partner-requested
+     refinement can earn one new offer; never repeat the card when no material
+     work changed.
+   - **Not now** declines preparation. Leave the change local and do not
+     re-offer the same version.
+3. An unanswered, timed-out, disabled, or empty-response card stops the flow
+   without preparing. Silence is neither approval nor refinement, so do not
+   immediately re-ask or treat `{}` / no selection as a yes.
 
-Anything but yes → stop. Preparing is still private: a local branch/commit and a
+Anything except an explicit **Prepare privately** remains non-approval.
+Refinement feedback changes when the question is asked again, never what the
+agent may publish. Preparing is still private: a local branch/commit and a
 Contribute record, not a fork, push, PR, issue, or comment. The next public step
 happens only after the partner presses **Send PR for review** in Contribute.
 
-An unanswered, timed-out, disabled, or empty-response question card is **not**
-approval. If the review surface expires or returns no answer, leave the
-prepared record private and ask again in plain chat or wait for the Contribute
-Send button. Never treat `{}` / no selection as "yes" for a public action.
+---
+
+## Review the code before every PR
+
+Review the branch after the code is written and **before** you build the review
+commit, so the partner sees the cleaned-up version. Right-size the pass to the
+change: a one-line or docs-only PR needs a careful reread, not a ritual audit;
+a behavioral or structural change earns proportionally deeper review. Reading
+and editing local source needs no approval and publishes nothing.
+
+Use two passes over the branch diff, in order.
+
+**Pass 1 — strip the slop.** Read your own diff as a hostile reviewer of
+machine-written code and delete what a careful human would not have written:
+comments restating what the line already says or breaking the file's existing
+comment style, defensive `try`/`except` and existence checks on paths that are
+already trusted, casts and broad types that only silence a complaint, nesting an
+early return would flatten, and near-duplicates of a helper the codebase already
+has. Behavior stays identical unless you are fixing a clear bug, and the edits
+stay minimal and local.
+
+**Pass 2 — audit the structure the change itself motivates.** Ask whether the
+new behavior sits at the layer that owns it and whether a simpler framing can
+remove branches, flags, helpers, or layers. These are review signals, not
+context-free blockers:
+
+- hand-written source crosses roughly 1000 lines because of the diff (generated
+  files, fixtures, data, and long-form prose do not count);
+- new ad-hoc conditionals or special cases are bolted into a flow that did not
+  care about them before;
+- feature-specific logic leaks into a shared or general-purpose path;
+- an abstraction, wrapper, or layer of indirection is added without buying
+  clarity;
+- optionality, `Any`, or loosely shaped dict payloads paper over an invariant
+  that should be explicit at the boundary;
+- logic lands somewhere other than the layer that already owns the concept, or
+  duplicates a canonical helper;
+- related updates can leave state half-applied, or independent work is
+  serialized for no reason.
+
+Act on findings that are motivated by this change and make the agreed behavior
+clearer or safer, then re-read the diff. Keep unrelated refactors out of the PR.
+When an obvious signal is deliberately left alone, record one sentence in the
+private `plan.prior_work.summary` review evidence — never in the public
+`body_draft` merely to narrate internal process. A larger finding becomes a
+follow-up for the partner rather than silent scope expansion.
+
+If the instance has a richer code-quality or slop-removal skill installed,
+apply it proportionally here too.
 
 ---
 
@@ -153,7 +215,8 @@ Contribute needs to submit it directly after approval:
 ```
 plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
        repo, target_url?, title?, body_draft, branch?, repo_path?,
-       base_sha?, head_sha?, diff_sha256?, diff_stat,
+       base_sha?, head_sha?, source_repo_path?, source_sha?,
+       diff_sha256?, diff_stat,
        prior_work?: {searched_at, query, decision, summary?, matches?},
        labels?: [type, area?],
        stack?: {id, name?, position, total, parent_record_id, base_branch},
@@ -209,9 +272,20 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   longer displayed; you may omit it. Record `base_sha`/`head_sha`/`diff_sha256`
   so the submit button can recompute the exact branch diff before pushing (Hard
   stop #3). Compute the hash from the exact `.diff` bytes you store.
+- For every review originating from an installed app or the platform, record
+  `source_repo_path` (the live source checkout) and `source_sha` (its exact
+  commit when the reviewed diff was captured). The submit path proves
+  `base_sha..head_sha` is present in that source commit and keeps the witness
+  only after the owner sends the PR. If GitHub later merges the reviewed change
+  under a squash/rebase identity, both shell and App Store updates can recognize
+  it as shared history without guessing or dropping later local edits. A linked
+  review already shares the Git objects; for a standalone app review, Contribute
+  imports only the two hash-verified reviewed commits into the installed repo
+  without moving its branch or worktree.
 
 Before you tell the partner it is ready, review the staged record yourself:
-re-read the stored `.diff`, confirm the body draft is exactly what should be
+re-read the stored `.diff`, confirm the proportional quality review above ran
+against the committed branch, confirm the body draft is exactly what should be
 published, confirm no private data appears in the branch, commit message, branch
 name, body, or diff, and confirm the branch is back on `main` when the prep
 steps require it.
@@ -395,6 +469,7 @@ review commit in a linked worktree while the live app stays on `main`:
 SOURCE=/data/apps/<slug>
 WORKTREE=/data/contrib/<record-id>/worktree
 BASE_SHA="$(git -C "$SOURCE" merge-base main upstream)"
+SOURCE_SHA="$(git -C "$SOURCE" rev-parse main)"
 git -C "$SOURCE" -c core.quotePath=false diff --no-ext-diff --no-color \
   --binary --full-index --src-prefix=a/ --dst-prefix=b/ \
   "$BASE_SHA..main" > /tmp/<record-id>.diff
@@ -416,7 +491,8 @@ DIFF_SHA256="$(sha256sum /tmp/<record-id>.diff | awk '{print $1}')"
 ```
 
 Then write the ledger record with `repo_path: "$WORKTREE"`, `branch`,
-`base_sha: "$BASE_SHA"`, `head_sha: "$HEAD_SHA"`, `diff_sha256` from
+`base_sha: "$BASE_SHA"`, `head_sha: "$HEAD_SHA"`,
+`source_repo_path: "$SOURCE"`, `source_sha: "$SOURCE_SHA"`, `diff_sha256` from
 `$DIFF_SHA256`, and `diff_stat` (required). `diff_excerpt` is legacy — omit it.
 
 Two invariants: the
@@ -432,14 +508,20 @@ on `fix/…`, so watcher edits and store updates cannot land on the review branc
 `/data/contrib/<record-id>/worktree` with
 `--separate-git-dir=/data/contrib/<record-id>/git`, `checkout -b fix/…`, copy
 the changed source over (re-read vs the allowlist), and commit with the
-co-author trailer. The separate Git directory is deliberately named `git`, not
-`.git`, so older boot cleaners leave it intact. Use the worktree as `repo_path`.
+co-author trailer. Before cloning, capture the installed app's live source path
+as `source_repo_path` and its exact `main` commit as `source_sha`; the reviewed
+commit identities may differ, and the submit path handles that safely. The
+separate Git directory is deliberately named `git`, not `.git`, so older boot
+cleaners leave it intact. Use the worktree as `repo_path`.
 
 **Platform/shell**: only when `/data/platform` has a real origin — create the
 review branch with `git -C /data/platform worktree add -b fix/…
 /data/contrib/<record-id>/worktree <base-sha>`, apply only the reviewed source
 diff there, and record that worktree path with `repo: "mobius-os/mobius"`.
-`/data/platform` itself remains on `main`. No origin → be honest: platform
+Capture `SOURCE_SHA="$(git -C /data/platform rev-parse HEAD)"` before creating
+the review worktree and store `source_repo_path: "/data/platform"` beside
+`plan.source_sha`; `/data/platform` itself remains on its current live branch.
+No origin → be honest: platform
 contributions need the updated platform bootstrap; app contributions still work.
 
 ## PLATFORM CI
@@ -531,6 +613,7 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
            "body_draft": "<full PR body, word for word>",
            "branch": "fix/<slug>-<short>", "repo_path": "/data/apps/<slug>",
            "base_sha": "<sha>", "head_sha": "<sha>",
+           "source_repo_path": "/data/apps/<slug>", "source_sha": "<sha>",
            "diff_sha256": "<sha256 of the .diff>",
            "diff_stat": "<git diff --stat tail>"}
 }'
