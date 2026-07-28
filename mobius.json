@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "description": "See what your agent has proposed upstream — pull requests, issues, and comments across the Möbius ecosystem, from prepared to merged.",
   "author": "mobius-os",
   "license": "MIT",
@@ -53,6 +53,7 @@
     "github-connection.js",
     "storage.js",
     "prepared_reconcile.py",
+    "agent_snapshot.py",
     "contributing.md",
     "review-followup.md",
     "ui/Icons.jsx",

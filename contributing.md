@@ -48,6 +48,24 @@ this file — never hardcode localhost. The payload:
 - `gh_version: null` — the platform image predates GitHub support. Tell the
   partner a platform update is needed; don't improvise around it.
 
+## Start queue work from one snapshot
+
+When the task covers more than one contribution, begin with Contribute's
+read-only queue snapshot instead of rebuilding state with sequential `gh`, Git,
+and ledger calls:
+
+```bash
+python3 /data/apps/contribute/agent_snapshot.py
+```
+
+It returns active items only, in dependency order, with each reviewed/local
+revision, working-tree state, GitHub head, review state, mergeability, and CI.
+All public PRs share one GraphQL request; one deleted or inaccessible PR remains
+a partial warning and does not discard healthy siblings. Use `--json` when a
+machine-readable result genuinely helps. Follow with a focused per-item read
+only when that snapshot identifies a specific gap it does not contain; do not
+reconstruct the complete queue again.
+
 ---
 
 ## Study existing work before every contribution
