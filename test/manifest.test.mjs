@@ -21,6 +21,10 @@ test('install manifest ships the prepared-record reconciliation pass', () => {
   assert.match(source, /prepared_reconcile\.py/)
 })
 
+test('install manifest ships the one-call agent contribution snapshot', () => {
+  assert.ok(manifest.source_files.includes('agent_snapshot.py'))
+})
+
 test('install manifest ships the label outcome helper imported by the review card', () => {
   assert.ok(manifest.source_files.includes('labels.js'))
 })
