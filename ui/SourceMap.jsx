@@ -560,11 +560,11 @@ export function SourceMap({
           title={`${prepareAll.count} local ${prepareAll.count === 1 ? 'change is' : 'changes are'} ready to inspect`}
           description="Starts one agent handoff to inspect each change and stage the worthwhile ones here. Nothing is published."
           actionLabel="Prepare all"
-          onAction={() => {
-            const outcome = onAskAgent?.(null, prepareAll) || {}
+          onAction={async () => {
+            const outcome = await (onAskAgent?.(null, prepareAll) || {})
             return outcome.ok
-              ? { ok: true, message: 'Opening one preparation chat…' }
-              : { error: 'Open Contribute inside Möbius to prepare these changes.' }
+              ? { ok: true, message: 'Starting one preparation chat…' }
+              : { error: outcome.error || 'Open Contribute inside Möbius to prepare these changes.' }
           }}
         />
       ) : null}

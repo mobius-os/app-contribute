@@ -645,21 +645,25 @@ export const CSS = `
   margin: 3px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.45;
 }
 .co-batch-button { align-self: center; white-space: nowrap; }
-.co-batch-confirm {
+.co-batch-queue {
   grid-column: 1 / -1; display: flex; flex-direction: column; gap: 9px;
   padding-top: 13px; border-top: 1px solid var(--border);
 }
-.co-batch-confirm > strong { font-size: 14px; }
-.co-batch-confirm > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.co-batch-queue > strong { font-size: 12px; color: var(--muted); font-weight: 620; }
 .co-batch-list {
   max-height: 180px; margin: 2px 0 0; padding: 0; overflow-y: auto;
   list-style: none; border: 1px solid var(--border); border-radius: 9px;
   background: color-mix(in srgb, var(--bg) 64%, transparent);
 }
 .co-batch-list > li {
-  min-height: 38px; display: flex; align-items: center; padding: 7px 10px;
+  min-height: 38px; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 7px 10px;
   color: var(--text); font-size: 11.5px; line-height: 1.35;
 }
+.co-batch-list > li > span { min-width: 0; }
+.co-batch-list > li > small { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+.co-batch-list > li[data-state="sending"] > small { color: var(--accent); font-weight: 700; }
+.co-batch-list > li[data-state="sent"] { color: var(--muted); }
 .co-batch-list > li + li { border-top: 1px solid var(--border); }
 
 /* The one-time device code stays genuinely selectable as a fallback when a

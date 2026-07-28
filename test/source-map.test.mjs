@@ -304,6 +304,7 @@ test('prepare all batches only projects with eligible local contribution changes
   const action = prepareAllAction(projects)
   assert.equal(action.label, 'Prepare all (2)')
   assert.equal(action.event, 'prepare_all_contributions')
+  assert.equal(action.autoSend, true)
   assert.match(action.draft, /- Möbius — mobius-os\/mobius/)
   assert.match(action.draft, /- Contribute — mobius-os\/app-contribute/)
   assert.doesNotMatch(action.draft, /Incoming/)

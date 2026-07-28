@@ -411,9 +411,36 @@ export default function ContributeApp({ appId, token }) {
     if (!action || window.parent === window) {
       return { ok: false, reason: 'standalone' }
     }
+    if (action.autoSend === true) {
+      const startChat = window.mobius?.chat?.start
+      if (typeof startChat !== 'function') {
+        return { ok: false, reason: 'chat-start-unavailable' }
+      }
+      const title = action.event === 'address_all_contributions'
+        ? 'Address Contribute follow-ups'
+        : 'Prepare Contribute projects'
+      return startChat({ title, draft: action.draft }).then(({ chatId }) => {
+        window.parent.postMessage(
+          { type: 'moebius:open-chat', chatId },
+          '*',
+        )
+        window.mobius?.signal?.('source_agent_handoff', {
+          action: action.event,
+          project: project?.key || 'all',
+        })
+        return { ok: true, chatId }
+      }).catch((error) => ({
+        ok: false,
+        reason: 'chat-start-failed',
+        error: error?.message || 'Could not start the agent chat.',
+      }))
+    }
     window.parent.postMessage(
-      { type: 'moebius:new-chat', draft: action.draft },
-      window.location.origin,
+      {
+        type: 'moebius:new-chat',
+        draft: action.draft,
+      },
+      '*',
     )
     window.mobius?.signal?.('source_agent_handoff', {
       action: action.event,
@@ -452,6 +479,15 @@ export default function ContributeApp({ appId, token }) {
       })
       refreshReviewStatus()
       return { ok: true, record: next, url: outcome.url || next.url }
+    }
+    if (outcome.alreadyHandled) {
+      try {
+        const ledger = await loadLedger()
+        const fresh = ledger.records.find((item) => item.id === rec.id)
+        if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+      } catch { /* the ordinary refresh below remains authoritative */ }
+      refreshReviewStatus()
+      return { alreadyHandled: true }
     }
     if (outcome.record) {
       const next = { ...outcome.record, path: rec.path }
@@ -549,6 +585,18 @@ export default function ContributeApp({ appId, token }) {
       })
       refreshReviewStatus()
       return { ok: true, submitted: outcome.submitted?.length || 0 }
+    }
+    if (outcome.alreadyHandled) {
+      try {
+        const ledger = await loadLedger()
+        const wanted = new Set(stackRecords.map((rec) => rec.id))
+        const fresh = ledger.records
+          .filter((rec) => wanted.has(rec.id))
+          .map((rec) => ({ ...rec, path: stackRecords.find((item) => item.id === rec.id)?.path }))
+        if (fresh.length > 0) applyRecordUpdates(fresh)
+      } catch { /* the ordinary refresh below remains authoritative */ }
+      refreshReviewStatus()
+      return { alreadyHandled: true }
     }
     if (outcome.uncertain) {
       let resolutions = stackRecords.map(() => ({ state: 'unconfirmed', record: null }))
@@ -787,6 +835,7 @@ export default function ContributeApp({ appId, token }) {
 
   const onSendAllReady = useCallback(async (onProgress) => {
     let sent = 0
+    let alreadyHandled = 0
     for (let index = 0; index < readyPrUnits.length; index += 1) {
       const unit = readyPrUnits[index]
       const readyInUnit = unit.records.filter(
@@ -804,6 +853,10 @@ export default function ContributeApp({ appId, token }) {
         sent += readyInUnit
         continue
       }
+      if (outcome?.alreadyHandled) {
+        alreadyHandled += readyInUnit
+        continue
+      }
       if (outcome?.pending) {
         return {
           pending: true,
@@ -819,9 +872,19 @@ export default function ContributeApp({ appId, token }) {
           : `Nothing was sent: ${reason}`,
       }
     }
-    window.mobius?.signal?.('contribution_batch_submitted', {
-      item_count: sent,
-    })
+    if (sent > 0) {
+      window.mobius?.signal?.('contribution_batch_submitted', {
+        item_count: sent,
+      })
+    }
+    if (alreadyHandled > 0) {
+      return {
+        ok: true,
+        message: sent > 0
+          ? `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'}; ${alreadyHandled} ${alreadyHandled === 1 ? 'was' : 'were'} already handled.`
+          : 'Everything in this batch had already been handled. The list is refreshed.',
+      }
+    }
     return {
       ok: true,
       message: `Sent ${sent} pull ${sent === 1 ? 'request' : 'requests'} for review.`,
@@ -931,21 +994,20 @@ export default function ContributeApp({ appId, token }) {
                   title={`${addressAll?.count || 0} pull ${(addressAll?.count || 0) === 1 ? 'request could' : 'requests could'} use an agent pass`}
                   description="Starts one private handoff with every active follow-up already listed. Nothing is published automatically."
                   actionLabel="Address all"
-                  onAction={() => {
-                    const outcome = onAskSourceAgent(null, addressAll)
+                  onAction={async () => {
+                    const outcome = await onAskSourceAgent(null, addressAll)
                     return outcome.ok
-                      ? { ok: true, message: 'Opening one agent chat with every follow-up listed.' }
-                      : { error: 'Open Contribute inside Möbius to start an agent handoff.' }
+                      ? { ok: true, message: 'Starting one agent chat with every follow-up listed.' }
+                      : { error: outcome.error || 'Open Contribute inside Möbius to start an agent handoff.' }
                   }}
                 />
                 <BatchAction
                   count={readyPrCount}
                   eyebrow="Reviewed and ready"
                   title={`${readyPrCount} pull ${readyPrCount === 1 ? 'request is' : 'requests are'} ready to send`}
-                  description="One confirmation sends every ready pull request in order. Contribute stops if anything changed."
+                  description="One press sends every ready pull request in order. Contribute stops if anything changed."
                   actionLabel="Send all ready"
-                  confirmTitle={`Send ${readyPrCount} reviewed pull ${readyPrCount === 1 ? 'request' : 'requests'}?`}
-                  confirmBody="This opens each item on GitHub for maintainer review. Nothing is merged automatically, and Contribute stops if one no longer matches what you reviewed."
+                  busyLabel="Sending…"
                   items={readyPrItems}
                   onAction={onSendAllReady}
                 />

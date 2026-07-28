@@ -274,6 +274,12 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
       }
     }
     const detail = body?.detail
+    if (
+      r.status === 409
+      && detail === 'This contribution is no longer waiting for approval.'
+    ) {
+      return { alreadyHandled: true }
+    }
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not submit this PR.',
@@ -320,6 +326,12 @@ export async function submitContributionStack({ appId, token, recordIds }) {
       }
     }
     const detail = body?.detail
+    if (
+      r.status === 409
+      && detail === 'Every PR in this stack has already been submitted.'
+    ) {
+      return { alreadyHandled: true }
+    }
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not submit this PR stack.',

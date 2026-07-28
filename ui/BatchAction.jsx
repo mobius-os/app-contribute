@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 export function BatchAction({
   count,
@@ -6,27 +6,21 @@ export function BatchAction({
   title,
   description,
   actionLabel,
-  confirmTitle,
-  confirmBody,
+  busyLabel = 'Starting…',
   items = [],
   onAction,
 }) {
-  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(null)
   const [note, setNote] = useState('')
   const [noteTone, setNoteTone] = useState('quiet')
-  const cancelRef = useRef(null)
-  const descriptionId = useId()
-  const needsConfirmation = !!confirmTitle
-
-  useEffect(() => {
-    if (confirming) cancelRef.current?.focus()
-  }, [confirming])
+  const busyRef = useRef(false)
 
   if (!count) return null
 
   async function run() {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
     setNote('')
     setNoteTone('quiet')
@@ -36,27 +30,17 @@ export function BatchAction({
       if (outcome.ok) {
         setNote(outcome.message || 'Done.')
         setNoteTone('quiet')
-        setConfirming(false)
       } else if (outcome.pending) {
         setNote(outcome.message || 'Publishing is still in progress. The feed will update as it settles.')
         setNoteTone('quiet')
-        setConfirming(false)
       } else {
         setNote(outcome.error || 'Could not complete this batch.')
         setNoteTone('error')
       }
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
-  }
-
-  function start() {
-    if (needsConfirmation) {
-      setNote('')
-      setConfirming(true)
-      return
-    }
-    run()
   }
 
   return (
@@ -70,50 +54,32 @@ export function BatchAction({
         type="button"
         className="co-btn co-btn-primary co-batch-button"
         disabled={busy}
-        onClick={start}
+        aria-busy={busy}
+        onClick={run}
       >
-        {busy && !confirming ? 'Opening…' : actionLabel}
+        {busy ? busyLabel : actionLabel}
       </button>
 
-      {confirming ? (
-        <div
-          className="co-batch-confirm"
-          role="alertdialog"
-          aria-label={confirmTitle}
-          aria-describedby={descriptionId}
-        >
-          <strong>{confirmTitle}</strong>
-          <p id={descriptionId}>{confirmBody}</p>
-          {items.length > 0 ? (
-            <ol className="co-batch-list">
-              {items.map((item) => <li key={item.id}>{item.label}</li>)}
-            </ol>
-          ) : null}
-          <div className="co-confirm-actions">
-            <button
-              ref={cancelRef}
-              type="button"
-              className="co-btn co-btn-sm"
-              disabled={busy}
-              onClick={() => setConfirming(false)}
-            >
-              Keep private
-            </button>
-            <button
-              type="button"
-              className={'co-btn co-btn-primary' + (busy ? ' is-sending' : '')}
-              disabled={busy}
-              aria-busy={busy}
-              onClick={run}
-            >
-              {busy ? 'Sending…' : actionLabel}
-            </button>
-          </div>
-          {busy && progress ? (
-            <p className="co-review-note" role="status" aria-live="polite">
-              Sending {progress.done + 1} of {progress.total}: {progress.label}
-            </p>
-          ) : null}
+      {busy && items.length > 0 ? (
+        <div className="co-batch-queue" role="status" aria-live="polite">
+          <strong>
+            {progress
+              ? `Sending ${progress.done + 1} of ${progress.total}: ${progress.label}`
+              : 'Preparing send queue…'}
+          </strong>
+          <ol className="co-batch-list">
+            {items.map((item, index) => {
+              const state = progress == null || index > progress.done
+                ? 'Waiting'
+                : (index === progress.done ? 'Sending' : 'Sent')
+              return (
+                <li key={item.id} data-state={state.toLowerCase()}>
+                  <span>{item.label}</span>
+                  <small>{state}</small>
+                </li>
+              )
+            })}
+          </ol>
         </div>
       ) : null}
 

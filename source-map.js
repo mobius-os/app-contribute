@@ -333,6 +333,7 @@ export function prepareAllAction(projects) {
   return {
     label: `Prepare all (${candidates.length})`,
     event: 'prepare_all_contributions',
+    autoSend: true,
     count: candidates.length,
     draft: [
       'Prepare private upstream contributions for every eligible local change below:',
@@ -345,8 +346,9 @@ export function prepareAllAction(projects) {
 }
 
 // Agent handoffs are specific to the inspected project and conservative about
-// public work: the button only opens a drafted chat, and publishing prompts ask
-// the agent to confirm the destination before creating anything on GitHub.
+// public work. Ordinary project actions open a reviewable draft; explicit batch
+// actions opt into auto-send so the work begins after the owner clicks the
+// clearly labelled Prepare all / Address all button.
 export function projectAgentAction(project) {
   if (!project) return null
   const name = project.name || 'this project'

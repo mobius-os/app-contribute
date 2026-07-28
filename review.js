@@ -125,6 +125,7 @@ export function addressAllAction(records, reviewStatus) {
   })
   return {
     event: 'address_all_contributions',
+    autoSend: true,
     count: attentionRecords.length,
     draft: [
       'Address every active Contribute pull request that needs attention:',

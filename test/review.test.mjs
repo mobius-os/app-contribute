@@ -142,6 +142,7 @@ test('address all collects active local and published blockers but not history',
   )
   const action = addressAllAction(records, review)
   assert.equal(action.count, 2)
+  assert.equal(action.autoSend, true)
   assert.match(action.draft, /Refresh local change — mobius-os\/app-local/)
   assert.match(action.draft, /The source branch moved\./)
   assert.match(action.draft, /Checks failed — One test is red\./)
