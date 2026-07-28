@@ -53,6 +53,7 @@
     "github-connection.js",
     "storage.js",
     "prepared_reconcile.py",
+    "agent_snapshot.py",
     "contributing.md",
     "review-followup.md",
     "ui/Icons.jsx",
