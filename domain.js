@@ -55,7 +55,7 @@ export const STATUS_NARRATION = {
   open: 'Sent — maintainers will review it; this can take days',
   merged: 'Merged — this improvement is now shared with everyone',
   superseded: 'Superseded — the improvement reached main through another contribution',
-  closed: 'Not merged — tap to see why',
+  closed: 'Not merged — see GitHub for details',
   commented: 'Comment posted',
   abandoned: 'Dropped — you can undrop it from History anytime',
 }

@@ -21,10 +21,12 @@ import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
 
-// One ledger row. Pointer clicks on a linked PR/issue card open the target, and
-// pointer clicks on a prepared card open its review detail; keyboard users keep
-// the familiar visible link/button targets. The status chip carries the group's
-// identity in color, and the meta line reads type · repo#number · updated-time.
+// One ledger row. Cards deliberately expose explicit targets only — the title
+// is the link on a linked PR/issue card, and prepared cards use their
+// Send/Drop/Details controls; there is no whole-card click (removed for
+// stability, so narration copy must not promise a tap). The status chip
+// carries the group's identity in color, and the meta line reads
+// type · repo#number · updated-time.
 // Every field is optional-tolerant — the ledger is written by the agent and
 // cron, so a missing summary or repo just drops that piece rather than breaking
 // layout.

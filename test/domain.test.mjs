@@ -165,7 +165,7 @@ test('status narration leads each lifecycle state with human copy', () => {
     statusNarration({ status: 'open' }),
     'Sent — maintainers will review it; this can take days',
   )
-  assert.equal(statusNarration({ status: 'closed' }), 'Not merged — tap to see why')
+  assert.equal(statusNarration({ status: 'closed' }), 'Not merged — see GitHub for details')
   assert.equal(
     statusNarration({ status: 'superseded' }),
     'Superseded — the improvement reached main through another contribution',
