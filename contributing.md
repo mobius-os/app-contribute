@@ -142,23 +142,30 @@ don't propose.
 
 ## The approval gate
 
-Hard stop #1 is the gate. In practice:
+Private preparation begins only from an explicit partner request, including a
+project-level or **Prepare all** handoff from Contribute. Do not surface an
+unsolicited contribution question at the end of an otherwise complete chat:
+Contribute's Projects view owns discovery of local changes and lets the partner
+start preparation when they want it.
 
-1. Propose the contribution through the clarifying-question tool, not as a prose
-   aside. When the partner may still want to improve the candidate, offer three
-   paths: **Prepare privately**, **Refine first**, and **Not now**. Say that
-   preparation stays private and nothing goes public without a later approval.
+Hard stop #1 is still the gate. In practice:
+
+1. If the partner explicitly asks to prepare a contribution, prepare it
+   privately and stop at the Contribute review record. If they ask whether a
+   change *should* be contributed, answer the investigative question first and
+   do not prepare anything until they explicitly ask. If they ask to
+   "contribute" or "share" without distinguishing preparation from publication,
+   clarify that you can prepare it privately now but publishing still needs a
+   later explicit approval.
 2. Wait and classify the response:
    - **Prepare privately** is approval for preparation only. Prepare everything
      needed for review and direct submission, then stop.
    - **Refine first**, or actionable free-text feedback about the candidate,
      defers the contribution decision; it does not decline it. Do not prepare
      yet. Apply the feedback within the approved scope, verify the revised
-     change, then offer preparation once for that revised version. If the
+     change, then wait for a fresh explicit preparation request. If the
      partner selected **Refine first** without saying what to change, ask for
-     that open-ended feedback in plain chat. Each completed, partner-requested
-     refinement can earn one new offer; never repeat the card when no material
-     work changed.
+     that open-ended feedback in plain chat.
    - **Not now** declines preparation. Leave the change local and do not
      re-offer the same version.
 3. An unanswered, timed-out, disabled, or empty-response card stops the flow
