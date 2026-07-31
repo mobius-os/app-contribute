@@ -200,14 +200,15 @@ export const CSS = `
   margin: 0 0 12px;
 }
 .co-source-filters {
-  display: flex; gap: 2px; padding: 3px; overflow-x: auto;
-  border: 1px solid var(--border); border-radius: 10px;
+  display: flex; gap: 2px; height: 44px; overflow-x: auto;
+  border: 0; border-radius: 10px;
   background: var(--surface2, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--border);
   scrollbar-width: none; overscroll-behavior-inline: contain;
 }
 .co-source-filters::-webkit-scrollbar { display: none; }
 .co-source-filter {
-  flex: 0 0 auto; min-height: 44px; padding: 8px 11px;
+  flex: 0 0 auto; box-sizing: border-box; min-height: 44px; padding: 8px 11px;
   border: 0; border-radius: 7px;
   background: transparent; color: var(--muted); font: inherit;
   font-size: 12px; font-weight: 600; cursor: pointer;
