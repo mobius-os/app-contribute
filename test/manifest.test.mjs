@@ -21,6 +21,21 @@ test('install manifest ships the prepared-record reconciliation pass', () => {
   assert.match(source, /prepared_reconcile\.py/)
 })
 
+test('scheduled refresh retries cleanup for every terminal staging checkout', () => {
+  const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  assert.match(source, /TERMINAL_STAGING_STATUSES = frozenset/)
+  for (const status of [
+    'merged', 'closed', 'superseded', 'commented', 'abandoned',
+  ]) {
+    assert.match(source, new RegExp(`"${status}"`))
+  }
+  assert.match(source, /cleanup-staging/)
+  assert.ok(
+    source.indexOf('_reconcile_terminal_staging()') < source.indexOf('if not targets:'),
+    'cleanup must still run when there are no live GitHub records to refresh',
+  )
+})
+
 test('install manifest ships the one-call agent contribution snapshot', () => {
   assert.ok(manifest.source_files.includes('agent_snapshot.py'))
 })
