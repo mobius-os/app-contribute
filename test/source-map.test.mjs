@@ -8,9 +8,13 @@ import {
   prepareAllAction,
   preparableSourceProjects,
   projectAgentAction,
+  projectDetailSummary,
+  projectFlowStatus,
   projectMatchesFilter,
   projectOverview,
   projectForks,
+  projectRowFacts,
+  projectSourceState,
   projectStatus,
   recordBranch,
   sourcePathRelationship,
@@ -94,6 +98,10 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(project.compatibleFiles, 1)
   assert.equal(project.conflictFiles, 1)
   assert.equal(projectStatus(project).label, '1 file needs a choice')
+  assert.equal(projectSourceState(project), 'conflict')
+  assert.equal(projectFlowStatus(project).tone, 'danger')
+  assert.match(projectDetailSummary(project), /remaining overlapping files/)
+  assert.ok(projectRowFacts(project).includes('1 needs a choice'))
   assert.equal(sourcePathRelationship(project, 'local.js'), 'local')
   assert.equal(sourcePathRelationship(project, 'incoming.js'), 'incoming')
   assert.equal(sourcePathRelationship(project, 'compatible.js'), 'compatible')
@@ -101,6 +109,59 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(sourcePathRelationship(project, 'outside-preview.js'), 'changed')
   assert.match(projectAgentAction(project).draft, /shared submissions are already excluded/)
   assert.match(projectAgentAction(project).draft, /1 file is local-only/)
+})
+
+test('semantic conflict counts outrank a stale customized state everywhere', () => {
+  const project = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'customized',
+      tree: { available: true, files: 1, authored_files: 1 },
+      reconciliation: {
+        available: true,
+        local_only_count: 0,
+        new_upstream_count: 0,
+        compatible_count: 0,
+        unresolved_conflict_count: 1,
+        unresolved_conflict_paths: ['choice.js'],
+      },
+      working: { available: true, files: 0 },
+    },
+    apps: [],
+  }, [])[0]
+
+  assert.equal(projectSourceState(project), 'conflict')
+  assert.equal(projectStatus(project).tone, 'danger')
+  assert.equal(projectOverview(project).tone, 'danger')
+  assert.equal(projectFlowStatus(project).tone, 'danger')
+  assert.equal(projectAgentAction(project).event, 'resolve_source_state')
+})
+
+test('semantic counts normalize invalid receipt numbers at the boundary', () => {
+  const project = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'aligned',
+      reconciliation: {
+        available: true,
+        local_only_count: -2,
+        new_upstream_count: '2',
+        compatible_count: Infinity,
+        unresolved_conflict_count: true,
+        proven_present_count: 1.8,
+      },
+      working: { available: true, files: -5 },
+    },
+    apps: [],
+  }, [])[0]
+
+  assert.equal(project.localFiles, 0)
+  assert.equal(project.incomingFiles, 0)
+  assert.equal(project.compatibleFiles, 0)
+  assert.equal(project.conflictFiles, 0)
+  assert.equal(project.workingFiles, 0)
+  assert.equal(project.provenShared, 1)
+  assert.equal(projectSourceState(project), 'aligned')
 })
 
 test('incoming-only semantic paths are not offered as local contributions', () => {

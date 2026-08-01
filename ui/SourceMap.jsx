@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   contributionRelationship,
   projectAgentAction,
+  projectDetailSummary,
+  projectFlowStatus,
   projectMatchesFilter,
+  projectRowFacts,
   projectStatus,
   recordBranch,
   sourcePathRelationship,
@@ -32,33 +35,8 @@ function localCountLabel(project) {
   return `${countLabel(project.localFiles, 'file')} ${project.localFiles === 1 ? 'remains' : 'remain'} local`
 }
 
-function localFlowStatus(project) {
-  if (project.kind === 'external') return { label: 'Not installed', tone: 'quiet' }
-  if (project.builtHere) return { label: 'Built here', tone: 'accent' }
-  if (project.state === 'local_only') return { label: 'No shared source', tone: 'warn' }
-  if (!project.available) return { label: 'Not tracked', tone: 'quiet' }
-  if (project.state === 'conflict') return { label: 'Update conflict', tone: 'danger' }
-  if (project.workingFiles > 0) return { label: 'Being edited', tone: 'warn' }
-  if (
-    project.compatibleFiles > 0
-    || (project.localFiles > 0 && project.incomingFiles > 0)
-  ) {
-    return { label: 'Both changed', tone: 'warn' }
-  }
-  if (project.incomingFiles > 0 || project.state === 'incoming') {
-    return { label: 'Update available', tone: 'accent' }
-  }
-  if (project.different || project.state === 'customized') {
-    return { label: 'Committed differences', tone: 'accent' }
-  }
-  if (project.adapted || project.state === 'adapted') {
-    return { label: 'Installed normally', tone: 'quiet' }
-  }
-  return { label: 'Up to date', tone: 'ok' }
-}
-
 function ProjectFlow({ project }) {
-  const status = localFlowStatus(project)
+  const status = projectFlowStatus(project)
   const contributions = project.contributions || []
   const reviews = contributions.length
   const ready = contributions.filter((rec) => rec.status === 'prepared').length
@@ -363,32 +341,7 @@ function ProjectFileChanges({ project }) {
 function ProjectDetail({ project, onAskAgent }) {
   const [handoffNote, setHandoffNote] = useState('')
   const status = projectStatus(project)
-  const overview = project.builtHere
-    ? 'This app was built on your Möbius and does not have a shared GitHub repository yet.'
-    : project.state === 'local_only'
-      ? 'This project has a GitHub repository, but no shared update source is configured here.'
-      : project.kind === 'external'
-        ? 'This project is not installed here, but it still has a contribution in review.'
-        : project.state === 'conflict'
-          ? 'An update needs attention before this project can move forward.'
-          : project.workingFiles > 0
-            ? 'This project is currently being edited in your Möbius.'
-            : project.conflictFiles > 0
-              ? 'Shared submissions are already accounted for; only the remaining overlapping files need a choice.'
-              : (
-                project.compatibleFiles > 0
-                || (project.localFiles > 0 && project.incomingFiles > 0)
-              )
-                ? 'Shared submissions are already accounted for. Genuine local and incoming changes remain.'
-                : project.incomingFiles > 0
-                  ? 'A newer shared version is available.'
-                : project.different
-                  ? project.contributions.length > 0
-                    ? 'These are the committed changes that remain local after landed submissions; active reviews are shown separately below.'
-                    : 'These committed changes remain local after landed submissions. They are not working-tree edits.'
-                  : project.kind === 'app'
-                    ? 'Your installed app has no local changes.'
-                    : 'Your version matches the shared source.'
+  const overview = projectDetailSummary(project)
   const agentAction = projectAgentAction(project)
 
   function askAgent() {
@@ -437,18 +390,7 @@ function ProjectDetail({ project, onAskAgent }) {
 
 function ProjectRow({ project, selected, onSelect }) {
   const status = projectStatus(project)
-  const facts = []
-  if (project.builtHere) facts.push('Not on GitHub yet')
-  else if (project.state === 'local_only') facts.push('No shared update source')
-  if (project.workingFiles) facts.push('Being edited')
-  if (project.provenShared) facts.push(`${project.provenShared} landed recognized`)
-  if (project.incomingFiles) facts.push('Update available')
-  if (project.localFiles) facts.push(localCountLabel(project))
-  if (project.compatibleFiles) facts.push(`${project.compatibleFiles} combine cleanly`)
-  if (project.conflictFiles) facts.push(`${project.conflictFiles} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice`)
-  if (project.contributions.length) facts.push(countLabel(project.contributions.length, 'review'))
-  if (!facts.length && project.managedFiles) facts.push('Installed normally')
-  if (!facts.length) facts.push(project.available ? 'Up to date' : 'Not tracked')
+  const facts = projectRowFacts(project)
   return (
     <div className={'co-source-row-wrap' + (selected ? ' is-selected' : '')}>
       <button

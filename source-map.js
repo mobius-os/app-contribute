@@ -5,6 +5,11 @@
 
 const ACTIVE = new Set(['prepared', 'submitting', 'draft', 'open'])
 
+function nonnegativeCount(value) {
+  const count = typeof value === 'number' ? value : Number.NaN
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
 function repoKey(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
@@ -81,7 +86,7 @@ export function attachSourceProjects(snapshot, records) {
 }
 
 function decorateProject(project, contributions) {
-  const workingFiles = Number(project?.working?.files || 0)
+  const workingFiles = nonnegativeCount(project?.working?.files)
   // Installed apps are release projections, not full development checkouts.
   // Their authoritative local delta is against installer-owned `upstream`;
   // comparing them with origin can make omitted tests/docs/source look like
@@ -91,16 +96,16 @@ function decorateProject(project, contributions) {
   const comparisonTree = compareWithOrigin
     ? (project?.origin?.local_tree || project?.tree)
     : project?.tree
-  const authoredFiles = Number(
+  const authoredFiles = nonnegativeCount(
     comparisonTree?.authored_files ?? comparisonTree?.files ?? 0,
   )
-  const managedFiles = Number(comparisonTree?.managed_files || 0)
-  const originAhead = Number(
+  const managedFiles = nonnegativeCount(comparisonTree?.managed_files)
+  const originAhead = nonnegativeCount(
     compareWithOrigin
       ? (project?.origin?.local_ahead ?? project?.ahead ?? 0)
       : (project?.ahead ?? 0),
   )
-  const originBehind = Number(
+  const originBehind = nonnegativeCount(
     compareWithOrigin
       ? (project?.origin?.local_behind ?? project?.behind ?? 0)
       : (project?.behind ?? 0),
@@ -120,19 +125,19 @@ function decorateProject(project, contributions) {
     ? reconciliation.unresolved_conflict_paths
     : []
   const localFiles = semanticAvailable
-    ? Number(reconciliation.local_only_count ?? localOnlyPaths.length)
+    ? nonnegativeCount(reconciliation.local_only_count ?? localOnlyPaths.length)
     : authoredFiles
   const incomingFiles = semanticAvailable
-    ? Number(reconciliation.new_upstream_count ?? incomingPaths.length)
+    ? nonnegativeCount(reconciliation.new_upstream_count ?? incomingPaths.length)
     : originBehind
   const conflictFiles = semanticAvailable
-    ? Number(reconciliation.unresolved_conflict_count ?? conflictPaths.length)
+    ? nonnegativeCount(reconciliation.unresolved_conflict_count ?? conflictPaths.length)
     : 0
   const compatibleFiles = semanticAvailable
-    ? Number(reconciliation.compatible_count ?? compatiblePaths.length)
+    ? nonnegativeCount(reconciliation.compatible_count ?? compatiblePaths.length)
     : 0
   const provenShared = semanticAvailable
-    ? Number(reconciliation.proven_present_count ?? reconciliation.proven_present?.length ?? 0)
+    ? nonnegativeCount(reconciliation.proven_present_count ?? reconciliation.proven_present?.length ?? 0)
     : 0
   const different = localFiles > 0 || compatibleFiles > 0 || conflictFiles > 0
   const forks = projectForks(project, contributions)
@@ -246,11 +251,34 @@ export function sourcePathRelationship(project, path) {
   return 'changed'
 }
 
+export function projectSourceState(project) {
+  if (!project) return 'unknown'
+  if (project.kind === 'external') return 'external'
+  if (project.builtHere) return 'built_here'
+  if (project.state === 'local_only') return 'local_only'
+  if (!project.available) return 'unavailable'
+  if (project.state === 'conflict' || project.conflictFiles > 0) return 'conflict'
+  if (project.workingFiles > 0) return 'working'
+  if (
+    project.compatibleFiles > 0
+    || (project.localFiles > 0 && project.incomingFiles > 0)
+    || project.state === 'diverged'
+  ) return 'both_changed'
+  if (project.incomingFiles > 0 || project.state === 'incoming') return 'incoming'
+  if (project.detached) return 'detached'
+  if (project.branch && project.branch !== 'main') return 'branch'
+  if (project.state === 'customized' || project.different) return 'local_changes'
+  if (project.state === 'adapted' || project.adapted) return 'adapted'
+  return 'aligned'
+}
+
 export function projectStatus(project) {
-  if (project.kind === 'external') return { label: 'Contribution only', tone: 'quiet' }
-  if (project.builtHere) return { label: 'Built here', tone: 'accent' }
-  if (!project.available) return { label: 'Not tracked', tone: 'quiet' }
-  if (project.state === 'conflict' || project.conflictFiles > 0) {
+  const state = projectSourceState(project)
+  if (state === 'external') return { label: 'Contribution only', tone: 'quiet' }
+  if (state === 'built_here') return { label: 'Built here', tone: 'accent' }
+  if (state === 'local_only') return { label: 'No shared source', tone: 'warn' }
+  if (state === 'unavailable') return { label: 'Not tracked', tone: 'quiet' }
+  if (state === 'conflict') {
     return {
       label: project.conflictFiles > 0
         ? fileCount(project.conflictFiles) + (project.conflictFiles === 1
@@ -263,27 +291,38 @@ export function projectStatus(project) {
   if (project.contributions.some((rec) => rec.needs_attention)) {
     return { label: 'Needs attention', tone: 'danger' }
   }
-  if (project.workingFiles > 0) {
-    return { label: project.workingFiles + ' working', tone: 'warn' }
+  if (state === 'working') return { label: project.workingFiles + ' working', tone: 'warn' }
+  if (state === 'both_changed') return { label: 'Both sides changed', tone: 'warn' }
+  if (state === 'incoming') {
+    return { label: project.incomingFiles > 0 ? 'Shared changes' : 'Update available', tone: 'accent' }
   }
-  if (
-    project.compatibleFiles > 0
-    || (project.localFiles > 0 && project.incomingFiles > 0)
-  ) {
-    return { label: 'Both sides changed', tone: 'warn' }
+  if (state === 'detached' || state === 'branch') {
+    return { label: state === 'detached' ? 'Detached' : project.branch, tone: 'warn' }
   }
-  if (project.incomingFiles > 0) return { label: 'Shared changes', tone: 'accent' }
-  if (project.state === 'diverged') {
-    return { label: 'Both sides changed', tone: 'warn' }
-  }
-  if (project.detached || (project.branch && project.branch !== 'main')) {
-    return { label: project.detached ? 'Detached' : project.branch, tone: 'warn' }
-  }
-  if (project.state === 'incoming') return { label: 'Update available', tone: 'accent' }
-  if (project.state === 'customized' || project.different) return { label: 'Local changes', tone: 'accent' }
-  if (project.state === 'adapted') return { label: 'Install-managed', tone: 'quiet' }
-  if (project.state === 'local_only') return { label: 'No shared source', tone: 'warn' }
+  if (state === 'local_changes') return { label: 'Local changes', tone: 'accent' }
+  if (state === 'adapted') return { label: 'Install-managed', tone: 'quiet' }
   return { label: 'Aligned', tone: 'ok' }
+}
+
+export function projectFlowStatus(project) {
+  const state = projectSourceState(project)
+  const views = {
+    external: { label: 'Not installed', tone: 'quiet' },
+    built_here: { label: 'Built here', tone: 'accent' },
+    local_only: { label: 'No shared source', tone: 'warn' },
+    unavailable: { label: 'Not tracked', tone: 'quiet' },
+    conflict: { label: 'Update conflict', tone: 'danger' },
+    working: { label: 'Being edited', tone: 'warn' },
+    both_changed: { label: 'Both changed', tone: 'warn' },
+    incoming: { label: 'Update available', tone: 'accent' },
+    detached: { label: 'Another version', tone: 'warn' },
+    branch: { label: 'Another version', tone: 'warn' },
+    local_changes: { label: 'Committed differences', tone: 'accent' },
+    adapted: { label: 'Installed normally', tone: 'quiet' },
+    aligned: { label: 'Up to date', tone: 'ok' },
+    unknown: { label: 'Not tracked', tone: 'quiet' },
+  }
+  return views[state]
 }
 
 function fileCount(value) {
@@ -342,46 +381,44 @@ function changeFacts(project) {
 // in the feed return null, keeping the overview silent when there is no useful
 // local/upstream position to act on.
 export function projectOverview(project) {
-  if (!project || project.kind === 'external') return null
-  if (project.builtHere) {
+  const state = projectSourceState(project)
+  if (state === 'unknown' || state === 'external') return null
+  if (state === 'built_here') {
     return {
       label: 'Built here',
       detail: 'This app does not have a GitHub home yet',
       tone: 'accent',
     }
   }
-  if (project.state === 'local_only') {
+  if (state === 'local_only') {
     return {
       label: 'No shared update source',
       detail: 'A GitHub repository exists, but there is no shared version to compare',
       tone: 'warn',
     }
   }
-  if (project.state === 'conflict') {
+  if (state === 'conflict') {
     return {
       label: 'Changes need help',
       detail: changeFacts(project) || 'An update could not be combined safely',
       tone: 'danger',
     }
   }
-  const bothChanged = project.compatibleFiles > 0 || (
-    project.localFiles > 0 && project.incomingFiles > 0
-  )
-  if (bothChanged) {
+  if (state === 'both_changed') {
     return {
       label: 'Both versions changed',
       detail: changeFacts(project) || 'Your version and the shared version are different',
       tone: 'warn',
     }
   }
-  if (project.workingFiles > 0) {
+  if (state === 'working') {
     return {
       label: 'Local edits in progress',
       detail: fileCount(project.workingFiles) + ' being edited',
       tone: 'warn',
     }
   }
-  if (project.different || project.state === 'customized') {
+  if (state === 'local_changes') {
     return {
       label: 'Committed version differs',
       detail: project.localFiles > 0
@@ -390,7 +427,7 @@ export function projectOverview(project) {
       tone: 'accent',
     }
   }
-  if (project.incomingFiles > 0 || project.state === 'incoming') {
+  if (state === 'incoming') {
     return {
       label: 'Update available',
       detail: project.incomingFiles > 0
@@ -399,14 +436,14 @@ export function projectOverview(project) {
       tone: 'accent',
     }
   }
-  if (project.detached) {
+  if (state === 'detached') {
     return {
       label: 'Not on the main version',
       detail: project.head_sha ? 'At commit ' + project.head_sha.slice(0, 7) : 'Detached from a branch',
       tone: 'warn',
     }
   }
-  if (project.branch && project.branch !== 'main') {
+  if (state === 'branch') {
     return {
       label: 'On another version',
       detail: 'Currently on ' + project.branch,
@@ -414,6 +451,63 @@ export function projectOverview(project) {
     }
   }
   return null
+}
+
+export function projectDetailSummary(project) {
+  const state = projectSourceState(project)
+  if (state === 'built_here') {
+    return 'This app was built on your Möbius and does not have a shared GitHub repository yet.'
+  }
+  if (state === 'local_only') {
+    return 'This project has a GitHub repository, but no shared update source is configured here.'
+  }
+  if (state === 'external') {
+    return 'This project is not installed here, but it still has a contribution in review.'
+  }
+  if (state === 'conflict') {
+    return project.conflictFiles > 0
+      ? 'Shared submissions are already accounted for; only the remaining overlapping files need a choice.'
+      : 'An update needs attention before this project can move forward.'
+  }
+  if (state === 'working') return 'This project is currently being edited in your Möbius.'
+  if (state === 'both_changed') {
+    return 'Shared submissions are already accounted for. Genuine local and incoming changes remain.'
+  }
+  if (state === 'incoming') return 'A newer shared version is available.'
+  if (state === 'local_changes') {
+    return project.contributions.length > 0
+      ? 'These are the committed changes that remain local after landed submissions; active reviews are shown separately below.'
+      : 'These committed changes remain local after landed submissions. They are not working-tree edits.'
+  }
+  if (state === 'detached' || state === 'branch') {
+    return 'This Möbius is using a version other than the shared main branch.'
+  }
+  if (state === 'unavailable') return 'No inspectable local source is available.'
+  return project.kind === 'app'
+    ? 'Your installed app has no local changes.'
+    : 'Your version matches the shared source.'
+}
+
+export function projectRowFacts(project) {
+  const facts = []
+  const state = projectSourceState(project)
+  if (state === 'built_here') facts.push('Not on GitHub yet')
+  else if (state === 'local_only') facts.push('No shared update source')
+  if (project.workingFiles) facts.push('Being edited')
+  if (project.provenShared) facts.push(`${project.provenShared} landed recognized`)
+  if (project.incomingFiles) facts.push('Update available')
+  if (project.localFiles) facts.push(localCount(project.localFiles))
+  if (project.compatibleFiles) facts.push(`${project.compatibleFiles} combine cleanly`)
+  if (project.conflictFiles) {
+    facts.push(`${project.conflictFiles} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice`)
+  }
+  if (project.contributions.length) {
+    const reviews = project.contributions.length
+    facts.push(`${reviews} ${reviews === 1 ? 'review' : 'reviews'}`)
+  }
+  if (!facts.length && project.managedFiles) facts.push('Installed normally')
+  if (!facts.length) facts.push(project.available ? 'Up to date' : 'Not tracked')
+  return facts
 }
 
 export function actionableSourceProjects(projects) {
@@ -456,26 +550,22 @@ export function projectAgentAction(project) {
   if (!project) return null
   const name = project.name || 'this project'
   const repo = project.canonical_repo ? ` (${project.canonical_repo})` : ''
-  if (project.builtHere) {
+  const state = projectSourceState(project)
+  if (state === 'built_here') {
     return {
       label: 'Ask agent to publish',
       event: 'publish_local_app',
       draft: `Help me publish the locally built app "${name}" to GitHub. Inspect the app first, then confirm the repository name and visibility with me before creating or pushing anything public.`,
     }
   }
-  if (project.state === 'local_only') {
+  if (state === 'local_only') {
     return {
       label: 'Ask agent to review',
       event: 'review_missing_source',
       draft: `Inspect ${name}${repo}. It has a GitHub repository but no shared update source on this Möbius. Explain whether the source should be connected before making any changes.`,
     }
   }
-  if (
-    project.state === 'conflict'
-    || project.conflictFiles > 0
-    || project.compatibleFiles > 0
-    || (project.localFiles > 0 && project.incomingFiles > 0)
-  ) {
+  if (state === 'conflict' || state === 'both_changed') {
     const hasSemanticOverlap = project.semanticAvailable && (
       project.conflictFiles > 0
       || project.compatibleFiles > 0
@@ -489,7 +579,7 @@ export function projectAgentAction(project) {
         : `Inspect ${name}${repo}. My local version and the shared version both have changes. Explain what differs and help me choose a safe next step without discarding local work.`,
     }
   }
-  if (project.workingFiles > 0 || project.localFiles > 0 || project.state === 'customized') {
+  if (state === 'working' || state === 'local_changes') {
     const localWork = localWorkDescription(project)
     if (project.contributions?.length > 0) {
       return {
@@ -508,14 +598,14 @@ export function projectAgentAction(project) {
         : `Inspect the local changes in ${name}${repo}: ${localWork}. Prepare upstream contributions for the worthwhile changes. Do not publish anything yet; stage them in Contribute so I can review them first.`,
     }
   }
-  if (project.incomingFiles > 0 || project.state === 'incoming') {
+  if (state === 'incoming') {
     return {
       label: 'Ask agent about update',
       event: 'review_source_update',
       draft: `Review the available shared update for ${name}${repo}. Explain what changed and whether it is safe to update my local version before making any changes.`,
     }
   }
-  if (project.detached || (project.branch && project.branch !== 'main')) {
+  if (state === 'detached' || state === 'branch') {
     return {
       label: 'Ask agent to review',
       event: 'review_source_position',
