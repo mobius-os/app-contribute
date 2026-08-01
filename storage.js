@@ -118,7 +118,7 @@ export async function loadFullDiff(rec) {
 
 // Drop and Undrop are the SAME guarded status flip in opposite directions, so
 // they share one CAS engine. The runtime's durableWrite({ifMatch}) and
-// _getWithVersion pairing is the same guarded path useDocument uses, so it
+// getWithVersion pairing is the same guarded path useDocument uses, so it
 // keeps the mirror and subscribers coherent. A 412 means someone else (the
 // agent claiming it, another tab) won the race: re-read once and retry only if
 // the record is still in the expected `from` status. There is intentionally no
@@ -131,15 +131,22 @@ export async function loadFullDiff(rec) {
 async function casFlipStatus({ rec, from, to }) {
   const path = rec.path || RECORD_PREFIX + rec.id + '.json'
   const s = window.mobius && window.mobius.storage
-  if (!s || typeof s.durableWrite !== 'function' ||
-      typeof s._getWithVersion !== 'function') {
+  // The versioned read is the other half of durableWrite({ifMatch}): without a
+  // version there is nothing to match on, and there is deliberately no
+  // blind-write fallback. The runtime promoted this from the private
+  // `_getWithVersion` to a supported `getWithVersion`; accept either so the
+  // app runs on a runtime from before or after that rename.
+  const readVersioned = typeof s?.getWithVersion === 'function'
+    ? s.getWithVersion.bind(s)
+    : (typeof s?._getWithVersion === 'function' ? s._getWithVersion.bind(s) : null)
+  if (!s || typeof s.durableWrite !== 'function' || !readVersioned) {
     return { error: 'Safe storage updates are unavailable.' }
   }
   for (let attempt = 0; attempt < 2; attempt++) {
     let current = null
     let version = null
     try {
-      const loaded = await s._getWithVersion(path, 'json')
+      const loaded = await readVersioned(path, 'json')
       current = loaded.value
       version = loaded.version
     } catch (err) {
