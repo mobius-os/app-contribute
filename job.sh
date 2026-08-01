@@ -7,15 +7,17 @@
 # landing reference; partial identifier evidence only adds a dismissible hint.
 # That pass is independently CAS-safe and never sends a notification.
 #
-# Then, for every pr/issue ledger record that is still draft/open, ask GitHub for
-# its live state, latest activity, and check status in ONE batched GraphQL call
-# (aliased resource() nodes, ~1 rate-limit point total), write back any change,
-# and fire a celebratory push the first time something merges. The mini-app UI
-# does the same state refresh on open; this keeps the feed and the merged-count
-# fresh even when nobody opens the app. The full status enum is
-# prepared|submitting|draft|open|merged|closed|commented|abandoned — this job
-# tracks ONLY type pr|issue in status draft|open and leaves every other record
-# alone. When GitHub activity or failing checks need follow-up, the job adds a
+# Reconcile disposable staging checkouts for terminal records before the
+# GitHub-dependent work. This is deliberately retryable: a checkout remains on
+# disk after a failed cleanup, so the next scheduled pass tries it again.
+#
+# Then, for every pr/issue ledger record that is still draft/open, ask GitHub
+# for its live state, latest activity, and check status in ONE batched GraphQL
+# call (aliased resource() nodes, ~1 rate-limit point total), write back any
+# change, and fire a celebratory push the first time something merges. The
+# mini-app UI does the same state refresh on open; this keeps the feed and the
+# merged-count fresh even when nobody opens the app. When GitHub activity or
+# failing checks need follow-up, the job adds a
 # `needs_attention` + `attention` payload so the app can offer a targeted agent
 # follow-up. Writes use compare-and-swap
 # (If-Match on the read's ETag), so the scheduled refresh cannot clobber a
@@ -52,11 +54,6 @@ if [ -z "$APP_ID" ] || [ -z "$SERVICE_TOKEN" ]; then
   # No app id (a malformed cron line) or no service token — nothing safe to do.
   exit 0
 fi
-
-# gh must be present AND authenticated. Either failing is the normal
-# "GitHub not connected" state, so leave without touching the ledger.
-command -v gh >/dev/null 2>&1 || exit 0
-gh auth status >/dev/null 2>&1 || exit 0
 
 mkdir -p /data/cron-logs
 
@@ -154,6 +151,66 @@ for name in names:
     continue
   if isinstance(rec, dict) and rec.get("id"):
     records.append((name, rec, etag))
+
+
+TERMINAL_STAGING_STATUSES = frozenset((
+  "merged", "closed", "superseded", "commented", "abandoned",
+))
+CONTRIBUTION_ROOTS = tuple(
+  os.path.realpath(path) for path in ("/data/contrib", "/data/contributions")
+)
+
+
+def _terminal_staging_checkout(rec):
+  if rec.get("status") not in TERMINAL_STAGING_STATUSES:
+    return ""
+  plan = rec.get("plan") if isinstance(rec.get("plan"), dict) else {}
+  path = plan.get("repo_path")
+  if not isinstance(path, str) or not path:
+    return ""
+  resolved = os.path.realpath(path)
+  try:
+    inside_staging = any(
+      os.path.commonpath((resolved, root)) == root
+      for root in CONTRIBUTION_ROOTS
+    )
+  except ValueError:
+    return ""
+  return resolved if inside_staging and os.path.isdir(resolved) else ""
+
+
+def _reconcile_terminal_staging():
+  for _name, rec, _etag in records:
+    checkout = _terminal_staging_checkout(rec)
+    if not checkout:
+      continue
+    record_id = urllib.parse.quote(str(rec.get("id") or ""), safe="")
+    if not record_id:
+      continue
+    try:
+      raw, _ = _call(
+        "POST",
+        "/api/github/contributions/%s/%s/cleanup-staging" % (
+          APP_ID, record_id,
+        ),
+        {},
+      )
+      result = json.loads(raw) if raw else {}
+      if not result.get("cleaned") and os.path.isdir(checkout):
+        print(
+          "contribute: terminal staging remains %s" % rec.get("id"),
+          file=sys.stderr,
+        )
+    except Exception as exc:
+      print(
+        "contribute: terminal staging cleanup %s error: %s" % (
+          rec.get("id"), exc,
+        ),
+        file=sys.stderr,
+      )
+
+
+_reconcile_terminal_staging()
 
 
 def _is_target(rec):
