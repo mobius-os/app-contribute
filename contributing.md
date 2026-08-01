@@ -245,6 +245,7 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
        prior_work?: {searched_at, query, decision, summary?, matches?},
        labels?: [type, area?],
        stack?: {id, name?, position, total, parent_record_id, base_branch},
+       after_merge?: {action: connect_app, app_id, manifest_url},
        diff_excerpt?}         # diff_stat REQUIRED; diff_excerpt legacy (unused)
 ```
 
@@ -307,10 +308,20 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   review already shares the Git objects; for a standalone app review, Contribute
   imports only the two hash-verified reviewed commits into the installed repo
   without moving its branch or worktree.
+- When the contribution publishes a local app into its own canonical
+  `mobius-os/app-<id>` repository, add one reviewed `after_merge` handoff:
+  `{"action":"connect_app","app_id":<live numeric app id>,
+  "manifest_url":"https://raw.githubusercontent.com/mobius-os/app-<id>/main/mobius.json"}`.
+  Use it only when `source_repo_path` is that exact live app source,
+  `source_sha` is its captured revision, and the reviewed manifest id matches
+  the target app repository (or declares the live id as `previous_id`). Never
+  use it for platform changes, an unrelated app, a non-`app-*` repository, or
+  as a workaround for an ordinary App Store update. Contribute shows this
+  action inside the private review. Send binds it to the exact reviewed source
+  and capability digests; it does not connect or reinstall anything yet.
 
 Before you tell the partner it is ready, review the staged record yourself:
-re-read the stored `.diff`, confirm the proportional quality review above ran
-against the committed branch, confirm the body draft is exactly what should be
+re-read the stored `.diff`, confirm the body draft is exactly what should be
 published, confirm no private data appears in the branch, commit message, branch
 name, body, or diff, and confirm the branch is back on `main` when the prep
 steps require it.
@@ -341,6 +352,9 @@ No agent turn is needed after that click. The platform endpoint:
 7. creates a review-ready PR with the approved `title` and `body_draft`,
 8. best-effort applies the reviewed `labels` that exist in the target repo, and
 9. records `url`, `number`, label outcome, and `status: "open"` in the ledger.
+   For a reviewed `after_merge` app handoff, Send also stores an immutable
+   publication witness in the live app repo; this remains private local
+   provenance and does not alter the PR.
 
 If any preflight fails, the endpoint rolls the record back to `prepared` with
 `last_submit_error`; the partner can press Leave feedback to return to the
@@ -349,6 +363,27 @@ record, and stop again.
 
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
+
+### After an app PR merges: connect the same local app
+
+A merged record with a reviewed `after_merge.action: connect_app` shows
+**Connect app** in Contribute History. The owner presses it explicitly; do not
+simulate that click or call its endpoint from an agent turn.
+
+The platform then checks GitHub's actual merge commit, the stored reviewed diff,
+the durable landed witness, the immutable merged source and permission digests,
+and the intended live app row. Only an exact match installs that merged commit
+under the stable App Store identity. The
+existing numeric app row and its saved data remain in place, so later App Store
+updates target the same installation instead of creating a second app. If the
+local source advanced after review, the ordinary update merge may report
+conflicts; Contribute keeps the app connected and sends those source conflicts
+back to its owning chat for deliberate resolution.
+
+This handoff depends on the running platform version that supports reviewed
+publication connections. If Contribute reports that the route is unavailable,
+restart after installing the companion platform change; do not fall back to
+clicking App Store **Install** against an older public package.
 
 ### After it's sent: autopilot
 

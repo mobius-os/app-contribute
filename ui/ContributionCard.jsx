@@ -131,6 +131,7 @@ function PriorWorkEvidence({ priorWork }) {
           <summary>
             Search details
             {matches.length > 0 ? ` · ${matches.length} relevant ${matches.length === 1 ? 'match' : 'matches'}` : ''}
+            <Icon name="right" className="co-prior-work-chevron" />
           </summary>
           <div>
             {query ? (
@@ -387,10 +388,32 @@ function ReconciliationHint({ hint, onDismiss }) {
   )
 }
 
+function publicationHandoff(rec) {
+  const handoff = rec?.plan?.after_merge
+  if (!handoff || handoff.action !== 'connect_app') return null
+  return handoff
+}
+
+function PublicationReviewNote({ rec }) {
+  if (!publicationHandoff(rec)) return null
+  return (
+    <section className="co-publication-review" aria-label="Reviewed after-merge action">
+      <span>After merge</span>
+      <div>
+        <strong>Connect this local app in place</strong>
+        <p>
+          Contribute will offer one verified handoff to the merged App Store
+          version. The app stays the same in your workspace, with its saved data.
+        </p>
+      </div>
+    </section>
+  )
+}
+
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
-function ReviewPlan({ rec, loadDiff }) {
+export function ReviewPlan({ rec, loadDiff }) {
   const plan = rec.plan
   const where = plan.repo || rec.repo || ''
   const badge = (ACTION_LABELS[plan.action] || 'Contribution to') +
@@ -412,6 +435,7 @@ function ReviewPlan({ rec, loadDiff }) {
           <strong>Möbius Agent</strong>
         </div>
       ) : null}
+      <PublicationReviewNote rec={rec} />
       <PriorWorkEvidence priorWork={plan.prior_work} />
       <PlanLabels rec={rec} />
       {plan.body_draft ? (
@@ -690,6 +714,77 @@ function UndropAction({ rec, onRestore }) {
   )
 }
 
+function PublicationConnectionAction({ rec, onConnectApp }) {
+  const handoff = publicationHandoff(rec)
+  const connection = rec.publication_connection
+  const [connecting, setConnecting] = useState(false)
+  const [note, setNote] = useState('')
+  if (!handoff || rec.status !== 'merged') return null
+
+  if (
+    connection?.status === 'connected' ||
+    connection?.status === 'connected_conflict'
+  ) {
+    const conflicted = connection.status === 'connected_conflict'
+    return (
+      <div
+        className={`co-publication-action is-connected${conflicted ? ' has-conflicts' : ''}`}
+        role="status"
+      >
+        <span>{conflicted ? 'Connected with follow-up' : 'App connected'}</span>
+        <strong>
+          {conflicted
+            ? 'Your app is linked, but its source changes need review.'
+            : 'This installed app now follows its App Store version.'}
+        </strong>
+        <p>
+          {conflicted
+            ? 'Your saved app data stayed in place. Open the app’s source chat to resolve the overlapping files.'
+            : 'Future App Store updates will update this same app instead of creating a separate copy.'}
+        </p>
+      </div>
+    )
+  }
+
+  async function connect() {
+    if (typeof onConnectApp !== 'function') return
+    setConnecting(true)
+    setNote('')
+    try {
+      const outcome = (await onConnectApp(rec)) || {}
+      if (!outcome.ok) {
+        setNote(outcome.error || 'Could not connect this published app.')
+      }
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  return (
+    <div className="co-publication-action">
+      <span>App ready to connect</span>
+      <strong>Keep the local app and its published version together</strong>
+      <p>
+        Contribute will verify the exact merged source and permissions, then
+        connect them to this same installed app. Saved app data stays in place.
+      </p>
+      {typeof onConnectApp === 'function' ? (
+        <button
+          type="button"
+          className="co-btn co-btn-sm co-btn-primary"
+          disabled={connecting}
+          onClick={connect}
+        >
+          {connecting ? 'Connecting…' : 'Connect app'}
+        </button>
+      ) : null}
+      {note ? (
+        <p className="co-review-error" role="status" aria-live="polite">{note}</p>
+      ) : null}
+    </div>
+  )
+}
+
 // Autopilot state for a shipped PR: the plain-language line, a Pause/Resume
 // control, and the rounds timeline. The `autopilot` block on the record is a
 // display-only mirror of a platform DB row — Pause/Resume calls the platform
@@ -760,6 +855,7 @@ export function ContributionCard({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onConnectApp,
   loadDiff,
   reviewOnly = false,
 }) {
@@ -845,6 +941,7 @@ export function ContributionCard({
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
+      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
       {hasPlan && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button

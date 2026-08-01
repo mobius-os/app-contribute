@@ -654,7 +654,7 @@ export function SourceMap({
           {selectedProject && (
             <aside className="co-source-desktop-detail">
               <button type="button" className="co-map-back" onClick={closeProject}>
-                <span aria-hidden="true">←</span> All projects
+                <Icon name="left" /> All projects
               </button>
               <ProjectDetail key={selectedProject.key} project={selectedProject} onAskAgent={onAskAgent} />
             </aside>

@@ -297,6 +297,42 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
   }
 }
 
+// Complete the reviewed publication handoff after GitHub merges an app PR.
+// The platform re-verifies the PR and immutable merged source/permissions before it
+// attaches that public identity to the original local app row. The endpoint is
+// idempotent: a lost response can be retried without duplicating or reinstalling
+// the app.
+export async function connectPublishedApp({ appId, token, recordId }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(recordId) + '/connect-app',
+      {
+        method: 'POST',
+        headers: authHeaders(token),
+      },
+    )
+    let body = null
+    try { body = await r.json() } catch { body = null }
+    if (r.ok && body?.record && body?.connection) {
+      return {
+        ok: body.record,
+        connection: body.connection,
+      }
+    }
+    return {
+      error: typeof body?.detail === 'string'
+        ? body.detail
+        : 'Could not connect this published app.',
+    }
+  } catch {
+    return {
+      error: 'The response was lost. It is safe to try Connect again.',
+    }
+  }
+}
+
 // Batch approval path for one immutable PR stack. recordIds is the exact
 // ordered list rendered in the confirmation, so the server cannot silently
 // include a layer the partner did not review. The response always carries the

@@ -2,6 +2,7 @@ import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits } from '../stack.js'
 import { partitionReviewUnits, reviewStateFor } from '../review.js'
+import { Icon } from './Icons.jsx'
 
 // The grouped feed. domain.groupRecords partitions the ledger into three
 // buckets; each renders as a section only when it has rows, so the layout
@@ -29,6 +30,7 @@ export function Feed({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onConnectApp,
   loadDiff,
 }) {
   const { ready, open, history } = groups
@@ -123,10 +125,16 @@ export function Feed({
           <summary>
             <span>History</span>
             <small>{history.length} completed contributions</small>
+            <Icon name="right" className="co-history-chevron" />
           </summary>
           <div className="co-history-feed">
             {history.map((rec) => (
-              <ContributionCard key={rec.id} rec={rec} onRestore={onRestore} />
+              <ContributionCard
+                key={rec.id}
+                rec={rec}
+                onRestore={onRestore}
+                onConnectApp={onConnectApp}
+              />
             ))}
           </div>
         </details>

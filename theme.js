@@ -716,9 +716,9 @@ export const CSS = `
 .co-history > summary::-webkit-details-marker { display: none; }
 .co-history > summary > span { font-size: 14px; font-weight: 680; }
 .co-history > summary > small { color: var(--muted); font-size: 11.5px; }
-.co-history > summary::after { content: '›'; color: var(--muted); font-size: 19px; line-height: 1; transform: rotate(90deg); transition: transform .15s ease; }
+.co-history-chevron { color: var(--muted); width: 19px; height: 19px; transform: rotate(90deg); transition: transform .15s ease; }
 .co-history[open] > summary { border-bottom: 1px solid var(--border); }
-.co-history[open] > summary::after { transform: rotate(-90deg); }
+.co-history[open] .co-history-chevron { transform: rotate(-90deg); }
 .co-history-feed { display: flex; flex-direction: column; }
 .co-history-feed .co-card {
   margin: 0; border: 0; border-radius: 0; padding: 13px 14px;
@@ -996,6 +996,26 @@ export const CSS = `
   color: var(--green); font-size: 12px; line-height: 1.2;
 }
 .co-review-coauthor strong { color: var(--green); font-weight: 700; }
+.co-publication-review {
+  align-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px; padding: 11px 12px; border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.co-publication-review > span {
+  align-self: start; padding: 4px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent); font-size: 10px; font-weight: 750;
+  line-height: 1.2; letter-spacing: .035em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.co-publication-review > div { min-width: 0; }
+.co-publication-review strong {
+  display: block; font-size: 13px; line-height: 1.35; color: var(--text);
+}
+.co-publication-review p {
+  margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45;
+}
 .co-prior-work {
   align-self: stretch; display: flex; flex-direction: column; gap: 9px;
   padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px;
@@ -1017,11 +1037,11 @@ export const CSS = `
   list-style: none; color: var(--muted); font-size: 12px;
 }
 .co-prior-work-details > summary::-webkit-details-marker { display: none; }
-.co-prior-work-details > summary::after {
-  content: '›'; margin-left: auto; color: var(--muted); font-size: 18px;
+.co-prior-work-chevron {
+  margin-left: auto; color: var(--muted); width: 18px; height: 18px;
   transform: rotate(0); transition: transform .14s ease;
 }
-.co-prior-work-details[open] > summary::after { transform: rotate(90deg); }
+.co-prior-work-details[open] .co-prior-work-chevron { transform: rotate(90deg); }
 .co-prior-work-details > div { display: flex; flex-direction: column; gap: 8px; padding-bottom: 2px; }
 .co-prior-work-query {
   display: flex; align-items: baseline; gap: 8px; min-width: 0;
@@ -1359,6 +1379,34 @@ export const CSS = `
 .co-confirm-actions .co-btn { flex: 1 1 0; min-width: 0; }
 /* Undrop lives on a dropped card in History — a single, content-width button. */
 .co-history-actions { display: flex; gap: 8px; margin-top: 2px; }
+.co-publication-action {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  margin: 10px 0 2px; padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.co-publication-action > span {
+  color: var(--accent); font-size: 10px; font-weight: 750;
+  letter-spacing: .055em; line-height: 1.2; text-transform: uppercase;
+}
+.co-publication-action > strong {
+  color: var(--text); font-size: 13px; line-height: 1.4;
+}
+.co-publication-action > p:not(.co-review-error) {
+  margin: 0; color: var(--muted); font-size: 12px; line-height: 1.48;
+}
+.co-publication-action > .co-btn { margin-top: 4px; }
+.co-publication-action.is-connected {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+  background: color-mix(in srgb, var(--green) 7%, var(--surface));
+}
+.co-publication-action.is-connected > span { color: var(--green); }
+.co-publication-action.has-conflicts {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.co-publication-action.has-conflicts > span { color: var(--accent); }
 .co-review-note {
   margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted);
   user-select: text; -webkit-user-select: text; cursor: text;

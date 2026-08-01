@@ -43,6 +43,7 @@ import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, loadAppSettings, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
+  connectPublishedApp,
   fetchGithubStatus,
   fetchLiveStates,
   fetchReviewStatus,
@@ -558,6 +559,34 @@ export default function ContributeApp({ appId, token }) {
     return { error: outcome.error || 'Could not update autopilot.' }
   }, [appId, token, applyRecordUpdates])
 
+  // A merged app contribution can finish by attaching its reviewed public
+  // identity to the same local app row. The backend rechecks GitHub and the
+  // immutable merged package; this handler only reflects the durable result.
+  const onConnectApp = useCallback(async (rec) => {
+    const outcome = await connectPublishedApp({
+      appId,
+      token,
+      recordId: rec.id,
+    })
+    if (!outcome.ok) {
+      return {
+        error: outcome.error || 'Could not connect this published app.',
+      }
+    }
+    const next = { ...outcome.ok, path: rec.path }
+    applyRecordUpdates(next)
+    refreshSources()
+    window.mobius?.signal?.('published_app_connected', {
+      contribution_id: rec.id,
+      app_id: outcome.connection?.app_id,
+      status: outcome.connection?.status,
+    })
+    return {
+      ok: true,
+      connection: outcome.connection,
+    }
+  }, [appId, token, applyRecordUpdates, refreshSources])
+
   const onToggleAutopilotDefault = useCallback(async (next) => {
     setAutopilotDefault(next)
     const settings = await loadAppSettings()
@@ -1038,6 +1067,7 @@ export default function ContributeApp({ appId, token }) {
                 onDismiss={onDismiss}
                 onRestore={onRestore}
                 onSetAutopilot={onSetAutopilot}
+                onConnectApp={onConnectApp}
                 loadDiff={loadFullDiff}
               />
             )}

@@ -15,11 +15,15 @@ async function cardRenderer() {
       contents: `
         import React from 'react'
         import { renderToStaticMarkup } from 'react-dom/server'
-        import { ContributionCard } from './ui/ContributionCard.jsx'
+        import { ContributionCard, ReviewPlan } from './ui/ContributionCard.jsx'
         export function renderCard(rec) {
           return renderToStaticMarkup(React.createElement(ContributionCard, {
             rec, onSend: () => {}, onDismiss: () => {},
+            onConnectApp: () => {},
           }))
+        }
+        export function renderReview(rec) {
+          return renderToStaticMarkup(React.createElement(ReviewPlan, { rec }))
         }
       `,
       loader: 'jsx',
@@ -119,6 +123,94 @@ test('partial reconciliation evidence suggests dismissal without settling the re
   assert.match(html, /View possible landing PR/)
   assert.match(html, />Dismiss</)
   assert.match(html, /Waiting for your OK/)
+})
+
+test('a local app publication review explains the verified after-merge handoff', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderReview } = await cardRenderer()
+  const html = renderReview({
+    id: 'publish-maps',
+    type: 'pr',
+    status: 'prepared',
+    repo: 'mobius-os/app-maps',
+    plan: {
+      action: 'pr',
+      repo: 'mobius-os/app-maps',
+      after_merge: {
+        action: 'connect_app',
+        app_id: 101,
+        manifest_url: 'https://raw.githubusercontent.com/mobius-os/app-maps/main/mobius.json',
+      },
+    },
+  })
+
+  assert.match(html, /After merge/)
+  assert.match(html, /Connect this local app in place/)
+  assert.match(html, /same in your workspace/)
+  assert.match(html, /saved data/)
+})
+
+test('a merged app publication offers one explicit connection action', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'publish-maps',
+    type: 'pr',
+    status: 'merged',
+    title: 'Publish Maps',
+    repo: 'mobius-os/app-maps',
+    plan: {
+      action: 'pr',
+      after_merge: {
+        action: 'connect_app',
+        app_id: 101,
+        manifest_url: 'https://raw.githubusercontent.com/mobius-os/app-maps/main/mobius.json',
+      },
+    },
+  })
+
+  assert.match(html, /App ready to connect/)
+  assert.match(html, /Keep the local app and its published version together/)
+  assert.match(html, />Connect app</)
+  assert.match(html, /Saved app data stays in place/)
+})
+
+test('a completed publication connection stays visible without another button', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'publish-maps',
+    type: 'pr',
+    status: 'merged',
+    title: 'Publish Maps',
+    repo: 'mobius-os/app-maps',
+    plan: {
+      action: 'pr',
+      after_merge: {
+        action: 'connect_app',
+        app_id: 101,
+        manifest_url: 'https://raw.githubusercontent.com/mobius-os/app-maps/main/mobius.json',
+      },
+    },
+    publication_connection: {
+      status: 'connected',
+      app_id: 101,
+      slug: 'maps',
+    },
+  })
+
+  assert.match(html, /App connected/)
+  assert.match(html, /Future App Store updates will update this same app/)
+  assert.doesNotMatch(html, />Connect app</)
 })
 
 async function autopilotCardRenderer() {
