@@ -1,6 +1,7 @@
 import React from 'react'
 import {
   ArrowRotateCw,
+  ArrowLeft,
   ArrowUp,
   Chat,
   ChevronDown,
@@ -15,6 +16,7 @@ const SDK_ICONS = {
   trash: Trash,
   settings: SettingsCog,
   refresh: ArrowRotateCw,
+  left: ArrowLeft,
   chevron: ChevronDown,
   right: ChevronRight,
 }
