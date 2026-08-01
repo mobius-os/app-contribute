@@ -431,6 +431,8 @@ export const CSS = `
   color: var(--accent); font-size: 8.5px; font-style: normal;
 }
 .co-project-file-meta > i.is-conflict { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.co-project-file-meta > i.is-incoming { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.co-project-file-meta > i.is-compatible { color: var(--text); background: var(--surface); }
 .co-project-file-meta > span { display: inline-flex; gap: 5px; color: var(--muted); font-size: 9px; }
 .co-project-file-meta b { color: var(--green); font-weight: 600; }
 .co-project-file-meta em { color: var(--danger); font-style: normal; }

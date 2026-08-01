@@ -5,6 +5,7 @@ import {
   projectMatchesFilter,
   projectStatus,
   recordBranch,
+  sourcePathRelationship,
 } from '../source-map.js'
 import { groupContributionUnits, stackMeta } from '../stack.js'
 import { BatchAction } from './BatchAction.jsx'
@@ -13,12 +14,22 @@ import { Icon } from './Icons.jsx'
 const FILTERS = [
   ['all', 'All'],
   ['attention', 'Needs attention'],
-  ['changed', 'Changed here'],
+  ['changed', 'Differs from shared'],
   ['shared', 'Shared'],
 ]
 
 function countLabel(value, singular, plural = singular + 's') {
   return value + ' ' + (value === 1 ? singular : plural)
+}
+
+function incomingCountLabel(project) {
+  return project.semanticAvailable
+    ? countLabel(project.incomingFiles, 'file')
+    : countLabel(project.originBehind, 'shared update')
+}
+
+function localCountLabel(project) {
+  return `${countLabel(project.localFiles, 'file')} ${project.localFiles === 1 ? 'remains' : 'remain'} local`
 }
 
 function localFlowStatus(project) {
@@ -28,14 +39,17 @@ function localFlowStatus(project) {
   if (!project.available) return { label: 'Not tracked', tone: 'quiet' }
   if (project.state === 'conflict') return { label: 'Update conflict', tone: 'danger' }
   if (project.workingFiles > 0) return { label: 'Being edited', tone: 'warn' }
-  if ((project.originBehind > 0 && project.originAhead > 0) || project.state === 'diverged') {
+  if (
+    project.compatibleFiles > 0
+    || (project.localFiles > 0 && project.incomingFiles > 0)
+  ) {
     return { label: 'Both changed', tone: 'warn' }
   }
-  if (project.originBehind > 0 || project.state === 'incoming') {
+  if (project.incomingFiles > 0 || project.state === 'incoming') {
     return { label: 'Update available', tone: 'accent' }
   }
   if (project.different || project.state === 'customized') {
-    return { label: 'Changed here', tone: 'accent' }
+    return { label: 'Committed differences', tone: 'accent' }
   }
   if (project.adapted || project.state === 'adapted') {
     return { label: 'Installed normally', tone: 'quiet' }
@@ -59,11 +73,24 @@ function ProjectFlow({ project }) {
   const localBranch = project.branch || (project.detached ? 'detached' : 'main')
   const localBits = [
     installedRelease && project.version ? `v${project.version}` : localBranch,
-    project.originBehind > 0 ? `${project.originBehind} incoming` : '',
-    project.authoredFiles > 0 ? countLabel(project.authoredFiles, 'changed file') : '',
+    project.provenShared > 0
+      ? `${countLabel(project.provenShared, 'landed submission')} recognized`
+      : '',
+    project.localFiles > 0
+      ? localCountLabel(project)
+      : '',
+    project.incomingFiles > 0
+      ? `${incomingCountLabel(project)} incoming`
+      : '',
+    project.compatibleFiles > 0
+      ? `${countLabel(project.compatibleFiles, 'file')} combine cleanly`
+      : '',
+    project.conflictFiles > 0
+      ? `${countLabel(project.conflictFiles, 'file')} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice`
+      : '',
     project.workingFiles > 0 ? countLabel(project.workingFiles, 'file being edited', 'files being edited') : '',
-    !project.authoredFiles && !project.workingFiles && project.managedFiles > 0 ? 'safe install adjustments only' : '',
-    !project.authoredFiles && !project.workingFiles && !project.managedFiles
+    !project.localFiles && !project.incomingFiles && !project.compatibleFiles && !project.conflictFiles && !project.workingFiles && project.managedFiles > 0 ? 'safe install adjustments only' : '',
+    !project.localFiles && !project.incomingFiles && !project.compatibleFiles && !project.conflictFiles && !project.workingFiles && !project.managedFiles
       ? (installedRelease ? 'installed files match release' : 'source matches')
       : '',
   ].filter(Boolean)
@@ -245,6 +272,10 @@ function fileStateLabel(group) {
   if (group === 'conflict') return 'Conflict'
   if (group === 'untracked') return 'New'
   if (group === 'staged') return 'Staged'
+  if (group === 'local') return 'Local'
+  if (group === 'incoming') return 'Incoming'
+  if (group === 'compatible') return 'Both · combines'
+  if (group === 'changed') return 'Differs'
   return 'Editing'
 }
 
@@ -271,7 +302,11 @@ function ProjectFileChanges({ project }) {
   const changed = Number(project.authoredFiles || 0)
   const editing = Number(project.workingFiles || 0)
   const summary = [
-    changed ? `${changed} changed` : '',
+    project.provenShared ? `${project.provenShared} landed recognized` : '',
+    project.localFiles ? localCountLabel(project) : '',
+    project.incomingFiles ? `${incomingCountLabel(project)} incoming` : '',
+    project.compatibleFiles ? `${project.compatibleFiles} combine cleanly` : '',
+    project.conflictFiles ? `${project.conflictFiles} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice` : '',
     editing ? `${editing} being edited` : '',
   ].filter(Boolean).join(' · ')
   const previewCount = 4
@@ -285,18 +320,23 @@ function ProjectFileChanges({ project }) {
         <small>{summary}</small>
       </header>
       <div className="co-project-file-list">
-        {shown.map((file) => (
-          <div className="co-project-file" key={file.path} title={file.path}>
-            <code>{file.path}</code>
-            <span className="co-project-file-meta">
-              {file.working && <i className={'is-' + file.group}>{fileStateLabel(file.group)}</i>}
-              {!file.binary && (file.insertions != null || file.deletions != null) && (
-                <span><b>+{file.insertions || 0}</b><em>−{file.deletions || 0}</em></span>
-              )}
-              {file.binary && <span>Binary</span>}
-            </span>
-          </div>
-        ))}
+        {shown.map((file) => {
+          const relationship = file.working
+            ? file.group
+            : sourcePathRelationship(project, file.path)
+          return (
+            <div className="co-project-file" key={file.path} title={file.path}>
+              <code>{file.path}</code>
+              <span className="co-project-file-meta">
+                <i className={'is-' + relationship}>{fileStateLabel(relationship)}</i>
+                {!file.binary && (file.insertions != null || file.deletions != null) && (
+                  <span><b>+{file.insertions || 0}</b><em>−{file.deletions || 0}</em></span>
+                )}
+                {file.binary && <span>Binary</span>}
+              </span>
+            </div>
+          )
+        })}
         {expanded && tree?.truncated && (
           <p>Showing {tree.paths?.filter((file) => file.group !== 'managed').length || 0} of {changed} changed files.</p>
         )}
@@ -333,12 +373,19 @@ function ProjectDetail({ project, onAskAgent }) {
           ? 'An update needs attention before this project can move forward.'
           : project.workingFiles > 0
             ? 'This project is currently being edited in your Möbius.'
-            : project.originBehind > 0 && project.originAhead > 0
-              ? 'Both your version and the shared version have changed.'
-              : project.originBehind > 0
-                ? 'A newer shared version is available.'
+            : project.conflictFiles > 0
+              ? 'Shared submissions are already accounted for; only the remaining overlapping files need a choice.'
+              : (
+                project.compatibleFiles > 0
+                || (project.localFiles > 0 && project.incomingFiles > 0)
+              )
+                ? 'Shared submissions are already accounted for. Genuine local and incoming changes remain.'
+                : project.incomingFiles > 0
+                  ? 'A newer shared version is available.'
                 : project.different
-                  ? 'Your Möbius includes changes that are not in the shared version.'
+                  ? project.contributions.length > 0
+                    ? 'These are the committed changes that remain local after landed submissions; active reviews are shown separately below.'
+                    : 'These committed changes remain local after landed submissions. They are not working-tree edits.'
                   : project.kind === 'app'
                     ? 'Your installed app has no local changes.'
                     : 'Your version matches the shared source.'
@@ -394,8 +441,11 @@ function ProjectRow({ project, selected, onSelect }) {
   if (project.builtHere) facts.push('Not on GitHub yet')
   else if (project.state === 'local_only') facts.push('No shared update source')
   if (project.workingFiles) facts.push('Being edited')
-  if (project.originBehind) facts.push('Update available')
-  if (project.authoredFiles) facts.push('Changed here')
+  if (project.provenShared) facts.push(`${project.provenShared} landed recognized`)
+  if (project.incomingFiles) facts.push('Update available')
+  if (project.localFiles) facts.push(localCountLabel(project))
+  if (project.compatibleFiles) facts.push(`${project.compatibleFiles} combine cleanly`)
+  if (project.conflictFiles) facts.push(`${project.conflictFiles} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice`)
   if (project.contributions.length) facts.push(countLabel(project.contributions.length, 'review'))
   if (!facts.length && project.managedFiles) facts.push('Installed normally')
   if (!facts.length) facts.push(project.available ? 'Up to date' : 'Not tracked')
@@ -527,7 +577,7 @@ export function SourceMap({
       <div className="co-sources-head">
         <div>
           <h2 id="co-sources-title">Where changes live</h2>
-          <p className="co-sources-intro">See what changed here, what changed in the shared version, and what is ready to share.</p>
+          <p className="co-sources-intro">Separate committed differences, working edits, shared updates, and reviews already in progress.</p>
         </div>
         <div className="co-sources-fresh">
           {compared && <span>Checked {compared}</span>}

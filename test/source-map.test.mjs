@@ -13,6 +13,7 @@ import {
   projectForks,
   projectStatus,
   recordBranch,
+  sourcePathRelationship,
   sourceSummary,
 } from '../source-map.js'
 
@@ -54,6 +55,82 @@ test('tree equality wins over bookkeeping-only ahead history', () => {
   assert.equal(contribute.different, false)
   assert.equal(projectStatus(contribute).label, 'Aligned')
   assert.equal(projectMatchesFilter(contribute, 'changed'), false)
+})
+
+test('semantic receipt separates landed, local, incoming, and residual paths', () => {
+  const project = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'conflict',
+      tree: {
+        available: true, files: 4, authored_files: 4, managed_files: 0,
+        paths: [
+          { path: 'local.js', group: 'authored' },
+          { path: 'incoming.js', group: 'authored' },
+          { path: 'compatible.js', group: 'authored' },
+          { path: 'choice.js', group: 'authored' },
+        ],
+      },
+      reconciliation: {
+        available: true,
+        proven_present: ['one', 'two'],
+        proven_present_count: 2,
+        local_only_paths: ['local.js'],
+        local_only_count: 1,
+        new_upstream_paths: ['incoming.js'],
+        new_upstream_count: 1,
+        compatible_paths: ['compatible.js'],
+        compatible_count: 1,
+        unresolved_conflict_paths: ['choice.js'],
+        unresolved_conflict_count: 1,
+      },
+    },
+    apps: [],
+  }, [])[0]
+
+  assert.equal(project.provenShared, 2)
+  assert.equal(project.localFiles, 1)
+  assert.equal(project.incomingFiles, 1)
+  assert.equal(project.compatibleFiles, 1)
+  assert.equal(project.conflictFiles, 1)
+  assert.equal(projectStatus(project).label, '1 file needs a choice')
+  assert.equal(sourcePathRelationship(project, 'local.js'), 'local')
+  assert.equal(sourcePathRelationship(project, 'incoming.js'), 'incoming')
+  assert.equal(sourcePathRelationship(project, 'compatible.js'), 'compatible')
+  assert.equal(sourcePathRelationship(project, 'choice.js'), 'conflict')
+  assert.equal(sourcePathRelationship(project, 'outside-preview.js'), 'changed')
+  assert.match(projectAgentAction(project).draft, /shared submissions are already excluded/)
+  assert.match(projectAgentAction(project).draft, /1 file is local-only/)
+})
+
+test('incoming-only semantic paths are not offered as local contributions', () => {
+  const project = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'incoming',
+      tree: { available: true, files: 2, authored_files: 2, managed_files: 0 },
+      reconciliation: {
+        available: true,
+        proven_present: ['already-landed'],
+        proven_present_count: 1,
+        local_only_paths: [],
+        local_only_count: 0,
+        new_upstream_paths: ['a.js', 'b.js'],
+        new_upstream_count: 2,
+        compatible_paths: [],
+        compatible_count: 0,
+        unresolved_conflict_paths: [],
+        unresolved_conflict_count: 0,
+      },
+      working: { available: true, files: 0 },
+    },
+    apps: [],
+  }, [])[0]
+
+  assert.equal(project.different, false)
+  assert.equal(projectStatus(project).label, 'Shared changes')
+  assert.equal(projectAgentAction(project).event, 'review_source_update')
+  assert.equal(preparableSourceProjects([project]).length, 0)
 })
 
 test('installed apps ignore full-repository origin projections', () => {
@@ -119,6 +196,8 @@ test('installed apps still surface genuine local work plus a release update', ()
   assert.equal(projectStatus(demo).label, 'Both sides changed')
   assert.equal(projectOverview(demo).label, 'Both versions changed')
   assert.equal(projectAgentAction(demo).event, 'resolve_source_state')
+  assert.match(projectAgentAction(demo).draft, /local version and the shared version/)
+  assert.doesNotMatch(projectAgentAction(demo).draft, /semantic source receipt/)
 })
 
 test('active records for an uninstalled repo stay visible', () => {
@@ -263,7 +342,7 @@ test('agent actions prepare local changes and guard public app publishing', () =
   }, [])[0]
   const prepare = projectAgentAction(changed)
   assert.equal(prepare.label, 'Ask agent to prepare')
-  assert.match(prepare.draft, /stage it in Contribute so I can review it first/)
+  assert.match(prepare.draft, /stage them in Contribute so I can review them first/)
 
   const localApp = attachSourceProjects({
     platform: null,
@@ -275,6 +354,56 @@ test('agent actions prepare local changes and guard public app publishing', () =
   const publish = projectAgentAction(localApp)
   assert.equal(publish.label, 'Ask agent to publish')
   assert.match(publish.draft, /confirm the repository name and visibility/)
+})
+
+test('active reviews turn a broad source delta into an inventory, not a mega-PR prompt', () => {
+  const changed = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'customized', ahead: 270, behind: 0,
+      tree: { available: true, files: 264 },
+      working: { available: true, files: 0 },
+    },
+    apps: [],
+  }, [{
+    id: 'open', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+  }])[0]
+
+  assert.equal(projectOverview(changed).label, 'Committed version differs')
+  assert.equal(projectOverview(changed).detail, '264 files remain local after shared work')
+  const action = projectAgentAction(changed)
+  assert.equal(action.label, 'Ask agent to inventory')
+  assert.equal(action.event, 'review_remaining_changes')
+  assert.match(action.draft, /already represented by active Contribute reviews/)
+  assert.match(action.draft, /264 files committed only here/)
+  assert.doesNotMatch(action.draft, /prepare an upstream contribution/)
+  assert.equal(preparableSourceProjects([changed]).length, 0)
+})
+
+test('working-only projects with active reviews describe the edits instead of zero local files', () => {
+  const changed = attachSourceProjects({
+    platform: {
+      ...snapshot.platform,
+      state: 'working', ahead: 0, behind: 0,
+      tree: { available: true, files: 0, authored_files: 0, managed_files: 0 },
+      working: { available: true, files: 2 },
+      reconciliation: {
+        available: true,
+        local_only_count: 0,
+        new_upstream_count: 0,
+        compatible_count: 0,
+        unresolved_conflict_count: 0,
+      },
+    },
+    apps: [],
+  }, [{
+    id: 'open', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+  }])[0]
+
+  const action = projectAgentAction(changed)
+  assert.equal(action.label, 'Ask agent to inventory')
+  assert.match(action.draft, /2 files being edited/)
+  assert.doesNotMatch(action.draft, /0 files/)
 })
 
 test('prepare all batches only projects with eligible local contribution changes', () => {
