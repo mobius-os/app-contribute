@@ -36,6 +36,7 @@ import {
 } from './domain.js'
 import {
   addressAllAction,
+  earlyChecksActive,
   indexReviewStatus,
   partitionReviewUnits,
 } from './review.js'
@@ -49,6 +50,8 @@ import {
   fetchReviewStatus,
   fetchSourceStatus,
   landContributionStack,
+  refreshPreparedChecks,
+  runPreparedChecks,
   setAutopilot,
   submitContribution,
   submitContributionStack,
@@ -250,6 +253,15 @@ export default function ContributeApp({ appId, token }) {
     return next
   }, [token, appId])
 
+  const refreshEarlyChecks = useCallback(async () => {
+    if (connRef.current.state !== 'connected') return { ok: false }
+    const outcome = await refreshPreparedChecks(token, appId)
+    if (outcome.ok && outcome.records.length > 0) {
+      applyRecordUpdates(outcome.records)
+    }
+    return outcome
+  }, [token, appId, applyRecordUpdates])
+
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
   // backend route was restarted into the running server, so say that plainly.
@@ -283,9 +295,10 @@ export default function ContributeApp({ appId, token }) {
     setConn(status)
     if (status.state === 'connected' && !fromCache) {
       runLiveRefresh(recordsRef.current)
+      refreshEarlyChecks()
     }
     return status
-  }, [token, fromCache, runLiveRefresh])
+  }, [token, fromCache, runLiveRefresh, refreshEarlyChecks])
 
   // Mount: read the ledger and the connection status together, then run the
   // live refresh only when GitHub is reachable and connected AND we enumerated
@@ -344,6 +357,9 @@ export default function ContributeApp({ appId, token }) {
   const refreshWorkRef = useRef(null)
   const runRefreshWork = useCallback(async () => {
     if (document.visibilityState !== 'visible') return
+    if (connRef.current.state === 'connected') {
+      await refreshEarlyChecks()
+    }
     const [ledger] = await Promise.all([
       loadLedger(),
       refreshReviewStatus(),
@@ -357,7 +373,7 @@ export default function ContributeApp({ appId, token }) {
       replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
       setFromCache(false)
     }
-  }, [fetchRefreshed, refreshReviewStatus, replaceFeed])
+  }, [fetchRefreshed, refreshEarlyChecks, refreshReviewStatus, replaceFeed])
   refreshWorkRef.current = runRefreshWork
   const refreshCoordinatorRef = useRef(null)
   if (!refreshCoordinatorRef.current) {
@@ -382,6 +398,22 @@ export default function ContributeApp({ appId, token }) {
       window.removeEventListener('message', refreshOnForeground)
     }
   }, [])
+
+  const hasActiveEarlyChecks = records.some(earlyChecksActive)
+  useEffect(() => {
+    if (!hasActiveEarlyChecks || conn.state !== 'connected') return undefined
+    let cancelled = false
+    let timer = null
+    const poll = async () => {
+      await refreshEarlyChecks()
+      if (!cancelled) timer = window.setTimeout(poll, 15000)
+    }
+    timer = window.setTimeout(poll, 2500)
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [hasActiveEarlyChecks, conn.state, refreshEarlyChecks])
 
   const setView = useCallback((next) => {
     if (!CONTRIBUTION_VIEWS.includes(next)) next = 'prs'
@@ -540,6 +572,44 @@ export default function ContributeApp({ appId, token }) {
     refreshReviewStatus()
     return { error: outcome.error || 'Could not submit this PR.' }
   }, [appId, token, autopilotDefault, applyRecordUpdates, refreshReviewStatus])
+
+  const onRunChecks = useCallback(async (rec) => {
+    const outcome = await runPreparedChecks({ appId, token, rec })
+    if (outcome.ok) {
+      const next = { ...outcome.ok, path: rec.path }
+      applyRecordUpdates(next)
+      window.mobius?.signal?.('prepared_checks_started', {
+        id: rec.id,
+        url: next.early_checks?.url || '',
+      })
+      return { ok: true, record: next }
+    }
+    if (outcome.record) {
+      applyRecordUpdates({ ...outcome.record, path: rec.path })
+    }
+    if (outcome.uncertain) {
+      try {
+        const ledger = await loadLedger()
+        const fresh = ledger.records.find((item) => item.id === rec.id)
+        if (fresh) {
+          applyRecordUpdates({ ...fresh, path: rec.path })
+          const state = fresh.early_checks?.state
+          if (earlyChecksActive(fresh)) {
+            return { pending: true, record: fresh }
+          }
+          if (state === 'completed') return { ok: true, record: fresh }
+          if (state === 'error') {
+            return { error: fresh.early_checks?.message || outcome.error }
+          }
+        }
+      } catch { /* the visibility refresh remains authoritative */ }
+      return { pending: true }
+    }
+    return {
+      error: outcome.error || 'Could not start GitHub checks.',
+      unsupported: outcome.unsupported,
+    }
+  }, [appId, token, applyRecordUpdates])
 
   // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
   // write); on success we re-read that record so the mirrored autopilot block
@@ -1061,6 +1131,7 @@ export default function ContributeApp({ appId, token }) {
                 records={visibleRecords}
                 reviewStatus={reviewStatus}
                 onSend={onSend}
+                onRunChecks={onRunChecks}
                 onSendStack={onSendStack}
                 onLandStack={onLandStack}
                 onFeedback={onFeedback}

@@ -13,7 +13,7 @@ const batchActionSource = readFileSync(new URL('../ui/BatchAction.jsx', import.m
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>Send<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : 'Send'\}<\/span>/)
   assert.match(
     stackSource,
     /<span>\{isLandingAction \? 'Land stack' : 'Send for review'\}<\/span>/,
@@ -22,6 +22,15 @@ test('send actions keep a visible label instead of relying on the icon alone', (
     stackSource,
     /<span>\{canRecoverLanding \? 'Check' : isLandingAction \? 'Land' : 'Send'\}<\/span>/,
   )
+})
+
+test('prepared platform checks stay a separate confirmed no-PR action', () => {
+  assert.match(cardSource, /Run GitHub checks/)
+  assert.match(cardSource, /Run on my fork/)
+  assert.match(cardSource, /does not[\s\S]*open a pull request or email the organization/)
+  assert.match(apiSource, /\/run-checks/)
+  assert.match(apiSource, /\/prepared-checks\/refresh/)
+  assert.match(appSource, /prepared_checks_started/)
 })
 
 test('single and stacked sends expose elapsed progress to assistive technology', () => {

@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   addressAllAction,
+  canRunEarlyChecks,
   contributionsNeedingAttention,
+  earlyChecksActive,
+  earlyChecksFailed,
+  earlyChecksPassed,
   blockedReviewCount,
   indexReviewStatus,
   partitionReviewUnits,
@@ -115,7 +119,53 @@ test('batch and feed share the same needs-attention partition', () => {
     },
   })
   assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked'])
+  assert.deepEqual(partition.checking, [])
   assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
+})
+
+test('prepared platform checks have explicit active, pass, and failure states', () => {
+  const base = {
+    id: 'platform', type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
+    plan: { action: 'pr', repo: 'mobius-os/mobius' },
+  }
+  assert.equal(canRunEarlyChecks(base), true)
+  assert.equal(canRunEarlyChecks({ ...base, plan: { ...base.plan, stack: {} } }), false)
+  assert.equal(canRunEarlyChecks({ ...base, repo: 'mobius-os/app-demo', plan: {
+    action: 'pr', repo: 'mobius-os/app-demo',
+  } }), false)
+
+  assert.equal(earlyChecksActive({ ...base, early_checks: { state: 'in_progress' } }), true)
+  assert.equal(earlyChecksPassed({
+    ...base, early_checks: { state: 'completed', conclusion: 'success' },
+  }), true)
+  assert.equal(earlyChecksFailed({
+    ...base, early_checks: { state: 'completed', conclusion: 'failure' },
+  }), true)
+  assert.equal(earlyChecksFailed({
+    ...base, early_checks: { state: 'error', message: 'Could not start.' },
+  }), true)
+})
+
+test('running early checks leave the send batch and failures enter follow-up', () => {
+  const record = (id, early_checks) => ({
+    id, type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
+    plan: { action: 'pr', repo: 'mobius-os/mobius', title: id },
+    early_checks,
+  })
+  const units = [
+    { type: 'record', id: 'running', record: record('running', { state: 'queued' }), records: [record('running', { state: 'queued' })] },
+    { type: 'record', id: 'failed', record: record('failed', { state: 'completed', conclusion: 'failure' }), records: [record('failed', { state: 'completed', conclusion: 'failure' })] },
+    { type: 'record', id: 'passed', record: record('passed', { state: 'completed', conclusion: 'success' }), records: [record('passed', { state: 'completed', conclusion: 'success' })] },
+  ]
+  const partition = partitionReviewUnits(units, { byId: {} })
+  assert.deepEqual(partition.checking.map((unit) => unit.id), ['running'])
+  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['failed'])
+  assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['passed'])
+
+  const action = addressAllAction(units.flatMap((unit) => unit.records), { byId: {} })
+  assert.equal(action.count, 1)
+  assert.match(action.draft, /failed/)
+  assert.match(action.draft, /early GitHub checks need a fix/i)
 })
 
 test('address all collects active local and published blockers but not history', () => {

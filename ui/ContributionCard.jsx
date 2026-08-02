@@ -11,6 +11,12 @@ import {
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
 import {
+  canRunEarlyChecks,
+  earlyChecksActive,
+  earlyChecksFailed,
+  earlyChecksPassed,
+} from '../review.js'
+import {
   autopilotState,
   autopilotNarration,
   autopilotRounds,
@@ -302,6 +308,74 @@ function SubmitErrorAlert({ rec, reviewState }) {
   )
 }
 
+function EarlyChecksPanel({ rec, onFeedback }) {
+  const checks = rec.early_checks
+  const [note, setNote] = useState('')
+  if (!checks || typeof checks !== 'object') return null
+
+  const active = earlyChecksActive(rec)
+  const failed = earlyChecksFailed(rec)
+  const passed = earlyChecksPassed(rec)
+  const url = typeof checks.url === 'string' &&
+    checks.url.startsWith('https://github.com/') ? checks.url : ''
+  const label = active
+    ? 'GitHub checks running'
+    : passed
+      ? 'GitHub checks passed'
+      : failed
+        ? 'GitHub checks need a fix'
+        : 'GitHub checks'
+  const detail = active
+    ? 'The reviewed branch is being tested on your personal fork. No pull request is open.'
+    : passed
+      ? 'The exact reviewed branch passed before a pull request was opened.'
+      : checks.message || 'Open the run, fix the failure privately, then prepare a fresh review.'
+
+  function fixInChat() {
+    const draft = [
+      `Fix prepared contribution ${rec.id} ("${rec.title || 'untitled'}") before it is sent.`,
+      `Early GitHub checks ${failed ? 'need attention' : 'have completed'}.`,
+      url ? `Run: ${url}` : null,
+      '',
+      'Inspect the failing jobs and artifacts, make the smallest durable fix in the live source, run focused local checks, and prepare a fresh reviewed contribution.',
+      'Do not push, open a pull request, or otherwise change GitHub without the approval required for that exact public action.',
+    ].filter((line) => line !== null).join('\n')
+    const outcome = (typeof onFeedback === 'function' && onFeedback(
+      rec, { draft },
+    )) || {}
+    if (!outcome.ok) {
+      setNote(outcome.reason === 'missing-chat'
+        ? 'This older record does not know which chat created it.'
+        : 'Open Contribute inside Möbius to return to the source chat.')
+    }
+  }
+
+  return (
+    <div className={`co-early-checks${active ? ' is-running' : ''}${passed ? ' is-passed' : ''}${failed ? ' is-failed' : ''}`} role="status">
+      <div className="co-early-checks-copy">
+        <strong>{label}</strong>
+        <p>{detail}</p>
+        {url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            View run on GitHub
+          </a>
+        ) : null}
+      </div>
+      {active ? <span className="ma-spinner is-compact" aria-hidden="true" /> : null}
+      {failed && typeof onFeedback === 'function' ? (
+        <button
+          type="button"
+          className="co-btn co-btn-sm co-btn-primary"
+          onClick={fixInChat}
+        >
+          Fix in chat
+        </button>
+      ) : null}
+      {note ? <p className="co-review-error">{note}</p> : null}
+    </div>
+  )
+}
+
 function attentionTitle(attention) {
   return attention?.title || ATTENTION_HEADLINE
 }
@@ -468,7 +542,9 @@ export function ReviewPlan({ rec, loadDiff }) {
 
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
-function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
+function ReviewActions({
+  rec, reviewState, onSend, onRunChecks, onFeedback, onDismiss,
+}) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
   const [sendElapsed, setSendElapsed] = useState(0)
@@ -477,17 +553,28 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
   // terminal), so it must never fire on a single stray tap. The first tap arms
   // this in-card confirm; only the explicit Discard inside it runs dismiss().
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
+  const [confirmingChecks, setConfirmingChecks] = useState(false)
+  const [startingChecks, setStartingChecks] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const blocked = reviewState?.state === 'needs_refresh'
+  const checksActive = earlyChecksActive(rec)
+  const mayRunChecks = canRunEarlyChecks(rec) &&
+    typeof onRunChecks === 'function' && !checksActive
   const keepButtonRef = useRef(null)
+  const cancelChecksRef = useRef(null)
   const confirmDescriptionId = useId()
+  const checkConfirmDescriptionId = useId()
 
   // The confirm replaces the action row. Move focus to the safe choice so
   // keyboard and switch users never land on the destructive action by default.
   useEffect(() => {
     if (confirmingDismiss) keepButtonRef.current?.focus()
   }, [confirmingDismiss])
+
+  useEffect(() => {
+    if (confirmingChecks) cancelChecksRef.current?.focus()
+  }, [confirmingChecks])
 
   useEffect(() => {
     if (!sending) {
@@ -502,7 +589,7 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
   }, [sending])
 
   async function send() {
-    if (!isPr || blocked) return
+    if (!isPr || blocked || checksActive) return
     setSending(true)
     setSendNote(null)
     setNote(null)
@@ -517,6 +604,28 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
       }
     } finally {
       setSending(false)
+    }
+  }
+
+  async function runChecks() {
+    if (!mayRunChecks) return
+    setStartingChecks(true)
+    setSendNote(null)
+    setNote(null)
+    try {
+      const outcome = (await onRunChecks(rec)) || {}
+      if (outcome.ok) {
+        setSendNote('The reviewed branch is on your fork and GitHub checks are starting.')
+      } else if (outcome.pending) {
+        setSendNote('The branch was handled, but the run is still being reconciled. Contribute will update this card before another try.')
+      } else {
+        setNote(outcome.unsupported
+          ? 'Restart Möbius to load the companion GitHub checks service.'
+          : outcome.error || 'Could not start GitHub checks.')
+      }
+    } finally {
+      setStartingChecks(false)
+      setConfirmingChecks(false)
     }
   }
 
@@ -595,6 +704,38 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
             </button>
           </div>
         </div>
+      ) : confirmingChecks ? (
+        <div
+          className="co-confirm is-safe"
+          role="alertdialog"
+          aria-label="Confirm GitHub checks"
+          aria-describedby={checkConfirmDescriptionId}
+        >
+          <p id={checkConfirmDescriptionId} className="co-confirm-text">
+            This updates your personal fork if needed, pushes only the exact
+            reviewed branch, and starts the full GitHub test suite. It does not
+            open a pull request or email the organization.
+          </p>
+          <div className="co-confirm-actions">
+            <button
+              type="button"
+              ref={cancelChecksRef}
+              className="co-btn co-btn-sm"
+              disabled={startingChecks}
+              onClick={() => setConfirmingChecks(false)}
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              className="co-btn co-btn-sm co-btn-primary"
+              disabled={startingChecks}
+              onClick={runChecks}
+            >
+              {startingChecks ? 'Starting…' : 'Run on my fork'}
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="co-review-actions" aria-label="Contribution actions">
           {blocked ? (
@@ -609,23 +750,37 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
               <span>Refresh</span>
             </button>
           ) : isPr ? (
-            <button
-              type="button"
-              className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
-              disabled={sending}
-              onClick={send}
-              aria-busy={sending}
-              aria-label={sending ? 'Sending pull request' : 'Send pull request for review'}
-              title="Send for review"
-            >
-              <Icon name="send" />
-              <span className="co-action-label">
-                <span>Send</span>
-                {sending ? (
-                  <span className="co-action-label-sweep" aria-hidden="true">Send</span>
-                ) : null}
-              </span>
-            </button>
+            <>
+              {mayRunChecks ? (
+                <button
+                  type="button"
+                  className="co-icon-btn co-check-btn"
+                  onClick={() => setConfirmingChecks(true)}
+                  aria-label={rec.early_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
+                  title={rec.early_checks ? 'Run checks again' : 'Run GitHub checks'}
+                >
+                  <Icon name="refresh" />
+                  {!rec.early_checks ? <span>Test</span> : null}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
+                disabled={sending || checksActive}
+                onClick={send}
+                aria-busy={sending}
+                aria-label={checksActive ? 'GitHub checks are still running' : sending ? 'Sending pull request' : 'Send pull request for review'}
+                title={checksActive ? 'Wait for checks' : 'Send for review'}
+              >
+                <Icon name="send" />
+                <span className="co-action-label">
+                  <span>{checksActive ? 'Checking' : 'Send'}</span>
+                  {sending ? (
+                    <span className="co-action-label-sweep" aria-hidden="true">Send</span>
+                  ) : null}
+                </span>
+              </button>
+            </>
           ) : null}
           {!blocked ? (
             <button
@@ -658,6 +813,11 @@ function ReviewActions({ rec, reviewState, onSend, onFeedback, onDismiss }) {
         <p className="co-review-note" role="status" aria-live="polite">
           Checking the reviewed source and publishing it to GitHub
           {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
+        </p>
+      )}
+      {startingChecks && (
+        <p className="co-review-note" role="status" aria-live="polite">
+          Verifying the reviewed branch, updating your fork, and starting GitHub checks…
         </p>
       )}
       {sendNote && (
@@ -851,6 +1011,7 @@ export function ContributionCard({
   rec,
   reviewState,
   onSend,
+  onRunChecks,
   onFeedback,
   onDismiss,
   onRestore,
@@ -938,6 +1099,7 @@ export function ContributionCard({
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
       <SubmitErrorAlert rec={rec} reviewState={reviewState} />
+      <EarlyChecksPanel rec={rec} onFeedback={onFeedback} />
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
@@ -958,6 +1120,7 @@ export function ContributionCard({
               rec={rec}
               reviewState={reviewState}
               onSend={onSend}
+              onRunChecks={onRunChecks}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
             />
@@ -970,6 +1133,7 @@ export function ContributionCard({
             rec={rec}
             reviewState={reviewState}
             onSend={onSend}
+            onRunChecks={onRunChecks}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
           />
