@@ -582,7 +582,6 @@ export default function ContributeApp({ appId, token }) {
         id: rec.id,
         url: next.early_checks?.url || '',
       })
-      refreshReviewStatus()
       return { ok: true, record: next }
     }
     if (outcome.record) {
@@ -595,7 +594,7 @@ export default function ContributeApp({ appId, token }) {
         if (fresh) {
           applyRecordUpdates({ ...fresh, path: rec.path })
           const state = fresh.early_checks?.state
-          if (['dispatching', 'uncertain', 'queued', 'in_progress'].includes(state)) {
+          if (earlyChecksActive(fresh)) {
             return { pending: true, record: fresh }
           }
           if (state === 'completed') return { ok: true, record: fresh }
@@ -610,7 +609,7 @@ export default function ContributeApp({ appId, token }) {
       error: outcome.error || 'Could not start GitHub checks.',
       unsupported: outcome.unsupported,
     }
-  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
+  }, [appId, token, applyRecordUpdates])
 
   // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
   // write); on success we re-read that record so the mirrored autopilot block

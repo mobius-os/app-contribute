@@ -335,11 +335,11 @@ function EarlyChecksPanel({ rec, onFeedback }) {
     const draft = [
       `Fix prepared contribution ${rec.id} ("${rec.title || 'untitled'}") before it is sent.`,
       `Early GitHub checks ${failed ? 'need attention' : 'have completed'}.`,
-      url ? `Run: ${url}` : '',
+      url ? `Run: ${url}` : null,
       '',
       'Inspect the failing jobs and artifacts, make the smallest durable fix in the live source, run focused local checks, and prepare a fresh reviewed contribution.',
       'Do not push, open a pull request, or otherwise change GitHub without the approval required for that exact public action.',
-    ].filter((line, index, all) => line || (index > 0 && all[index - 1])).join('\n')
+    ].filter((line) => line !== null).join('\n')
     const outcome = (typeof onFeedback === 'function' && onFeedback(
       rec, { draft },
     )) || {}

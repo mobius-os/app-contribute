@@ -600,8 +600,8 @@ branch, and manually dispatch `.github/workflows/test.yml`. It does NOT open a
 PR, mention a team, comment, or email the organization. GitHub's ordinary
 Actions completion notification is directed to the triggerer according to
 their personal notification settings. The run is recorded under the prepared
-record's top-level `early_checks` field and Contribute personally notifies the
-owner when it settles.
+record's top-level `early_checks` field, and Contribute refreshes it while the
+app is open.
 
 The manual trigger must already exist on upstream's default branch. The PR that
 bootstraps `workflow_dispatch` is therefore the one exception that must use the
