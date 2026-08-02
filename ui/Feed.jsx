@@ -24,6 +24,7 @@ export function Feed({
   records,
   reviewStatus,
   onSend,
+  onRunChecks,
   onSendStack,
   onLandStack,
   onFeedback,
@@ -36,7 +37,7 @@ export function Feed({
   const { ready, open, history } = groups
   const readyUnits = preparedContributionUnits(ready, records)
   const openUnits = publicContributionUnits(open, records)
-  const { needsAttention, readyToSend } = partitionReviewUnits(
+  const { needsAttention, checking, readyToSend } = partitionReviewUnits(
     readyUnits,
     reviewStatus,
   )
@@ -57,6 +58,7 @@ export function Feed({
         rec={unit.record}
         reviewState={reviewStateFor(unit.record, reviewStatus)}
         onSend={onSend}
+        onRunChecks={onRunChecks}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
         loadDiff={loadDiff}
@@ -90,6 +92,21 @@ export function Feed({
             <p className="co-section-hint">Reviewed and waiting for your OK.</p>
           </div>
           {readyToSend.map(renderUnit)}
+        </section>
+      )}
+
+      {checking.length > 0 && (
+        <section className="co-section is-checking">
+          <div>
+            <div className="co-section-headline">
+              <h2 className="co-section-title">Checks running</h2>
+              <span>{checking.length}</span>
+            </div>
+            <p className="co-section-hint">
+              Testing reviewed branches privately before a pull request opens.
+            </p>
+          </div>
+          {checking.map(renderUnit)}
         </section>
       )}
 

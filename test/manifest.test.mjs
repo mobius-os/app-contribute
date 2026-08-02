@@ -71,6 +71,14 @@ test('schedule runs often enough for a responsive review loop', () => {
   assert.equal(manifest.schedule.default, '*/15 * * * *')
 })
 
+test('scheduled refresh follows prepared GitHub runs without opening a PR', () => {
+  const job = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  assert.match(job, /prepared-checks\/refresh/)
+  assert.match(source, /refreshPreparedChecks/)
+  assert.match(source, /runPreparedChecks/)
+})
+
 test('scheduled autopilot retries durable attention after a lost respond call', () => {
   const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
   assert.match(source, /A prior pass may have durably written the attention/)

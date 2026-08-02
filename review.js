@@ -47,6 +47,40 @@ export function reviewStateFor(rec, reviewStatus) {
   return null
 }
 
+const EARLY_CHECK_ACTIVE = new Set([
+  'dispatching', 'uncertain', 'queued', 'in_progress',
+])
+const EARLY_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
+
+export function canRunEarlyChecks(rec) {
+  const plan = rec?.plan || {}
+  return !!(
+    rec?.status === 'prepared' &&
+    rec?.type === 'pr' &&
+    plan.action === 'pr' &&
+    !plan.stack &&
+    (plan.repo || rec.repo) === 'mobius-os/mobius'
+  )
+}
+
+export function earlyChecksActive(rec) {
+  return EARLY_CHECK_ACTIVE.has(rec?.early_checks?.state)
+}
+
+export function earlyChecksFailed(rec) {
+  const checks = rec?.early_checks
+  if (!checks || typeof checks !== 'object') return false
+  if (checks.state === 'error') return true
+  return checks.state === 'completed' &&
+    !EARLY_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
+}
+
+export function earlyChecksPassed(rec) {
+  const checks = rec?.early_checks
+  return checks?.state === 'completed' &&
+    EARLY_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
+}
+
 export function summarizeReviewStatus(records, reviewStatus) {
   const prepared = (Array.isArray(records) ? records : [])
     .filter((rec) => rec?.status === 'prepared')
@@ -93,6 +127,10 @@ export function attentionReason(rec, reviewStatus) {
   if (review?.state === 'needs_refresh') {
     return review.message || 'This changed after it was reviewed and needs to be refreshed.'
   }
+  if (earlyChecksFailed(rec)) {
+    return rec.early_checks?.message ||
+      'The early GitHub checks need a fix before this is sent.'
+  }
   if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
     return rec.last_submit_error.trim()
   }
@@ -106,7 +144,8 @@ export function contributionsNeedingAttention(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
     return hasPublishedAttention(rec) ||
-      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
+      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
+      earlyChecksFailed(rec)
   })
 }
 
@@ -141,16 +180,19 @@ export function addressAllAction(records, reviewStatus) {
 
 export function partitionReviewUnits(units, reviewStatus) {
   const needsAttention = []
+  const checking = []
   const readyToSend = []
   for (const unit of units || []) {
     const records = unit.records || (unit.record ? [unit.record] : [])
-    if (records.some(
+    if (records.some(earlyChecksActive)) {
+      checking.push(unit)
+    } else if (records.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
-    )) {
+    ) || records.some(earlyChecksFailed)) {
       needsAttention.push(unit)
     } else {
       readyToSend.push(unit)
     }
   }
-  return { needsAttention, readyToSend }
+  return { needsAttention, checking, readyToSend }
 }

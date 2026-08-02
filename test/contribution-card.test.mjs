@@ -19,6 +19,7 @@ async function cardRenderer() {
         export function renderCard(rec) {
           return renderToStaticMarkup(React.createElement(ContributionCard, {
             rec, onSend: () => {}, onDismiss: () => {},
+            onRunChecks: () => {}, onFeedback: () => ({ ok: true }),
             onConnectApp: () => {},
           }))
         }
@@ -69,6 +70,63 @@ test('open and draft cards expose durable label failures without Send controls',
     assert.match(html, /do not send it again/)
     assert.doesNotMatch(html, /Send pull request|Send for review|Contribution actions/)
   }
+})
+
+test('prepared platform cards offer a no-PR early check action', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'platform-check', type: 'pr', status: 'prepared',
+    repo: 'mobius-os/mobius', title: 'Test before sending',
+    plan: { action: 'pr', repo: 'mobius-os/mobius', title: 'Test before sending' },
+  })
+  assert.match(html, /aria-label="Run GitHub checks"/)
+  assert.match(html, />Test</)
+  assert.match(html, /Send pull request for review/)
+})
+
+test('prepared cards narrate running, failed, and passing early checks', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const base = {
+    id: 'platform-check', type: 'pr', status: 'prepared',
+    repo: 'mobius-os/mobius', title: 'Test before sending',
+    plan: { action: 'pr', repo: 'mobius-os/mobius', title: 'Test before sending' },
+  }
+  const running = renderCard({
+    ...base,
+    early_checks: {
+      state: 'in_progress',
+      url: 'https://github.com/owner/mobius/actions/runs/7',
+    },
+  })
+  assert.match(running, /GitHub checks running/)
+  assert.match(running, /No pull request is open/)
+  assert.match(running, /GitHub checks are still running/)
+
+  const failed = renderCard({
+    ...base,
+    early_checks: {
+      state: 'completed', conclusion: 'failure',
+      url: 'https://github.com/owner/mobius/actions/runs/8',
+    },
+  })
+  assert.match(failed, /GitHub checks need a fix/)
+  assert.match(failed, /Fix in chat/)
+  assert.match(failed, /Run GitHub checks again/)
+
+  const passed = renderCard({
+    ...base,
+    early_checks: { state: 'completed', conclusion: 'success' },
+  })
+  assert.match(passed, /GitHub checks passed/)
+  assert.match(passed, /exact reviewed branch passed/)
 })
 
 test('fully applied published labels stay compact', async (t) => {

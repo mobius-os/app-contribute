@@ -212,6 +212,24 @@ def _reconcile_terminal_staging():
 
 _reconcile_terminal_staging()
 
+# Prepared platform reviews can have a manually dispatched workflow on the
+# owner's fork without a PR. Let the backend reconcile those durable run ids
+# and send the owner one personal completion notification. A platform version
+# predating the endpoint (404) is a normal mixed-version install during update.
+try:
+  _call(
+    "POST",
+    "/api/github/contributions/%s/prepared-checks/refresh" % APP_ID,
+    {},
+  )
+except urllib.error.HTTPError as exc:
+  if exc.code != 404:
+    print("contribute: prepared checks refresh failed (%s)" % exc.code,
+          file=sys.stderr)
+except Exception as exc:
+  print("contribute: prepared checks refresh error: %s" % exc,
+        file=sys.stderr)
+
 
 def _is_target(rec):
   return (

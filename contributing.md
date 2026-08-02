@@ -588,10 +588,44 @@ contributions need the updated platform bootstrap; app contributions still work.
 
 For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit
 `npm test`, `packager-unit`, `core-apps-unit`, `core-apps-sync` via
-`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e. Feature and
-fix branch pushes run the cheap jobs; Playwright runs on the PR, main, and
-integration branches. The Contribute checks refresh reports that PR result on
-the record; expect it within the refresh cadence.
+`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e. The same
+suite can run before a PR exists, but preparation itself remains private and
+must NEVER push automatically.
+
+For a standalone prepared `mobius-os/mobius` PR, Contribute shows **Run GitHub
+checks**. Its in-card confirmation is the explicit approval for exactly these
+public actions: create or fast-forward the connected owner's personal fork when
+needed, enable the allowlisted Tests workflow there, push the exact reviewed
+branch, and manually dispatch `.github/workflows/test.yml`. It does NOT open a
+PR, mention a team, comment, or email the organization. GitHub's ordinary
+Actions completion notification is directed to the triggerer according to
+their personal notification settings. The run is recorded under the prepared
+record's top-level `early_checks` field and Contribute personally notifies the
+owner when it settles.
+
+The manual trigger must already exist on upstream's default branch. The PR that
+bootstraps `workflow_dispatch` is therefore the one exception that must use the
+ordinary Send path before early checks become available for later work. For a
+branch already pushed to a personal fork, the command-line equivalent is:
+
+```bash
+gh workflow run test.yml -R <owner>/mobius --ref <reviewed-branch>
+```
+
+That command is a public GitHub action too: never run it, create/update a fork,
+or push the branch from chat without a fresh explicit yes for those exact
+actions. Prefer the Contribute button because it preserves the reviewed SHA,
+run id, and no-PR boundary as one durable operation.
+
+When early checks fail, **Fix in chat** returns to the source chat with the run
+URL. Inspect the failed jobs and artifacts read-only, fix the owning live source,
+run the narrowest focused local checks, then re-stage the SAME record on a fresh
+private branch and checkout. Recompute its canonical diff/hash, update its
+reviewed base/head/source witness with CAS, and remove the stale `early_checks`
+and old pushed-branch evidence from the refreshed record. Do not overwrite the
+old public fork branch or dispatch another run: the owner reviews the new diff
+and presses **Run GitHub checks** again for that new branch. A passing early run
+is evidence for the exact stored `head_sha`; any re-stage clears it.
 
 Before staging, run the cheapest focused checks that cover the changed files.
 Do **not** run Playwright locally by default. The Möbius app container does not
