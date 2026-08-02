@@ -24,27 +24,14 @@ export function indexReviewStatus(payload) {
   }
 }
 
+// The verdict is the platform's to give. This used to override a local-ready
+// verdict by regex-matching `last_submit_error` for an upstream conflict,
+// because the read-only status endpoint genuinely could not see one. It now
+// recomputes mergeability itself and reports `upstream_conflict` directly, so
+// reading the failure prose here would only be a second, staler opinion — it
+// matched a message left by a past attempt even after the branch was fixed.
 export function reviewStateFor(rec, reviewStatus) {
-  const direct = reviewStatus?.byId?.[rec?.id]
-
-  // Only a durable remote blocker may override a fresh local-ready verdict.
-  // The read-only status endpoint cannot see an upstream merge conflict, but
-  // retryable submit failures (fork inspection, transient 500s, and similar)
-  // do not invalidate the reviewed source and must not permanently disable
-  // Send after the local verifier says it is ready.
-  if (rec?.status === 'prepared' && rec?.last_submit_error) {
-    const upstreamConflict = /no longer merges cleanly|merge conflict/i
-      .test(rec.last_submit_error)
-    if (upstreamConflict) {
-      return {
-        state: 'needs_refresh',
-        code: 'upstream_conflict',
-        message: rec.last_submit_error,
-      }
-    }
-  }
-  if (direct) return direct
-  return null
+  return reviewStatus?.byId?.[rec?.id] || null
 }
 
 export function summarizeReviewStatus(records, reviewStatus) {

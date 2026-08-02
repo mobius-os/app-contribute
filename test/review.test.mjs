@@ -31,17 +31,30 @@ test('an unchecked retryable failure does not bounce a review into attention', (
   assert.equal(state, null)
 })
 
-test('a persisted remote submit blocker wins over a local ready verdict', () => {
+test('the failure message never overrides the verdict the platform gave', () => {
+  // The platform reports upstream_conflict itself now, recomputed from the
+  // branch. A message left by an earlier attempt describes a branch that may
+  // already have been refreshed, so it must not outrank a fresh verdict.
+  const ready = { state: 'ready', code: 'ready', message: 'Local checkout matches.' }
   const state = reviewStateFor({
     id: 'stale',
     status: 'prepared',
     last_submit_error: 'This PR no longer merges cleanly with upstream main.',
-  }, {
-    state: 'ready',
-    byId: { stale: { state: 'ready', code: 'ready', message: 'Local checkout matches.' } },
-  })
-  assert.equal(state.state, 'needs_refresh')
-  assert.equal(state.code, 'upstream_conflict')
+  }, { state: 'ready', byId: { stale: ready } })
+  assert.deepEqual(state, ready)
+})
+
+test('a conflict the platform reports is passed through untouched', () => {
+  const blocked = {
+    state: 'needs_refresh',
+    code: 'upstream_conflict',
+    message: 'This no longer merges cleanly with the branch it targets.',
+  }
+  const state = reviewStateFor(
+    { id: 'conflicted', status: 'prepared' },
+    { state: 'ready', byId: { conflicted: blocked } },
+  )
+  assert.deepEqual(state, blocked)
 })
 
 test('a fresh ready verdict wins over retryable persisted submit failures', () => {
