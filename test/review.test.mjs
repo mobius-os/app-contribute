@@ -2,11 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   addressAllAction,
-  canRunEarlyChecks,
+  canRunPrePrChecks,
   contributionsNeedingAttention,
-  earlyChecksActive,
-  earlyChecksFailed,
-  earlyChecksPassed,
+  prePrCheckPhase,
   blockedReviewCount,
   indexReviewStatus,
   partitionReviewUnits,
@@ -128,29 +126,31 @@ test('prepared platform checks have explicit active, pass, and failure states', 
     id: 'platform', type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
     plan: { action: 'pr', repo: 'mobius-os/mobius' },
   }
-  assert.equal(canRunEarlyChecks(base), true)
-  assert.equal(canRunEarlyChecks({ ...base, plan: { ...base.plan, stack: {} } }), false)
-  assert.equal(canRunEarlyChecks({ ...base, repo: 'mobius-os/app-demo', plan: {
+  assert.equal(canRunPrePrChecks(base), true)
+  assert.equal(canRunPrePrChecks({ ...base, plan: { ...base.plan, stack: {} } }), false)
+  assert.equal(canRunPrePrChecks({ ...base, repo: 'mobius-os/app-demo', plan: {
     action: 'pr', repo: 'mobius-os/app-demo',
   } }), false)
 
-  assert.equal(earlyChecksActive({ ...base, early_checks: { state: 'in_progress' } }), true)
-  assert.equal(earlyChecksPassed({
-    ...base, early_checks: { state: 'completed', conclusion: 'success' },
-  }), true)
-  assert.equal(earlyChecksFailed({
-    ...base, early_checks: { state: 'completed', conclusion: 'failure' },
-  }), true)
-  assert.equal(earlyChecksFailed({
-    ...base, early_checks: { state: 'error', message: 'Could not start.' },
-  }), true)
+  assert.equal(prePrCheckPhase({
+    ...base, pre_pr_checks: { state: 'in_progress' },
+  }), 'running')
+  assert.equal(prePrCheckPhase({
+    ...base, pre_pr_checks: { state: 'completed', conclusion: 'success' },
+  }), 'passed')
+  assert.equal(prePrCheckPhase({
+    ...base, pre_pr_checks: { state: 'completed', conclusion: 'failure' },
+  }), 'failed')
+  assert.equal(prePrCheckPhase({
+    ...base, pre_pr_checks: { state: 'error', message: 'Could not start.' },
+  }), 'failed')
 })
 
-test('running early checks leave the send batch and failures enter follow-up', () => {
-  const record = (id, early_checks) => ({
+test('running pre-PR checks leave the send batch and failures enter follow-up', () => {
+  const record = (id, pre_pr_checks) => ({
     id, type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
     plan: { action: 'pr', repo: 'mobius-os/mobius', title: id },
-    early_checks,
+    pre_pr_checks,
   })
   const units = [
     { type: 'record', id: 'running', record: record('running', { state: 'queued' }), records: [record('running', { state: 'queued' })] },
@@ -165,7 +165,7 @@ test('running early checks leave the send batch and failures enter follow-up', (
   const action = addressAllAction(units.flatMap((unit) => unit.records), { byId: {} })
   assert.equal(action.count, 1)
   assert.match(action.draft, /failed/)
-  assert.match(action.draft, /early GitHub checks need a fix/i)
+  assert.match(action.draft, /pre-PR GitHub checks need a fix/i)
 })
 
 test('address all collects active local and published blockers but not history', () => {

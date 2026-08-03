@@ -302,13 +302,13 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
 // workflow without opening a pull request. Like Send, a lost response is
 // ambiguous because the public push/dispatch may already have completed; the
 // caller must reconcile from the ledger before offering another try.
-export async function runPreparedChecks({ appId, token, rec }) {
+export async function runPrePrChecks({ appId, token, rec }) {
   try {
     const r = await fetch(
       '/api/github/contributions/' +
         encodeURIComponent(appId) + '/' +
         encodeURIComponent(rec.id) +
-        '/run-checks',
+        '/pre-pr-checks',
       {
         method: 'POST',
         headers: authHeaders(token),
@@ -317,7 +317,7 @@ export async function runPreparedChecks({ appId, token, rec }) {
     let body = null
     try { body = await r.json() } catch { body = null }
     if (r.ok && body?.record) {
-      return { ok: body.record, checks: body.checks || null }
+      return { ok: body.record }
     }
     const detail = body?.detail
     if (detail && typeof detail === 'object') {
@@ -343,12 +343,12 @@ export async function runPreparedChecks({ appId, token, rec }) {
 // Read-only GitHub status refresh plus a local ledger write. The endpoint
 // returns full updated records so the app can repaint without a second storage
 // scan. It is safe to repeat while a run is queued or in progress.
-export async function refreshPreparedChecks(token, appId) {
+export async function refreshPrePrChecks(token, appId) {
   try {
     const r = await fetchRead(
       '/api/github/contributions/' +
         encodeURIComponent(appId) +
-        '/prepared-checks/refresh',
+        '/pre-pr-checks/refresh',
       {
         method: 'POST',
         headers: authHeaders(token),

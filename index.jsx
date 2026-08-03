@@ -36,7 +36,7 @@ import {
 } from './domain.js'
 import {
   addressAllAction,
-  earlyChecksActive,
+  prePrCheckPhase,
   indexReviewStatus,
   partitionReviewUnits,
 } from './review.js'
@@ -50,8 +50,8 @@ import {
   fetchReviewStatus,
   fetchSourceStatus,
   landContributionStack,
-  refreshPreparedChecks,
-  runPreparedChecks,
+  refreshPrePrChecks,
+  runPrePrChecks,
   setAutopilot,
   submitContribution,
   submitContributionStack,
@@ -253,9 +253,9 @@ export default function ContributeApp({ appId, token }) {
     return next
   }, [token, appId])
 
-  const refreshEarlyChecks = useCallback(async () => {
+  const refreshPrePrChecksState = useCallback(async () => {
     if (connRef.current.state !== 'connected') return { ok: false }
-    const outcome = await refreshPreparedChecks(token, appId)
+    const outcome = await refreshPrePrChecks(token, appId)
     if (outcome.ok && outcome.records.length > 0) {
       applyRecordUpdates(outcome.records)
     }
@@ -295,10 +295,10 @@ export default function ContributeApp({ appId, token }) {
     setConn(status)
     if (status.state === 'connected' && !fromCache) {
       runLiveRefresh(recordsRef.current)
-      refreshEarlyChecks()
+      refreshPrePrChecksState()
     }
     return status
-  }, [token, fromCache, runLiveRefresh, refreshEarlyChecks])
+  }, [token, fromCache, runLiveRefresh, refreshPrePrChecksState])
 
   // Mount: read the ledger and the connection status together, then run the
   // live refresh only when GitHub is reachable and connected AND we enumerated
@@ -358,7 +358,7 @@ export default function ContributeApp({ appId, token }) {
   const runRefreshWork = useCallback(async () => {
     if (document.visibilityState !== 'visible') return
     if (connRef.current.state === 'connected') {
-      await refreshEarlyChecks()
+      await refreshPrePrChecksState()
     }
     const [ledger] = await Promise.all([
       loadLedger(),
@@ -373,7 +373,7 @@ export default function ContributeApp({ appId, token }) {
       replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
       setFromCache(false)
     }
-  }, [fetchRefreshed, refreshEarlyChecks, refreshReviewStatus, replaceFeed])
+  }, [fetchRefreshed, refreshPrePrChecksState, refreshReviewStatus, replaceFeed])
   refreshWorkRef.current = runRefreshWork
   const refreshCoordinatorRef = useRef(null)
   if (!refreshCoordinatorRef.current) {
@@ -399,13 +399,15 @@ export default function ContributeApp({ appId, token }) {
     }
   }, [])
 
-  const hasActiveEarlyChecks = records.some(earlyChecksActive)
+  const hasActivePrePrChecks = records.some(
+    (rec) => prePrCheckPhase(rec) === 'running',
+  )
   useEffect(() => {
-    if (!hasActiveEarlyChecks || conn.state !== 'connected') return undefined
+    if (!hasActivePrePrChecks || conn.state !== 'connected') return undefined
     let cancelled = false
     let timer = null
     const poll = async () => {
-      await refreshEarlyChecks()
+      await refreshPrePrChecksState()
       if (!cancelled) timer = window.setTimeout(poll, 15000)
     }
     timer = window.setTimeout(poll, 2500)
@@ -413,7 +415,7 @@ export default function ContributeApp({ appId, token }) {
       cancelled = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [hasActiveEarlyChecks, conn.state, refreshEarlyChecks])
+  }, [hasActivePrePrChecks, conn.state, refreshPrePrChecksState])
 
   const setView = useCallback((next) => {
     if (!CONTRIBUTION_VIEWS.includes(next)) next = 'prs'
@@ -573,14 +575,14 @@ export default function ContributeApp({ appId, token }) {
     return { error: outcome.error || 'Could not submit this PR.' }
   }, [appId, token, autopilotDefault, applyRecordUpdates, refreshReviewStatus])
 
-  const onRunChecks = useCallback(async (rec) => {
-    const outcome = await runPreparedChecks({ appId, token, rec })
+  const onRunPrePrChecks = useCallback(async (rec) => {
+    const outcome = await runPrePrChecks({ appId, token, rec })
     if (outcome.ok) {
       const next = { ...outcome.ok, path: rec.path }
       applyRecordUpdates(next)
-      window.mobius?.signal?.('prepared_checks_started', {
+      window.mobius?.signal?.('pre_pr_checks_started', {
         id: rec.id,
-        url: next.early_checks?.url || '',
+        url: next.pre_pr_checks?.url || '',
       })
       return { ok: true, record: next }
     }
@@ -593,13 +595,13 @@ export default function ContributeApp({ appId, token }) {
         const fresh = ledger.records.find((item) => item.id === rec.id)
         if (fresh) {
           applyRecordUpdates({ ...fresh, path: rec.path })
-          const state = fresh.early_checks?.state
-          if (earlyChecksActive(fresh)) {
+          const phase = prePrCheckPhase(fresh)
+          if (phase === 'running') {
             return { pending: true, record: fresh }
           }
-          if (state === 'completed') return { ok: true, record: fresh }
-          if (state === 'error') {
-            return { error: fresh.early_checks?.message || outcome.error }
+          if (phase === 'passed') return { ok: true, record: fresh }
+          if (phase === 'failed') {
+            return { error: fresh.pre_pr_checks?.message || outcome.error }
           }
         }
       } catch { /* the visibility refresh remains authoritative */ }
@@ -1131,7 +1133,7 @@ export default function ContributeApp({ appId, token }) {
                 records={visibleRecords}
                 reviewStatus={reviewStatus}
                 onSend={onSend}
-                onRunChecks={onRunChecks}
+                onRunPrePrChecks={onRunPrePrChecks}
                 onSendStack={onSendStack}
                 onLandStack={onLandStack}
                 onFeedback={onFeedback}

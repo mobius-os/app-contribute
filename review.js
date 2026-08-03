@@ -34,12 +34,12 @@ export function reviewStateFor(rec, reviewStatus) {
   return reviewStatus?.byId?.[rec?.id] || null
 }
 
-const EARLY_CHECK_ACTIVE = new Set([
+const PRE_PR_CHECK_ACTIVE = new Set([
   'dispatching', 'uncertain', 'queued', 'in_progress',
 ])
-const EARLY_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
+const PRE_PR_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
 
-export function canRunEarlyChecks(rec) {
+export function canRunPrePrChecks(rec) {
   const plan = rec?.plan || {}
   return !!(
     rec?.status === 'prepared' &&
@@ -50,22 +50,15 @@ export function canRunEarlyChecks(rec) {
   )
 }
 
-export function earlyChecksActive(rec) {
-  return EARLY_CHECK_ACTIVE.has(rec?.early_checks?.state)
-}
-
-export function earlyChecksFailed(rec) {
-  const checks = rec?.early_checks
-  if (!checks || typeof checks !== 'object') return false
-  if (checks.state === 'error') return true
-  return checks.state === 'completed' &&
-    !EARLY_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
-}
-
-export function earlyChecksPassed(rec) {
-  const checks = rec?.early_checks
-  return checks?.state === 'completed' &&
-    EARLY_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
+export function prePrCheckPhase(rec) {
+  const checks = rec?.pre_pr_checks
+  if (!checks || typeof checks !== 'object') return 'idle'
+  if (PRE_PR_CHECK_ACTIVE.has(checks.state)) return 'running'
+  if (checks.state === 'error') return 'failed'
+  if (checks.state !== 'completed') return 'idle'
+  return PRE_PR_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
+    ? 'passed'
+    : 'failed'
 }
 
 export function summarizeReviewStatus(records, reviewStatus) {
@@ -114,9 +107,9 @@ export function attentionReason(rec, reviewStatus) {
   if (review?.state === 'needs_refresh') {
     return review.message || 'This changed after it was reviewed and needs to be refreshed.'
   }
-  if (earlyChecksFailed(rec)) {
-    return rec.early_checks?.message ||
-      'The early GitHub checks need a fix before this is sent.'
+  if (prePrCheckPhase(rec) === 'failed') {
+    return rec.pre_pr_checks?.message ||
+      'The pre-PR GitHub checks need a fix before this is sent.'
   }
   if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
     return rec.last_submit_error.trim()
@@ -132,7 +125,7 @@ export function contributionsNeedingAttention(records, reviewStatus) {
     if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
     return hasPublishedAttention(rec) ||
       reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      earlyChecksFailed(rec)
+      prePrCheckPhase(rec) === 'failed'
   })
 }
 
@@ -171,11 +164,11 @@ export function partitionReviewUnits(units, reviewStatus) {
   const readyToSend = []
   for (const unit of units || []) {
     const records = unit.records || (unit.record ? [unit.record] : [])
-    if (records.some(earlyChecksActive)) {
+    if (records.some((rec) => prePrCheckPhase(rec) === 'running')) {
       checking.push(unit)
     } else if (records.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
-    ) || records.some(earlyChecksFailed)) {
+    ) || records.some((rec) => prePrCheckPhase(rec) === 'failed')) {
       needsAttention.push(unit)
     } else {
       readyToSend.push(unit)

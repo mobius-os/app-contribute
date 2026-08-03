@@ -19,7 +19,7 @@ async function cardRenderer() {
         export function renderCard(rec) {
           return renderToStaticMarkup(React.createElement(ContributionCard, {
             rec, onSend: () => {}, onDismiss: () => {},
-            onRunChecks: () => {}, onFeedback: () => ({ ok: true }),
+            onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
             onConnectApp: () => {},
           }))
         }
@@ -72,7 +72,7 @@ test('open and draft cards expose durable label failures without Send controls',
   }
 })
 
-test('prepared platform cards offer a no-PR early check action', async (t) => {
+test('prepared platform cards offer a confirmed pre-PR check action', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
     return
@@ -88,7 +88,7 @@ test('prepared platform cards offer a no-PR early check action', async (t) => {
   assert.match(html, /Send pull request for review/)
 })
 
-test('prepared cards narrate running, failed, and passing early checks', async (t) => {
+test('prepared cards narrate running, failed, and passing pre-PR checks', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
     return
@@ -101,7 +101,7 @@ test('prepared cards narrate running, failed, and passing early checks', async (
   }
   const running = renderCard({
     ...base,
-    early_checks: {
+    pre_pr_checks: {
       state: 'in_progress',
       url: 'https://github.com/owner/mobius/actions/runs/7',
     },
@@ -112,7 +112,7 @@ test('prepared cards narrate running, failed, and passing early checks', async (
 
   const failed = renderCard({
     ...base,
-    early_checks: {
+    pre_pr_checks: {
       state: 'completed', conclusion: 'failure',
       url: 'https://github.com/owner/mobius/actions/runs/8',
     },
@@ -123,7 +123,7 @@ test('prepared cards narrate running, failed, and passing early checks', async (
 
   const passed = renderCard({
     ...base,
-    early_checks: { state: 'completed', conclusion: 'success' },
+    pre_pr_checks: { state: 'completed', conclusion: 'success' },
   })
   assert.match(passed, /GitHub checks passed/)
   assert.match(passed, /exact reviewed branch passed/)
