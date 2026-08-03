@@ -245,7 +245,7 @@ test('exact canonical tree equality outranks a stale installer marker', () => {
         unresolved_conflict_count: 0,
       },
       origin: {
-        ref: 'origin/main', sha: 'new-shared', head_tree_matches_origin: true,
+        ref: 'origin/main', sha: 'new-shared', tree_matches_local: true,
       },
       working: { available: true, files: 0 },
     }],
@@ -266,7 +266,7 @@ test('a moved canonical source is compared before local work is prepared', () =>
       branch: 'main', base_ref: 'upstream', base_sha: 'old-base',
       tree: { available: true, files: 2, authored_files: 2, managed_files: 0 },
       origin: {
-        ref: 'origin/main', sha: 'new-shared', head_tree_matches_origin: false,
+        ref: 'origin/main', sha: 'new-shared', tree_matches_local: false,
       },
       working: { available: true, files: 0 },
     }],

@@ -119,7 +119,7 @@ function decorateProject(project, contributions) {
   // needs comparison before it is contribution-ready. Exact tree equality is
   // the one conclusive exception.
   const sourceComparisonRequired = project?.kind === 'app'
-    && project?.origin?.head_tree_matches_origin !== true
+    && project?.origin?.tree_matches_local !== true
     && !!originSha
     && !!baseSha
     && originSha !== baseSha
