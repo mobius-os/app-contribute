@@ -28,9 +28,9 @@ test('prepared platform checks stay a separate confirmed no-PR action', () => {
   assert.match(cardSource, /Run GitHub checks/)
   assert.match(cardSource, /Run on my fork/)
   assert.match(cardSource, /does not[\s\S]*open a pull request or email the organization/)
-  assert.match(apiSource, /\/run-checks/)
-  assert.match(apiSource, /\/prepared-checks\/refresh/)
-  assert.match(appSource, /prepared_checks_started/)
+  assert.match(apiSource, /\/pre-pr-checks/)
+  assert.match(apiSource, /\/pre-pr-checks\/refresh/)
+  assert.match(appSource, /pre_pr_checks_started/)
 })
 
 test('single and stacked sends expose elapsed progress to assistive technology', () => {

@@ -11,10 +11,8 @@ import {
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
 import {
-  canRunEarlyChecks,
-  earlyChecksActive,
-  earlyChecksFailed,
-  earlyChecksPassed,
+  canRunPrePrChecks,
+  prePrCheckPhase,
 } from '../review.js'
 import {
   autopilotState,
@@ -308,14 +306,15 @@ function SubmitErrorAlert({ rec, reviewState }) {
   )
 }
 
-function EarlyChecksPanel({ rec, onFeedback }) {
-  const checks = rec.early_checks
+function PrePrChecksPanel({ rec, onFeedback }) {
+  const checks = rec.pre_pr_checks
   const [note, setNote] = useState('')
   if (!checks || typeof checks !== 'object') return null
 
-  const active = earlyChecksActive(rec)
-  const failed = earlyChecksFailed(rec)
-  const passed = earlyChecksPassed(rec)
+  const phase = prePrCheckPhase(rec)
+  const active = phase === 'running'
+  const failed = phase === 'failed'
+  const passed = phase === 'passed'
   const url = typeof checks.url === 'string' &&
     checks.url.startsWith('https://github.com/') ? checks.url : ''
   const label = active
@@ -330,11 +329,12 @@ function EarlyChecksPanel({ rec, onFeedback }) {
     : passed
       ? 'The exact reviewed branch passed before a pull request was opened.'
       : checks.message || 'Open the run, fix the failure privately, then prepare a fresh review.'
+  const tone = active ? ' is-follow-up' : passed ? ' is-passed' : ''
 
   function fixInChat() {
     const draft = [
       `Fix prepared contribution ${rec.id} ("${rec.title || 'untitled'}") before it is sent.`,
-      `Early GitHub checks ${failed ? 'need attention' : 'have completed'}.`,
+      `Pre-PR GitHub checks ${failed ? 'need attention' : 'have completed'}.`,
       url ? `Run: ${url}` : null,
       '',
       'Inspect the failing jobs and artifacts, make the smallest durable fix in the live source, run focused local checks, and prepare a fresh reviewed contribution.',
@@ -351,17 +351,14 @@ function EarlyChecksPanel({ rec, onFeedback }) {
   }
 
   return (
-    <div className={`co-early-checks${active ? ' is-running' : ''}${passed ? ' is-passed' : ''}${failed ? ' is-failed' : ''}`} role="status">
-      <div className="co-early-checks-copy">
-        <strong>{label}</strong>
-        <p>{detail}</p>
-        {url ? (
-          <a href={url} target="_blank" rel="noopener noreferrer">
-            View run on GitHub
-          </a>
-        ) : null}
-      </div>
-      {active ? <span className="ma-spinner is-compact" aria-hidden="true" /> : null}
+    <div className={`co-alert${tone}`} role="status">
+      <strong>{label}</strong>
+      <p className="co-alert-reassurance">{detail}</p>
+      {url ? (
+        <a className="co-review-link" href={url} target="_blank" rel="noopener noreferrer">
+          View run on GitHub
+        </a>
+      ) : null}
       {failed && typeof onFeedback === 'function' ? (
         <button
           type="button"
@@ -543,7 +540,7 @@ export function ReviewPlan({ rec, loadDiff }) {
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
 function ReviewActions({
-  rec, reviewState, onSend, onRunChecks, onFeedback, onDismiss,
+  rec, reviewState, onSend, onRunPrePrChecks, onFeedback, onDismiss,
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
@@ -558,9 +555,9 @@ function ReviewActions({
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const blocked = reviewState?.state === 'needs_refresh'
-  const checksActive = earlyChecksActive(rec)
-  const mayRunChecks = canRunEarlyChecks(rec) &&
-    typeof onRunChecks === 'function' && !checksActive
+  const checksActive = prePrCheckPhase(rec) === 'running'
+  const mayRunChecks = canRunPrePrChecks(rec) &&
+    typeof onRunPrePrChecks === 'function' && !checksActive
   const keepButtonRef = useRef(null)
   const cancelChecksRef = useRef(null)
   const confirmDescriptionId = useId()
@@ -613,7 +610,7 @@ function ReviewActions({
     setSendNote(null)
     setNote(null)
     try {
-      const outcome = (await onRunChecks(rec)) || {}
+      const outcome = (await onRunPrePrChecks(rec)) || {}
       if (outcome.ok) {
         setSendNote('The reviewed branch is on your fork and GitHub checks are starting.')
       } else if (outcome.pending) {
@@ -756,11 +753,11 @@ function ReviewActions({
                   type="button"
                   className="co-icon-btn co-check-btn"
                   onClick={() => setConfirmingChecks(true)}
-                  aria-label={rec.early_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
-                  title={rec.early_checks ? 'Run checks again' : 'Run GitHub checks'}
+                  aria-label={rec.pre_pr_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
+                  title={rec.pre_pr_checks ? 'Run checks again' : 'Run GitHub checks'}
                 >
                   <Icon name="refresh" />
-                  {!rec.early_checks ? <span>Test</span> : null}
+                  {!rec.pre_pr_checks ? <span>Test</span> : null}
                 </button>
               ) : null}
               <button
@@ -1011,7 +1008,7 @@ export function ContributionCard({
   rec,
   reviewState,
   onSend,
-  onRunChecks,
+  onRunPrePrChecks,
   onFeedback,
   onDismiss,
   onRestore,
@@ -1099,7 +1096,7 @@ export function ContributionCard({
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
       <SubmitErrorAlert rec={rec} reviewState={reviewState} />
-      <EarlyChecksPanel rec={rec} onFeedback={onFeedback} />
+      <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
@@ -1120,7 +1117,7 @@ export function ContributionCard({
               rec={rec}
               reviewState={reviewState}
               onSend={onSend}
-              onRunChecks={onRunChecks}
+              onRunPrePrChecks={onRunPrePrChecks}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
             />
@@ -1133,7 +1130,7 @@ export function ContributionCard({
             rec={rec}
             reviewState={reviewState}
             onSend={onSend}
-            onRunChecks={onRunChecks}
+            onRunPrePrChecks={onRunPrePrChecks}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
           />

@@ -24,7 +24,7 @@ export function Feed({
   records,
   reviewStatus,
   onSend,
-  onRunChecks,
+  onRunPrePrChecks,
   onSendStack,
   onLandStack,
   onFeedback,
@@ -58,7 +58,7 @@ export function Feed({
         rec={unit.record}
         reviewState={reviewStateFor(unit.record, reviewStatus)}
         onSend={onSend}
-        onRunChecks={onRunChecks}
+        onRunPrePrChecks={onRunPrePrChecks}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
         loadDiff={loadDiff}

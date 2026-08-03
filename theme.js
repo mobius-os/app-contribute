@@ -925,6 +925,11 @@ export const CSS = `
 .co-alert.is-follow-up .co-alert-text {
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
+.co-alert.is-passed {
+  border-color: color-mix(in srgb, var(--green) 32%, var(--border));
+  background: color-mix(in srgb, var(--green) 7%, var(--surface));
+}
+.co-alert.is-passed > strong { color: var(--green); }
 /* The raw Git message, tucked behind a Details disclosure under the headline. */
 .co-alert-details > summary {
   cursor: pointer; font-size: 12px; color: var(--muted); min-height: 38px;
@@ -933,36 +938,6 @@ export const CSS = `
 .co-alert-details > summary::-webkit-details-marker { display: none; }
 .co-alert-details[open] > summary { margin-bottom: 5px; }
 .co-alert-details > .co-alert-text { margin: 0; }
-
-.co-early-checks {
-  align-self: stretch; margin-top: 10px; padding: 10px 11px;
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  border: 1px solid var(--border); border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
-}
-.co-early-checks-copy {
-  min-width: 0; flex: 1 1 220px; display: flex; flex-direction: column; gap: 3px;
-}
-.co-early-checks strong { font-size: 13px; line-height: 1.35; color: var(--text); }
-.co-early-checks p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
-.co-early-checks a {
-  align-self: flex-start; min-height: 32px; display: inline-flex; align-items: center;
-  color: var(--accent); font-size: 12px; text-underline-offset: 2px;
-}
-.co-early-checks.is-running {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-}
-.co-early-checks.is-passed {
-  border-color: color-mix(in srgb, var(--green) 32%, var(--border));
-  background: color-mix(in srgb, var(--green) 7%, var(--surface));
-}
-.co-early-checks.is-passed strong { color: var(--green); }
-.co-early-checks.is-failed {
-  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
-  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
-}
-.co-early-checks.is-failed .co-btn { flex: 0 0 auto; }
-.co-early-checks > .co-review-error { flex-basis: 100%; }
 
 .co-attention {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
@@ -1573,8 +1548,6 @@ export const CSS = `
   .co-attention {
     flex-direction: column; align-items: stretch;
   }
-  .co-early-checks { align-items: stretch; }
-  .co-early-checks.is-failed .co-btn { width: 100%; }
 }
 
 `
