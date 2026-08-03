@@ -228,6 +228,61 @@ test('installed apps ignore full-repository origin projections', () => {
   assert.equal(projectMatchesFilter(notes, 'changed'), false)
 })
 
+test('exact canonical tree equality outranks a stale installer marker', () => {
+  const project = attachSourceProjects({
+    platform: null,
+    apps: [{
+      key: 'app:equal', kind: 'app', name: 'Equal app', available: true,
+      canonical_repo: 'mobius-os/app-equal', state: 'aligned',
+      branch: 'main', base_ref: 'upstream', base_sha: 'old-base',
+      comparison_ref: 'origin/main', comparison_sha: 'new-shared',
+      tree: { available: true, files: 0, authored_files: 0, managed_files: 0 },
+      reconciliation: {
+        available: true,
+        local_only_count: 0,
+        new_upstream_count: 0,
+        compatible_count: 0,
+        unresolved_conflict_count: 0,
+      },
+      origin: {
+        ref: 'origin/main', sha: 'new-shared', head_tree_matches_origin: true,
+      },
+      working: { available: true, files: 0 },
+    }],
+  }, [])[0]
+
+  assert.equal(project.sourceComparisonRequired, false)
+  assert.equal(projectStatus(project).label, 'Aligned')
+  assert.equal(projectOverview(project), null)
+  assert.equal(projectAgentAction(project), null)
+})
+
+test('a moved canonical source is compared before local work is prepared', () => {
+  const project = attachSourceProjects({
+    platform: null,
+    apps: [{
+      key: 'app:stale', kind: 'app', name: 'Stale app', available: true,
+      canonical_repo: 'mobius-os/app-stale', state: 'customized',
+      branch: 'main', base_ref: 'upstream', base_sha: 'old-base',
+      tree: { available: true, files: 2, authored_files: 2, managed_files: 0 },
+      origin: {
+        ref: 'origin/main', sha: 'new-shared', head_tree_matches_origin: false,
+      },
+      working: { available: true, files: 0 },
+    }],
+  }, [])[0]
+
+  assert.equal(project.sourceComparisonRequired, true)
+  assert.equal(projectSourceState(project), 'comparison_needed')
+  assert.equal(projectStatus(project).label, 'Needs comparison')
+  assert.equal(projectOverview(project).label, 'Compare before contributing')
+  assert.match(projectDetailSummary(project), /Compare both versions/)
+  assert.ok(projectRowFacts(project).includes('Compare shared source'))
+  assert.equal(projectAgentAction(project).event, 'review_source_position')
+  assert.equal(preparableSourceProjects([project]).length, 0)
+  assert.equal(prepareAllAction([project]), null)
+})
+
 test('installed apps still surface genuine local work plus a release update', () => {
   const projects = attachSourceProjects({
     platform: null,

@@ -112,6 +112,17 @@ function decorateProject(project, contributions) {
   )
   const reconciliation = project?.reconciliation || {}
   const semanticAvailable = reconciliation.available === true
+  const originSha = typeof project?.origin?.sha === 'string' ? project.origin.sha : ''
+  const baseSha = typeof project?.base_sha === 'string' ? project.base_sha : ''
+  // Source status is intentionally fetch-free. If the last-fetched canonical
+  // branch and the installer-owned marker name different commits, local work
+  // needs comparison before it is contribution-ready. Exact tree equality is
+  // the one conclusive exception.
+  const sourceComparisonRequired = project?.kind === 'app'
+    && project?.origin?.head_tree_matches_origin !== true
+    && !!originSha
+    && !!baseSha
+    && originSha !== baseSha
   const localOnlyPaths = Array.isArray(reconciliation.local_only_paths)
     ? reconciliation.local_only_paths
     : []
@@ -166,6 +177,7 @@ function decorateProject(project, contributions) {
     managedFiles,
     reconciliation,
     semanticAvailable,
+    sourceComparisonRequired,
     localOnlyPaths,
     incomingPaths,
     compatiblePaths,
@@ -258,6 +270,7 @@ export function projectSourceState(project) {
   if (project.state === 'local_only') return 'local_only'
   if (!project.available) return 'unavailable'
   if (project.state === 'conflict' || project.conflictFiles > 0) return 'conflict'
+  if (project.sourceComparisonRequired && project.workingFiles > 0) return 'comparison_needed'
   if (project.workingFiles > 0) return 'working'
   if (
     project.compatibleFiles > 0
@@ -267,6 +280,9 @@ export function projectSourceState(project) {
   if (project.incomingFiles > 0 || project.state === 'incoming') return 'incoming'
   if (project.detached) return 'detached'
   if (project.branch && project.branch !== 'main') return 'branch'
+  if (project.sourceComparisonRequired && (project.state === 'customized' || project.different)) {
+    return 'comparison_needed'
+  }
   if (project.state === 'customized' || project.different) return 'local_changes'
   if (project.state === 'adapted' || project.adapted) return 'adapted'
   return 'aligned'
@@ -291,6 +307,7 @@ export function projectStatus(project) {
   if (project.contributions.some((rec) => rec.needs_attention)) {
     return { label: 'Needs attention', tone: 'danger' }
   }
+  if (state === 'comparison_needed') return { label: 'Needs comparison', tone: 'warn' }
   if (state === 'working') return { label: project.workingFiles + ' working', tone: 'warn' }
   if (state === 'both_changed') return { label: 'Both sides changed', tone: 'warn' }
   if (state === 'incoming') {
@@ -312,6 +329,7 @@ export function projectFlowStatus(project) {
     local_only: { label: 'No shared source', tone: 'warn' },
     unavailable: { label: 'Not tracked', tone: 'quiet' },
     conflict: { label: 'Update conflict', tone: 'danger' },
+    comparison_needed: { label: 'Needs comparison', tone: 'warn' },
     working: { label: 'Being edited', tone: 'warn' },
     both_changed: { label: 'Both changed', tone: 'warn' },
     incoming: { label: 'Update available', tone: 'accent' },
@@ -411,6 +429,13 @@ export function projectOverview(project) {
       tone: 'warn',
     }
   }
+  if (state === 'comparison_needed') {
+    return {
+      label: 'Compare before contributing',
+      detail: 'The shared source and this app’s recorded baseline are different',
+      tone: 'warn',
+    }
+  }
   if (state === 'working') {
     return {
       label: 'Local edits in progress',
@@ -469,6 +494,9 @@ export function projectDetailSummary(project) {
       ? 'Shared submissions are already accounted for; only the remaining overlapping files need a choice.'
       : 'An update needs attention before this project can move forward.'
   }
+  if (state === 'comparison_needed') {
+    return 'The shared source does not match this app’s recorded comparison point. Compare both versions before treating local work as a contribution.'
+  }
   if (state === 'working') return 'This project is currently being edited in your Möbius.'
   if (state === 'both_changed') {
     return 'Shared submissions are already accounted for. Genuine local and incoming changes remain.'
@@ -494,6 +522,9 @@ export function projectRowFacts(project) {
   if (state === 'built_here') facts.push('Not on GitHub yet')
   else if (state === 'local_only') facts.push('No shared update source')
   if (project.workingFiles) facts.push('Being edited')
+  if (state === 'comparison_needed') {
+    facts.push('Compare shared source')
+  }
   if (project.provenShared) facts.push(`${project.provenShared} landed recognized`)
   if (project.incomingFiles) facts.push('Update available')
   if (project.localFiles) facts.push(localCount(project.localFiles))
@@ -577,6 +608,13 @@ export function projectAgentAction(project) {
       draft: hasSemanticOverlap
         ? `Inspect ${name}${repo}. Use the semantic source receipt: shared submissions are already excluded, ${fileCount(project.localFiles)} ${presentVerb(project.localFiles)} local-only, ${incomingCount(project)} ${presentVerb(project.incomingFiles)} incoming-only, ${fileCount(project.compatibleFiles)} ${presentVerb(project.compatibleFiles)} compatible, and ${fileCount(project.conflictFiles)} ${presentVerb(project.conflictFiles)} unresolved. Explain the remaining groups and help me choose a safe next step without discarding local work.`
         : `Inspect ${name}${repo}. My local version and the shared version both have changes. Explain what differs and help me choose a safe next step without discarding local work.`,
+    }
+  }
+  if (state === 'comparison_needed') {
+    return {
+      label: 'Ask agent to compare',
+      event: 'review_source_position',
+      draft: `Inspect ${name}${repo}. The shared repository and this app’s recorded update source point to different revisions. Compare the live source with current shared work, separate already-landed changes from genuine local work, and explain what remains. Do not prepare or publish anything yet.`,
     }
   }
   if (state === 'working' || state === 'local_changes') {

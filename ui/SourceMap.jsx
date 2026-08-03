@@ -45,9 +45,10 @@ function ProjectFlow({ project }) {
   const chains = groupContributionUnits(contributions).filter((unit) => unit.type === 'stack').length
   const sourceName = project.canonical_repo || 'Shared source'
   const installedRelease = project.kind === 'app' && project.base_ref === 'upstream'
-  const sourceRef = installedRelease
+  const comparesWithRelease = installedRelease && project.comparison_ref !== project.origin?.ref
+  const sourceRef = comparesWithRelease
     ? `Full source · release ${project.version || 'installed'}`
-    : `${project.origin?.ref || project.base_ref || 'shared main'} · last fetched`
+    : `${project.comparison_ref || project.origin?.ref || project.base_ref || 'shared main'} · last fetched`
   const localBranch = project.branch || (project.detached ? 'detached' : 'main')
   const localBits = [
     installedRelease && project.version ? `v${project.version}` : localBranch,
@@ -69,7 +70,11 @@ function ProjectFlow({ project }) {
     project.workingFiles > 0 ? countLabel(project.workingFiles, 'file being edited', 'files being edited') : '',
     !project.localFiles && !project.incomingFiles && !project.compatibleFiles && !project.conflictFiles && !project.workingFiles && project.managedFiles > 0 ? 'safe install adjustments only' : '',
     !project.localFiles && !project.incomingFiles && !project.compatibleFiles && !project.conflictFiles && !project.workingFiles && !project.managedFiles
-      ? (installedRelease ? 'installed files match release' : 'source matches')
+      ? (comparesWithRelease
+          ? 'installed files match release'
+          : installedRelease
+            ? 'committed source matches last-fetched shared source'
+            : 'source matches')
       : '',
   ].filter(Boolean)
   const forks = project.forks?.length || 0
@@ -112,12 +117,12 @@ function shortCommit(value) {
 
 function ProjectPosition({ project }) {
   const installedRelease = project.kind === 'app' && project.base_ref === 'upstream'
-  const sharedSha = installedRelease
-    ? project.base_sha
-    : (project.origin?.sha || project.base_sha)
-  const sharedRef = installedRelease
-    ? `installed release (${project.base_ref})`
-    : (project.origin?.ref || project.base_ref || 'Not configured')
+  const comparisonRef = project.comparison_ref || project.base_ref
+  const comparisonSha = project.comparison_sha || project.base_sha
+  const comparesWithRelease = installedRelease && comparisonRef === project.base_ref
+  const sharedRef = comparesWithRelease
+    ? `installed release (${comparisonRef})`
+    : (comparisonRef || 'Not configured')
   return (
     <details className="co-position-details">
       <summary>
@@ -130,7 +135,7 @@ function ProjectPosition({ project }) {
         {project.state !== 'local_only' ? (
           <>
             <div><dt>Compared with</dt><dd><code>{sharedRef}</code></dd></div>
-            <div><dt>{installedRelease ? 'Release commit' : 'Shared commit'}</dt><dd><code>{shortCommit(sharedSha)}</code></dd></div>
+            <div><dt>{comparesWithRelease ? 'Release commit' : 'Shared commit'}</dt><dd><code>{shortCommit(comparisonSha)}</code></dd></div>
           </>
         ) : null}
         {project.canonical_repo ? (
