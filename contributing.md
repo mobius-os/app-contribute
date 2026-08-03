@@ -133,7 +133,8 @@ empty-state crash", not "fix crash when <name>'s workout log is empty").
 **Re-read the FULL diff — every changed line, not the file list.** In an
 installed app's repo, `git diff upstream...HEAD` shows everything local, where
 `upstream` is the Möbius per-app-git branch that exists INSIDE `/data/apps/<slug>`;
-in a `/tmp` clone there is no `upstream` branch — diff against `origin/main`.
+in a scratch clone under `$TMPDIR` there is no `upstream` branch — diff against
+`origin/main`.
 Local commits routinely carry partner data into source (a seeded example, a
 hardcoded name, a test fixture with real entries) — strip anything personal or
 don't propose.
@@ -284,7 +285,8 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
 - For PRs, `repo_path` MUST be a durable git checkout under a staging root the
   platform accepts — `/data/contrib/<workspace>` (the primary durable staging
   root), `/data/apps/`, `/data/platform`, or the legacy `/data/contributions/`;
-  a `/tmp` clone does not survive restart and cannot be approved with one click.
+  a scratch clone under `$TMPDIR` does not survive restart and cannot be
+  approved with one click.
 - Commit the reviewed source before staging. If GitHub is connected, first set
   the checkout's repo-local `user.name`/`user.email` to the connected owner
   identity (`git config --global --get user.email` should already be the
@@ -474,6 +476,21 @@ validation, not a second pre-merge run of the child PR.
 
 Run these during preparation, after the partner agrees to stage a PR for review.
 Do not fork, push, or create a PR here.
+
+### Keep exploration out of durable staging
+
+`/data/contrib` is the final review boundary, not a general Git workspace. Until
+the partner has approved **Prepare privately** and one exact review + record id
+have been chosen, keep review clones, rebase trials, integration carriers,
+builds, and candidate fixes under the current turn's `$TMPDIR`. That scratch is
+owned by the chat run and swept after it becomes idle.
+
+Use independent clones whose `.git` directory lives inside the scratch clone.
+Do not create linked worktrees there: the scratch sweeper removes directories
+recursively and cannot unregister a linked worktree from its source repository.
+Once the review is exact, create only its record-bound checkout at
+`/data/contrib/<record-id>/worktree`; keep alternate candidates ephemeral and
+remove them in the turn that created them.
 
 **Use a linked worktree for every staged review checkout.** Its `.git` marker is
 a file pointing at the installed app/platform repo, not a nested `.git`
