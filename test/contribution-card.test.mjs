@@ -1,46 +1,22 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { frontendModules, renderModule } from './render-harness.mjs'
 
-const frontendModules = process.env.MOBIUS_FRONTEND_NODE_MODULES
-
-async function cardRenderer() {
-  const esbuildUrl = pathToFileURL(join(frontendModules, 'esbuild', 'lib', 'main.js')).href
-  const { build } = await import(esbuildUrl)
-  const projectRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-  const result = await build({
-    stdin: {
-      contents: `
-        import React from 'react'
-        import { renderToStaticMarkup } from 'react-dom/server'
-        import { ContributionCard, ReviewPlan } from './ui/ContributionCard.jsx'
-        export function renderCard(rec) {
-          return renderToStaticMarkup(React.createElement(ContributionCard, {
-            rec, onSend: () => {}, onDismiss: () => {},
-            onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
-            onConnectApp: () => {},
-          }))
-        }
-        export function renderReview(rec) {
-          return renderToStaticMarkup(React.createElement(ReviewPlan, { rec }))
-        }
-      `,
-      loader: 'jsx',
-      resolveDir: projectRoot,
-    },
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    nodePaths: [frontendModules],
-    write: false,
-  })
-  const bundledModule = { exports: {} }
-  const evaluate = new Function('module', 'exports', 'require', result.outputFiles[0].text)
-  evaluate(bundledModule, bundledModule.exports, createRequire(import.meta.url))
-  return bundledModule.exports
-}
+const cardRenderer = () => renderModule(`
+  import React from 'react'
+  import { renderToStaticMarkup } from 'react-dom/server'
+  import { ContributionCard, ReviewPlan } from './ui/ContributionCard.jsx'
+  export function renderCard(rec) {
+    return renderToStaticMarkup(React.createElement(ContributionCard, {
+      rec, onSend: () => {}, onDismiss: () => {},
+      onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
+      onConnectApp: () => {},
+    }))
+  }
+  export function renderReview(rec) {
+    return renderToStaticMarkup(React.createElement(ReviewPlan, { rec }))
+  }
+`)
 
 test('open and draft cards expose durable label failures without Send controls', async (t) => {
   if (!frontendModules) {
@@ -271,36 +247,16 @@ test('a completed publication connection stays visible without another button', 
   assert.doesNotMatch(html, />Connect app</)
 })
 
-async function autopilotCardRenderer() {
-  const esbuildUrl = pathToFileURL(join(frontendModules, 'esbuild', 'lib', 'main.js')).href
-  const { build } = await import(esbuildUrl)
-  const projectRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-  const result = await build({
-    stdin: {
-      contents: `
-        import React from 'react'
-        import { renderToStaticMarkup } from 'react-dom/server'
-        import { ContributionCard } from './ui/ContributionCard.jsx'
-        export function renderCard(rec) {
-          return renderToStaticMarkup(React.createElement(ContributionCard, {
-            rec, onSetAutopilot: () => {},
-          }))
-        }
-      `,
-      loader: 'jsx',
-      resolveDir: projectRoot,
-    },
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    nodePaths: [frontendModules],
-    write: false,
-  })
-  const bundledModule = { exports: {} }
-  const evaluate = new Function('module', 'exports', 'require', result.outputFiles[0].text)
-  evaluate(bundledModule, bundledModule.exports, createRequire(import.meta.url))
-  return bundledModule.exports
-}
+const autopilotCardRenderer = () => renderModule(`
+  import React from 'react'
+  import { renderToStaticMarkup } from 'react-dom/server'
+  import { ContributionCard } from './ui/ContributionCard.jsx'
+  export function renderCard(rec) {
+    return renderToStaticMarkup(React.createElement(ContributionCard, {
+      rec, onSetAutopilot: () => {},
+    }))
+  }
+`)
 
 test('an open autopilot PR shows the autopilot panel with pause + rounds', async (t) => {
   if (!frontendModules) {

@@ -1,57 +1,20 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { frontendModules, renderModule } from './render-harness.mjs'
 
-const frontendModules = process.env.MOBIUS_FRONTEND_NODE_MODULES
-
-async function connectionRenderer() {
-  const esbuildUrl = pathToFileURL(
-    join(frontendModules, 'esbuild', 'lib', 'main.js'),
-  ).href
-  const { build } = await import(esbuildUrl)
-  const projectRoot = dirname(
-    fileURLToPath(new URL('../package.json', import.meta.url)),
-  )
-  const result = await build({
-    stdin: {
-      contents: `
-        import React from 'react'
-        import { renderToStaticMarkup } from 'react-dom/server'
-        import { ConnectionCard } from './ui/ConnectionCard.jsx'
-        export function renderConnection(conn, placement = 'content') {
-          return renderToStaticMarkup(React.createElement(ConnectionCard, {
-            conn,
-            placement,
-            token: 'app-token',
-            onChanged: () => {},
-          }))
-        }
-      `,
-      loader: 'jsx',
-      resolveDir: projectRoot,
-    },
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    nodePaths: [frontendModules],
-    write: false,
-  })
-  const bundledModule = { exports: {} }
-  const evaluate = new Function(
-    'module',
-    'exports',
-    'require',
-    result.outputFiles[0].text,
-  )
-  evaluate(
-    bundledModule,
-    bundledModule.exports,
-    createRequire(import.meta.url),
-  )
-  return bundledModule.exports
-}
+const connectionRenderer = () => renderModule(`
+  import React from 'react'
+  import { renderToStaticMarkup } from 'react-dom/server'
+  import { ConnectionCard } from './ui/ConnectionCard.jsx'
+  export function renderConnection(conn, placement = 'content') {
+    return renderToStaticMarkup(React.createElement(ConnectionCard, {
+      conn,
+      placement,
+      token: 'app-token',
+      onChanged: () => {},
+    }))
+  }
+`)
 
 test('disconnected setup renders one GitHub device-flow action', async (t) => {
   if (!frontendModules) {
