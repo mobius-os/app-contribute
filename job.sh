@@ -550,7 +550,6 @@ def _attention_update(rec, node):
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
-  previous_check = rec.get("last_check_rollup_state")
   set_if_changed("last_check_rollup_state", check_state)
   set_if_changed("failing_checks", failing_checks)
 
@@ -584,6 +583,8 @@ def _attention_update(rec, node):
   ):
     patch["needs_attention"] = False
     patch["attention"] = None
+  if check_state == "SUCCESS" and rec.get("last_checks_attention_key"):
+    patch["last_checks_attention_key"] = None
 
   attention = None
   checks_attention = None
@@ -596,8 +597,14 @@ def _attention_update(rec, node):
       "url": rec.get("url") or "",
       "detected_at": now,
     }
-  if checks_attention and previous_check not in ("FAILURE", "ERROR"):
+  # Raise per checks KEY (state + head sha), not per raw state transition: an
+  # autopilot follow-up push that fails again must fire for the NEW head even
+  # though the stored rollup state never left FAILURE. The platform dedupes
+  # response rounds by this same key (last_handled_attention_key), so
+  # re-raising an already-handled key stays a quiet no-op.
+  if checks_attention and rec.get("last_checks_attention_key") != checks_attention["key"]:
     attention = checks_attention
+    patch["last_checks_attention_key"] = checks_attention["key"]
   elif review_decision == "CHANGES_REQUESTED" and previous_review != "CHANGES_REQUESTED":
     attention = {
       "type": "changes_requested",
