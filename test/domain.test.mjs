@@ -6,6 +6,7 @@ import {
   STATUS_NARRATION,
   applyLiveStates,
   buildRefreshQuery,
+  repoLandability,
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
   problemHeadline,
@@ -135,6 +136,53 @@ test('live PR refresh carries the CI rollup used by stack landing', () => {
     r0: { __typename: 'PullRequest', state: 'MERGED', isDraft: false },
   })
   assert.equal(settled[0].status, 'merged', 'a terminal GitHub result settles the journal')
+})
+
+test('repoLandability requires push and an unruled default branch', () => {
+  // Protected/ruled default branch (a non-null refUpdateRule) → land on GitHub.
+  assert.equal(repoLandability({
+    viewerPermission: 'ADMIN',
+    defaultBranchRef: { refUpdateRule: { viewerCanPush: true } },
+  }), false)
+  // Clean, pushable app repo → atomic land is offered.
+  assert.equal(repoLandability({
+    viewerPermission: 'WRITE',
+    defaultBranchRef: { refUpdateRule: null },
+  }), true)
+  // No push → land on GitHub regardless of protection.
+  assert.equal(repoLandability({
+    viewerPermission: 'READ',
+    defaultBranchRef: { refUpdateRule: null },
+  }), false)
+  // Missing/unreachable repo → fail-safe: not landable.
+  assert.equal(repoLandability(null), false)
+  assert.equal(repoLandability({ viewerPermission: 'ADMIN', defaultBranchRef: null }), false)
+})
+
+test('live refresh probes stack landability and stamps land_eligible per repo', () => {
+  const stackRec = {
+    id: 'one', type: 'pr', status: 'open',
+    repo: 'mobius-os/mobius',
+    url: 'https://github.com/mobius-os/mobius/pull/1',
+    plan: { repo: 'mobius-os/mobius', stack: { id: 's', position: 1, total: 2, base_branch: 'main' } },
+  }
+  const request = buildRefreshQuery([stackRec])
+  assert.match(request.query, /resource\(url: "https:\/\/github\.com\/mobius-os\/mobius"\)/)
+  assert.match(request.query, /\.\.\. on Repository \{ viewerPermission/)
+  assert.match(request.query, /refUpdateRule/)
+  assert.deepEqual(request.repoAliases, { repo0: 'mobius-os/mobius' })
+
+  const next = applyLiveStates([stackRec], request.aliases, {
+    r0: { __typename: 'PullRequest', state: 'OPEN', isDraft: false, statusCheckRollup: { state: 'SUCCESS' } },
+    repo0: { viewerPermission: 'ADMIN', defaultBranchRef: { refUpdateRule: { viewerCanPush: true } } },
+  }, request.repoAliases)
+  assert.equal(next[0].land_eligible, false, 'a ruled default branch is not atomically landable')
+  assert.equal(next[0].live_checks_state, 'SUCCESS')
+
+  // A standalone open PR (no stack) never triggers a landability probe.
+  const standalone = buildRefreshQuery([{ ...stackRec, plan: { repo: 'mobius-os/mobius' } }])
+  assert.deepEqual(standalone.repoAliases, {})
+  assert.doesNotMatch(standalone.query, /on Repository/)
 })
 
 test('submitting stays publishing until every reconciled pull request is durable', () => {

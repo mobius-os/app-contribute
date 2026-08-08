@@ -20,6 +20,8 @@
 // flight); `landing` is the atomic green-stack claim; `commented` is the
 // terminal status for comment actions.
 
+import { stackMeta } from './stack.js'
+
 export const TYPE_LABELS = {
   pr: 'Pull request',
   issue: 'Issue',
@@ -258,29 +260,60 @@ export function countStats(records) {
   return { merged, open, ready }
 }
 
+// Records whose live GitHub state is worth polling, and the repo one targets —
+// shared by the refresh query and the landability overlay below.
+const LIVE_STATUSES = ['draft', 'open', 'landing']
+const recordRepo = (rec) => rec?.plan?.repo || rec?.repo || ''
+
 // One GraphQL document refreshes every live PR/issue in a single round-trip
-// (aliased resource(url:) nodes cost ~1 rate-limit point total). Comments
-// carry no meaningful live state, so only pr/issue records participate.
-// Returns null when nothing needs refreshing.
+// (aliased resource(url:) nodes cost ~1 rate-limit point total). Comments carry
+// no meaningful live state, so only pr/issue records participate. Open
+// multi-layer stacks additionally probe their repo's landability in the same
+// request. Returns null when nothing needs refreshing.
 export function buildRefreshQuery(records) {
   const targets = records.filter((rec) =>
     (rec.type === 'pr' || rec.type === 'issue') &&
-    (rec.status === 'draft' || rec.status === 'open' || rec.status === 'landing') &&
+    LIVE_STATUSES.includes(rec.status) &&
     typeof rec.url === 'string' &&
     rec.url.startsWith('https://github.com/'))
-  if (targets.length === 0) return null
+  // Only a live, multi-layer stack can atomically land, so probe landability
+  // just for those repos. Everything else lands through GitHub's own merge/queue.
+  const stackRepos = [...new Set(targets.filter(stackMeta).map(recordRepo).filter(Boolean))]
+  if (targets.length === 0 && stackRepos.length === 0) return null
+  // JSON.stringify escapes quotes/backslashes, exactly the GraphQL string
+  // escaping a url needs; every node (PR, issue, or repo) uses this one idiom.
+  const resourceNode = (alias, url, body) =>
+    alias + ': resource(url: ' + JSON.stringify(url) + ') { __typename ' + body + ' }'
   const aliases = {}
   const parts = targets.map((rec, i) => {
-    const alias = 'r' + i
-    aliases[alias] = rec.id
-    // JSON.stringify escapes quotes/backslashes, which is exactly the
-    // GraphQL string-literal escaping the URL needs.
-    return alias + ': resource(url: ' + JSON.stringify(rec.url) + ') {' +
-      ' __typename' +
-      ' ... on PullRequest { state isDraft statusCheckRollup { state } }' +
-      ' ... on Issue { state } }'
+    aliases['r' + i] = rec.id
+    return resourceNode('r' + i, rec.url,
+      '... on PullRequest { state isDraft statusCheckRollup { state } } ... on Issue { state }')
   })
-  return { query: 'query { ' + parts.join(' ') + ' }', aliases }
+  const repoAliases = {}
+  stackRepos.forEach((full, i) => {
+    repoAliases['repo' + i] = full
+    // refUpdateRule is the viewer's EFFECTIVE rule for the default branch and is
+    // readable without admin (unlike branchProtectionRules). Its presence
+    // (protection, required checks, or a merge queue) means an atomic
+    // fast-forward would bypass repository-owned rules, so we don't offer Land.
+    parts.push(resourceNode('repo' + i, 'https://github.com/' + full,
+      '... on Repository { viewerPermission defaultBranchRef { refUpdateRule { viewerCanPush } } }'))
+  })
+  return { query: 'query { ' + parts.join(' ') + ' }', aliases, repoAliases }
+}
+
+// A Repository resource() node → whether its stack may be atomically landed
+// here: true only when the viewer can push AND the default branch carries no
+// update rule an atomic land must not bypass. Anything else (unknown,
+// protected, ruled, or unpushable) is false, so the UI fails safe — an unknown
+// or unreachable repo never shows a Land button that would only fail.
+export function repoLandability(node) {
+  if (!node || typeof node !== 'object') return false
+  const perm = node.viewerPermission
+  if (perm !== 'ADMIN' && perm !== 'MAINTAIN' && perm !== 'WRITE') return false
+  const ref = node.defaultBranchRef
+  return !!ref && !ref.refUpdateRule
 }
 
 // Maps one resource() node to a ledger status. null = no verdict (deleted,
@@ -303,7 +336,7 @@ export function liveStatusFor(node) {
 
 // Overlays fresh GraphQL results onto the record list for display. Never
 // mutates the inputs; records without a verdict pass through unchanged.
-export function applyLiveStates(records, aliases, data) {
+export function applyLiveStates(records, aliases, data, repoAliases) {
   if (!data) return records
   const liveById = new Map()
   for (const [alias, recId] of Object.entries(aliases)) {
@@ -315,15 +348,31 @@ export function applyLiveStates(records, aliases, data) {
       : ''
     liveById.set(recId, { status, checks })
   }
-  if (liveById.size === 0) return records
+  const landByRepo = new Map()
+  if (repoAliases) {
+    for (const [alias, full] of Object.entries(repoAliases)) {
+      landByRepo.set(full, repoLandability(data[alias]))
+    }
+  }
+  if (liveById.size === 0 && landByRepo.size === 0) return records
   return records.map((rec) => {
+    // Repo-level landability overlay: only allocates a new record when the
+    // value actually moves, so the caller's === "nothing changed" check holds.
+    let base = rec
+    if (landByRepo.size > 0) {
+      const full = recordRepo(rec)
+      if (full && landByRepo.has(full)) {
+        const landable = landByRepo.get(full)
+        if (rec.land_eligible !== landable) base = { ...rec, land_eligible: landable }
+      }
+    }
     const live = liveById.get(rec.id)
-    if (!live) return rec
-    const next = live.checks ? { ...rec, live_checks_state: live.checks } : rec
+    if (!live) return base
+    const next = live.checks ? { ...base, live_checks_state: live.checks } : base
     // `landing` is a durable public-action journal, not a display overlay. An
     // OPEN verdict can be a momentary GitHub lag after the default ref moved;
     // only a terminal MERGED/CLOSED result may settle the journal here.
-    if (rec.status === 'landing' && ['open', 'draft'].includes(live.status)) {
+    if (base.status === 'landing' && ['open', 'draft'].includes(live.status)) {
       return next
     }
     return live.status !== next.status ? { ...next, status: live.status } : next
