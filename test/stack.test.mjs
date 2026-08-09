@@ -5,6 +5,7 @@ import {
   preparedContributionUnits,
   publicContributionUnits,
   stackMeta,
+  stackLandable,
   stackLandingReadiness,
   stackProgress,
   stackReadiness,
@@ -108,6 +109,26 @@ test('public stacks stay grouped and land only after every CI rollup is green', 
   records[1] = { ...records[1], live_checks_state: 'PENDING' }
   const waiting = publicContributionUnits(records, records)[0]
   assert.equal(stackLandingReadiness(waiting).code, 'pending')
+})
+
+test('a stack is landable only when every layer confirms it', () => {
+  const open = [layer(1, 'open'), layer(2, 'open'), layer(3, 'open')]
+  const unit = publicContributionUnits(open, open)[0]
+  // No landability verdict yet (pre-refresh) → not landable, so no Land button.
+  assert.equal(stackLandable(unit), false)
+  // A ruled/protected repo stamps land_eligible:false → land on GitHub.
+  const ruled = { records: open.map((rec) => ({ ...rec, land_eligible: false })) }
+  assert.equal(stackLandable(ruled), false)
+  // Only when every layer is positively landable does the Land flow appear.
+  const clean = { records: open.map((rec) => ({ ...rec, land_eligible: true })) }
+  assert.equal(stackLandable(clean), true)
+  // One unconfirmed layer is enough to withhold Land.
+  const mixed = { records: [
+    { ...open[0], land_eligible: true },
+    { ...open[1], land_eligible: true },
+    { ...open[2] },
+  ] }
+  assert.equal(stackLandable(mixed), false)
 })
 
 test('an in-flight atomic landing cannot be started twice', () => {

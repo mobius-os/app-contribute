@@ -138,6 +138,16 @@ export function stackProgress(unit) {
   }
 }
 
+// Whether atomic Land may be offered for an open stack. Landability is a
+// repo-level fact stamped onto each record by the live refresh (land_eligible);
+// every layer shares the target repo, so the whole unit is landable only when
+// each layer positively confirms it. Anything else (unknown, protected/ruled
+// default branch, no push) lands through GitHub's own merge/queue instead.
+export function stackLandable(unit) {
+  const records = unit?.records || []
+  return records.length > 0 && records.every((rec) => rec.land_eligible === true)
+}
+
 export function stackLandingReadiness(unit) {
   const records = sortStackRecords(unit?.records || [])
   const total = Number(unit?.total || records.length)
