@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
 import {
+  sortStackRecords,
   stackLandingReadiness,
   stackMeta,
   stackProgress,
@@ -11,6 +12,67 @@ import { Icon } from './Icons.jsx'
 
 function branchOf(rec) {
   return rec?.plan?.branch || rec?.branch || 'branch unavailable'
+}
+
+// Copy for the "lands through GitHub" panel, keyed by the stack's check state.
+const MERGE_COPY = {
+  ready: {
+    title: 'All checks passed',
+    body: 'This repository merges on GitHub — open each pull request to merge it or add it to the queue.',
+  },
+  failed: {
+    title: 'A check needs attention on GitHub',
+    body: 'Open the pull request on GitHub to see the failing check, then merge there once it passes.',
+  },
+  running: {
+    title: 'Checks are running on GitHub',
+    body: 'They can be merged on GitHub once every check has passed.',
+  },
+}
+
+// One status-banner tone rule: red only for a genuine failure or broken chain;
+// a calm accent while a landing is in progress; neutral otherwise.
+function warnTone(code, isLanding) {
+  if (code === 'failed' || code === 'invalid') return ' is-error'
+  return isLanding ? ' is-progress' : ''
+}
+
+// Open stacks whose target lands through GitHub's own merge/queue (protected or
+// ruled default branch) show this calm path instead of a Land button that would
+// only fail. Reuses the shared .co-stack-warning banner: accent when ready to
+// merge, caution amber when a check failed, neutral while checks run.
+function StackMergeNotice({ unit, readiness, readinessId }) {
+  const key = readiness.code === 'ready' ? 'ready'
+    : readiness.code === 'failed' ? 'failed'
+    : 'running'
+  const copy = MERGE_COPY[key]
+  const links = sortStackRecords(unit.records).filter((rec) =>
+    typeof rec.url === 'string' && rec.url.startsWith('https://github.com/'))
+  return (
+    <div
+      id={readinessId}
+      className={'co-stack-warning' + (key === 'ready' ? ' is-progress' : key === 'failed' ? ' is-attention' : '')}
+      role="status"
+    >
+      <strong>{copy.title}</strong>
+      <span>{copy.body}</span>
+      {links.length > 0 ? (
+        <div className="co-stack-merge-links">
+          {links.map((rec) => (
+            <a
+              key={rec.id}
+              className="co-review-link"
+              href={rec.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {rec.number ? `Merge #${rec.number} ↗` : 'Open on GitHub ↗'}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function StackRail({ records }) {
@@ -35,6 +97,7 @@ function StackRail({ records }) {
 export function ContributionStack({
   unit,
   action = 'send',
+  landable = false,
   reviewStatus,
   onSendStack,
   onLandStack,
@@ -52,6 +115,10 @@ export function ContributionStack({
   const readiness = isLandingAction
     ? stackLandingReadiness(unit)
     : stackReadiness(unit)
+  // An open stack whose target can't be atomically landed here (protected or
+  // ruled default branch, or no push) never gets a Land button that would only
+  // fail — it lands through GitHub's own merge/queue, so we show that path.
+  const mergeOnGitHub = isLandingAction && !landable
   const blocked = isLandingAction ? 0 : blockedReviewCount(unit.records, reviewStatus)
   const canAct = readiness.ok && blocked === 0
   const canRecoverLanding = isLandingAction && readiness.code === 'landing'
@@ -132,7 +199,7 @@ export function ContributionStack({
               ? 'Landing the verified stack…'
               : progress.ready > 0
                 ? `${progress.ready} ready to send`
-                : isLandingAction && readiness.ok
+                : isLandingAction && landable && readiness.ok
                   ? 'Every check passed · ready to land'
                   : 'Everything has been sent'}
             {progress.open > 0 && !isLandingAction ? ` · ${progress.open} being reviewed` : ''}
@@ -164,7 +231,11 @@ export function ContributionStack({
         </div>
       </details>
 
-      {blocked > 0 ? (
+      {mergeOnGitHub
+        ? <StackMergeNotice unit={unit} readiness={readiness} readinessId={readinessId} />
+        : null}
+
+      {!mergeOnGitHub && (blocked > 0 ? (
         <div
           id={readinessId}
           className={'co-stack-warning' + (isLandingAction && readiness.code !== 'failed' ? ' is-progress' : '')}
@@ -174,7 +245,11 @@ export function ContributionStack({
           <span>Sending is paused until the agent updates the review.</span>
         </div>
       ) : !readiness.ok && !['settled', 'landing'].includes(readiness.code) ? (
-        <div id={readinessId} className="co-stack-warning" role="status">
+        <div
+          id={readinessId}
+          className={'co-stack-warning' + warnTone(readiness.code, isLandingAction)}
+          role="status"
+        >
           <strong>{isLandingAction
             ? readiness.code === 'failed' ? 'Automated checks failed' : 'Waiting to land'
             : 'Not ready to send'}</strong>
@@ -185,9 +260,9 @@ export function ContributionStack({
           <strong>Landing in progress</strong>
           <span>The verified changes are being applied together.</span>
         </div>
-      ) : null}
+      ) : null)}
 
-      {confirming ? (
+      {!mergeOnGitHub && (confirming ? (
         <div
           className="co-stack-confirm"
           role="alertdialog"
@@ -274,8 +349,8 @@ export function ContributionStack({
             <Icon name="feedback" />
           </button>}
         </div>
-      )}
-      {note && (
+      ))}
+      {!mergeOnGitHub && note && (
         <p
           className={note.includes('opened') || note.includes('landed') || note.startsWith('Publishing') || note.startsWith('Landing')
             ? 'co-review-note'

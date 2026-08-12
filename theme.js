@@ -11,6 +11,9 @@ export const CSS = `
   background: var(--bg); color: var(--text); font-family: var(--font);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Caution amber for advisory/attention states that are NOT errors, so real
+     failures keep --danger to themselves and nothing benign shouts in red. */
+  --co-warn: #cf9526;
 }
 .co-root *, .co-root *::before, .co-root *::after { box-sizing: inherit; }
 /* /mobius-ui:Root */
@@ -511,7 +514,7 @@ export const CSS = `
   margin-top: 6px; background: var(--muted);
 }
 .co-conn-dot.is-ok { background: var(--green); }
-.co-conn-dot.is-warn { background: var(--danger); }
+.co-conn-dot.is-warn { background: var(--co-warn); }
 .co-conn-dot.is-accent { background: var(--accent); }
 .co-conn-body { min-width: 0; flex: 1; }
 .co-conn-title { font-size: 14px; font-weight: 650; margin: 0 0 2px; }
@@ -800,12 +803,28 @@ export const CSS = `
 .co-stack-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .co-stack-warning {
   display: flex; flex-direction: column; gap: 3px; margin-top: 12px; padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--border));
-  border-radius: 10px; background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 10px; background: color-mix(in srgb, var(--text) 4%, var(--surface));
   color: var(--muted); font-size: 12px; line-height: 1.45;
 }
-.co-stack-warning strong { color: var(--danger); font-size: 12.5px; }
+.co-stack-warning strong { color: var(--text); font-size: 12.5px; }
+/* Calm, in-progress waiting (checks running, landing underway) — never alarm. */
+.co-stack-warning.is-progress { border-color: color-mix(in srgb, var(--accent) 26%, var(--border)); }
 .co-stack-warning.is-progress strong { color: var(--accent); }
+/* Advisory attention (a check to look at) — caution amber, not error red. */
+.co-stack-warning.is-attention {
+  border-color: color-mix(in srgb, var(--co-warn) 34%, var(--border));
+  background: color-mix(in srgb, var(--co-warn) 8%, var(--surface));
+}
+.co-stack-warning.is-attention strong { color: var(--co-warn); }
+/* Genuine failure or a broken chain — the only stack banner that earns red. */
+.co-stack-warning.is-error {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+.co-stack-warning.is-error strong { color: var(--danger); }
+/* Row of GitHub merge links for a stack that lands through GitHub's merge/queue. */
+.co-stack-merge-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
 .co-stack-confirm {
   margin-top: 12px; padding: 12px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));

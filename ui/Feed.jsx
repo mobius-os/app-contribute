@@ -1,6 +1,6 @@
 import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
-import { preparedContributionUnits, publicContributionUnits } from '../stack.js'
+import { preparedContributionUnits, publicContributionUnits, stackLandable } from '../stack.js'
 import { partitionReviewUnits, reviewStateFor } from '../review.js'
 import { Icon } from './Icons.jsx'
 
@@ -121,6 +121,7 @@ export function Feed({
               key={'open-stack:' + unit.id}
               unit={unit}
               action="land"
+              landable={stackLandable(unit)}
               onLandStack={onLandStack}
               onFeedback={onFeedback}
               onSetAutopilot={onSetAutopilot}

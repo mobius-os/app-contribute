@@ -222,7 +222,7 @@ export default function ContributeApp({ appId, token }) {
     const refresh = buildRefreshQuery(recs)
     if (!refresh) return recs
     const data = await fetchLiveStates(token, refresh.query)
-    return applyLiveStates(recs, refresh.aliases, data)
+    return applyLiveStates(recs, refresh.aliases, data, refresh.repoAliases)
   }, [token])
 
   // Refresh in place: apply the fresh states to both React state and the
