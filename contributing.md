@@ -645,6 +645,21 @@ and presses **Run GitHub checks** again for that new branch. A passing pre-PR ru
 is evidence for the exact stored `head_sha`; any re-stage clears it.
 
 Before staging, run the cheapest focused checks that cover the changed files.
+Classify the evidence honestly: local focused checks are fast implementation
+feedback; a lock-matched hosted run proves the exact reviewed revision in the
+full environment; the merge queue is the unconditional final gate.
+
+Recommend **Run GitHub checks** explicitly before **Send PR** when the change
+touches concurrency or ordering, persistence, auth or security, migrations,
+provider protocols, dependencies/runtime behavior, or a broad cross-cutting
+path. The same recommendation applies when the partner asks for a thorough or
+expanding-scope review and the complete environment could reveal something
+the local container cannot. This is a risk-based owner choice, never an
+automatic push: small documentation, styling, or narrowly covered changes do
+not earn a duplicate expensive run merely because the button exists. When the
+recommendation is earned, include it in the prepared handoff so the owner sees
+the early full-suite option before sending the PR.
+
 Do **not** run Playwright locally by default. The Möbius app container does not
 have Docker, so agents normally diagnose browser failures from the hosted CI
 report. On a Docker-capable contributor host, a CI failure can be reproduced by
