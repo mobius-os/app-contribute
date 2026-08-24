@@ -69,21 +69,6 @@ async function responseDetail(response, fallback) {
   return fallback
 }
 
-export async function fetchOwnedAgentChats(token, scope = '') {
-  const cleanScope = typeof scope === 'string' ? scope.trim() : ''
-  const query = cleanScope ? `?scope=${encodeURIComponent(cleanScope)}` : ''
-  try {
-    const response = await fetchRead(`/api/app-chats${query}`, {
-      headers: authHeaders(token),
-    })
-    if (!response.ok) return []
-    const chats = await response.json()
-    return Array.isArray(chats) ? chats : []
-  } catch {
-    return []
-  }
-}
-
 // Resolves the connection card's state and carries the fields the connect
 // flow needs (device_flow_available, login). 404 means the platform predates
 // the GitHub surface entirely — a distinct, actionable message.

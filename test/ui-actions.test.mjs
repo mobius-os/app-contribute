@@ -109,8 +109,6 @@ test('an assigned incoming review stays recoverable until its conversation start
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
   assert.match(sourceOverviewSource, /Run contribution cycle/)
-  assert.match(appSource, /fetchOwnedAgentChats\(token, 'contribute-cycle'\)/)
-  assert.doesNotMatch(appSource, /if \(!saved && typeof window\.mobius\?\.chat\?\.list/)
   assert.match(sourceOverviewSource, /Nothing goes public without your approval\./)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
