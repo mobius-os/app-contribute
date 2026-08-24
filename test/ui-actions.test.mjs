@@ -14,7 +14,7 @@ const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : 'Open PR'\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
   assert.match(
     stackSource,
     /<span>\{isLandingAction \? 'Land stack' : 'Send for review'\}<\/span>/,
@@ -112,7 +112,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(sourceOverviewSource, /Nothing goes public without your approval\./)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : 'Open PR'\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
   assert.doesNotMatch(batchActionSource, /role="alertdialog"/)
   assert.doesNotMatch(batchActionSource, /Keep private/)
   assert.match(batchActionSource, /className="co-agent-handoff"/)

@@ -79,7 +79,8 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
   assert.match(html, /aria-label="Run GitHub checks"/)
-  assert.match(html, />Test</)
+  assert.match(html, /title="Run the full GitHub checks on your fork"/)
+  assert.match(html, />Run checks</)
   assert.match(html, /Open pull request for review/)
 })
 

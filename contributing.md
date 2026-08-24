@@ -727,6 +727,42 @@ the review worktree and store `source_repo_path: "/data/platform"` beside
 No origin → be honest: platform
 contributions need the updated platform bootstrap; app contributions still work.
 
+### Updating an existing open PR
+
+When a new owner-authored change belongs on a PR that is already open, update
+that contribution's existing record instead of opening a duplicate or pushing
+around Contribute. This is still a private preparation until the owner presses
+**Update PR**.
+
+1. Refresh GitHub read-only and require that the recorded repository, PR
+   number, public head repository, and topic branch still name one open PR.
+   Re-anchor the durable review worktree at the public pushed head before
+   applying the new local patch. Never build on an unpushed local attempt.
+2. Keep the same record id, PR URL, number, branch, `head_repository`, original
+   `submitted_at`, and original PR base. Set the record back to `prepared` and
+   set `plan.action` to `pr_update`; update `plan.head_sha`, the complete
+   base-to-new-head diff/hash/stat, source witness, body draft, and timestamps.
+   The stored diff is the complete current PR, not only the new delta, because
+   the all-clear verdict must describe exactly what maintainers will review.
+3. Re-run the full private review on the new head and pin
+   `quality_review.reviewed_head_sha` to it. The ordinary local review-status
+   endpoint understands both `pr` and `pr_update`; a changed checkout, source
+   witness, diff, ancestry, or upstream conflict blocks the action before the
+   owner clicks.
+4. Stop in Contribute. **Update PR** is the explicit public approval boundary.
+   Its platform route rechecks the live PR identity before any push and then
+   allows only the exact reviewed fast-forward. Ordinary **Send PR** continues
+   to reject a branch that already has a PR, and raw `git push` is never a
+   substitute.
+5. After a successful update, the same record returns to `open`, retains its
+   original submission time, records `last_updated_pr_at`, and advances an
+   existing Autopilot grant to the new public head without creating, enabling,
+   or retargeting a grant.
+
+If the installed platform does not yet expose the reviewed update route, keep
+the record privately prepared and say that a restart or platform update is
+needed. Do not fall back to a duplicate PR or an unguarded branch rewrite.
+
 ## PLATFORM CI
 
 For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit

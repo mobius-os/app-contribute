@@ -59,6 +59,7 @@ import {
   submitContribution,
   submitContributionViaMobius,
   submitContributionStack,
+  updateContribution,
 } from './api.js'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
@@ -685,29 +686,39 @@ export default function ContributeApp({ appId, token }) {
     pageRef.current?.scrollTo({ top: 0, left: 0 })
   }, [view])
 
-  // Send uses the path the owner selected: personal GitHub retains the existing
-  // branch-push flow, while Möbius sends the same reviewed record through the
-  // one-use launcher relay. Both paths keep the durable record authoritative.
+  // New PRs use the owner's selected publication path. An existing-PR update
+  // stays on the personal GitHub identity that owns its public branch. Both
+  // actions consume one exact reviewed record and remain explicit clicks.
   const onSend = useCallback(async (rec) => {
-    const decision = contributionPathDecision(
-      rec,
-      submissionMethod,
-      connRef.current.state,
-    )
-    if (decision.error) return { error: decision.error }
-    const viaMobius = decision.method === 'mobius'
-    const outcome = viaMobius
-      ? await submitContributionViaMobius({ appId, token, rec })
-      : await submitContribution({
-          appId,
-          token,
-          rec,
-          autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
-        })
+    const updating = rec.plan?.action === 'pr_update'
+    let viaMobius = false
+    let outcome
+    if (updating) {
+      if (connRef.current.state !== 'connected') {
+        return { error: 'Connect GitHub before updating this pull request.' }
+      }
+      outcome = await updateContribution({ appId, token, rec })
+    } else {
+      const decision = contributionPathDecision(
+        rec,
+        submissionMethod,
+        connRef.current.state,
+      )
+      if (decision.error) return { error: decision.error }
+      viaMobius = decision.method === 'mobius'
+      outcome = viaMobius
+        ? await submitContributionViaMobius({ appId, token, rec })
+        : await submitContribution({
+            appId,
+            token,
+            rec,
+            autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
+          })
+    }
     if (outcome.ok) {
       const next = { ...outcome.ok, path: rec.path }
       applyRecordUpdates(next)
-      window.mobius?.signal?.('contribution_submitted', {
+      window.mobius?.signal?.(updating ? 'contribution_updated' : 'contribution_submitted', {
         id: rec.id,
         url: outcome.url || next.url,
         via: viaMobius ? 'mobius' : 'github',
@@ -718,6 +729,7 @@ export default function ContributeApp({ appId, token }) {
         record: next,
         url: outcome.url || next.url,
         viaMobius,
+        updated: updating,
       }
     }
     if (outcome.pending) {
@@ -759,7 +771,7 @@ export default function ContributeApp({ appId, token }) {
         const next = { ...resolution.record, path: rec.path }
         applyRecordUpdates(next)
         if (resolution.state === 'published') {
-          window.mobius?.signal?.('contribution_submitted', {
+          window.mobius?.signal?.(updating ? 'contribution_updated' : 'contribution_submitted', {
             id: rec.id,
             url: next.url || '',
             reconciled: true,
@@ -770,6 +782,7 @@ export default function ContributeApp({ appId, token }) {
             record: next,
             url: next.url || '',
             viaMobius,
+            updated: updating,
           }
         }
         if (resolution.state === 'publishing') {

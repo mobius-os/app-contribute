@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   fetchMobiusContributionStatus,
   submitContributionViaMobius,
+  updateContribution,
 } from '../api.js'
 
 function response(status, body) {
@@ -73,6 +74,41 @@ test('Möbius status reader returns the saved draft URL', async () => {
     })
     assert.equal(outcome.ok.status, 'draft')
     assert.equal(outcome.ok.url, 'https://github.com/owner/mobius/pull/123')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('existing PR update uses the dedicated reviewed fast-forward endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  let seen = null
+  globalThis.fetch = async (url, options) => {
+    seen = { url, options }
+    return response(200, {
+      record: {
+        id: 'review-1',
+        status: 'open',
+        number: 58,
+        url: 'https://github.com/mobius-os/app-contribute/pull/58',
+      },
+      url: 'https://github.com/mobius-os/app-contribute/pull/58',
+    })
+  }
+  try {
+    const outcome = await updateContribution({
+      appId: 80,
+      token: 'scoped-token',
+      rec: { id: 'review-1' },
+    })
+    assert.equal(
+      seen.url,
+      '/api/github/contributions/80/review-1/update-existing',
+    )
+    assert.equal(seen.options.method, 'POST')
+    assert.equal(seen.options.headers.Authorization, 'Bearer scoped-token')
+    assert.deepEqual(JSON.parse(seen.options.body), {})
+    assert.equal(outcome.ok.status, 'open')
+    assert.equal(outcome.url, 'https://github.com/mobius-os/app-contribute/pull/58')
   } finally {
     globalThis.fetch = originalFetch
   }

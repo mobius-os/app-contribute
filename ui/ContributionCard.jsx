@@ -46,6 +46,7 @@ import { Icon } from './Icons.jsx'
 
 const ACTION_LABELS = {
   pr: 'Pull request',
+  pr_update: 'Pull request update',
   issue: 'Issue',
   issue_comment: 'Issue comment',
   discussion_comment: 'Discussion reply',
@@ -53,6 +54,7 @@ const ACTION_LABELS = {
 
 const PREPARED_ACTION_LABELS = {
   pr: 'New pull request',
+  pr_update: 'Update existing pull request',
   issue: 'New issue',
   issue_comment: 'New issue comment',
   discussion_comment: 'New discussion reply',
@@ -573,6 +575,7 @@ function ReviewActions({
   const [startingChecks, setStartingChecks] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
+  const isUpdate = rec.plan?.action === 'pr_update'
   const blocked = reviewState?.state === 'needs_refresh'
   const quality = qualityReviewFor(rec)
   const reviewIncomplete = isPr && quality.state !== 'all_clear'
@@ -614,15 +617,19 @@ function ReviewActions({
     try {
       const outcome = (await onSend(rec)) || {}
       if (outcome.ok) {
-        setSendNote(outcome.viaMobius
-          ? 'Draft pull request opened through Möbius.'
-          : 'Pull request opened on GitHub for review.')
+        setSendNote(outcome.updated
+          ? 'Pull request updated on GitHub.'
+          : outcome.viaMobius
+            ? 'Draft pull request opened through Möbius.'
+            : 'Pull request opened on GitHub for review.')
       } else if (outcome.pending) {
         setSendNote(outcome.viaMobius
           ? 'Möbius accepted the reviewed change and is opening the draft. This card will update automatically.'
           : 'Publishing is still in progress. Contribute will update this card when GitHub finishes.')
       } else {
-        setNote(outcome.error || 'Could not submit this contribution.')
+        setNote(outcome.error || (isUpdate
+          ? 'Could not update this pull request.'
+          : 'Could not submit this contribution.'))
       }
     } finally {
       setSending(false)
@@ -791,10 +798,12 @@ function ReviewActions({
                   className="co-icon-btn co-check-btn"
                   onClick={() => setConfirmingChecks(true)}
                   aria-label={rec.pre_pr_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
-                  title={rec.pre_pr_checks ? 'Run checks again' : 'Run GitHub checks'}
+                  title={rec.pre_pr_checks
+                    ? 'Run the full GitHub checks again on your fork'
+                    : 'Run the full GitHub checks on your fork'}
                 >
                   <Icon name={rec.pre_pr_checks ? 'refresh' : 'check'} />
-                  {!rec.pre_pr_checks ? <span>Test</span> : null}
+                  <span>{rec.pre_pr_checks ? 'Check again' : 'Run checks'}</span>
                 </button>
               ) : null}
               {!reviewIncomplete ? (
@@ -804,14 +813,20 @@ function ReviewActions({
                   disabled={sending || checksActive}
                   onClick={send}
                   aria-busy={sending}
-                  aria-label={checksActive ? 'GitHub checks are still running' : sending ? 'Opening pull request' : 'Open pull request for review'}
-                  title={checksActive ? 'Wait for checks' : 'Open pull request'}
+                  aria-label={checksActive
+                    ? 'GitHub checks are still running'
+                    : sending
+                      ? (isUpdate ? 'Updating pull request' : 'Opening pull request')
+                      : (isUpdate ? 'Update pull request' : 'Open pull request for review')}
+                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Update pull request' : 'Open pull request')}
                 >
                   <Icon name="send" />
                   <span className="co-action-label">
-                    <span>{checksActive ? 'Checking' : 'Open PR'}</span>
+                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Update PR' : 'Open PR')}</span>
                     {sending ? (
-                      <span className="co-action-label-sweep" aria-hidden="true">Open PR</span>
+                      <span className="co-action-label-sweep" aria-hidden="true">
+                        {isUpdate ? 'Update PR' : 'Open PR'}
+                      </span>
                     ) : null}
                   </span>
                 </button>
@@ -859,7 +874,9 @@ function ReviewActions({
       ) : null}
       {sending && (
         <p className="co-review-note" role="status" aria-live="polite">
-          Checking the reviewed source and publishing it to GitHub
+          {isUpdate
+            ? 'Checking the reviewed source and updating the pull request'
+            : 'Checking the reviewed source and publishing it to GitHub'}
           {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
         </p>
       )}

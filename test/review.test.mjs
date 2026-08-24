@@ -25,6 +25,7 @@ import {
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
+const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
 
 test('shell review intents name one ledger record without encoding presentation state', () => {
   assert.deepEqual(contributionReviewTargetFromIntent('review:record.1-ready'), {
@@ -282,7 +283,12 @@ test('address all collects active local and published blockers but not history',
   assert.match(action.draft, /Do not push, reply, publish, merge/)
   assert.doesNotMatch(action.draft, /Already merged|An issue|Clean PR/)
 })
-
+test('the optional fork preflight is named as checks rather than an ambiguous test', () => {
+  assert.match(cardSource, />\{rec\.pre_pr_checks \? 'Check again' : 'Run checks'\}<\/span>/)
+  assert.match(cardSource, /Run the full GitHub checks on your fork/)
+  assert.doesNotMatch(cardSource, /<span>Test<\/span>/)
+  assert.match(cardSource, /It does not\s+open a pull request/)
+})
 
 test('all clear belongs to the exact prepared head', () => {
   const record = {
@@ -311,6 +317,15 @@ test('prepared work stays out of send until a thorough review is all clear', () 
   assert.deepEqual(parts.readyToSend.map((unit) => unit.id), ['clear'])
   assert.match(reviewAllAction([needed]).draft, /correctness, maintainability, simplicity/)
   assert.match(reviewAllAction([needed]).draft, /Do not push, publish, comment, merge/)
+})
+
+test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
+  assert.match(appSource, /rec\.plan\?\.action === 'pr_update'/)
+  assert.match(appSource, /updateContribution\(\{ appId, token, rec \}\)/)
+  assert.match(appSource, /Connect GitHub before updating this pull request/)
+  assert.match(cardSource, /pr_update: 'Update existing pull request'/)
+  assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
+  assert.match(cardSource, /Pull request updated on GitHub/)
 })
 
 test('one queue handoff owns every visible private review job', () => {

@@ -356,6 +356,56 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
   }
 }
 
+// Owner-approved fast-forward of an already-open pull request. A prepared
+// `pr_update` record carries the exact new head and complete reviewed diff; the
+// platform verifies the live PR identity before it pushes anything.
+export async function updateContribution({ appId, token, rec }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) +
+        '/update-existing',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    )
+    const body = await r.json().catch(() => null)
+    if (r.ok && body?.record) {
+      return { ok: body.record, url: body?.url || '' }
+    }
+    const detail = body?.detail
+    if (
+      r.status === 409 &&
+      detail === 'This contribution is no longer waiting for approval.'
+    ) {
+      return { alreadyHandled: true }
+    }
+    if (r.status === 404) {
+      return {
+        unsupported: true,
+        error: 'Restart Möbius to load the reviewed PR update action.',
+      }
+    }
+    if (detail && typeof detail === 'object') {
+      return {
+        error: detail.message || 'Could not update this PR.',
+        record: detail.record || null,
+      }
+    }
+    return {
+      error: typeof detail === 'string' ? detail : 'Could not update this PR.',
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved contribution before offering a retry…',
+    }
+  }
+}
+
 // Launcher path: the scoped app token reaches only the platform BFF. The BFF
 // rechecks the reviewed record, asks the root-owned identity broker for one
 // body-bound contribution capability, and sends an always-draft request to the
