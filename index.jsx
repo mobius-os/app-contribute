@@ -34,7 +34,7 @@ import {
   summarizeSubmissionResolutions,
   syncSetupCompletion,
 } from './domain.js'
-import { contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, summarizeQualityReviews } from './review.js'
+import { contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, summarizeQualityReviews } from './review.js'
 import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
@@ -157,6 +157,7 @@ export default function ContributeApp({ appId, token }) {
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'checking' })
   const [loading, setLoading] = useState(true)
+  const [ledgerReady, setLedgerReady] = useState(false)
   const [omittedCount, setOmittedCount] = useState(0)
   const [view, setViewState] = useState(() => {
     try {
@@ -172,6 +173,7 @@ export default function ContributeApp({ appId, token }) {
   const [reviewStatus, setReviewStatus] = useState({
     state: 'loading', byId: {}, checkedAt: '',
   })
+  const [reviewFocus, setReviewFocus] = useState(null)
   const [incomingReviews, setIncomingReviews] = useState([])
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
@@ -525,6 +527,7 @@ export default function ContributeApp({ appId, token }) {
       setFromCache(ledger.fromCache)
       setConn(status)
       setLoading(false)
+      setLedgerReady(true)
       signalReady({ item_count: recs.length })
 
       if (ledger.fromCache) return
@@ -543,6 +546,7 @@ export default function ContributeApp({ appId, token }) {
     load().catch((err) => {
       if (cancelled) return
       setLoading(false)
+      setLedgerReady(true)
       signalReady({ item_count: recordsRef.current.length })
       window.mobius?.signal?.('error', {
         message: String(err?.message || err),
@@ -624,6 +628,30 @@ export default function ContributeApp({ appId, token }) {
     if (!CONTRIBUTION_VIEWS.includes(next)) next = 'overview'
     setViewState(next)
     try { sessionStorage.setItem('contribute-view-v3', next) } catch { /* optional */ }
+  }, [])
+
+  // Shell review cards use the platform's one-shot app-intent rail. The card
+  // names only the ledger record; this app resolves the record's current stage
+  // and enclosing stack after the authoritative ledger arrives.
+  useEffect(() => {
+    function onReviewIntent(event) {
+      if (event.origin !== window.location.origin || event.source !== window.parent) return
+      if (event.data?.type !== 'moebius:app-intent') return
+      const target = contributionReviewTargetFromIntent(event.data.intent)
+      if (!target) return
+      setReviewFocus({
+        ...target,
+        nonce: String(event.data.nonce ?? Date.now()),
+      })
+      setView('prs')
+      window.mobius?.signal?.('contribution_review_opened', { id: target.recordId })
+    }
+    window.addEventListener('message', onReviewIntent)
+    return () => window.removeEventListener('message', onReviewIntent)
+  }, [setView])
+
+  const consumeReviewFocus = useCallback((nonce) => {
+    setReviewFocus((current) => current?.nonce === nonce ? null : current)
   }, [])
 
   const viewProjects = useCallback((projectKey = '') => {
@@ -1438,7 +1466,7 @@ export default function ContributeApp({ appId, token }) {
             />
             {/* Name the cold-load state without flashing an inaccurate empty
                 inbox before the authoritative ledger arrives. */}
-            {loading ? <FeedLoadingState view={view} /> : isEmpty ? (
+            {loading || (reviewFocus && !ledgerReady) ? <FeedLoadingState view={view} /> : isEmpty ? (
               <EmptyState view={view} />
             ) : (
               <Feed
@@ -1459,6 +1487,9 @@ export default function ContributeApp({ appId, token }) {
                 onConnectApp={onConnectApp}
                 onStartAgent={startAgentTask}
                 loadDiff={loadFullDiff}
+                focusTarget={reviewFocus}
+                focusReady={ledgerReady}
+                onFocusConsumed={consumeReviewFocus}
               />
             )}
           </div>

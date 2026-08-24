@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits, stackLandable } from '../stack.js'
 import {
   partitionReviewUnits,
+  locateContributionReview,
   prePrCheckPhase,
   qualityReviewFor,
   reviewAllAction,
@@ -291,6 +292,9 @@ function ReviewWorkspace({
   onConnectApp,
   onStartAgent,
   loadDiff,
+  focusTarget,
+  focusReady,
+  onFocusConsumed,
 }) {
   const readyUnits = useMemo(
     () => preparedContributionUnits(groups.ready, records),
@@ -317,8 +321,34 @@ function ReviewWorkspace({
   }), [partition.needsAttention, partition.needsReview, partition.reviewing, partition.checking, partition.readyToSend, openUnits, historyUnits])
   const firstNonempty = REVIEW_STAGES.find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
   const [filter, setFilter] = useState(firstNonempty)
-  const [selected, setSelected] = useState(null)
+  const [selectedKey, setSelectedKey] = useState(null)
+  const [missingTarget, setMissingTarget] = useState(false)
   const [visibleLimit, setVisibleLimit] = useState(STAGE_PAGE_SIZE)
+
+  const selected = useMemo(() => {
+    if (!selectedKey) return null
+    for (const units of Object.values(phaseUnits)) {
+      const match = (units || []).find((unit) => unitKey(unit) === selectedKey)
+      if (match) return match
+    }
+    return null
+  }, [phaseUnits, selectedKey])
+
+  useEffect(() => {
+    if (!focusTarget?.recordId || !focusReady) return
+    const located = locateContributionReview(phaseUnits, focusTarget.recordId)
+    if (located) {
+      setFilter(located.phase)
+      setSelectedKey(unitKey(located.unit))
+      setMissingTarget(false)
+      setVisibleLimit(STAGE_PAGE_SIZE)
+      onFocusConsumed?.(focusTarget.nonce)
+      return
+    }
+    setSelectedKey(null)
+    setMissingTarget(true)
+    onFocusConsumed?.(focusTarget.nonce)
+  }, [focusTarget, focusReady, phaseUnits, onFocusConsumed])
 
   const visibleUnits = phaseUnits[filter] || []
   const renderedUnits = visibleUnits.slice(0, visibleLimit)
@@ -330,12 +360,30 @@ function ReviewWorkspace({
     history: ['History', 'Merged, closed, superseded, and deliberately dropped work.'],
   }[filter]
 
+  if (missingTarget) {
+    return (
+      <section className="co-review-workspace is-focus">
+        <ViewHeading title="Reviews" description="The contribution may have moved or been removed." />
+        <div className="co-focus-view">
+          <button type="button" className="co-focus-back" onClick={() => setMissingTarget(false)}>
+            <Icon name="left" size={15} /> Back to reviews
+          </button>
+          <div className="co-stage-empty">
+            <Icon name="cycle" size={20} />
+            <strong>Review no longer available</strong>
+            <span>Refresh Contribute or return to the source conversation for its latest state.</span>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   if (selected) {
     return (
       <section className="co-review-workspace is-focus">
         <ViewHeading title="Reviews" description="Inspect the complete change before you act." />
         <div className="co-focus-view">
-          <button type="button" className="co-focus-back" onClick={() => setSelected(null)}>
+          <button type="button" className="co-focus-back" onClick={() => setSelectedKey(null)}>
             <Icon name="left" size={15} /> Back to {copy[0].toLowerCase()}
           </button>
           <SelectedUnit
@@ -368,7 +416,8 @@ function ReviewWorkspace({
         active={filter}
         onChange={(next) => {
           setFilter(next)
-          setSelected(null)
+          setSelectedKey(null)
+          setMissingTarget(false)
           setVisibleLimit(STAGE_PAGE_SIZE)
         }}
         label="Review stages"
@@ -382,7 +431,7 @@ function ReviewWorkspace({
           phase={filter}
           projects={projects}
           reviewStatus={reviewStatus}
-          onSelect={setSelected}
+          onSelect={(unit) => setSelectedKey(unitKey(unit))}
         />
       ) : <EmptyStage phase={filter} />}
       <ListContinuation

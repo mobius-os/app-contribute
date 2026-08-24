@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   addressAllAction,
   canRunPrePrChecks,
+  contributionReviewTargetFromIntent,
   contributionsNeedingAttention,
   finishContributionCycleAction,
   contributionCyclePhase,
   contributionCycleProgress,
   isContributionCycleChat,
   isAllClear,
+  locateContributionReview,
   progressReviewAction,
   qualityReviewFor,
   reviewAllAction,
@@ -19,6 +22,54 @@ import {
   reviewStateFor,
   summarizeReviewStatus,
 } from '../review.js'
+
+const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
+
+test('shell review intents name one ledger record without encoding presentation state', () => {
+  assert.deepEqual(contributionReviewTargetFromIntent('review:record.1-ready'), {
+    recordId: 'record.1-ready',
+  })
+  assert.deepEqual(contributionReviewTargetFromIntent('  review:record_2  '), {
+    recordId: 'record_2',
+  })
+  assert.equal(contributionReviewTargetFromIntent('review:../escape'), null)
+  assert.equal(contributionReviewTargetFromIntent('reviews:record'), null)
+  assert.equal(contributionReviewTargetFromIntent(null), null)
+})
+
+test('a record intent resolves its current phase and enclosing stack', () => {
+  const stack = {
+    id: 'stack:demo',
+    records: [{ id: 'layer-1' }, { id: 'layer-2' }],
+  }
+  const single = { id: 'single-unit', record: { id: 'single' } }
+  const phases = { action: [single], clear: [stack], history: [] }
+
+  assert.deepEqual(locateContributionReview(phases, 'layer-2'), {
+    phase: 'clear',
+    unit: stack,
+  })
+  assert.deepEqual(locateContributionReview(phases, 'single'), {
+    phase: 'action',
+    unit: single,
+  })
+  assert.equal(locateContributionReview(phases, 'missing'), null)
+})
+
+test('the app consumes trusted intents only after the authoritative ledger is ready', () => {
+  assert.match(appSource, /event\.origin !== window\.location\.origin/)
+  assert.match(appSource, /event\.source !== window\.parent/)
+  assert.match(appSource, /contributionReviewTargetFromIntent\(event\.data\.intent\)/)
+  assert.match(appSource, /setView\('prs'\)/)
+  assert.match(appSource, /focusTarget=\{reviewFocus\}/)
+  assert.match(appSource, /focusReady=\{ledgerReady\}/)
+  assert.match(appSource, /reviewFocus && !ledgerReady/)
+  assert.match(feedSource, /!focusTarget\?\.recordId \|\| !focusReady/)
+  assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
+  assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
+  assert.match(feedSource, /Review no longer available/)
+})
 
 test('indexes only recognized review verdicts', () => {
   const indexed = indexReviewStatus({

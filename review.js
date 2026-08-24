@@ -411,3 +411,29 @@ export function partitionReviewUnits(units, reviewStatus) {
   }
   return { needsAttention, checking, needsReview, reviewing, readyToSend }
 }
+
+const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
+
+// Shell cards address one immutable ledger identity. The record's current
+// stage and stack membership remain Contribute's decision, so a stale card can
+// still open the truthful current review instead of encoding a tab/filter that
+// may have changed since the card rendered.
+export function contributionReviewTargetFromIntent(intent) {
+  if (typeof intent !== 'string') return null
+  const match = REVIEW_INTENT.exec(intent.trim())
+  return match ? { recordId: match[1] } : null
+}
+
+export function locateContributionReview(phaseUnits, recordId) {
+  const wanted = typeof recordId === 'string' ? recordId : ''
+  if (!wanted) return null
+  for (const [phase, units] of Object.entries(phaseUnits || {})) {
+    for (const unit of units || []) {
+      const records = unit?.records || (unit?.record ? [unit.record] : [])
+      if (records.some((record) => record?.id === wanted)) {
+        return { phase, unit }
+      }
+    }
+  }
+  return null
+}
