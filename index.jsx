@@ -1351,7 +1351,7 @@ export default function ContributeApp({ appId, token }) {
   return (
     <div className="co-root" data-design-seed="1c15eb06">
       <style>{CSS}</style>
-      <main ref={pageRef} className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
+      <div className="co-header-shell">
         <Header
           appId={appId}
           fromCache={fromCache}
@@ -1368,6 +1368,8 @@ export default function ContributeApp({ appId, token }) {
             onChooseSubmissionMethod={onChooseSubmissionMethod}
           />
         </Header>
+      </div>
+      <main ref={pageRef} className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
         <nav className="co-tabs" role="tablist" aria-label="Contribute views">
           <button
             type="button"

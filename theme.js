@@ -65,16 +65,19 @@ export const CSS = `
 /* The shared header and tabs keep the contribution feed's reading measure even
    when Projects uses the wider canvas. Their viewport position therefore stays
    fixed when the owner switches views. */
-.co-header,
 .co-tabs,
 .co-contributions-view {
   width: min(100%, 760px); margin-inline: auto;
 }
 
+.co-header-shell {
+  flex: 0 0 auto; width: 100%; background: var(--bg); border-bottom: 1px solid var(--border);
+}
 .co-header {
   position: relative; display: grid;
   grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 16px;
-  padding: max(18px, env(safe-area-inset-top)) 2px 8px;
+  width: min(100%, 760px); margin-inline: auto;
+  padding: max(18px, env(safe-area-inset-top)) 20px 12px;
 }
 .co-header-main { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .co-brand-copy { min-width: 0; }
@@ -1730,4 +1733,21 @@ button.co-workspace-task { cursor: pointer; }
   .co-attention { flex-direction: column; align-items: stretch; }
 }
 
+
+/* mobius-ui:CenteredRail v1 */
+@media (min-width: 900px) {
+  .co-root {
+    background: radial-gradient(ellipse 62% 88% at 50% 48%,
+      color-mix(in srgb, var(--accent) 9%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 3%, var(--surface)) 38%,
+      var(--surface) 100%);
+  }
+  .co-root::before {
+    content: ""; position: absolute; inset-block: 0; left: 50%;
+    width: min(100%, 760px); transform: translateX(-50%);
+    background: var(--bg); pointer-events: none;
+  }
+  .co-header-shell { width: min(100%, 760px); margin-inline: auto; }
+}
+/* /mobius-ui:CenteredRail */
 `
