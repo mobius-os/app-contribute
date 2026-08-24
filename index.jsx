@@ -49,6 +49,7 @@ import {
   fetchGithubStatus,
   fetchLiveStates,
   fetchMobiusContributionStatus,
+  fetchOwnedAgentChats,
   fetchReviewStatus,
   fetchSourceDiff,
   fetchSourceStatus,
@@ -268,11 +269,26 @@ export default function ContributeApp({ appId, token }) {
     let cancelled = false
     async function restoreCycle() {
       let saved = await loadCycleState()
-      if (!saved && typeof window.mobius?.chat?.list === 'function') {
+      if (!saved) {
         try {
-          let chats = await window.mobius.chat.list({ scope: 'contribute-cycle' })
+          let chats = []
+          if (typeof window.mobius?.chat?.list === 'function') {
+            try {
+              chats = await window.mobius.chat.list({ scope: 'contribute-cycle' })
+            } catch { /* direct app-scoped read below remains available */ }
+          }
           if (!chats.length) {
-            chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
+            chats = await fetchOwnedAgentChats(token, 'contribute-cycle')
+          }
+          if (!chats.length) {
+            let legacyChats = []
+            if (typeof window.mobius?.chat?.list === 'function') {
+              try {
+                legacyChats = await window.mobius.chat.list()
+              } catch { /* direct app-scoped read below remains available */ }
+            }
+            if (!legacyChats.length) legacyChats = await fetchOwnedAgentChats(token)
+            chats = legacyChats.filter(isContributionCycleChat)
           }
           chats.sort((a, b) => String(b.activity_at || b.updated_at || '').localeCompare(
             String(a.activity_at || a.updated_at || ''),
@@ -312,7 +328,7 @@ export default function ContributeApp({ appId, token }) {
     }
     restoreCycle()
     return () => { cancelled = true }
-  }, [refreshCycle])
+  }, [refreshCycle, token])
 
   useEffect(() => {
     if (cycle.phase !== 'running' || !cycle.chatId) return undefined
