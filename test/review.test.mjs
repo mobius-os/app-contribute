@@ -7,6 +7,7 @@ import {
   finishContributionCycleAction,
   contributionCyclePhase,
   contributionCycleProgress,
+  isContributionCycleChat,
   isAllClear,
   progressReviewAction,
   qualityReviewFor,
@@ -354,6 +355,13 @@ test('cycle lifecycle distinguishes running, waiting, paused, and settled work',
   assert.equal(contributionCyclePhase({ running: false, pending_question_id: 'q1' }), 'waiting')
   assert.equal(contributionCyclePhase({ running: false, goal: { status: 'paused' } }), 'paused')
   assert.equal(contributionCyclePhase({ running: false, goal: { status: 'completed' } }), 'complete')
+})
+
+test('cycle recovery survives an auto-renamed legacy conversation', () => {
+  assert.equal(isContributionCycleChat({ scope: 'contribute-cycle', title: 'Anything' }), true)
+  assert.equal(isContributionCycleChat({ title: 'Finishing the contribution cycle' }), true)
+  assert.equal(isContributionCycleChat({ scope_label: 'Contribution cycle' }), true)
+  assert.equal(isContributionCycleChat({ title: 'Review Contribute changes' }), false)
 })
 
 test('cycle progress uses the durable plan and current task', () => {

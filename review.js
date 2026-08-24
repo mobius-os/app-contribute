@@ -349,6 +349,16 @@ export function contributionCyclePhase(runtime) {
   return 'complete'
 }
 
+export function isContributionCycleChat(chat) {
+  if (!chat || typeof chat !== 'object') return false
+  if (chat.scope === 'contribute-cycle') return true
+  const legacyLabel = [chat.scope_label, chat.title]
+    .filter((value) => typeof value === 'string')
+    .join(' ')
+    .toLowerCase()
+  return legacyLabel.includes('contribution cycle')
+}
+
 export function contributionCycleProgress(runtime) {
   const plan = runtime?.goal_plan
   const tasks = Array.isArray(plan?.tasks) ? plan.tasks : []

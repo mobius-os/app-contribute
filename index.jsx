@@ -34,7 +34,7 @@ import {
   summarizeSubmissionResolutions,
   syncSetupCompletion,
 } from './domain.js'
-import { contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, summarizeQualityReviews } from './review.js'
+import { contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, summarizeQualityReviews } from './review.js'
 import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
@@ -272,9 +272,7 @@ export default function ContributeApp({ appId, token }) {
         try {
           let chats = await window.mobius.chat.list({ scope: 'contribute-cycle' })
           if (!chats.length) {
-            chats = (await window.mobius.chat.list()).filter(
-              (chat) => chat?.title === 'Finish contribution cycle',
-            )
+            chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
           }
           chats.sort((a, b) => String(b.activity_at || b.updated_at || '').localeCompare(
             String(a.activity_at || a.updated_at || ''),
