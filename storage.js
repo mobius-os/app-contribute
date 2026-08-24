@@ -23,6 +23,35 @@ function recordTime(record) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function isCanonicalRecord(record) {
+  return record?.path === `${RECORD_PREFIX}${record?.id}.json`
+}
+
+// Older Contribute versions could leave an <id>.record.json mirror beside the
+// canonical <id>.json record. Preserve a legacy-only record, but once its
+// canonical successor exists the successor owns the lifecycle state even when
+// the mirror still claims that settled work is active.
+function preferCanonicalLedgerRecords(records) {
+  const selected = new Map()
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!record || typeof record !== 'object' || !record.id) continue
+    const current = selected.get(record.id)
+    if (!current) {
+      selected.set(record.id, record)
+      continue
+    }
+    const currentCanonical = isCanonicalRecord(current)
+    const nextCanonical = isCanonicalRecord(record)
+    if (
+      (nextCanonical && !currentCanonical)
+      || (nextCanonical === currentCanonical && recordTime(record) > recordTime(current))
+    ) {
+      selected.set(record.id, record)
+    }
+  }
+  return [...selected.values()]
+}
+
 // The cache is the fast, bounded first screen—not a second source of truth.
 // Keep every current item plus a small recent-history window; the authoritative
 // ledger refresh follows in the background and replaces it atomically.
@@ -105,7 +134,11 @@ export async function loadLedger() {
       omitted.push(path)
     }
   }
-  return { records, fromCache: false, omitted }
+  return {
+    records: preferCanonicalLedgerRecords(records),
+    fromCache: false,
+    omitted,
+  }
 }
 
 export async function cacheFeed(records) {

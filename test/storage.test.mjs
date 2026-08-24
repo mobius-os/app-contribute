@@ -43,6 +43,46 @@ test('ledger uses JSON content batched into the storage listing', async () => {
   assert.deepEqual(result.omitted, [])
 })
 
+test('a canonical ledger record outranks its stale legacy mirror', async () => {
+  globalThis.window = {
+    mobius: {
+      storage: {
+        async list() {
+          return [
+            {
+              name: 'review.record.json', type: 'file', content: {
+                id: 'review', status: 'prepared', updated_at: '2026-08-04T12:00:00Z',
+              },
+            },
+            {
+              name: 'review.json', type: 'file', content: {
+                id: 'review', status: 'abandoned', updated_at: '2026-08-11T12:00:00Z',
+              },
+            },
+            {
+              name: 'legacy-only.record.json', type: 'file', content: {
+                id: 'legacy-only', status: 'prepared',
+              },
+            },
+          ]
+        },
+      },
+    },
+  }
+
+  const { records } = await loadLedger()
+  assert.deepEqual(records.map(({ id, status, path }) => ({ id, status, path })), [
+    {
+      id: 'review', status: 'abandoned',
+      path: 'contributions/review.json',
+    },
+    {
+      id: 'legacy-only', status: 'prepared',
+      path: 'contributions/legacy-only.record.json',
+    },
+  ])
+})
+
 test('ledger isolates entries without batched content without request fan-out', async () => {
   const gets = []
   globalThis.window = {

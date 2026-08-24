@@ -28,6 +28,26 @@ class AgentSnapshotTests(unittest.TestCase):
         ["one", "two", "solo"],
       )
 
+  def test_canonical_record_settles_a_stale_active_legacy_mirror(self):
+    with tempfile.TemporaryDirectory() as raw:
+      ledger = Path(raw)
+      (ledger / "review.record.json").write_text(json.dumps({
+        "id": "review", "status": "prepared",
+        "updated_at": "2026-08-04T12:00:00Z",
+      }))
+      (ledger / "review.json").write_text(json.dumps({
+        "id": "review", "status": "abandoned",
+        "updated_at": "2026-08-11T12:00:00Z",
+      }))
+      (ledger / "legacy-only.record.json").write_text(json.dumps({
+        "id": "legacy-only", "status": "prepared",
+      }))
+
+      self.assertEqual(
+        [record["id"] for record in snapshot.load_active(ledger)],
+        ["legacy-only"],
+      )
+
   def test_one_graphql_query_covers_every_public_pull_request(self):
     items = [
       snapshot.Item(1, "first", "pr", "mobius-os/mobius", 12, "open", "", "", "", None, None, "", None, None, "", "", None, "", "", ""),
