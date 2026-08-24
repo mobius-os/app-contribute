@@ -77,6 +77,13 @@ export function statusNarration(rec) {
   return STATUS_NARRATION[rec.status] || ''
 }
 
+// Review-history rows deliberately collapse every non-merged outcome to the
+// same settled label. Keep that display decision pure so merged and closed
+// histories stay behaviorally covered rather than inferred from Feed source.
+export function historyContributionLabel(status) {
+  return status === 'merged' ? 'Merged' : 'Closed'
+}
+
 // Backend problem codes → one short, human headline. The review-status and
 // submit endpoints tag every blocking problem with a stable `code`; the raw
 // message is Git jargon (a moved ref, a diff-hash mismatch, a diverged fork).

@@ -6,6 +6,7 @@ import {
   STATUS_NARRATION,
   applyLiveStates,
   buildRefreshQuery,
+  historyContributionLabel,
   repoLandability,
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
@@ -18,6 +19,12 @@ import {
   SETUP_COMPLETIONS_KEY,
   syncSetupCompletion,
 } from '../domain.js'
+
+test('history labels distinguish merged work from every other settled outcome', () => {
+  assert.equal(historyContributionLabel('merged'), 'Merged')
+  assert.equal(historyContributionLabel('closed'), 'Closed')
+  assert.equal(historyContributionLabel('abandoned'), 'Closed')
+})
 
 test('record updates preserve enumerated paths while replacing stale fields', () => {
   const original = [

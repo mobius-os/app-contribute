@@ -11,7 +11,7 @@ import {
 } from '../review.js'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
-import { STATUS_LABELS, timeAgo } from '../domain.js'
+import { historyContributionLabel, STATUS_LABELS, timeAgo } from '../domain.js'
 
 const REVIEW_STAGES = [
   ['action', 'Needs action'],
@@ -60,7 +60,7 @@ function phaseLabel(unit, phase, reviewStatus) {
     return 'Reviewing'
   }
   if (phase === 'open') return records.some((rec) => rec.status === 'submitting') ? 'Publishing' : 'Open'
-  if (phase === 'history') return records[0]?.status === 'merged' ? 'Merged' : 'Closed'
+  if (phase === 'history') return historyContributionLabel(records[0]?.status)
   if (records.some((rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh')) return 'Needs update'
   if (records.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) return 'Needs fixes'
   return records[0]?.type === 'pr' ? 'Review needed' : 'Draft'
