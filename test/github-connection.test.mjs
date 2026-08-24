@@ -4,11 +4,13 @@ import test from 'node:test'
 import {
   connectCancel,
   connectPoll,
+  connectStart,
   disconnect,
 } from '../api.js'
 import {
   ConnectionAttemptError,
   hasFullPrAccess,
+  hasPrivateRepoAccess,
   runDeviceConnection,
 } from '../github-connection.js'
 
@@ -29,6 +31,25 @@ test('full PR access requires repository and workflow grants', () => {
   assert.equal(hasFullPrAccess(['workflow']), false)
   assert.equal(hasFullPrAccess(['public_repo', 'workflow']), true)
   assert.equal(hasFullPrAccess(['repo', 'workflow']), true)
+})
+
+test('private repository access is explicit and reaches the connection request', async (t) => {
+  assert.equal(hasPrivateRepoAccess(['public_repo', 'workflow']), false)
+  assert.equal(hasPrivateRepoAccess(['repo', 'workflow']), true)
+
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  let request = null
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response('{}', { status: 200 })
+  }
+  await connectStart('test-token', { privateRepos: true })
+  assert.equal(request.url, '/api/github/connect/start')
+  assert.deepEqual(JSON.parse(request.options.body), {
+    workflow: true,
+    private_repos: true,
+  })
 })
 
 test('new device connections request workflow access by default', async () => {

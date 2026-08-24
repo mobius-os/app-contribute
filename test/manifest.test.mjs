@@ -48,6 +48,22 @@ test('install manifest ships the shared batch action used by Projects and PRs', 
   assert.ok(manifest.source_files.includes('ui/BatchAction.jsx'))
 })
 
+test('install manifest ships the project policy and canonical diff workspace', () => {
+  for (const sourceFile of [
+    'contribution-policy.js',
+    'ui/ProjectIcon.jsx',
+    'ui/diff/DiffView.jsx',
+    'ui/diff/FileDiffList.jsx',
+    'ui/diff/UnifiedDiff.jsx',
+    'ui/diff/parseUnifiedDiff.js',
+    'ui/diff/styles.js',
+  ]) {
+    assert.ok(manifest.source_files.includes(sourceFile), `${sourceFile} is installable`)
+  }
+  assert.ok(!manifest.source_files.includes('parse-unified-diff.js'))
+  assert.ok(!manifest.source_files.includes('ui/DiffView.jsx'))
+})
+
 test('install manifest ships the GitHub connection-attempt controller', () => {
   assert.ok(manifest.source_files.includes('github-connection.js'))
 })

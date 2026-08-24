@@ -1,27 +1,160 @@
+import React, { useMemo, useState } from 'react'
 import { ContributionCard } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits, stackLandable } from '../stack.js'
-import { partitionReviewUnits, reviewStateFor } from '../review.js'
+import {
+  partitionReviewUnits,
+  prePrCheckPhase,
+  qualityReviewFor,
+  reviewAllAction,
+  reviewStateFor,
+} from '../review.js'
 import { Icon } from './Icons.jsx'
+import { ProjectIcon } from './ProjectIcon.jsx'
+import { STATUS_LABELS, timeAgo } from '../domain.js'
 
-// The grouped feed. domain.groupRecords partitions the ledger into three
-// buckets; each renders as a section only when it has rows, so the layout
-// tightens around whatever the ledger actually holds:
-//
-//   Ready for review — status=prepared, waiting on the owner's go-ahead. These
-//                      cards carry the review flow (expand the staged plan,
-//                      Send/Feedback/Drop), so only this group gets the
-//                      submit + drop handlers.
-//   Open             — status submitting/draft/open: live on GitHub, or in
-//                      flight to it (refreshed on mount + daily). Cards may
-//                      still return to the source chat when GitHub activity
-//                      needs agent follow-up.
-//   History          — merged/closed/commented/abandoned and any unknown
-//                      future status. A dropped (abandoned) card gets an Undrop
-//                      button (onRestore) to send it back to Ready for review.
-export function Feed({
-  groups,
-  records,
+const REVIEW_STAGES = [
+  ['action', 'Needs action'],
+  ['working', 'In review'],
+  ['clear', 'All clear'],
+  ['open', 'Open'],
+  ['history', 'History'],
+]
+
+const REQUEST_STAGES = [
+  ['action', 'Drafts'],
+  ['open', 'Published'],
+  ['history', 'History'],
+]
+
+const STAGE_PAGE_SIZE = 16
+
+function unitRecords(unit) {
+  return unit.records || (unit.record ? [unit.record] : [])
+}
+
+function primaryRecord(unit) {
+  return unit.record || unit.records?.[0] || null
+}
+
+function unitRepo(unit) {
+  const rec = primaryRecord(unit)
+  return rec?.plan?.repo || rec?.repo || 'Other'
+}
+
+function unitTitle(unit) {
+  if (unit.type === 'stack') return unit.name || 'Related pull requests'
+  const rec = primaryRecord(unit)
+  return rec?.plan?.title || rec?.title || rec?.summary || 'Untitled contribution'
+}
+
+function unitKey(unit) {
+  return `${unit.type || 'single'}:${unit.id || primaryRecord(unit)?.id}`
+}
+
+function phaseLabel(unit, phase, reviewStatus) {
+  const records = unitRecords(unit)
+  if (phase === 'clear') return 'All clear'
+  if (phase === 'working') {
+    if (records.some((rec) => prePrCheckPhase(rec) === 'running')) return 'Checks running'
+    return 'Reviewing'
+  }
+  if (phase === 'open') return records.some((rec) => rec.status === 'submitting') ? 'Publishing' : 'Open'
+  if (phase === 'history') return STATUS_LABELS[records[0]?.status] || 'History'
+  if (records.some((rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh')) return 'Needs update'
+  if (records.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) return 'Needs fixes'
+  return records[0]?.type === 'pr' ? 'Review needed' : 'Draft'
+}
+
+function groupByProject(units, projects) {
+  const projectByRepo = new Map((projects || []).map((project) => [
+    String(project.canonical_repo || '').toLowerCase(), project,
+  ]))
+  const grouped = new Map()
+  for (const unit of units) {
+    const repo = unitRepo(unit)
+    const key = repo.toLowerCase()
+    if (!grouped.has(key)) grouped.set(key, { repo, project: projectByRepo.get(key), units: [] })
+    grouped.get(key).units.push(unit)
+  }
+  return [...grouped.values()].sort((a, b) =>
+    (a.project?.name || a.repo).localeCompare(b.project?.name || b.repo))
+}
+
+function StageNav({ stages, phaseUnits, active, onChange, label }) {
+  return (
+    <nav className="co-stage-nav" aria-label={label}>
+      {stages.map(([key, title]) => (
+        <button
+          type="button"
+          key={key}
+          className={active === key ? 'is-active' : ''}
+          aria-pressed={active === key}
+          onClick={() => onChange(key)}
+        >
+          <span>{title}</span><b>{phaseUnits[key]?.length || 0}</b>
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+function ListContinuation({ shown, total, onContinue }) {
+  if (shown >= total) return null
+  const next = Math.min(STAGE_PAGE_SIZE, total - shown)
+  return (
+    <button type="button" className="co-list-continuation" onClick={onContinue}>
+      <span>Show next {next}</span>
+      <small>{total - shown} remaining</small>
+      <Icon name="chevron" size={14} />
+    </button>
+  )
+}
+
+function ReviewRow({ unit, phase, project, reviewStatus, onSelect }) {
+  const count = unitRecords(unit).length
+  return (
+    <button type="button" className="co-review-row" onClick={onSelect}>
+      <span className="co-review-row-copy">
+        <strong>{unitTitle(unit)}</strong>
+        <small>{count > 1 ? `${count} linked pull requests` : unitRepo(unit)}</small>
+      </span>
+      <span className={'co-review-state is-' + phase}>{phaseLabel(unit, phase, reviewStatus)}</span>
+      <Icon name="right" size={14} />
+    </button>
+  )
+}
+
+function ReviewList({ units, phase, projects, reviewStatus, onSelect }) {
+  const groups = groupByProject(units, projects)
+  return (
+    <div className="co-review-list">
+      {groups.map((group) => (
+        <section className="co-review-project" key={group.repo}>
+          <header>
+            <ProjectIcon project={group.project || { name: group.repo }} />
+            <strong>{group.project?.name || group.repo}</strong>
+            <span>{group.units.length}</span>
+          </header>
+          {group.units.map((unit) => (
+            <ReviewRow
+              key={unitKey(unit)}
+              unit={unit}
+              phase={phase}
+              project={group.project}
+              reviewStatus={reviewStatus}
+              onSelect={() => onSelect(unit)}
+            />
+          ))}
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function SelectedUnit({
+  unit,
+  phase,
   reviewStatus,
   onSend,
   onRunPrePrChecks,
@@ -32,131 +165,365 @@ export function Feed({
   onRestore,
   onSetAutopilot,
   onConnectApp,
+  onStartAgent,
   loadDiff,
 }) {
-  const { ready, open, history } = groups
-  const readyUnits = preparedContributionUnits(ready, records)
-  const openUnits = publicContributionUnits(open, records)
-  const { needsAttention, checking, readyToSend } = partitionReviewUnits(
-    readyUnits,
-    reviewStatus,
-  )
-
-  function renderUnit(unit) {
-    return unit.type === 'stack' ? (
+  if (unit.type === 'stack') {
+    return (
       <ContributionStack
-        key={'stack:' + unit.id}
         unit={unit}
+        action={phase === 'open' ? 'land' : 'send'}
+        landable={phase === 'open' ? stackLandable(unit) : false}
         reviewStatus={reviewStatus}
         onSendStack={onSendStack}
+        onLandStack={onLandStack}
         onFeedback={onFeedback}
-        loadDiff={loadDiff}
-      />
-    ) : (
-      <ContributionCard
-        key={unit.record.id}
-        rec={unit.record}
-        reviewState={reviewStateFor(unit.record, reviewStatus)}
-        onSend={onSend}
-        onRunPrePrChecks={onRunPrePrChecks}
-        onFeedback={onFeedback}
-        onDismiss={onDismiss}
+        onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
       />
     )
   }
+  const rec = primaryRecord(unit)
   return (
-    <>
-      {needsAttention.length > 0 && (
-        <section className="co-section is-follow-up">
-          <div>
-            <div className="co-section-headline">
-              <h2 className="co-section-title">Agent follow-up</h2>
-              <span>{needsAttention.length}</span>
-            </div>
-            <p className="co-section-hint">
-              These can be refreshed privately before they are sent.
-            </p>
-          </div>
-          {needsAttention.map(renderUnit)}
-        </section>
-      )}
-
-      {readyToSend.length > 0 && (
-        <section className="co-section">
-          <div>
-            <div className="co-section-headline">
-              <h2 className="co-section-title">Ready to send</h2>
-              <span>{readyToSend.length}</span>
-            </div>
-            <p className="co-section-hint">Reviewed and waiting for your OK.</p>
-          </div>
-          {readyToSend.map(renderUnit)}
-        </section>
-      )}
-
-      {checking.length > 0 && (
-        <section className="co-section is-checking">
-          <div>
-            <div className="co-section-headline">
-              <h2 className="co-section-title">Checks running</h2>
-              <span>{checking.length}</span>
-            </div>
-            <p className="co-section-hint">
-              Testing reviewed branches privately before a pull request opens.
-            </p>
-          </div>
-          {checking.map(renderUnit)}
-        </section>
-      )}
-
-      {open.length > 0 && (
-        <section className="co-section">
-          <div className="co-section-headline">
-            <h2 className="co-section-title">Open</h2>
-            <span>{open.length}</span>
-          </div>
-          {openUnits.map((unit) => unit.type === 'stack' ? (
-            <ContributionStack
-              key={'open-stack:' + unit.id}
-              unit={unit}
-              action="land"
-              landable={stackLandable(unit)}
-              onLandStack={onLandStack}
-              onFeedback={onFeedback}
-              onSetAutopilot={onSetAutopilot}
-              loadDiff={loadDiff}
-            />
-          ) : (
-            <ContributionCard
-              key={unit.record.id}
-              rec={unit.record}
-              onFeedback={onFeedback}
-              onSetAutopilot={onSetAutopilot}
-            />
-          ))}
-        </section>
-      )}
-
-      {history.length > 0 && (
-        <details className="co-section co-history">
-          <summary>
-            <span>History</span>
-            <small>{history.length} completed contributions</small>
-            <Icon name="right" className="co-history-chevron" />
-          </summary>
-          <div className="co-history-feed">
-            {history.map((rec) => (
-              <ContributionCard
-                key={rec.id}
-                rec={rec}
-                onRestore={onRestore}
-                onConnectApp={onConnectApp}
-              />
-            ))}
-          </div>
-        </details>
-      )}
-    </>
+    <ContributionCard
+      key={rec.id}
+      rec={rec}
+      reviewState={reviewStateFor(rec, reviewStatus)}
+      onSend={onSend}
+      onRunPrePrChecks={onRunPrePrChecks}
+      onReview={(record) => onStartAgent?.(reviewAllAction([record]))}
+      onFeedback={onFeedback}
+      onDismiss={onDismiss}
+      onRestore={onRestore}
+      onSetAutopilot={onSetAutopilot}
+      onConnectApp={onConnectApp}
+      loadDiff={loadDiff}
+      initialExpanded
+    />
   )
+}
+
+function ViewHeading({ title, description }) {
+  return (
+    <header className="co-view-heading">
+      <div><h2>{title}</h2><p>{description}</p></div>
+    </header>
+  )
+}
+
+const REVIEW_EMPTY_STAGES = {
+  action: {
+    icon: 'check',
+    tone: 'is-clear',
+    title: 'No reviews need action',
+    detail: 'Prepared work will appear here when it needs your decision.',
+  },
+  working: {
+    icon: 'review',
+    title: 'No reviews in progress',
+    detail: 'Reviews and checks that are running will appear here.',
+  },
+  clear: {
+    icon: 'check',
+    title: 'Nothing ready to send',
+    detail: 'Reviewed work appears here once its current version is all clear.',
+  },
+  open: {
+    icon: 'merge',
+    title: 'No open pull requests',
+    detail: 'Published pull requests stay here until they merge or close.',
+  },
+  history: {
+    icon: 'cycle',
+    title: 'No review history yet',
+    detail: 'Finished and deliberately dropped contributions will collect here.',
+  },
+}
+
+const REQUEST_EMPTY_STAGES = {
+  action: {
+    icon: 'check',
+    tone: 'is-clear',
+    title: 'No request drafts',
+    detail: 'Requests prepared for your decision will appear here.',
+  },
+  open: {
+    icon: 'send',
+    title: 'No published requests',
+    detail: 'Published issues and comments will appear here while they are active.',
+  },
+  history: {
+    icon: 'cycle',
+    title: 'No request history yet',
+    detail: 'Settled requests will collect here.',
+  },
+}
+
+function EmptyStage({ phase, requests = false }) {
+  const copy = (requests ? REQUEST_EMPTY_STAGES : REVIEW_EMPTY_STAGES)[phase]
+  return (
+    <div className={'co-stage-empty ' + (copy?.tone || '')}>
+      <Icon name={copy?.icon || 'check'} size={20} />
+      <strong>{copy?.title || 'Nothing here'}</strong>
+      <span>{copy?.detail || 'This stage is empty.'}</span>
+    </div>
+  )
+}
+
+function ReviewWorkspace({
+  groups,
+  records,
+  projects,
+  reviewStatus,
+  onSend,
+  onRunPrePrChecks,
+  onSendStack,
+  onLandStack,
+  onFeedback,
+  onDismiss,
+  onRestore,
+  onSetAutopilot,
+  onConnectApp,
+  onStartAgent,
+  loadDiff,
+}) {
+  const readyUnits = useMemo(
+    () => preparedContributionUnits(groups.ready, records),
+    [groups.ready, records],
+  )
+  const openUnits = useMemo(
+    () => publicContributionUnits(groups.open, records),
+    [groups.open, records],
+  )
+  const historyUnits = useMemo(
+    () => groups.history.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
+    [groups.history],
+  )
+  const partition = useMemo(
+    () => partitionReviewUnits(readyUnits, reviewStatus),
+    [readyUnits, reviewStatus],
+  )
+  const phaseUnits = useMemo(() => ({
+    action: [...partition.needsAttention, ...partition.needsReview],
+    working: [...partition.reviewing, ...partition.checking],
+    clear: partition.readyToSend,
+    open: openUnits,
+    history: historyUnits,
+  }), [partition.needsAttention, partition.needsReview, partition.reviewing, partition.checking, partition.readyToSend, openUnits, historyUnits])
+  const firstNonempty = REVIEW_STAGES.find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
+  const [filter, setFilter] = useState(firstNonempty)
+  const [selected, setSelected] = useState(null)
+  const [visibleLimit, setVisibleLimit] = useState(STAGE_PAGE_SIZE)
+
+  const visibleUnits = phaseUnits[filter] || []
+  const renderedUnits = visibleUnits.slice(0, visibleLimit)
+  const copy = {
+    action: ['Needs action', 'Review and improve this private work before anything is published.'],
+    working: ['In review', 'Agents and checks currently working through prepared contributions.'],
+    clear: ['All clear', 'Reviewed work whose exact current version is ready for your public approval.'],
+    open: ['Open', 'Published pull requests moving through checks, feedback, and merge.'],
+    history: ['History', 'Merged, closed, superseded, and deliberately dropped work.'],
+  }[filter]
+
+  if (selected) {
+    return (
+      <section className="co-review-workspace is-focus">
+        <ViewHeading title="Reviews" description="Inspect the complete change before you act." />
+        <div className="co-focus-view">
+          <button type="button" className="co-focus-back" onClick={() => setSelected(null)}>
+            <Icon name="left" size={15} /> Back to {copy[0].toLowerCase()}
+          </button>
+          <SelectedUnit
+            unit={selected}
+            phase={filter}
+            reviewStatus={reviewStatus}
+            onSend={onSend}
+            onRunPrePrChecks={onRunPrePrChecks}
+            onSendStack={onSendStack}
+            onLandStack={onLandStack}
+            onFeedback={onFeedback}
+            onDismiss={onDismiss}
+            onRestore={onRestore}
+            onSetAutopilot={onSetAutopilot}
+            onConnectApp={onConnectApp}
+            onStartAgent={onStartAgent}
+            loadDiff={loadDiff}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="co-review-workspace">
+      <ViewHeading title="Reviews" description="Move each contribution from private review to a deliberate public handoff." />
+      <StageNav
+        stages={REVIEW_STAGES}
+        phaseUnits={phaseUnits}
+        active={filter}
+        onChange={(next) => {
+          setFilter(next)
+          setSelected(null)
+          setVisibleLimit(STAGE_PAGE_SIZE)
+        }}
+        label="Review stages"
+      />
+      <section className="co-stage-intro" aria-labelledby="co-review-stage-title">
+        <div><h3 id="co-review-stage-title">{copy[0]}</h3><p>{copy[1]}</p></div>
+      </section>
+      {visibleUnits.length ? (
+        <ReviewList
+          units={renderedUnits}
+          phase={filter}
+          projects={projects}
+          reviewStatus={reviewStatus}
+          onSelect={setSelected}
+        />
+      ) : <EmptyStage phase={filter} />}
+      <ListContinuation
+        shown={renderedUnits.length}
+        total={visibleUnits.length}
+        onContinue={() => setVisibleLimit((current) => current + STAGE_PAGE_SIZE)}
+      />
+    </section>
+  )
+}
+
+function requestKind(rec) {
+  if (rec?.type === 'issue_comment') return 'Issue comment'
+  if (rec?.type === 'discussion_comment') return 'Discussion reply'
+  return 'Issue'
+}
+
+function RequestCard({ unit, phase, project, onSelect }) {
+  const rec = primaryRecord(unit)
+  const history = phase === 'history'
+  const status = phase === 'action'
+    ? 'Draft'
+    : history
+      ? STATUS_LABELS[rec?.status] || 'Settled'
+      : 'Published'
+  const context = [
+    requestKind(rec),
+    project?.name || unitRepo(unit),
+    history ? timeAgo(rec?.updated_at || rec?.created_at) : '',
+  ].filter(Boolean).join(' · ')
+  return (
+    <button type="button" className={'co-request-card' + (history ? ' is-history' : '')} onClick={onSelect}>
+      <ProjectIcon project={project || { name: unitRepo(unit) }} className="co-request-project" />
+      <span className="co-request-copy">
+        <small>{context}</small>
+        <strong>{unitTitle(unit)}</strong>
+        {!history && rec?.summary ? <span>{rec.summary}</span> : null}
+      </span>
+      <em className={'is-' + phase}>{status}</em>
+      <Icon name="right" size={15} />
+    </button>
+  )
+}
+
+function RequestsWorkspace({
+  groups,
+  records,
+  projects,
+  reviewStatus,
+  onSend,
+  onRunPrePrChecks,
+  onSendStack,
+  onLandStack,
+  onFeedback,
+  onDismiss,
+  onRestore,
+  onSetAutopilot,
+  onConnectApp,
+  onStartAgent,
+  loadDiff,
+}) {
+  const phaseUnits = useMemo(() => ({
+    action: groups.ready.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
+    open: groups.open.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
+    history: groups.history.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
+  }), [groups.ready, groups.open, groups.history])
+  const firstNonempty = REQUEST_STAGES.find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
+  const [filter, setFilter] = useState(firstNonempty)
+  const [selected, setSelected] = useState(null)
+  const [visibleLimit, setVisibleLimit] = useState(STAGE_PAGE_SIZE)
+  const projectByRepo = useMemo(() => new Map((projects || []).map((project) => [
+    String(project.canonical_repo || '').toLowerCase(), project,
+  ])), [projects])
+  const visibleUnits = phaseUnits[filter] || []
+  const renderedUnits = visibleUnits.slice(0, visibleLimit)
+  const stageLabel = REQUEST_STAGES.find(([key]) => key === filter)?.[1] || 'requests'
+
+  if (selected) {
+    return (
+      <section className="co-requests-workspace is-focus">
+        <ViewHeading title="Requests" description="One decision at a time, with the source conversation still attached." />
+        <div className="co-focus-view co-request-focus">
+          <button type="button" className="co-focus-back" onClick={() => setSelected(null)}>
+            <Icon name="left" size={15} /> Back to {stageLabel.toLowerCase()}
+          </button>
+          <SelectedUnit
+            unit={selected}
+            phase={filter}
+            reviewStatus={reviewStatus}
+            onSend={onSend}
+            onRunPrePrChecks={onRunPrePrChecks}
+            onSendStack={onSendStack}
+            onLandStack={onLandStack}
+            onFeedback={onFeedback}
+            onDismiss={onDismiss}
+            onRestore={onRestore}
+            onSetAutopilot={onSetAutopilot}
+            onConnectApp={onConnectApp}
+            onStartAgent={onStartAgent}
+            loadDiff={loadDiff}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="co-requests-workspace">
+      <ViewHeading title="Requests" description="Decide what to ask, say, or publish without losing the conversation that shaped it." />
+      <StageNav
+        stages={REQUEST_STAGES}
+        phaseUnits={phaseUnits}
+        active={filter}
+        onChange={(next) => {
+          setFilter(next)
+          setSelected(null)
+          setVisibleLimit(STAGE_PAGE_SIZE)
+        }}
+        label="Request stages"
+      />
+      {visibleUnits.length ? (
+        <div className="co-request-list">
+          {renderedUnits.map((unit) => {
+            const project = projectByRepo.get(unitRepo(unit).toLowerCase())
+            return (
+              <RequestCard
+                key={unitKey(unit)}
+                unit={unit}
+                phase={filter}
+                project={project}
+                onSelect={() => setSelected(unit)}
+              />
+            )
+          })}
+        </div>
+      ) : <EmptyStage phase={filter} requests />}
+      <ListContinuation
+        shown={renderedUnits.length}
+        total={visibleUnits.length}
+        onContinue={() => setVisibleLimit((current) => current + STAGE_PAGE_SIZE)}
+      />
+    </section>
+  )
+}
+
+export function Feed(props) {
+  const isPrFeed = props.records.some((rec) => rec.type === 'pr')
+  return isPrFeed ? <ReviewWorkspace {...props} /> : <RequestsWorkspace {...props} />
 }

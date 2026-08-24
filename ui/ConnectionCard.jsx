@@ -3,6 +3,7 @@ import { disconnect } from '../api.js'
 import {
   createGithubDeviceTransport,
   hasFullPrAccess,
+  hasPrivateRepoAccess,
   runDeviceConnection,
 } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
@@ -217,6 +218,8 @@ export function ConnectionCard({
   deviceTransport,
   autopilotDefault = true,
   onToggleAutopilotDefault,
+  submissionMethod = 'github',
+  onChooseSubmissionMethod,
 }) {
   // Device-flow machine: idle | starting | pending | failed | cancelled |
   // complete.
@@ -230,6 +233,9 @@ export function ConnectionCard({
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Opt-in on the connect screen: request the broader `repo` scope so pushes to
+  // the owner's PRIVATE repos succeed. Default off keeps least privilege.
+  const [includePrivate, setIncludePrivate] = useState(false)
   const [accessMigration, setAccessMigration] = useState('idle')
   const [accessMigrationError, setAccessMigrationError] = useState('')
   const [statusRetrying, setStatusRetrying] = useState(false)
@@ -238,6 +244,7 @@ export function ConnectionCard({
   const attemptIdRef = useRef('')
   const pollGenRef = useRef(0)
   const connectedTimerRef = useRef(null)
+  const keepConnectedRef = useRef(null)
   const transport = useMemo(
     () => deviceTransport || createGithubDeviceTransport(token),
     [deviceTransport, token],
@@ -248,6 +255,10 @@ export function ConnectionCard({
     flowControllerRef.current?.abort()
     flowControllerRef.current = null
   }, [])
+
+  useEffect(() => {
+    if (disconnectConfirm) keepConnectedRef.current?.focus()
+  }, [disconnectConfirm])
 
   // Abort both provider I/O and delayed UI work on unmount.
   useEffect(() => () => {
@@ -260,6 +271,7 @@ export function ConnectionCard({
     setConnectedLogin(login || '')
     setUserCode('')
     setVerificationUri('')
+    setIncludePrivate(false)
     attemptIdRef.current = ''
     setDeviceIssue(null)
     setJustConnected(true)
@@ -279,7 +291,10 @@ export function ConnectionCard({
     setFlow('idle')
   }, [onChanged])
 
-  const startDeviceFlow = useCallback(async (existingAttempt = null) => {
+  const startDeviceFlow = useCallback(async (
+    existingAttempt = null,
+    { privateRepos = false } = {},
+  ) => {
     stopDeviceFlow()
     attemptIdRef.current = ''
     const controller = new AbortController()
@@ -292,12 +307,14 @@ export function ConnectionCard({
     window.mobius?.signal?.('github_connect_started', {
       method: 'device',
       workflow: true,
+      private_repos: privateRepos,
     })
 
     const result = await runDeviceConnection({
       transport,
       existingAttempt,
       workflow: true,
+      privateRepos,
       signal: controller.signal,
       onPending: (started) => {
         if (
@@ -628,80 +645,128 @@ export function ConnectionCard({
   if (statusConnected) {
     const login = connectedLogin || conn?.login || 'your account'
     const workflowEnabled = hasFullPrAccess(conn?.scopes)
+    const privateEnabled = hasPrivateRepoAccess(conn?.scopes)
     return (
       <div className={'co-conn is-connected is-toolbar' + (settingsOpen ? ' is-open' : '')}>
         <button
           type="button"
           className="co-github-menu"
           aria-expanded={settingsOpen}
+          aria-controls="co-contribution-settings"
           aria-label={`${settingsOpen ? 'Close' : 'Open'} Contribute settings`}
           title={settingsOpen ? 'Close Contribute settings' : 'Contribute settings'}
-          onClick={() => setSettingsOpen((open) => !open)}
+          onClick={() => {
+            setSettingsOpen((open) => {
+              if (open) {
+                setDisconnectConfirm(false)
+                setDisconnectError('')
+              }
+              return !open
+            })
+          }}
         >
-          <Icon name="github" size={17} />
+          <Icon name="github" size={19} />
           <span>{justConnected ? 'Connected' : login}</span>
-          <Icon name="settings" size={15} />
+          <Icon name="chevron" size={13} />
         </button>
 
         {settingsOpen && (
-          <div className="co-conn-settings">
-            {conn?.autopilotAvailable &&
+          <div
+            id="co-contribution-settings"
+            className="co-conn-settings"
+            role="group"
+            aria-label="Contribution settings"
+          >
+            {submissionMethod === 'github' && conn?.autopilotAvailable &&
               typeof onToggleAutopilotDefault === 'function' && (
               <label className="co-autopilot-setting">
-                <input
-                  type="checkbox"
-                  checked={autopilotDefault}
-                  onChange={(event) => (
-                    onToggleAutopilotDefault(event.target.checked)
-                  )}
-                />
-                <span>
-                  <strong>Autopilot</strong>
-                  <small>
-                    Handles reviews and pushes fixes for contributions you
-                    approve and send. Only pings you when it needs help.
-                  </small>
+                <strong>Follow sent PRs</strong>
+                <span className="co-setting-switch">
+                  <input
+                    type="checkbox"
+                    checked={autopilotDefault}
+                    onChange={(event) => (
+                      onToggleAutopilotDefault(event.target.checked)
+                    )}
+                  />
+                  <i aria-hidden="true" />
                 </span>
               </label>
             )}
-            <p className="co-conn-hint">
-              Reviewed PRs publish through <strong>{login}</strong>. Public actions
-              still require your explicit approval.
-            </p>
-            {workflowEnabled ? (
-              <p className="co-conn-hint">
-                Full PR access is enabled for reviewed workflow changes and
-                safe handling of stale forks.
-              </p>
-            ) : (
-              <p className="co-conn-hint">
-                This older connection is being reset. Reconnect once to grant
-                the full PR access Contribute now requires.
-              </p>
+            {typeof onChooseSubmissionMethod === 'function' && (
+              <div className="co-method-setting">
+                <strong>Publish mobius-os with</strong>
+                <div
+                  className="co-method-options"
+                  role="group"
+                  aria-label="Contribution path"
+                >
+                  <button
+                    type="button"
+                    className={submissionMethod === 'mobius' ? 'is-active' : ''}
+                    aria-pressed={submissionMethod === 'mobius'}
+                    onClick={() => onChooseSubmissionMethod('mobius')}
+                  >
+                    <Icon name="merge" size={14} />
+                    <span>Möbius</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={submissionMethod === 'github' ? 'is-active' : ''}
+                    aria-pressed={submissionMethod === 'github'}
+                    onClick={() => onChooseSubmissionMethod('github')}
+                  >
+                    <Icon name="github" size={14} />
+                    <span>{login}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            {submissionMethod === 'github' && workflowEnabled && (
+              !privateEnabled ? (
+                <div className="co-private-setting">
+                  <strong>Private repositories</strong>
+                  <DeviceFlowControl
+                    flow={flow}
+                    issue={deviceIssue}
+                    userCode={userCode}
+                    verificationUri={verificationUri}
+                    onStart={() => startDeviceFlow(null, { privateRepos: true })}
+                    onCancel={cancelPending}
+                    startLabel="Add access"
+                    retryLabel="Try GitHub again"
+                    buttonClassName="co-btn co-btn-sm"
+                  />
+                </div>
+              ) : null
             )}
             {disconnectError && (
               <p className="co-conn-error" role="status" aria-live="polite">{disconnectError}</p>
             )}
             <div className="co-conn-actions">
               {disconnectConfirm ? (
-                <>
-                  <button
-                    type="button"
-                    className="co-btn co-btn-sm"
-                    onClick={() => setDisconnectConfirm(false)}
-                    disabled={disconnecting}
-                  >
-                    Keep connected
-                  </button>
-                  <button
-                    type="button"
-                    className="co-btn co-btn-sm co-btn-danger"
-                    onClick={doDisconnect}
-                    disabled={disconnecting}
-                  >
-                    {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-                  </button>
-                </>
+                <div className="co-disconnect-confirm" role="alertdialog" aria-label="Disconnect GitHub">
+                  <p>Disconnect GitHub from Contribute? Your drafts and review history stay here.</p>
+                  <div className="co-confirm-actions">
+                    <button
+                      type="button"
+                      ref={keepConnectedRef}
+                      className="co-btn co-btn-sm"
+                      onClick={() => setDisconnectConfirm(false)}
+                      disabled={disconnecting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="co-btn co-btn-sm co-btn-danger"
+                      onClick={doDisconnect}
+                      disabled={disconnecting}
+                    >
+                      {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -718,7 +783,10 @@ export function ConnectionCard({
     )
   }
 
-  // Disconnected — one deliberate connection path: GitHub's device flow.
+  // Disconnected — use the linked Möbius identity for mobius-os repositories,
+  // or connect a personal GitHub account for every other target. Choosing a
+  // path is local preference only; Send remains the explicit public-action
+  // checkpoint for each reviewed contribution.
   const deviceFlowAvailable = !!conn?.deviceFlowAvailable
   return (
     <div className="co-conn is-column">
@@ -728,26 +796,64 @@ export function ConnectionCard({
           <p className="co-conn-title">
             {accessMigration === 'required'
               ? 'Reconnect GitHub to continue'
-              : 'Connect GitHub to contribute'}
+              : 'Contribute to Möbius or connect GitHub'}
           </p>
           <p className="co-conn-text">
             {accessMigration === 'required'
               ? 'Contribute now requests full PR access so reviewed workflow changes and stale forks can be handled without another sign-in.'
-              : 'When your agent improves a Möbius app or the platform, it can share that fix upstream so it ships to everyone. Full PR access avoids interruptions from workflow changes and stale forks; your agent still asks before every public action.'}
+              : 'Möbius can open drafts for mobius-os repositories through its narrowly scoped GitHub App. Connect your personal account for any other repository. Nothing is shared until you press Send on a reviewed change.'}
           </p>
         </div>
       </div>
 
+      <div className="co-mobius-route">
+        <button
+          type="button"
+          className={'co-btn co-btn-block' + (
+            submissionMethod === 'mobius' ? ' co-btn-primary' : ''
+          )}
+          aria-pressed={submissionMethod === 'mobius'}
+          onClick={() => onChooseSubmissionMethod?.('mobius')}
+        >
+          Contribute via Möbius (no GitHub needed)
+        </button>
+        <p className="co-conn-note">
+          Uses your linked Möbius identity to open a draft PR only for a
+          mobius-os repository. The one-use permission cannot merge.
+        </p>
+      </div>
+
+      <div className="co-conn-divider" aria-hidden="true"><span>or</span></div>
+
       {deviceFlowAvailable && (
         <div className="co-conn-device">
+          {(flow === 'idle' || flow === 'failed' || flow === 'cancelled') && (
+            <label className="co-autopilot-setting">
+              <input
+                type="checkbox"
+                checked={includePrivate}
+                onChange={(event) => setIncludePrivate(event.target.checked)}
+              />
+              <span>
+                <strong>Include private repositories</strong>
+                <small>
+                  Needed to push to a private repo, like a personal backup.
+                  Grants broader access to your GitHub repositories; leave off
+                  for public contributions.
+                </small>
+              </span>
+            </label>
+          )}
           <DeviceFlowControl
             flow={flow}
             issue={deviceIssue}
             userCode={userCode}
             verificationUri={verificationUri}
-            onStart={() => startDeviceFlow()}
+            onStart={() => startDeviceFlow(null, { privateRepos: includePrivate })}
             onCancel={cancelPending}
-            startLabel="Connect with GitHub"
+            startLabel={includePrivate
+              ? 'Connect with private-repo access'
+              : 'Connect with GitHub'}
             retryLabel="Try GitHub again"
             buttonClassName="co-btn co-btn-primary co-btn-block"
           />

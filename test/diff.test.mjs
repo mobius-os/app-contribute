@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseUnifiedDiff, parseDiffStat } from '../diff.js'
+import { parseDiffStat } from '../diff.js'
+import { parseUnifiedDiff } from '../ui/diff/parseUnifiedDiff.js'
 
 test('parseUnifiedDiff groups files, hunks, and line numbers', () => {
   const files = parseUnifiedDiff(`diff --git a/src/a.js b/src/a.js
@@ -16,17 +17,17 @@ index 111..222 100644
 `)
 
   assert.equal(files.length, 1)
-  assert.equal(files[0].label, 'src/a.js')
-  assert.equal(files[0].additions, 2)
+  assert.equal(files[0].path, 'src/a.js')
+  assert.equal(files[0].insertions, 2)
   assert.equal(files[0].deletions, 1)
   assert.deepEqual(
-    files[0].rows
-      .filter((row) => row.kind === 'add' || row.kind === 'del')
-      .map((row) => [row.kind, row.oldNumber, row.newNumber, row.content]),
+    files[0].hunks.flatMap((hunk) => hunk.lines)
+      .filter((line) => line.type === 'add' || line.type === 'del')
+      .map((line) => [line.type, line.oldNo, line.newNo, line.text]),
     [
-      ['del', 2, '', 'const b = 2'],
-      ['add', '', 2, 'const b = 3'],
-      ['add', '', 3, 'const c = 4'],
+      ['del', 2, null, 'const b = 2'],
+      ['add', null, 2, 'const b = 3'],
+      ['add', null, 3, 'const c = 4'],
     ],
   )
 })
@@ -40,9 +41,9 @@ test('parseUnifiedDiff handles new files and no-newline notes', () => {
 +Body
 \\ No newline at end of file`)
 
-  assert.equal(files[0].oldPath, '')
+  assert.equal(files[0].oldPath, null)
   assert.equal(files[0].newPath, 'notes.md')
-  assert.equal(files[0].rows.at(-1).kind, 'note')
+  assert.equal(files[0].hunks[0].lines.at(-1).type, 'meta')
 })
 
 test('parseUnifiedDiff counts hunk lines whose content begins with -- / ++', () => {
@@ -59,13 +60,13 @@ index 111..222 100644
  unchanged`)
 
   assert.equal(files.length, 1)
-  assert.equal(files[0].newPath, 'q.sql')
-  assert.equal(files[0].additions, 1)
+  assert.equal(files[0].path, 'q.sql')
+  assert.equal(files[0].insertions, 1)
   assert.equal(files[0].deletions, 1)
   assert.deepEqual(
-    files[0].rows
-      .filter((row) => row.kind === 'add' || row.kind === 'del')
-      .map((row) => [row.kind, row.content]),
+    files[0].hunks.flatMap((hunk) => hunk.lines)
+      .filter((line) => line.type === 'add' || line.type === 'del')
+      .map((line) => [line.type, line.text]),
     [['del', '-- old comment'], ['add', '++ new comment']],
   )
 })

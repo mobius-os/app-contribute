@@ -8,10 +8,45 @@
 // feed is also cached to feed-cache.json for the next offline open.
 
 const FEED_CACHE = 'feed-cache.json'
+const SOURCE_CACHE = 'source-cache.json'
+const CYCLE_STATE = 'cycle-state.json'
 const RECORD_PREFIX = 'contributions/'
 const LEGACY_FILE_MAX = 64 * 1024
 const LEGACY_PAGE_MAX = 1024 * 1024
 const LEGACY_RECORD_MAX = 100
+const CURRENT_STATUSES = new Set(['prepared', 'submitting', 'draft', 'open'])
+const RECENT_HISTORY_LIMIT = 24
+
+function recordTime(record) {
+  const value = record?.updated_at || record?.created_at || ''
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+// The cache is the fast, bounded first screen—not a second source of truth.
+// Keep every current item plus a small recent-history window; the authoritative
+// ledger refresh follows in the background and replaces it atomically.
+export function buildFeedSnapshot(records) {
+  const current = []
+  const history = []
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!record || typeof record !== 'object' || !record.id) continue
+    if (CURRENT_STATUSES.has(record.status) || record.needs_attention) current.push(record)
+    else history.push(record)
+  }
+  history.sort((a, b) => recordTime(b) - recordTime(a))
+  return [...current, ...history.slice(0, RECENT_HISTORY_LIMIT)]
+}
+
+export async function loadCachedFeed() {
+  try {
+    const cached = await window.mobius.storage.get(FEED_CACHE)
+    const records = Array.isArray(cached) ? cached : cached?.records
+    return Array.isArray(records) ? records : []
+  } catch {
+    return []
+  }
+}
 
 export async function loadLedger() {
   // Current platforms page include-content listings at a bounded byte budget.
@@ -26,8 +61,7 @@ export async function loadLedger() {
     entries === null
     || (entries.length === 0 && window.mobius.online === false)
   ) {
-    const cached = await window.mobius.storage.get(FEED_CACHE)
-    return { records: cached || [], fromCache: true, omitted: [] }
+    return { records: await loadCachedFeed(), fromCache: true, omitted: [] }
   }
   const records = []
   const omitted = []
@@ -76,9 +110,85 @@ export async function loadLedger() {
 
 export async function cacheFeed(records) {
   try {
-    await window.mobius.storage.set(FEED_CACHE, records)
+    await window.mobius.storage.set(FEED_CACHE, {
+      schema: 2,
+      saved_at: new Date().toISOString(),
+      records: buildFeedSnapshot(records),
+    })
   } catch {
     // The cache only improves the next offline open; never let it fail a load.
+  }
+}
+
+export function normalizeSourceSnapshotCache(raw) {
+  const snapshot = raw?.snapshot || raw
+  return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    ? snapshot
+    : null
+}
+
+export async function loadCachedSourceSnapshot() {
+  try {
+    return normalizeSourceSnapshotCache(
+      await window.mobius.storage.get(SOURCE_CACHE),
+    )
+  } catch {
+    return null
+  }
+}
+
+export async function cacheSourceSnapshot(snapshot) {
+  if (!normalizeSourceSnapshotCache(snapshot)) return false
+  try {
+    await window.mobius.storage.set(SOURCE_CACHE, {
+      schema: 1,
+      saved_at: new Date().toISOString(),
+      snapshot,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function normalizeCycleState(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const chatId = typeof raw.chat_id === 'string' ? raw.chat_id.trim() : ''
+  if (!chatId) return null
+  return {
+    chat_id: chatId.slice(0, 128),
+    started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
+  }
+}
+
+export async function loadCycleState() {
+  try {
+    return normalizeCycleState(await window.mobius.storage.get(CYCLE_STATE))
+  } catch {
+    return null
+  }
+}
+
+export async function saveCycleState(state) {
+  const normalized = normalizeCycleState(state)
+  if (!normalized) return false
+  try {
+    await window.mobius.storage.set(CYCLE_STATE, {
+      schema: 1,
+      ...normalized,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function clearCycleState() {
+  try {
+    await window.mobius.storage.remove(CYCLE_STATE)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -116,7 +226,7 @@ export async function loadFullDiff(rec) {
   }
 }
 
-// Drop and Undrop are the SAME guarded status flip in opposite directions, so
+// Archive and restore are the SAME guarded status flip in opposite directions, so
 // they share one CAS engine. The runtime's durableWrite({ifMatch}) and
 // getWithVersion pairing is the same guarded path useDocument uses, so it
 // keeps the mirror and subscribers coherent. A 412 means someone else (the
@@ -177,14 +287,14 @@ async function casFlipStatus({ rec, from, to }) {
   return { conflict: null }
 }
 
-// Drop = CAS-flip a still-`prepared` record to `abandoned`.
+// Move to History = CAS-flip a still-`prepared` record to `abandoned`.
 export async function abandonPrepared({ appId, token, rec }) {
   return casFlipStatus({ appId, token, rec, from: 'prepared', to: 'abandoned' })
 }
 
-// Undrop = the reverse: CAS-flip a `abandoned` record back to `prepared` so it
+// Restore = the reverse: CAS-flip an `abandoned` record back to `prepared` so it
 // returns to Ready for review (the plan, diff blob, and branch are untouched by
-// a drop, so a restored record is fully reviewable/sendable again).
+// the archive, so a restored record is fully reviewable/sendable again).
 export async function restoreAbandoned({ appId, token, rec }) {
   return casFlipStatus({ appId, token, rec, from: 'abandoned', to: 'prepared' })
 }
