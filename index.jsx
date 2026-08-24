@@ -61,6 +61,7 @@ import {
   submitContributionStack,
 } from './api.js'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
+import { openAgentConversation } from './ui/BatchAction.jsx'
 import { Feed } from './ui/Feed.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { ContributionOverview } from './ui/SourceOverview.jsx'
@@ -1285,11 +1286,7 @@ export default function ContributeApp({ appId, token }) {
   }, [cycle.chatId])
 
   const onOpenCycle = useCallback(() => {
-    if (!cycle.chatId || window.parent === window) return
-    window.parent.postMessage(
-      { type: 'moebius:open-chat', chatId: cycle.chatId },
-      window.location.origin,
-    )
+    openAgentConversation(cycle.chatId)
   }, [cycle.chatId])
   const qualitySummary = useMemo(
     () => summarizeQualityReviews(prRecords, reviewStatus),

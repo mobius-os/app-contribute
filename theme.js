@@ -656,10 +656,22 @@ button.co-workspace-task { cursor: pointer; }
   font-size: 12px; line-height: 1.45; color: var(--muted);
 }
 .co-conn-settings .co-autopilot-setting {
-  align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 44px; margin: 0; padding: 7px 8px; cursor: pointer;
+  display: grid; grid-template-columns: minmax(0, 1fr) 44px 34px;
+  align-items: center; gap: 2px;
+  min-height: 44px; margin: 0; padding: 7px 8px; cursor: default;
 }
-.co-conn-settings .co-autopilot-setting > strong { color: var(--text); font-size: 12px; font-weight: 650; }
+.co-conn-settings .co-autopilot-setting > label { color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; }
+.co-setting-info {
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 9px; background: transparent;
+  color: var(--muted); cursor: pointer;
+}
+.co-setting-info:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (hover: hover) { .co-setting-info:hover { color: var(--text); background: var(--surface2, var(--bg)); } }
+.co-autopilot-help {
+  grid-column: 1 / -1; margin: -1px 0 4px; padding-right: 4px;
+  color: var(--muted); font-size: 10.5px; line-height: 1.45; text-wrap: pretty;
+}
 .co-setting-switch { position: relative; flex: 0 0 auto; width: 34px; height: 20px; display: block !important; }
 .co-setting-switch input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0 !important; opacity: 0; cursor: pointer; }
 .co-setting-switch i {
@@ -1547,6 +1559,7 @@ button.co-workspace-task { cursor: pointer; }
   border: 0; border-top: 1px solid var(--border); background: transparent;
   color: var(--text); font: inherit; text-align: left; cursor: pointer;
 }
+.co-review-row.is-compact { min-height: 58px; }
 .co-review-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .co-review-row-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; line-height: 1.35; }
 .co-review-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
@@ -1672,6 +1685,7 @@ button.co-workspace-task { cursor: pointer; }
   .co-project-handoff .co-agent-handoff .co-btn { width: 100%; }
   .co-project-handoff .co-agent-handoff-error { max-width: none; text-align: left; }
   .co-review-row { min-height: 72px; padding: 10px 11px; grid-template-columns: minmax(0, 1fr) auto 14px; gap: 8px; }
+  .co-review-row.is-compact { min-height: 64px; }
   .co-review-row-copy strong {
     display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical;
     -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere;
@@ -1682,13 +1696,14 @@ button.co-workspace-task { cursor: pointer; }
   .co-cycle-actions { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; padding-left: 48px; }
   .co-cycle-progress { align-items: flex-start; flex-direction: column; gap: 5px; }
   .co-cycle-progress > span { width: min(100%, 210px); }
-  .co-request-card { min-height: 96px; padding: 12px 11px; grid-template-columns: 36px minmax(0, 1fr) 14px; gap: 10px; }
+  .co-request-card { min-height: 80px; padding: 11px; grid-template-columns: 36px minmax(0, 1fr) 14px; gap: 10px; }
   .co-request-project { width: 36px; height: 36px; }
   .co-request-copy strong {
     display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical;
     -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere;
   }
   .co-request-card em { display: none; }
+  .co-request-copy > span { display: none; }
   .co-card { padding: 13px; }
   .co-plan-meta { gap: 4px; font-size: 10.5px; }
   .co-plan-meta.has-branch .co-plan-meta-repo {

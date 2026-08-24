@@ -193,6 +193,13 @@ export async function clearCycleState() {
 }
 
 const SETTINGS_FILE = 'settings.json'
+const DEFAULT_APP_SETTINGS = Object.freeze({ autopilot_default: true })
+
+export function normalizeAppSettings(raw) {
+  return raw && typeof raw === 'object'
+    ? { ...DEFAULT_APP_SETTINGS, ...raw }
+    : { ...DEFAULT_APP_SETTINGS }
+}
 
 // App-level preferences (not per-contribution). Currently just the global
 // "grant autopilot on new sends" default, consulted only at Send time — job.sh
@@ -200,9 +207,9 @@ const SETTINGS_FILE = 'settings.json'
 export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)
-    return raw && typeof raw === 'object' ? raw : {}
+    return normalizeAppSettings(raw)
   } catch {
-    return {}
+    return normalizeAppSettings(null)
   }
 }
 

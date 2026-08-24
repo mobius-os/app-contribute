@@ -199,6 +199,8 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onStartAg
   const detailAction = prepareAction && projectNeedsSorting(project)
     ? { ...prepareAction, label: 'Sort & prepare', title: `Sort ${project.name} changes` }
     : prepareAction
+      ? { ...prepareAction, label: 'Prepare for review' }
+      : null
   return (
     <article className="co-source-detail">
       <header className="co-source-detail-head">
@@ -207,7 +209,13 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onStartAg
       </header>
       <div className="co-project-next">
         <span><strong>{projectNextStep(project, journey)}</strong></span>
-        {detailAction ? <AgentHandoffButton action={detailAction} onStart={onStartAgent} /> : reviews ? <button type="button" className="co-btn co-btn-primary co-btn-sm" onClick={onViewReviews}>Open reviews</button> : null}
+        {detailAction ? (
+          <AgentHandoffButton action={detailAction} onStart={onStartAgent} icon="review" />
+        ) : reviews ? (
+          <button type="button" className="co-btn co-btn-primary co-btn-sm" onClick={onViewReviews}>
+            <Icon name="review" size={14} /> Open reviews
+          </button>
+        ) : null}
       </div>
       <p className="co-source-overview-copy">{projectDetailSummary(project)}</p>
       <ProjectReviews project={project} onViewReviews={onViewReviews} />

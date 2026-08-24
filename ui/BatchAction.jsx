@@ -1,6 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons.jsx'
 
+// Mini-app frames have an opaque origin, so a frame-origin target silently
+// drops this shell command. postMessage still goes only to the direct parent;
+// `*` is required for the shell to receive it across the opaque boundary.
+export function openAgentConversation(chatId) {
+  if (!chatId || window.parent === window) return false
+  window.parent.postMessage({
+    type: 'moebius:open-chat',
+    chatId,
+  }, '*')
+  return true
+}
+
 export function AgentHandoffButton({
   action,
   onStart,
@@ -36,11 +48,7 @@ export function AgentHandoffButton({
   }
 
   function viewConversation() {
-    if (!started?.chatId || window.parent === window) return
-    window.parent.postMessage({
-      type: 'moebius:open-chat',
-      chatId: started.chatId,
-    }, window.location.origin)
+    if (!openAgentConversation(started?.chatId)) return
     window.mobius?.signal?.('contribute_agent_conversation_opened', {
       event: action.event || 'contribute_agent_handoff',
     })

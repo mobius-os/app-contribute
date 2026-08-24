@@ -5,10 +5,17 @@ import {
   abandonPrepared,
   buildFeedSnapshot,
   loadLedger,
+  normalizeAppSettings,
   normalizeCycleState,
   normalizeSourceSnapshotCache,
   restoreAbandoned,
 } from '../storage.js'
+
+test('follow sent PRs defaults on without overriding a saved choice', () => {
+  assert.equal(normalizeAppSettings(null).autopilot_default, true)
+  assert.equal(normalizeAppSettings({}).autopilot_default, true)
+  assert.equal(normalizeAppSettings({ autopilot_default: false }).autopilot_default, false)
+})
 
 test('ledger uses JSON content batched into the storage listing', async () => {
   const gets = []

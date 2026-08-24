@@ -75,7 +75,11 @@ test('review details show reviewed labels and truthful published outcomes', () =
 test('agent handoffs start one durable project chat and open only its accepted conversation', () => {
   assert.match(appSource, /window\.mobius\?\.chat\?\.start/)
   assert.match(appSource, /scope: action\.scope/)
-  assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId: started\.chatId/)
+  assert.match(batchActionSource, /function openAgentConversation\(chatId\)/)
+  assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId,[\s\S]*}, '\*'\)/)
+  assert.match(batchActionSource, /openAgentConversation\(started\?\.chatId\)/)
+  assert.match(appSource, /openAgentConversation\(cycle\.chatId\)/)
+  assert.doesNotMatch(batchActionSource, /postMessage\([\s\S]*window\.location\.origin/)
   assert.doesNotMatch(appSource, /type: 'moebius:new-chat'/)
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
@@ -92,7 +96,7 @@ test('pull requests and requests have distinct top-level rooms', () => {
   assert.match(appSource, /ISSUE_TYPES\.has\(rec\.type\)/)
   assert.match(appSource, /aria-labelledby=\{view === 'issues' \? 'co-tab-issues' : 'co-tab-prs'\}/)
   assert.match(cardSource, /!isPr && rec\.status === 'prepared'/)
-  assert.match(feedSource, /STATUS_LABELS\[records\[0\]\?\.status\] \|\| 'History'/)
+  assert.match(feedSource, /STATUS_LABELS\[rec\?\.status\] \|\| 'Settled'/)
   assert.match(appSource, /isEmpty \? \(\s*<EmptyState view=\{view\} \/>/)
 })
 

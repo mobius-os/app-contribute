@@ -233,6 +233,7 @@ export function ConnectionCard({
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [autopilotHelpOpen, setAutopilotHelpOpen] = useState(false)
   // Opt-in on the connect screen: request the broader `repo` scope so pushes to
   // the owner's PRIVATE repos succeed. Default off keeps least privilege.
   const [includePrivate, setIncludePrivate] = useState(false)
@@ -660,6 +661,7 @@ export function ConnectionCard({
               if (open) {
                 setDisconnectConfirm(false)
                 setDisconnectError('')
+                setAutopilotHelpOpen(false)
               }
               return !open
             })
@@ -679,10 +681,22 @@ export function ConnectionCard({
           >
             {submissionMethod === 'github' && conn?.autopilotAvailable &&
               typeof onToggleAutopilotDefault === 'function' && (
-              <label className="co-autopilot-setting">
-                <strong>Follow sent PRs</strong>
+              <div className="co-autopilot-setting">
+                <label htmlFor="co-follow-sent-prs">Follow sent PRs</label>
+                <button
+                  type="button"
+                  className="co-setting-info"
+                  aria-label="What Follow sent PRs does"
+                  aria-expanded={autopilotHelpOpen}
+                  aria-controls="co-follow-sent-prs-help"
+                  title="What Follow sent PRs does"
+                  onClick={() => setAutopilotHelpOpen((open) => !open)}
+                >
+                  <Icon name="info" size={15} />
+                </button>
                 <span className="co-setting-switch">
                   <input
+                    id="co-follow-sent-prs"
                     type="checkbox"
                     checked={autopilotDefault}
                     onChange={(event) => (
@@ -691,7 +705,12 @@ export function ConnectionCard({
                   />
                   <i aria-hidden="true" />
                 </span>
-              </label>
+                {autopilotHelpOpen ? (
+                  <p id="co-follow-sent-prs-help" className="co-autopilot-help">
+                    Follows sent PRs through checks and review, addresses comments automatically, and asks when it needs you.
+                  </p>
+                ) : null}
+              </div>
             )}
             {typeof onChooseSubmissionMethod === 'function' && (
               <div className="co-method-setting">

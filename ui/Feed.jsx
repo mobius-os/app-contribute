@@ -60,7 +60,7 @@ function phaseLabel(unit, phase, reviewStatus) {
     return 'Reviewing'
   }
   if (phase === 'open') return records.some((rec) => rec.status === 'submitting') ? 'Publishing' : 'Open'
-  if (phase === 'history') return STATUS_LABELS[records[0]?.status] || 'History'
+  if (phase === 'history') return records[0]?.status === 'merged' ? 'Merged' : 'Closed'
   if (records.some((rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh')) return 'Needs update'
   if (records.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) return 'Needs fixes'
   return records[0]?.type === 'pr' ? 'Review needed' : 'Draft'
@@ -111,13 +111,19 @@ function ListContinuation({ shown, total, onContinue }) {
   )
 }
 
-function ReviewRow({ unit, phase, project, reviewStatus, onSelect }) {
+function ReviewRow({ unit, phase, reviewStatus, onSelect }) {
   const count = unitRecords(unit).length
+  const record = primaryRecord(unit)
+  const detail = count > 1
+    ? `${count} linked pull requests`
+    : phase === 'history'
+      ? timeAgo(record?.updated_at || record?.created_at)
+      : ''
   return (
-    <button type="button" className="co-review-row" onClick={onSelect}>
+    <button type="button" className={'co-review-row' + (detail ? '' : ' is-compact')} onClick={onSelect}>
       <span className="co-review-row-copy">
         <strong>{unitTitle(unit)}</strong>
-        <small>{count > 1 ? `${count} linked pull requests` : unitRepo(unit)}</small>
+        {detail ? <small>{detail}</small> : null}
       </span>
       <span className={'co-review-state is-' + phase}>{phaseLabel(unit, phase, reviewStatus)}</span>
       <Icon name="right" size={14} />
@@ -141,7 +147,6 @@ function ReviewList({ units, phase, projects, reviewStatus, onSelect }) {
               key={unitKey(unit)}
               unit={unit}
               phase={phase}
-              project={group.project}
               reviewStatus={reviewStatus}
               onSelect={() => onSelect(unit)}
             />
