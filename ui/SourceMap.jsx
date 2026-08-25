@@ -344,22 +344,24 @@ export function SourceMap({
   }
 
   return (
-    <section id="co-panel-sources" className="co-projects-view" role="tabpanel" aria-labelledby="co-tab-sources">
-      <header className="co-view-heading">
-        <div>
-          <h2>Projects</h2>
-          <p>See what can move, what needs context, and what should stay local.</p>
-        </div>
-        <button
-          type="button"
-          className="co-quiet-action"
-          onClick={onRetry}
-          disabled={loading}
-        >
-          <Icon name="refresh" size={15} />
-          {loading ? 'Checking…' : 'Check projects'}
-        </button>
-      </header>
+    <section id="co-panel-sources" className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} role="tabpanel" aria-labelledby="co-tab-sources">
+      {selectedProject ? <h2 className="co-visually-hidden">Project detail</h2> : (
+        <header className="co-view-heading">
+          <div>
+            <h2>Projects</h2>
+            <p>See what can move, what needs context, and what should stay local.</p>
+          </div>
+          <button
+            type="button"
+            className="co-quiet-action"
+            onClick={onRetry}
+            disabled={loading}
+          >
+            <Icon name="refresh" size={15} />
+            {loading ? 'Checking…' : 'Check projects'}
+          </button>
+        </header>
+      )}
 
       {['disconnected', 'unknown', 'unsupported'].includes(conn?.state) ? (
         <div className="co-view-note">Local positions are current; GitHub review states may be older.</div>

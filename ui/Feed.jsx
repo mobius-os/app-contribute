@@ -512,7 +512,7 @@ function RequestsWorkspace({
   if (selected) {
     return (
       <section className="co-requests-workspace is-focus">
-        <ViewHeading title="Requests" description="One decision at a time, with the source conversation still attached." />
+        <h2 className="co-visually-hidden">Request detail</h2>
         <div className="co-focus-view co-request-focus">
           <button type="button" className="co-focus-back" onClick={() => setSelected(null)}>
             <Icon name="left" size={15} /> Back to {stageLabel.toLowerCase()}

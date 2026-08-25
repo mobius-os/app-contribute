@@ -1279,7 +1279,7 @@ button.co-workspace-task { cursor: pointer; }
   background: var(--surface2, var(--surface)); color: var(--muted);
   font-size: 9.5px; font-weight: 650; line-height: 1.2;
 }
-.co-pr-metadata { margin-top: 12px; border-top: 1px solid var(--border); }
+.co-pr-metadata { align-self: stretch; width: 100%; margin-top: 12px; border-top: 1px solid var(--border); }
 .co-pr-metadata > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; color: var(--muted); font-size: 11px; font-weight: 650; cursor: pointer; }
 .co-pr-metadata > summary::-webkit-details-marker { display: none; }
 .co-pr-metadata > summary .co-icon { transition: transform .16s ease; }

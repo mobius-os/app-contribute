@@ -31,6 +31,7 @@ test('focused review actions keep one strong primary and compact phone-safe seco
   assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: 44px;[\s\S]*?background: transparent/)
   assert.match(themeSource, /\.co-technical-summary \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
   assert.match(themeSource, /\.co-review-changes-head span \{[\s\S]*?white-space: nowrap;[\s\S]*?border-radius: 999px/)
+  assert.match(themeSource, /\.co-pr-metadata \{[^}]*align-self: stretch;[^}]*width: 100%/)
 })
 
 test('prepared platform checks stay a separate confirmed no-PR action', () => {
@@ -106,6 +107,12 @@ test('pull requests and requests have distinct top-level rooms', () => {
   assert.match(cardSource, /!isPr && rec\.status === 'prepared'/)
   assert.match(feedSource, /STATUS_LABELS\[rec\?\.status\] \|\| 'Settled'/)
   assert.match(appSource, /isEmpty \? \(\s*<EmptyState view=\{view\} \/>/)
+})
+
+test('focused Projects and Requests use the same single-heading detail pattern as Reviews', () => {
+  assert.match(sourceMapSource, /selectedProject \? <h2 className="co-visually-hidden">Project detail<\/h2>/)
+  assert.match(feedSource, /<h2 className="co-visually-hidden">Request detail<\/h2>/)
+  assert.doesNotMatch(feedSource, /<ViewHeading title="Requests"[^>]*source conversation still attached/)
 })
 
 test('an assigned incoming review stays recoverable until its conversation starts', () => {

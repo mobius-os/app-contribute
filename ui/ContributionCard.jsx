@@ -511,8 +511,12 @@ export function ReviewPlan({ rec, loadDiff }) {
 
   return (
     <>
-      <div className="co-review-changes-head"><strong>Changes</strong><span>{badge}</span></div>
-      <FileDiffList rec={rec} loadDiff={loadDiff} />
+      {isPr ? (
+        <>
+          <div className="co-review-changes-head"><strong>Changes</strong><span>{badge}</span></div>
+          <FileDiffList rec={rec} loadDiff={loadDiff} />
+        </>
+      ) : null}
       <details className="co-pr-metadata">
         <summary><span>{isPr ? 'PR details' : 'Request details'}</span><Icon name="chevron" size={15} /></summary>
         <div className="co-pr-metadata-body">

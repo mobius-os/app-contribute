@@ -63,6 +63,25 @@ test('a prepared request keeps its source-conversation action and note', async (
   assert.match(html, /Requests stay connected to their source conversation/)
 })
 
+test('request details do not render an empty pull-request changes section', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderReview } = await cardRenderer()
+  const html = renderReview({
+    id: 'published-request', type: 'issue', status: 'open',
+    repo: 'mobius-os/mobius',
+    plan: {
+      action: 'issue',
+      title: 'Clarify the review flow',
+    },
+  })
+  assert.match(html, /Request details/)
+  assert.doesNotMatch(html, />Changes</)
+  assert.doesNotMatch(html, /co-diff/)
+})
+
 test('prepared platform cards offer a confirmed pre-PR check action', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
