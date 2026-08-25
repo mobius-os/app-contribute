@@ -10,7 +10,7 @@ const cardRenderer = () => renderModule(`
     return renderToStaticMarkup(React.createElement(ContributionCard, {
       rec, onSend: () => {}, onDismiss: () => {},
       onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
-      onConnectApp: () => {},
+      onConnectApp: () => {}, onWithdraw: () => ({ ok: true }),
     }))
   }
   export function renderReview(rec) {
@@ -127,6 +127,31 @@ test('a settled update target blocks another public action and leads to recovery
   assert.match(html, /Pull request #59 already merged/)
   assert.match(html, /Refresh/)
   assert.doesNotMatch(html, /Update pull request|>Update PR</)
+})
+
+test('withdrawal is offered only for a published Möbius-bot contribution', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const eligible = {
+    id: 'relay-pr', type: 'pr', status: 'draft',
+    title: 'Review the relay', repo: 'mobius-os/app-demo',
+    submission_mode: 'mobius-bot', relay_contribution_id: 'ctr_reviewed',
+  }
+
+  const html = renderCard(eligible)
+  assert.match(html, />Withdraw PR</)
+  assert.doesNotMatch(html, /Confirm contribution withdrawal|Keep open/)
+
+  for (const rec of [
+    { ...eligible, submission_mode: 'personal-github' },
+    { ...eligible, status: 'merged' },
+    { ...eligible, relay_contribution_id: null },
+  ]) {
+    assert.doesNotMatch(renderCard(rec), />Withdraw PR</)
+  }
 })
 
 test('prepared cards narrate running, failed, and passing pre-PR checks', async (t) => {

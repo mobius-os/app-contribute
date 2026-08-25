@@ -160,6 +160,21 @@ test('published check follow-ups use the same calm refresh treatment', () => {
   )
 })
 
+test('Möbius-bot withdrawal keeps the destructive action behind confirmation', () => {
+  assert.match(cardSource, /function WithdrawAction\(\{ rec, onWithdraw \}\)/)
+  assert.match(
+    cardSource,
+    /submission_mode === 'mobius-bot'[\s\S]*?\['draft', 'open'\]\.includes\(rec\.status\)[\s\S]*?relay_contribution_id/,
+  )
+  assert.match(cardSource, /onClick=\{\(\) => \{ setNote\(''\); setConfirming\(true\) \}\}/)
+  assert.match(cardSource, /role="alertdialog"[\s\S]*?Confirm contribution withdrawal/)
+  assert.match(cardSource, /ref=\{keepRef\}[\s\S]*?>\s*Keep open\s*<\/button>/)
+  assert.match(
+    cardSource,
+    /className="co-btn co-btn-sm co-btn-caution"[\s\S]*?onClick=\{withdraw\}/,
+  )
+})
+
 test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(apiSource, /uncertain: true/g)
   assert.match(appSource, /resolveUncertainSubmission/)
