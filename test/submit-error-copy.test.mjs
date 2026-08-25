@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 const card = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
 
 test('a pushed branch is never described as though nothing left the instance', () => {
-  assert.match(card, /branchWasPushed[\s\S]*The reviewed branch was pushed, but Contribute could not confirm a new pull request\./)
+  assert.match(card, /branchWasPushed[\s\S]*The reviewed branch reached GitHub, but Contribute could not confirm the pull request\./)
   assert.doesNotMatch(card, /Nothing was pushed\./)
 })
 

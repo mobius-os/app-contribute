@@ -22,6 +22,8 @@ import {
   reviewStateFor,
   summarizeReviewStatus,
 } from '../review.js'
+import { upsertRecord } from '../domain.js'
+import { contributionRecordPaths } from '../storage.js'
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
@@ -58,20 +60,52 @@ test('a record intent resolves its current phase and enclosing stack', () => {
   assert.equal(locateContributionReview(phases, 'missing'), null)
 })
 
-test('the app consumes trusted intents only after the authoritative ledger is ready', () => {
+test('the app resolves trusted standalone intents without waiting for the full ledger', () => {
   assert.match(appSource, /event\.origin !== window\.location\.origin/)
   assert.match(appSource, /event\.source !== window\.parent/)
   assert.match(appSource, /contributionReviewTargetFromIntent\(event\.data\.intent\)/)
   assert.match(appSource, /setView\('prs'\)/)
+  assert.match(appSource, /loadContributionRecord\(recordId\)/)
+  assert.match(appSource, /upsertRecord\(recordsRef\.current, record\)/)
   assert.match(appSource, /focusTarget=\{reviewFocus\}/)
-  assert.match(appSource, /focusReady=\{ledgerReady\}/)
-  assert.match(appSource, /reviewFocus && !ledgerReady/)
+  assert.match(appSource, /focusReady=\{focusedReviewReady\}/)
+  assert.match(appSource, /loading \|\| !focusedReviewReady/)
   assert.match(feedSource, /!focusTarget\?\.recordId \|\| !focusReady/)
   assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
   assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
   assert.match(feedSource, /Review no longer available/)
   assert.match(feedSource, /<h2 className="co-visually-hidden">Contribution review<\/h2>/)
   assert.doesNotMatch(feedSource, /<ViewHeading title="Reviews" description="Inspect the complete change before you act\."/)
+})
+
+test('only mount and foreground freshness enumerate the complete history', () => {
+  assert.equal(appSource.match(/loadLedger\(\)/g)?.length, 2)
+  assert.match(appSource, /if \(!ledgerReadyRef\.current\) return/)
+  assert.match(appSource, /loadContributionRecord\(recordId\)/)
+  assert.match(appSource, /loadFreshContributionRecord\(rec\.id\)/)
+  assert.match(appSource, /loadFreshContributionRecords\(/)
+})
+
+test('focused record paths are bounded and reject unsafe ids', () => {
+  assert.deepEqual(contributionRecordPaths('record.1-ready'), [
+    'contributions/record.1-ready.json',
+    'contributions/record.1-ready.record.json',
+  ])
+  assert.deepEqual(contributionRecordPaths('../escape'), [])
+  assert.deepEqual(contributionRecordPaths(''), [])
+})
+
+test('a focused record is inserted or refreshed without losing its storage path', () => {
+  assert.deepEqual(upsertRecord([{ id: 'other', path: 'contributions/other.json' }], {
+    id: 'focus', path: 'contributions/focus.json', status: 'prepared',
+  }).map((record) => record.id), ['focus', 'other'])
+  assert.deepEqual(upsertRecord([{
+    id: 'focus', path: 'contributions/focus.record.json', status: 'prepared',
+  }], {
+    id: 'focus', status: 'open',
+  }), [{
+    id: 'focus', path: 'contributions/focus.record.json', status: 'open',
+  }])
 })
 
 test('indexes only recognized review verdicts', () => {
@@ -322,12 +356,25 @@ test('prepared work stays out of send until a thorough review is all clear', () 
 })
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
-  assert.match(appSource, /rec\.plan\?\.action === 'pr_update'/)
-  assert.match(appSource, /updateContribution\(\{ appId, token, rec \}\)/)
+  assert.match(appSource, /refreshed\.plan\?\.action === 'pr_update'/)
+  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
   assert.match(cardSource, /Pull request updated on GitHub/)
+})
+
+test('submit failures lead back to private agent recovery without overstating a stale push', () => {
+  assert.match(cardSource, /rec\.last_submit_stage === 'pushed'/)
+  assert.match(cardSource, /rec\.last_submit_push_sha/)
+  assert.match(cardSource, /rec\.plan\?\.head_sha/)
+  assert.match(cardSource, />\s*Fix and review\s*</)
+  assert.match(cardSource, /reconcile the contribution record/)
+  assert.match(cardSource, /existing approval button/)
+  assert.match(cardSource, /Review needs refreshing/)
+  assert.match(cardSource, /<summary>Technical details<\/summary>/)
+  assert.match(cardSource, /const submitFailed = Boolean\(rec\.last_submit_error\)/)
+  assert.match(cardSource, /!reviewIncomplete && !submitFailed/)
 })
 
 test('one queue handoff owns every visible private review job', () => {

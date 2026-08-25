@@ -152,14 +152,16 @@ privacy facts and then reuse the same **Prepare** and **Run full cycle** intents
 
 ---
 
-## Check you're set up
+## Check the available public paths
 
 ```bash
 curl -s -H "Authorization: Bearer $AGENT_TOKEN" "$API_BASE_URL/api/github/status" | python3 -m json.tool
 ```
 
 Use the `$API_BASE_URL` + `$AGENT_TOKEN` idiom for every chat-context command in
-this file — never hardcode localhost. The payload:
+this file — never hardcode localhost. This status is for the optional personal
+GitHub path; a linked Möbius account can use the bot path without connecting a
+personal GitHub account. The payload:
 
 - `connected: true` with a `login` — `gh` is authenticated as the owner. You
   never see the token (`gh` resolves it from the platform store — don't dig for
@@ -167,10 +169,10 @@ this file — never hardcode localhost. The payload:
   github.com remote authenticates as the owner and nothing at the git layer gates
   that — Hard stop #1 is the whole safety net. NEVER run a bare `git push` to a
   github remote outside the approved fork flow.
-- `connected: false` — point the partner to the **Contribute app** (App Store)
-  and its Connect GitHub card. You can still prepare a contribution (branch,
-  commit, record it `prepared`); nothing goes public until they connect AND
-  approve.
+- `connected: false` — personal GitHub is unavailable, but a supported Möbius
+  repository may still use **Contribute via Möbius (no GitHub needed)**. Other
+  repositories can still be prepared privately and wait for a later personal
+  connection. Nothing goes public until the partner approves the exact record.
 - `gh_version: null` — the platform image predates GitHub support. Tell the
   partner a platform update is needed; don't improvise around it.
 
@@ -448,11 +450,16 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   action inside the private review. Send binds it to the exact reviewed source
   and capability digests; it does not connect or reinstall anything yet.
 
-Before you tell the partner it is ready, review the staged record yourself:
-re-read the stored `.diff`, confirm the body draft is exactly what should be
-published, confirm no private data appears in the branch, commit message, branch
-name, body, or diff, and confirm the branch is back on `main` when the prep
-steps require it.
+Before you tell the partner it is ready, complete the exact-head review contract
+from **Thoroughly review prepared work**. CAS-mark `quality_review.state` as
+`reviewing`, inspect the complete stored diff and its owning invariants, fix
+every sound issue privately, and repeat on the new head. Confirm the body draft
+is exactly what should be published and that no private data appears in the
+branch, commit message, branch name, body, or diff. Only then CAS-store
+`quality_review.state: all_clear` with `reviewed_head_sha` exactly equal to the
+current `plan.head_sha`. If that verdict cannot honestly be recorded, leave the
+record visibly at **Review needed** or **Changes needed**—never tell the partner
+it is sendable.
 
 Status stays `prepared`. Then give the partner one short, text-only handoff:
 summarize what is staged and say it is waiting for their review. A prepared
@@ -463,8 +470,13 @@ app, or link a completion notification to an app as part of this handoff.
 
 ## The green light
 
-The green light for a staged PR is the Send PR for review button in Contribute.
-No agent turn is needed after that click. The platform endpoint:
+The green light for a staged PR is **Open PR** in Contribute. It appears only for
+an `all_clear` verdict on the exact current head. The app re-reads the canonical
+record immediately before Send; if an older or stale client reaches the server,
+the card returns to **Review** instead of exposing a raw head-review error. No
+agent turn is needed after a valid click.
+
+For **Personal GitHub**, the platform endpoint:
 
 1. claims the `prepared` record as `submitting`,
 2. verifies `plan.head_sha` still equals the branch tip, `diff_sha256` still
@@ -491,6 +503,18 @@ record, and stop again.
 
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
+
+For **Contribute via Möbius**, the instance proves the same exact reviewed head,
+merge-tests it against the configured current target, and sends an exact file
+snapshot through a one-use body-bound capability. The launcher writes only to
+the configured bot publication repository, opens or updates one draft PR in the
+target, and returns the stable PR URL. `local_record_id` stays stable while
+`relay_revision` increases for each changed reviewed snapshot, so a refresh can
+update the same PR without discarding comments. Exact retries reuse the same
+revision and cannot create a duplicate. Status polling is a fallback behind
+launcher webhooks. The partner may explicitly **Withdraw PR**; that closes the
+PR and removes only its bot-owned branch, never an upstream branch and never a
+merge.
 
 ### After an app PR merges: connect the same local app
 
@@ -927,13 +951,23 @@ curl -si -H "Authorization: Bearer $AGENT_TOKEN" -H "x-mobius-version: 1" \
 # note the ETag, edit the JSON, then PUT with -H 'If-Match: <etag>' -d '{ ...full record... }'
 ```
 
+When refreshing a record that already has a Möbius-bot PR, keep the same record
+id and preserve its `relay_contribution_id`, `relay_revision`,
+`relay_publication_repo`, and PR URL/number. Replace the plan/diff and invalidate
+the old `quality_review`; the instance assigns the next revision only after it
+has built the exact new merge snapshot. Do not create a second record merely
+because upstream moved.
+
 `type` ∈ `pr | issue | issue_comment | discussion_comment`; `status` ∈ `prepared
 | submitting | draft | open | merged | closed | commented | abandoned`; `number`,
 `url`, `branch` are optional until they exist. `submitting` = the approve endpoint
 claimed the record and the action is in flight; `commented` = terminal for
-comment actions. A record stuck in `submitting` with an old `updated_at` (crashed
-submit) → verify via `gh search` whether the action actually happened before
-redoing it.
+comment actions. Bot-published records may additionally carry
+`submission_mode: "mobius-bot"`, `relay_contribution_id`, `relay_revision`,
+`relay_status`, and `relay_publication_repo`. A bot record stuck in `submitting`
+is reconciled by its saved relay id and exact revision—never search GitHub and
+invent a new record. The personal-GitHub path retains its existing lost-response
+reconciliation.
 
 `quality_review.state` ∈ `reviewing | changes_needed | all_clear`. The
 `reviewed_head_sha` must exactly equal the record's current `plan.head_sha`.

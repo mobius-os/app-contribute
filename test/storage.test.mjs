@@ -4,12 +4,90 @@ import assert from 'node:assert/strict'
 import {
   abandonPrepared,
   buildFeedSnapshot,
+  loadFreshContributionRecord,
+  loadFreshContributionRecords,
   loadLedger,
   normalizeAppSettings,
   normalizeCycleState,
   normalizeSourceSnapshotCache,
   restoreAbandoned,
 } from '../storage.js'
+
+test('selected action records use bounded fresh reads and deduplicate ids', async (t) => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const paths = []
+  globalThis.window = {
+    mobius: {
+      storage: {
+        getWithVersion: async (path) => {
+          paths.push(path)
+          const id = path.match(/contributions\/(.+)\.json$/)?.[1]
+          return { value: id ? { id, status: 'prepared' } : null, version: 'v1' }
+        },
+      },
+    },
+  }
+
+  const records = await loadFreshContributionRecords(['one', 'two', 'one', '../unsafe'])
+  assert.deepEqual(records.map((record) => record.id), ['one', 'two'])
+  assert.deepEqual(paths.sort(), [
+    'contributions/one.json',
+    'contributions/two.json',
+  ])
+})
+
+test('a publishing decision rejects an offline cached record', async (t) => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  globalThis.window = {
+    mobius: {
+      storage: {
+        getWithVersion: async () => ({
+          value: { id: 'cached', status: 'prepared' },
+          version: 'v1',
+          offline: true,
+        }),
+      },
+    },
+  }
+
+  assert.equal(await loadFreshContributionRecord('cached'), null)
+})
+
+test('concurrent ledger refreshes share one enumeration but later refreshes stay fresh', async (t) => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  let release
+  let calls = 0
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        list: async () => {
+          calls += 1
+          if (calls === 1) await new Promise((resolve) => { release = resolve })
+          return [{
+            type: 'file',
+            name: 'one.json',
+            path: 'contributions/one.json',
+            content: { id: 'one', status: 'prepared' },
+          }]
+        },
+      },
+    },
+  }
+
+  const first = loadLedger()
+  const duplicate = loadLedger()
+  assert.equal(first, duplicate)
+  release()
+  assert.deepEqual((await first).records.map((record) => record.id), ['one'])
+  assert.equal(calls, 1)
+
+  await loadLedger()
+  assert.equal(calls, 2)
+})
 
 test('follow sent PRs defaults on without overriding a saved choice', () => {
   assert.equal(normalizeAppSettings(null).autopilot_default, true)

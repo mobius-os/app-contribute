@@ -278,7 +278,8 @@ function LabelOutcomeRow({ label, labels, tone = '' }) {
 // A persisted submit failure, shown as a real alert strip (not stray red text)
 // on the prepared card in both the collapsed and expanded states, so the reason
 // a Send bounced stays visible while the partner fixes it.
-function SubmitErrorAlert({ rec, reviewState }) {
+function SubmitErrorAlert({ rec, reviewState, onFeedback }) {
+  const [note, setNote] = useState('')
   const blocked = reviewState?.state === 'needs_refresh'
   if (!blocked && !rec.last_submit_error) return null
   const message = blocked
@@ -290,27 +291,46 @@ function SubmitErrorAlert({ rec, reviewState }) {
   // returns '' and the raw message becomes the headline (lenient fallback).
   const code = reviewState?.code || (rec.last_submit_error ? 'previous_submit_failure' : '')
   const headline = problemHeadline(code)
+  const displayHeadline = headline || (blocked ? 'Fresh review needed' : 'Review needs refreshing')
+  const reviewedHead = String(rec.plan?.head_sha || '')
   const branchWasPushed = (
+    rec.last_submit_stage === 'pushed' &&
+    reviewedHead &&
+    String(rec.last_submit_push_sha || '') === reviewedHead &&
     typeof rec.last_pushed_branch_url === 'string' &&
     rec.last_pushed_branch_url.startsWith('https://github.com/')
   )
 
+  function fixAndReview() {
+    const draft = [
+      `Fix and review contribution ${rec.id} ("${rec.title || 'untitled'}").`,
+      '',
+      'Refresh the recorded pull request and branch first. If the exact reviewed head already reached the pull request, reconcile the contribution record and inspect its current checks. If the branch moved, rebuild the private review on its current head and run the relevant checks.',
+      '',
+      'Keep any further public update behind the existing approval button.',
+    ].join('\n')
+    const outcome = (typeof onFeedback === 'function' && onFeedback(
+      rec, { draft },
+    )) || {}
+    if (!outcome.ok) {
+      setNote(outcome.reason === 'missing-chat'
+        ? 'This older record does not know which chat created it.'
+        : 'Open Contribute inside Möbius to return to the source chat.')
+    }
+  }
+
   return (
     <div className={'co-alert' + (blocked ? ' is-follow-up' : '')} role="status">
-      <strong>{headline || (blocked ? 'Fresh review needed' : 'Could not send')}</strong>
+      <strong>{displayHeadline}</strong>
       <p className="co-alert-reassurance">
         {branchWasPushed
-          ? 'The reviewed branch was pushed, but Contribute could not confirm a new pull request.'
-          : 'Nothing was published. Your agent can update it safely.'}
+          ? 'The reviewed branch reached GitHub, but Contribute could not confirm the pull request.'
+          : 'This review needs a quick check before it can continue.'}
       </p>
-      {headline ? (
-        <details className="co-alert-details">
-          <summary>Technical details</summary>
-          <p className="co-alert-text">{message}</p>
-        </details>
-      ) : (
+      <details className="co-alert-details">
+        <summary>Technical details</summary>
         <p className="co-alert-text">{message}</p>
-      )}
+      </details>
       {branchWasPushed ? (
         <a
           className="co-review-link"
@@ -321,6 +341,16 @@ function SubmitErrorAlert({ rec, reviewState }) {
           View pushed branch
         </a>
       ) : null}
+      {typeof onFeedback === 'function' ? (
+        <button
+          type="button"
+          className="co-btn co-btn-sm co-btn-primary"
+          onClick={fixAndReview}
+        >
+          Fix and review
+        </button>
+      ) : null}
+      {note ? <p className="co-review-error">{note}</p> : null}
     </div>
   )
 }
@@ -581,10 +611,14 @@ function ReviewActions({
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
   const blocked = reviewState?.state === 'needs_refresh'
+  // A failed publication needs the source-aware agent recovery above this
+  // action row. Do not offer the same blind GitHub mutation again while its
+  // cause is unresolved.
+  const submitFailed = Boolean(rec.last_submit_error)
   const quality = qualityReviewFor(rec)
   const reviewIncomplete = isPr && quality.state !== 'all_clear'
   const checksActive = prePrCheckPhase(rec) === 'running'
-  const mayRunChecks = canRunPrePrChecks(rec) &&
+  const mayRunChecks = !submitFailed && canRunPrePrChecks(rec) &&
     typeof onRunPrePrChecks === 'function' && !checksActive
   const keepButtonRef = useRef(null)
   const cancelChecksRef = useRef(null)
@@ -614,7 +648,7 @@ function ReviewActions({
   }, [sending])
 
   async function send() {
-    if (!isPr || blocked || reviewIncomplete || checksActive) return
+    if (!isPr || blocked || submitFailed || reviewIncomplete || checksActive) return
     setSending(true)
     setSendNote(null)
     setNote(null)
@@ -810,7 +844,7 @@ function ReviewActions({
                   <span>{rec.pre_pr_checks ? 'Check again' : 'Run checks'}</span>
                 </button>
               ) : null}
-              {!reviewIncomplete ? (
+              {!reviewIncomplete && !submitFailed ? (
                 <button
                   type="button"
                   className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
@@ -1076,6 +1110,86 @@ function AutopilotPanel({ rec, onSetAutopilot }) {
   )
 }
 
+function WithdrawAction({ rec, onWithdraw }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const keepRef = useRef(null)
+  const descriptionId = useId()
+  const eligible = rec.submission_mode === 'mobius-bot' &&
+    ['draft', 'open'].includes(rec.status) &&
+    typeof rec.relay_contribution_id === 'string' &&
+    typeof onWithdraw === 'function'
+
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus()
+  }, [confirming])
+
+  if (!eligible) return null
+
+  async function withdraw() {
+    setBusy(true)
+    setNote('')
+    try {
+      const outcome = (await onWithdraw(rec)) || {}
+      if (!outcome.ok) {
+        setNote(outcome.error || 'Could not withdraw this contribution.')
+      }
+    } finally {
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <div className="co-published-action">
+        <button
+          type="button"
+          className="co-btn co-btn-sm"
+          onClick={() => { setNote(''); setConfirming(true) }}
+        >
+          Withdraw PR
+        </button>
+        {note ? <p className="co-review-error" role="status">{note}</p> : null}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="co-confirm"
+      role="alertdialog"
+      aria-label="Confirm contribution withdrawal"
+      aria-describedby={descriptionId}
+    >
+      <p id={descriptionId} className="co-confirm-text">
+        Withdraw this pull request? Möbius will close it and remove its bot
+        branch. The local review stays in History; nothing will be merged.
+      </p>
+      <div className="co-confirm-actions">
+        <button
+          type="button"
+          ref={keepRef}
+          className="co-btn co-btn-sm"
+          disabled={busy}
+          onClick={() => setConfirming(false)}
+        >
+          Keep open
+        </button>
+        <button
+          type="button"
+          className="co-btn co-btn-sm co-btn-caution"
+          disabled={busy}
+          onClick={withdraw}
+        >
+          {busy ? 'Withdrawing…' : 'Withdraw PR'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function ContributionCard({
   rec,
   reviewState,
@@ -1086,6 +1200,7 @@ export function ContributionCard({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   loadDiff,
   reviewOnly = false,
@@ -1186,7 +1301,12 @@ export function ContributionCard({
       {status !== 'prepared' && autopilotState(rec) ? (
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
-      <SubmitErrorAlert rec={rec} reviewState={reviewState} />
+      <WithdrawAction rec={rec} onWithdraw={onWithdraw} />
+      <SubmitErrorAlert
+        rec={rec}
+        reviewState={reviewState}
+        onFeedback={onFeedback}
+      />
       <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />

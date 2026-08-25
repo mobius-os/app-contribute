@@ -1072,12 +1072,12 @@ button.co-workspace-task { cursor: pointer; }
   align-self: stretch; margin-top: 10px; padding: 9px 11px;
   display: flex; flex-direction: column; gap: 6px;
   border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border));
-  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--co-warn) 26%, var(--border));
+  background: color-mix(in srgb, var(--co-warn) 6%, var(--surface));
 }
 .co-alert-text {
   margin: 0; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere;
-  color: color-mix(in srgb, var(--danger) 88%, var(--text));
+  color: var(--muted);
 }
 .co-alert > strong { color: var(--text); font-size: 13px; line-height: 1.35; }
 .co-alert-reassurance { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -1468,14 +1468,26 @@ button.co-workspace-task { cursor: pointer; }
 @media (forced-colors: active) {
   .co-action-label-sweep { display: none !important; }
 }
-/* Two-tap confirmation before moving active work to History. The action is
-   reversible, so it reads as caution rather than permanent deletion. */
+/* Two-tap confirmation before a consequential lifecycle action. History is
+   reversible; bot withdrawal is not, so both keep the safe choice focused. */
 .co-confirm {
   display: flex; flex-direction: column; gap: 10px; padding: 12px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--co-warn) 34%, var(--border));
   background: color-mix(in srgb, var(--co-warn) 7%, var(--surface));
 }
+.co-published-action {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.co-published-action .co-review-error {
+  flex: 1 0 100%;
+  margin: 0;
+}
+.co-card > .co-confirm { margin-top: 12px; }
 .co-confirm-text { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text); }
 .co-confirm-actions { display: flex; gap: 8px; }
 .co-confirm-actions .co-btn { flex: 1 1 0; min-width: 0; }

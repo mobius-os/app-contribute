@@ -170,6 +170,7 @@ function SelectedUnit({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -202,6 +203,7 @@ function SelectedUnit({
       onDismiss={onDismiss}
       onRestore={onRestore}
       onSetAutopilot={onSetAutopilot}
+      onWithdraw={onWithdraw}
       onConnectApp={onConnectApp}
       loadDiff={loadDiff}
       initialExpanded
@@ -289,6 +291,7 @@ function ReviewWorkspace({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -398,6 +401,7 @@ function ReviewWorkspace({
             onDismiss={onDismiss}
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
+            onWithdraw={onWithdraw}
             onConnectApp={onConnectApp}
             onStartAgent={onStartAgent}
             loadDiff={loadDiff}
@@ -489,6 +493,7 @@ function RequestsWorkspace({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -529,6 +534,7 @@ function RequestsWorkspace({
             onDismiss={onDismiss}
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
+            onWithdraw={onWithdraw}
             onConnectApp={onConnectApp}
             onStartAgent={onStartAgent}
             loadDiff={loadDiff}

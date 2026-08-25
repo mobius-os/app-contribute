@@ -11,6 +11,7 @@ const FEED_CACHE = 'feed-cache.json'
 const SOURCE_CACHE = 'source-cache.json'
 const CYCLE_STATE = 'cycle-state.json'
 const RECORD_PREFIX = 'contributions/'
+const RECORD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
 const LEGACY_FILE_MAX = 64 * 1024
 const LEGACY_PAGE_MAX = 1024 * 1024
 const LEGACY_RECORD_MAX = 100
@@ -77,7 +78,63 @@ export async function loadCachedFeed() {
   }
 }
 
-export async function loadLedger() {
+// A shell review handoff names one already-validated contribution id. Resolve
+// that record with at most two small reads instead of holding the interaction
+// behind the full paged ledger scan. The legacy suffix keeps old prepared work
+// reachable without turning this focused path into another enumeration.
+export function contributionRecordPaths(recordId) {
+  const id = typeof recordId === 'string' ? recordId.trim() : ''
+  if (!RECORD_ID_RE.test(id)) return []
+  return [
+    `${RECORD_PREFIX}${id}.json`,
+    `${RECORD_PREFIX}${id}.record.json`,
+  ]
+}
+
+export async function loadContributionRecord(recordId) {
+  const id = typeof recordId === 'string' ? recordId.trim() : ''
+  for (const path of contributionRecordPaths(id)) {
+    const record = await window.mobius.storage.get(path)
+    if (record && typeof record === 'object' && record.id === id) {
+      return { ...record, path }
+    }
+  }
+  return null
+}
+
+// User-visible review opening can use the runtime's instant stale-while-
+// revalidate read above. Decisions that can publish or reconcile work cannot:
+// getWithVersion reaches the server while online and explicitly reports an
+// offline fallback, so those actions never accept a cached row as canonical.
+export async function loadFreshContributionRecord(recordId) {
+  const id = typeof recordId === 'string' ? recordId.trim() : ''
+  const storage = window.mobius?.storage
+  const readVersioned = typeof storage?.getWithVersion === 'function'
+    ? storage.getWithVersion.bind(storage)
+    : (typeof storage?._getWithVersion === 'function'
+        ? storage._getWithVersion.bind(storage)
+        : null)
+  if (!readVersioned) return null
+  for (const path of contributionRecordPaths(id)) {
+    const loaded = await readVersioned(path, 'json')
+    if (loaded?.offline) return null
+    const record = loaded?.value
+    if (record && typeof record === 'object' && record.id === id) {
+      return { ...record, path }
+    }
+  }
+  return null
+}
+
+export async function loadFreshContributionRecords(recordIds) {
+  const ids = [...new Set((Array.isArray(recordIds) ? recordIds : [])
+    .map((id) => typeof id === 'string' ? id.trim() : '')
+    .filter((id) => RECORD_ID_RE.test(id)))]
+  const records = await Promise.all(ids.map((id) => loadFreshContributionRecord(id)))
+  return records.filter(Boolean)
+}
+
+async function readLedger() {
   // Current platforms page include-content listings at a bounded byte budget.
   // A pre-batch runtime ignores the option and returns metadata for every JSON
   // record, so retain a strictly bounded sequential fallback for that one
@@ -139,6 +196,21 @@ export async function loadLedger() {
     fromCache: false,
     omitted,
   }
+}
+
+// Visibility, focus, and mount can converge during the same app activation.
+// They all want the same authoritative snapshot, so share that expensive
+// enumeration while it is in flight rather than issuing parallel 100+ page
+// scans. A settled read is never cached here: the next real refresh still
+// reaches storage.
+let ledgerLoadPromise = null
+export function loadLedger() {
+  if (!ledgerLoadPromise) {
+    ledgerLoadPromise = readLedger().finally(() => {
+      ledgerLoadPromise = null
+    })
+  }
+  return ledgerLoadPromise
 }
 
 export async function cacheFeed(records) {
