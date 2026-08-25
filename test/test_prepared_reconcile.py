@@ -224,46 +224,40 @@ class PreparedReconciliationEvidenceTests(unittest.TestCase):
             record, DIFF,
         ).matched_by, "merged_branch")
 
-    def test_reconciliation_surfaces_a_settled_update_target(self):
-        pull = {
-            "number": 59,
-            "state": "closed",
-            "merged_at": "2026-08-25T01:23:17Z",
-            "updated_at": "2026-08-25T01:23:17Z",
-            "head": {"sha": "a" * 40},
-            "html_url": "https://github.com/owner/repo/pull/59",
-        }
+    class UpdateTargetGitHub:
+        def __init__(self, pull):
+            self.target = pull
+            self.requested = None
 
-        class GitHubStub:
-            def repo_info(self, repo):
-                return "main", "c" * 40
+        def repo_info(self, repo):
+            return "main", "c" * 40
 
-            def pull(self, repo, number):
-                self.requested = (repo, number)
-                return pull
+        def pull(self, repo, number):
+            self.requested = (repo, number)
+            return self.target
 
-            def branch_pull(self, repo, base, branch):
-                return pull
+        def branch_pull(self, repo, base, branch):
+            return self.target
 
-            def head_is_on_main(self, repo, head, main):
-                return False
+        def head_is_on_main(self, repo, head, main):
+            return False
 
-            def pull_for_commit(self, repo, sha, base):
-                return None
+        def pull_for_commit(self, repo, sha, base):
+            return None
 
-        class LocalStub:
-            def patch_commit(self, repo, base, main, patch):
-                return ""
+    class UnlandedLocalMain:
+        def patch_commit(self, repo, base, main, patch):
+            return ""
 
-            def reverse_patch_present(self, repo, base, main, diff):
-                return False
+        def reverse_patch_present(self, repo, base, main, diff):
+            return False
 
-        class StorageStub:
-            def read_diff(self, name):
-                return None
+    class NoStoredDiff:
+        def read_diff(self, name):
+            return None
 
-        github = GitHubStub()
-        record = {
+    def prepared_update_record(self, **extra):
+        return {
             "id": "follow-up",
             "type": "pr",
             "status": "prepared",
@@ -274,15 +268,72 @@ class PreparedReconciliationEvidenceTests(unittest.TestCase):
                 "branch": "fix/follow-up",
                 "head_sha": "b" * 40,
             },
+            **extra,
         }
-        patch = reconcile_record(
-            github, LocalStub(), StorageStub(), "follow-up.json", record,
-            "2026-08-25T02:00:00Z",
+
+    def reconcile_update_target(self, github, record, now):
+        return reconcile_record(
+            github, self.UnlandedLocalMain(), self.NoStoredDiff(),
+            "follow-up.json", record, now,
+        )
+
+    def test_reconciliation_surfaces_a_settled_update_target(self):
+        github = self.UpdateTargetGitHub({
+            "number": 59,
+            "state": "closed",
+            "merged_at": "2026-08-25T01:23:17Z",
+            "updated_at": "2026-08-25T01:23:17Z",
+            "head": {"sha": "a" * 40},
+            "html_url": "https://github.com/owner/repo/pull/59",
+        })
+        patch = self.reconcile_update_target(
+            github, self.prepared_update_record(), "2026-08-25T02:00:00Z",
         )
         self.assertEqual(github.requested, ("owner/repo", 59))
         self.assertTrue(patch["needs_attention"])
         self.assertEqual(patch["attention"]["type"], "review_target_settled")
         self.assertEqual(patch["reconciliation_probe"]["target_state"], "closed")
+
+    def test_a_reopened_update_target_clears_its_recovery_blocker(self):
+        github = self.UpdateTargetGitHub({
+            "number": 59,
+            "state": "open",
+            "merged_at": None,
+            "updated_at": "2026-08-25T02:15:00Z",
+            "head": {"sha": "a" * 40},
+            "html_url": "https://github.com/owner/repo/pull/59",
+        })
+        settled_probe = {
+            "main_sha": "c" * 40,
+            "target_state": "closed",
+            "target_head_sha": "a" * 40,
+            "target_updated_at": "2026-08-25T01:23:17Z",
+        }
+        blocked = self.prepared_update_record(
+            needs_attention=True,
+            attention={
+                "type": "review_target_settled",
+                "key": "review_target_settled:59:closed",
+                "title": "Pull request #59 already closed",
+                "detected_at": "2026-08-25T02:00:00Z",
+            },
+            reconciliation_probe=settled_probe,
+        )
+
+        patch = self.reconcile_update_target(
+            github, blocked, "2026-08-25T02:30:00Z",
+        )
+        self.assertIs(patch["needs_attention"], False)
+        self.assertIsNone(patch["attention"])
+        self.assertEqual(patch["updated_at"], "2026-08-25T02:30:00Z")
+        self.assertEqual(patch["reconciliation_probe"]["target_state"], "open")
+
+        never_blocked = self.prepared_update_record(
+            reconciliation_probe=settled_probe,
+        )
+        self.assertNotIn("needs_attention", self.reconcile_update_target(
+            github, never_blocked, "2026-08-25T02:30:00Z",
+        ))
 
     def test_identifier_evidence_uses_distinctive_added_declarations(self):
         identifiers = distinctive_identifiers(DIFF)
