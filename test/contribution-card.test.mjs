@@ -103,6 +103,32 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
   assert.match(html, /Open pull request for review/)
 })
 
+test('a settled update target blocks another public action and leads to recovery', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'settled-update', type: 'pr', status: 'prepared',
+    repo: 'mobius-os/app-contribute', title: 'Preserve the follow-up',
+    number: 59, needs_attention: true,
+    attention: {
+      type: 'review_target_settled',
+      title: 'Pull request #59 already merged',
+      message: 'Preserve the remaining changes in a new reviewed contribution.',
+    },
+    plan: {
+      action: 'pr_update', repo: 'mobius-os/app-contribute',
+      title: 'Preserve the follow-up', head_sha: 'reviewed-head',
+    },
+    quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
+  })
+  assert.match(html, /Pull request #59 already merged/)
+  assert.match(html, /Refresh/)
+  assert.doesNotMatch(html, /Update pull request|>Update PR</)
+})
+
 test('prepared cards narrate running, failed, and passing pre-PR checks', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')

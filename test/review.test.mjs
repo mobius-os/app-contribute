@@ -202,6 +202,11 @@ test('batch and feed share the same needs-attention partition', () => {
       records: [{ id: 'blocked', status: 'prepared' }],
     },
     {
+      type: 'record', id: 'attention',
+      record: { ...clear('attention'), needs_attention: true },
+      records: [{ ...clear('attention'), needs_attention: true }],
+    },
+    {
       type: 'stack', id: 'stack',
       records: [
         { id: 'stack-1', status: 'open' },
@@ -213,10 +218,11 @@ test('batch and feed share the same needs-attention partition', () => {
     byId: {
       ready: { state: 'ready' },
       blocked: { state: 'needs_refresh' },
+      attention: { state: 'ready' },
       'stack-2': { state: 'ready' },
     },
   })
-  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked'])
+  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked', 'attention'])
   assert.deepEqual(partition.checking, [])
   assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
 })

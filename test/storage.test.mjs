@@ -334,6 +334,7 @@ test('restore refuses to write when a CAS version is unavailable', async () => {
 test('first-load snapshot keeps every current item and only recent history', () => {
   const current = [
     { id: 'prepared', status: 'prepared' },
+    { id: 'landing', status: 'landing' },
     { id: 'open', status: 'open' },
     { id: 'attention', status: 'merged', needs_attention: true },
   ]
@@ -344,11 +345,11 @@ test('first-load snapshot keeps every current item and only recent history', () 
   }))
 
   const snapshot = buildFeedSnapshot([...history, ...current])
-  assert.deepEqual(snapshot.slice(0, 3).map((record) => record.id), [
-    'prepared', 'open', 'attention',
+  assert.deepEqual(snapshot.slice(0, 4).map((record) => record.id), [
+    'prepared', 'landing', 'open', 'attention',
   ])
-  assert.equal(snapshot.length, 27)
-  assert.equal(snapshot[3].id, 'history-39')
+  assert.equal(snapshot.length, 28)
+  assert.equal(snapshot[4].id, 'history-39')
   assert.equal(snapshot.at(-1).id, 'history-16')
 })
 

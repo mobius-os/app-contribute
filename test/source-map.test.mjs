@@ -37,15 +37,16 @@ const snapshot = {
 test('joins only active contribution records to their source project', () => {
   const records = [
     { id: 'ready', type: 'pr', repo: 'MOBIUS-OS/MOBIUS', status: 'prepared', plan: {} },
+    { id: 'landing', type: 'pr', repo: 'mobius-os/mobius', status: 'landing', plan: {} },
     { id: 'open', type: 'pr', repo: 'mobius-os/app-contribute', status: 'open', plan: {} },
     { id: 'done', type: 'pr', repo: 'mobius-os/mobius', status: 'merged', plan: {} },
     { id: 'issue', type: 'issue', repo: 'mobius-os/mobius', status: 'prepared', plan: {} },
   ]
   const projects = attachSourceProjects(snapshot, records)
   assert.equal(projects[0].name, 'Möbius')
-  assert.deepEqual(projects[0].contributions.map((r) => r.id), ['ready'])
+  assert.deepEqual(projects[0].contributions.map((r) => r.id), ['ready', 'landing'])
   assert.deepEqual(projects[1].contributions.map((r) => r.id), ['open'])
-  assert.equal(projects.reduce((total, project) => total + project.contributions.length, 0), 2)
+  assert.equal(projects.reduce((total, project) => total + project.contributions.length, 0), 3)
 })
 
 test('tree equality wins over bookkeeping-only ahead history', () => {

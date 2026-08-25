@@ -611,10 +611,11 @@ function ReviewActions({
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
   const blocked = reviewState?.state === 'needs_refresh'
+  const attentionBlocked = rec.needs_attention === true
   // A failed publication needs the source-aware agent recovery above this
   // action row. Do not offer the same blind GitHub mutation again while its
   // cause is unresolved.
-  const submitFailed = Boolean(rec.last_submit_error)
+  const submitFailed = Boolean(rec.last_submit_error) || attentionBlocked
   const quality = qualityReviewFor(rec)
   const reviewIncomplete = isPr && quality.state !== 'all_clear'
   const checksActive = prePrCheckPhase(rec) === 'running'
@@ -882,7 +883,7 @@ function ReviewActions({
               <span>Open chat</span>
             </button>
           ) : null}
-          {!blocked && isPr ? (
+          {!blocked && !attentionBlocked && isPr ? (
             <button
               type="button"
               className="co-icon-btn co-secondary-action"
@@ -1208,7 +1209,9 @@ export function ContributionCard({
 }) {
   const status = rec.status || 'prepared'
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
-  const blocked = status === 'prepared' && reviewState?.state === 'needs_refresh'
+  const blocked = status === 'prepared' && (
+    reviewState?.state === 'needs_refresh' || rec.needs_attention === true
+  )
   const qualityState = qualityReviewFor(rec)
   const statusLabel = blocked
     ? 'Needs update'

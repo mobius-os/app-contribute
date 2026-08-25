@@ -15,7 +15,9 @@ const RECORD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
 const LEGACY_FILE_MAX = 64 * 1024
 const LEGACY_PAGE_MAX = 1024 * 1024
 const LEGACY_RECORD_MAX = 100
-const CURRENT_STATUSES = new Set(['prepared', 'submitting', 'draft', 'open'])
+const CURRENT_STATUSES = new Set([
+  'prepared', 'submitting', 'landing', 'draft', 'open',
+])
 const RECENT_HISTORY_LIMIT = 24
 
 function recordTime(record) {

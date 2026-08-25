@@ -3,7 +3,7 @@
 // React and I/O stay in ui/SourceMap.jsx + api.js so these rules are cheap to
 // exercise under node:test.
 
-const ACTIVE = new Set(['prepared', 'submitting', 'draft', 'open'])
+const ACTIVE = new Set(['prepared', 'submitting', 'landing', 'draft', 'open'])
 
 function nonnegativeCount(value) {
   const count = typeof value === 'number' ? value : Number.NaN

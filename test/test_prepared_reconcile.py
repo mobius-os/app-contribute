@@ -8,12 +8,17 @@ from prepared_reconcile import (
     branch_match_is_current,
     distinctive_added_lines,
     distinctive_identifiers,
+    exact_landing,
     identifier_landing,
     identifier_presence,
+    is_prepared_pr,
     partial_identifier_presence,
     LocalMain,
+    reconcile_record,
     Storage,
     strong_identifier_presence,
+    settled_update_attention,
+    update_target_probe,
     validated_review_diff,
 )
 
@@ -140,6 +145,144 @@ class PreparedReconciliationEvidenceTests(unittest.TestCase):
         record = {"plan": {"diff_sha256": digest}}
         self.assertEqual(validated_review_diff(record, DIFF), DIFF)
         self.assertIsNone(validated_review_diff(record, DIFF + "\nchanged"))
+
+    def test_existing_pr_updates_are_reconciled_without_treating_them_as_new_prs(self):
+        record = {
+            "type": "pr",
+            "status": "prepared",
+            "repo": "owner/repo",
+            "plan": {"action": "pr_update"},
+        }
+        self.assertTrue(is_prepared_pr(record))
+
+        pull = {
+            "number": 59,
+            "state": "closed",
+            "merged_at": "2026-08-25T01:23:17Z",
+            "updated_at": "2026-08-25T01:23:17Z",
+            "head": {"sha": "a" * 40},
+            "html_url": "https://github.com/owner/repo/pull/59",
+        }
+        self.assertEqual(update_target_probe(record, pull), {
+            "target_state": "closed",
+            "target_head_sha": "a" * 40,
+            "target_updated_at": "2026-08-25T01:23:17Z",
+        })
+        attention = settled_update_attention(record, pull, "2026-08-25T02:00:00Z")
+        self.assertTrue(attention["needs_attention"])
+        self.assertEqual(attention["attention"]["type"], "review_target_settled")
+        self.assertIn("new reviewed contribution", attention["attention"]["message"])
+
+    def test_open_or_malformed_update_targets_do_not_invent_a_blocker(self):
+        record = {"plan": {"action": "pr_update"}}
+        self.assertIsNone(settled_update_attention(
+            record, {"state": "open", "merged_at": None}, "now",
+        ))
+        self.assertIsNone(settled_update_attention(
+            record, {"state": "", "head": "invalid"}, "now",
+        ))
+        self.assertEqual(update_target_probe(
+            record, {"state": "open", "head": "invalid"},
+        )["target_head_sha"], "")
+
+    def test_a_merged_branch_does_not_supersede_an_unsent_pr_update(self):
+        class GitHubStub:
+            def branch_pull(self, repo, base, branch):
+                return {
+                    "merged_at": "2026-08-25T01:23:17Z",
+                    "head": {"sha": "a" * 40},
+                }
+
+            def head_is_on_main(self, repo, head, main):
+                return False
+
+            def pull_for_commit(self, repo, sha, base):
+                return None
+
+        class LocalStub:
+            def patch_commit(self, repo, base, main, patch):
+                return ""
+
+            def reverse_patch_present(self, repo, base, main, diff):
+                return False
+
+        record = {
+            "created_at": "2026-08-25T01:00:00Z",
+            "plan": {
+                "action": "pr_update",
+                "branch": "fix/follow-up",
+                "head_sha": "b" * 40,
+            },
+        }
+        self.assertIsNone(exact_landing(
+            GitHubStub(), LocalStub(), "owner/repo", "main", "c" * 40,
+            record, DIFF,
+        ))
+        record["plan"]["action"] = "pr"
+        self.assertEqual(exact_landing(
+            GitHubStub(), LocalStub(), "owner/repo", "main", "c" * 40,
+            record, DIFF,
+        ).matched_by, "merged_branch")
+
+    def test_reconciliation_surfaces_a_settled_update_target(self):
+        pull = {
+            "number": 59,
+            "state": "closed",
+            "merged_at": "2026-08-25T01:23:17Z",
+            "updated_at": "2026-08-25T01:23:17Z",
+            "head": {"sha": "a" * 40},
+            "html_url": "https://github.com/owner/repo/pull/59",
+        }
+
+        class GitHubStub:
+            def repo_info(self, repo):
+                return "main", "c" * 40
+
+            def pull(self, repo, number):
+                self.requested = (repo, number)
+                return pull
+
+            def branch_pull(self, repo, base, branch):
+                return pull
+
+            def head_is_on_main(self, repo, head, main):
+                return False
+
+            def pull_for_commit(self, repo, sha, base):
+                return None
+
+        class LocalStub:
+            def patch_commit(self, repo, base, main, patch):
+                return ""
+
+            def reverse_patch_present(self, repo, base, main, diff):
+                return False
+
+        class StorageStub:
+            def read_diff(self, name):
+                return None
+
+        github = GitHubStub()
+        record = {
+            "id": "follow-up",
+            "type": "pr",
+            "status": "prepared",
+            "repo": "owner/repo",
+            "number": 59,
+            "plan": {
+                "action": "pr_update",
+                "branch": "fix/follow-up",
+                "head_sha": "b" * 40,
+            },
+        }
+        patch = reconcile_record(
+            github, LocalStub(), StorageStub(), "follow-up.json", record,
+            "2026-08-25T02:00:00Z",
+        )
+        self.assertEqual(github.requested, ("owner/repo", 59))
+        self.assertTrue(patch["needs_attention"])
+        self.assertEqual(patch["attention"]["type"], "review_target_settled")
+        self.assertEqual(patch["reconciliation_probe"]["target_state"], "closed")
 
     def test_identifier_evidence_uses_distinctive_added_declarations(self):
         identifiers = distinctive_identifiers(DIFF)

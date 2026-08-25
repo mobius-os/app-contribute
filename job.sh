@@ -3,9 +3,11 @@
 #
 # First reconcile prepared PR records whose reviewed work already reached the
 # target repository's main by another path. Strong commit, reviewed-diff,
-# merged-branch, or distinctive-identifier evidence settles the record with a
-# landing reference; partial identifier evidence only adds a dismissible hint.
-# That pass is independently CAS-safe and never sends a notification.
+# merged-branch, or distinctive-identifier evidence settles an ordinary PR
+# with a landing reference; partial identifier evidence only adds a dismissible
+# hint. A PR update whose target settled first stays prepared but gains one
+# recovery handoff so its remaining private work cannot be mistaken for
+# sendable. That pass is independently CAS-safe and never sends a notification.
 #
 # Reconcile disposable staging checkouts for terminal records before the
 # GitHub-dependent work. This is deliberately retryable: a checkout remains on

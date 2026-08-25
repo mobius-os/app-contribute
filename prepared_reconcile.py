@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Reconcile prepared PR records whose reviewed change already reached main.
+"""Reconcile prepared PRs that landed elsewhere or lost their update target.
 
 This is deliberately separate from job.sh's draft/open polling. It only reads
-prepared PR records and writes a result with the storage version it originally
-read, so a concurrent send, dismiss, or agent refresh always wins.
+prepared PR records. Exact landing evidence settles ordinary PRs; a settled
+target leaves an unsent PR update visible for agent recovery. Every write uses
+the storage version originally read, so a concurrent send, dismiss, or agent
+refresh always wins.
 """
 
 from __future__ import annotations
@@ -58,7 +60,7 @@ def is_prepared_pr(record: dict[str, Any]) -> bool:
         record.get("type") == "pr"
         and record.get("status") == "prepared"
         and isinstance(plan, dict)
-        and plan.get("action", "pr") == "pr"
+        and plan.get("action", "pr") in ("pr", "pr_update")
         and bool(repo_slug(record))
     )
 
@@ -290,6 +292,7 @@ class GitHub:
     def __init__(self):
         self.repo_info_cache: dict[str, tuple[str, str] | None] = {}
         self.pulls_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self.pull_cache: dict[tuple[str, int], dict[str, Any] | None] = {}
         self.branch_pull_cache: dict[tuple[str, str, str], dict[str, Any] | None] = {}
         self.content_cache: dict[tuple[str, str, str], str | None] = {}
 
@@ -349,6 +352,13 @@ class GitHub:
         ]
         self.pulls_cache[key] = pulls
         return pulls
+
+    def pull(self, repo: str, number: int) -> dict[str, Any] | None:
+        key = (repo, number)
+        if key not in self.pull_cache:
+            value = self.json(f"repos/{repo}/pulls/{number}")
+            self.pull_cache[key] = value if isinstance(value, dict) else None
+        return self.pull_cache[key]
 
     def branch_pull(self, repo: str, base: str, branch: str) -> dict[str, Any] | None:
         key = (repo, base, branch)
@@ -748,9 +758,61 @@ def exact_landing(
             commit_sha=landed_commit or main_sha,
         )
 
-    if branch_pull and branch_match_is_current(record, branch_pull):
+    if (
+        plan.get("action", "pr") == "pr"
+        and branch_pull
+        and branch_match_is_current(record, branch_pull)
+    ):
         return Landing("superseded", "merged_branch", pull=branch_pull, commit_sha=head_sha)
     return None
+
+
+def update_target_probe(
+    record: dict[str, Any],
+    pull: dict[str, Any] | None,
+) -> dict[str, str]:
+    plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+    if plan.get("action") != "pr_update" or not isinstance(pull, dict):
+        return {}
+    head = pull.get("head") if isinstance(pull.get("head"), dict) else {}
+    return {
+        "target_state": str(pull.get("state") or ""),
+        "target_head_sha": str(head.get("sha") or ""),
+        "target_updated_at": str(pull.get("updated_at") or ""),
+    }
+
+
+def settled_update_attention(
+    record: dict[str, Any],
+    pull: dict[str, Any] | None,
+    now: str,
+) -> dict[str, Any] | None:
+    plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+    if plan.get("action") != "pr_update" or not isinstance(pull, dict):
+        return None
+    state = str(pull.get("state") or "").lower()
+    merged = bool(pull.get("merged_at"))
+    if not merged and state != "closed":
+        return None
+    number = pull.get("number") or record.get("number")
+    label = f"Pull request #{number}" if number else "The pull request"
+    outcome = "merged" if merged else "closed"
+    url = pull.get("html_url") or record.get("url") or ""
+    return {
+        "needs_attention": True,
+        "attention": {
+            "type": "review_target_settled",
+            "key": f"review_target_settled:{number or ''}:{outcome}",
+            "title": f"{label} already {outcome}",
+            "message": (
+                "This private update can no longer use Update PR. Ask your agent "
+                "to preserve the remaining changes in a new reviewed contribution."
+            ),
+            "url": url if isinstance(url, str) else "",
+            "detected_at": now,
+        },
+        "updated_at": now,
+    }
 
 
 def identifier_landing(
@@ -869,15 +931,24 @@ def reconcile_record(
         if isinstance(record.get("reconciliation_probe"), dict)
         else {}
     )
-    if previous_probe.get("main_sha") == main_sha:
+    plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+    target_pull = None
+    if plan.get("action") == "pr_update":
+        try:
+            number = int(record.get("number") or 0)
+        except (TypeError, ValueError):
+            number = 0
+        if number > 0:
+            target_pull = github.pull(repo, number)
+    probe = {"main_sha": main_sha, **update_target_probe(record, target_pull)}
+    if all(previous_probe.get(key) == value for key, value in probe.items()):
         return None
 
     raw_diff = storage.read_diff(name)
     review_diff = validated_review_diff(record, raw_diff)
     landing = exact_landing(github, local, repo, base, main_sha, record, review_diff)
     hint = None
-    if not landing and review_diff:
-        plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+    if not landing and review_diff and plan.get("action", "pr") == "pr":
         landing, hint = identifier_landing(
             github,
             local,
@@ -889,23 +960,37 @@ def reconcile_record(
         )
 
     patch: dict[str, Any] = {
-        "reconciliation_probe": {
-            "main_sha": main_sha,
-            "checked_at": now,
-        },
+        "reconciliation_probe": {**probe, "checked_at": now},
     }
     if landing:
         patch.update(landing_patch(record, landing, repo, main_sha, now))
+    elif settled := settled_update_attention(record, target_pull, now):
+        patch.update(settled)
     elif hint:
         hint["detected_at"] = now
         hint["main_sha"] = main_sha
         patch["reconciliation_hint"] = hint
         patch["updated_at"] = now
+    elif (
+        plan.get("action") == "pr_update"
+        and isinstance(record.get("attention"), dict)
+        and record["attention"].get("type") == "review_target_settled"
+        and isinstance(target_pull, dict)
+        and str(target_pull.get("state") or "").lower() == "open"
+    ):
+        patch.update({"needs_attention": False, "attention": None, "updated_at": now})
     return patch
 
 
 def run(storage: Storage, github: GitHub, dry_run: bool = False) -> dict[str, int]:
-    counts = {"checked": 0, "merged": 0, "superseded": 0, "hinted": 0, "written": 0}
+    counts = {
+        "checked": 0,
+        "merged": 0,
+        "superseded": 0,
+        "hinted": 0,
+        "attention": 0,
+        "written": 0,
+    }
     now = utc_now()
     prepared: list[tuple[str, dict[str, Any], str]] = []
     for name in storage.list_names():
@@ -942,13 +1027,19 @@ def run(storage: Storage, github: GitHub, dry_run: bool = False) -> dict[str, in
             counts[status] += 1
         if patch.get("reconciliation_hint"):
             counts["hinted"] += 1
+        if (patch.get("attention") or {}).get("type") == "review_target_settled":
+            counts["attention"] += 1
         updated = dict(record)
         updated.update(patch)
         if dry_run:
             print(json.dumps({
                 "record": record.get("id"),
                 "repo": record.get("repo"),
-                "result": status or ("hint" if patch.get("reconciliation_hint") else "no_match"),
+                "result": status or (
+                    "hint" if patch.get("reconciliation_hint")
+                    else "attention" if patch.get("needs_attention")
+                    else "no_match"
+                ),
                 "matched_by": (patch.get("reconciliation") or {}).get("matched_by"),
             }))
             continue

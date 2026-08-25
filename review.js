@@ -396,7 +396,7 @@ export function partitionReviewUnits(units, reviewStatus) {
     const reviewRecords = privateRecords.length > 0 ? privateRecords : records
     if (reviewRecords.some((rec) => prePrCheckPhase(rec) === 'running')) {
       checking.push(unit)
-    } else if (reviewRecords.some(
+    } else if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
     ) || reviewRecords.some((rec) => prePrCheckPhase(rec) === 'failed') ||
       reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
