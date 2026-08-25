@@ -277,6 +277,16 @@ unsolicited contribution question at the end of an otherwise complete chat:
 Contribute's Projects view owns discovery of local changes and lets the partner
 start preparation when they want it.
 
+**One decision, one surface.** A live Contribute/prepare block is the single
+owner decision surface for the exact action it represents. Never also call
+`request_user_input` / `AskUserQuestion` for **Prepare**, **Review / Fix and
+review**, **Send / Update PR**, or another action already shown by that block.
+Do not paraphrase the same choice into chat. If the owner presses the block,
+let that action own its complete batch until every item settles; in-flight
+siblings stay visibly in flight and never turn into a second doorway. A review
+handoff starts or resumes one app-owned scoped conversation and remains in
+Contribute—the agent must not draft the recovery prompt into the source chat.
+
 Hard stop #1 is still the gate. In practice:
 
 1. If the partner explicitly asks to prepare a contribution, prepare it
@@ -284,8 +294,8 @@ Hard stop #1 is still the gate. In practice:
    change *should* be contributed, answer the investigative question first and
    do not prepare anything until they explicitly ask. If they ask to
    "contribute" or "share" without distinguishing preparation from publication,
-   clarify that you can prepare it privately now but publishing still needs a
-   later explicit approval.
+   treat that as approval for routine private preparation; the resulting
+   Contribute block—not another question card—owns the later public approval.
 2. Wait and classify the response:
    - **Prepare privately** is approval for preparation only. Prepare everything
      needed for review and direct submission, then stop.
@@ -301,7 +311,8 @@ Hard stop #1 is still the gate. In practice:
    without preparing. Silence is neither approval nor refinement, so do not
    immediately re-ask or treat `{}` / no selection as a yes.
 
-Anything except an explicit **Prepare privately** remains non-approval.
+Anything except an explicit private-preparation request or **Prepare privately**
+choice remains non-approval.
 Refinement feedback changes when the question is asked again, never what the
 agent may publish. Preparing is still private: a local branch/commit and a
 Contribute record, not a fork, push, PR, issue, or comment. The next public step
@@ -926,6 +937,7 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
            "branch": "fix/<slug>-<short>", "repo_path": "/data/apps/<slug>",
            "base_sha": "<sha>", "head_sha": "<sha>",
            "source_repo_path": "/data/apps/<slug>", "source_sha": "<sha>",
+           "files": ["<every path covered by this exact contribution>"],
            "diff_sha256": "<sha256 of the .diff>",
            "diff_stat": "<git diff --stat tail>"}
 }'

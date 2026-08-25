@@ -7,7 +7,6 @@ import {
   locateContributionReview,
   prePrCheckPhase,
   qualityReviewFor,
-  reviewAllAction,
   reviewStateFor,
 } from '../review.js'
 import { Icon } from './Icons.jsx'
@@ -198,7 +197,7 @@ function SelectedUnit({
       reviewState={reviewStateFor(rec, reviewStatus)}
       onSend={onSend}
       onRunPrePrChecks={onRunPrePrChecks}
-      onReview={(record) => onStartAgent?.(reviewAllAction([record]))}
+      onReview={onStartAgent}
       onFeedback={onFeedback}
       onDismiss={onDismiss}
       onRestore={onRestore}

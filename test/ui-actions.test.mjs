@@ -138,9 +138,10 @@ test('preparation runs as one cycle while every public send stays explicit', () 
 })
 
 test('blocked contributions have one calm recovery action', () => {
-  assert.match(cardSource, /function fixAndReview\(\)/)
-  assert.match(cardSource, /className="co-btn co-btn-sm co-btn-primary"/)
-  assert.match(cardSource, /Fix and review/)
+  assert.doesNotMatch(cardSource, /function fixAndReview\(\)/)
+  assert.match(cardSource, /<AgentHandoffButton/)
+  assert.match(cardSource, /action=\{recoveryReviewAction\(rec\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
   assert.doesNotMatch(cardSource, /Draft follow-up/)
   assert.match(cardSource, /'Fresh review needed'/)
   assert.match(cardSource, /This review needs a quick check before it can continue\./)

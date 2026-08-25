@@ -38,6 +38,26 @@ const QUALITY_REVIEW_STATES = new Set([
   'queued', 'reviewing', 'changes_needed', 'all_clear',
 ])
 
+// One exact prepared head owns one review conversation. The scope travels with
+// the app-owned chat, so a second tap (or a remounted Contribute frame) can find
+// the already-running review instead of starting another agent. A compact
+// 64-bit digest keeps batch scopes inside the platform's bounded metadata field
+// without making the UI remember a parallel registry.
+export function contributionReviewScope(records, mode = 'review') {
+  const identities = (Array.isArray(records) ? records : [])
+    .filter((rec) => rec && typeof rec.id === 'string' && rec.id)
+    .map((rec) => `${rec.id}\u0000${String(rec.plan?.head_sha || '')}`)
+    .sort()
+  if (identities.length === 0) return ''
+  const input = `${mode}\u0000${identities.join('\u0001')}`
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= BigInt(input.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return `contribute-review:${hash.toString(16).padStart(16, '0')}`
+}
+
 // A quality verdict belongs to one immutable prepared head. Source freshness
 // and agent review are separate claims: the platform proves the former, while
 // the agent records the latter after its correctness/maintenance review.
@@ -82,6 +102,8 @@ function reviewAction(records, mode = 'review') {
     startedLabel: fixing ? 'Fixing and reviewing' : 'Reviewing contributions',
     startedMessage: 'Stay in Contribute. Review verdicts will update here.',
     count: candidates.length,
+    scope: contributionReviewScope(candidates, mode),
+    scopeLabel: fixing ? 'Fix and review contributions' : 'Review contributions',
     draft: [
       fixing
         ? 'Fix and thoroughly re-review the prepared contributions listed below.'
@@ -101,6 +123,34 @@ function reviewAction(records, mode = 'review') {
 
 export function reviewAllAction(records) { return reviewAction(records, 'review') }
 export function fixAndReviewAction(records) { return reviewAction(records, 'fix') }
+
+// A failed publication is not another GitHub mutation. One app-owned recovery
+// conversation refreshes the recorded branch, reconciles a response that may
+// have been lost after GitHub accepted it, and leaves any public retry on the
+// existing approval surface. The exact record+head scope matches the compact
+// chat card so either doorway resumes the same work.
+export function recoveryReviewAction(rec) {
+  if (!rec?.id) return null
+  return {
+    event: 'recover_contribution_review',
+    title: `Fix and review ${rec.title || 'contribution'}`,
+    label: 'Fix and review',
+    busyLabel: 'Starting…',
+    startedLabel: 'Fixing and reviewing',
+    reusedLabel: 'Review already running',
+    startedMessage: 'Stay in Contribute. This exact review will update here.',
+    count: 1,
+    scope: contributionReviewScope([rec], 'recovery'),
+    scopeLabel: 'Fix and review contribution',
+    draft: [
+      `Fix and review contribution ${rec.id} ("${rec.title || 'untitled'}").`,
+      '',
+      'Refresh the recorded pull request and branch first. If the exact reviewed head already reached the pull request, reconcile the contribution record and inspect its current checks. If the branch moved, rebuild the private review on its current head and run the relevant checks.',
+      '',
+      'Keep any further public update behind the existing approval button.',
+    ].join('\n'),
+  }
+}
 
 // The Needs action queue can contain three different private jobs: a fresh
 // quality review, fixes after a review, or a stale/conflicted prepared head.
@@ -141,6 +191,8 @@ export function progressReviewAction(records, reviewStatus) {
     startedLabel: 'Working through reviews',
     startedMessage: 'Stay in Contribute. Each item will move as its current head is resolved and reviewed.',
     count: candidates.length,
+    scope: contributionReviewScope(candidates, 'progress'),
+    scopeLabel: 'Work through contribution reviews',
     draft: [
       'Work through the exact Contribute review queue listed below.',
       '',

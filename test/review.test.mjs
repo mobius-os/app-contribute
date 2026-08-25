@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   addressAllAction,
   canRunPrePrChecks,
+  contributionReviewScope,
   contributionReviewTargetFromIntent,
   contributionsNeedingAttention,
   finishContributionCycleAction,
@@ -14,6 +15,7 @@ import {
   locateContributionReview,
   progressReviewAction,
   qualityReviewFor,
+  recoveryReviewAction,
   reviewAllAction,
   prePrCheckPhase,
   blockedReviewCount,
@@ -359,6 +361,36 @@ test('prepared work stays out of send until a thorough review is all clear', () 
   assert.deepEqual(parts.readyToSend.map((unit) => unit.id), ['clear'])
   assert.match(reviewAllAction([needed]).draft, /correctness, maintainability, simplicity/)
   assert.match(reviewAllAction([needed]).draft, /Do not push, publish, comment, merge/)
+  assert.equal(reviewAllAction([needed]).scope, contributionReviewScope([needed]))
+})
+
+test('one exact prepared head has one stable review conversation scope', () => {
+  const first = { id: 'first', plan: { head_sha: 'a'.repeat(40) } }
+  const second = { id: 'second', plan: { head_sha: 'b'.repeat(40) } }
+  const scope = contributionReviewScope([first, second])
+
+  assert.match(scope, /^contribute-review:[0-9a-f]{16}$/)
+  assert.equal(contributionReviewScope([second, first]), scope)
+  assert.notEqual(
+    contributionReviewScope([first, { ...second, plan: { head_sha: 'c'.repeat(40) } }]),
+    scope,
+  )
+  assert.notEqual(contributionReviewScope([first, second], 'fix'), scope)
+})
+
+test('the card review action exposes launch progress and the started conversation', () => {
+  assert.match(cardSource, /<AgentHandoffButton/)
+  assert.match(cardSource, /action=\{reviewAllAction\(\[rec\]\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
+  assert.doesNotMatch(cardSource, /onClick=\{\(\) => onReview\(rec\)\}/)
+  assert.match(feedSource, /onReview=\{onStartAgent\}/)
+})
+
+test('a scoped review delegates exactly-once admission to chat.start', () => {
+  assert.doesNotMatch(appSource, /chat\.list\(\{ scope: action\.scope \}\)/)
+  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: action\.scope/)
+  assert.match(appSource, /reused: started\.reused === true/)
+  assert.match(appSource, /outcome: started\.outcome/)
 })
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
@@ -371,12 +403,20 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
 })
 
 test('submit failures lead back to private agent recovery without overstating a stale push', () => {
+  const record = {
+    id: 'existing-pr', title: 'Refine the existing contribution',
+    plan: { head_sha: 'a'.repeat(40) },
+  }
+  const action = recoveryReviewAction(record)
+  assert.equal(action.scope, 'contribute-review:b0661670f342e064')
+  assert.equal(action.reusedLabel, 'Review already running')
+  assert.match(action.draft, /reconcile the contribution record/)
+  assert.match(action.draft, /existing approval button/)
   assert.match(cardSource, /rec\.last_submit_stage === 'pushed'/)
   assert.match(cardSource, /rec\.last_submit_push_sha/)
   assert.match(cardSource, /rec\.plan\?\.head_sha/)
-  assert.match(cardSource, />\s*Fix and review\s*</)
-  assert.match(cardSource, /reconcile the contribution record/)
-  assert.match(cardSource, /existing approval button/)
+  assert.match(cardSource, /action=\{recoveryReviewAction\(rec\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
   assert.match(cardSource, /Review needs refreshing/)
   assert.match(cardSource, /<summary>Technical details<\/summary>/)
   assert.match(cardSource, /const submitFailed = Boolean\(rec\.last_submit_error\)/)
@@ -403,6 +443,7 @@ test('one queue handoff owns every visible private review job', () => {
   } }
   const action = progressReviewAction(records, source)
   assert.equal(action.count, 3)
+  assert.equal(action.scope, contributionReviewScope(records.slice(0, 3), 'progress'))
   assert.equal(action.label, 'Work through 3')
   assert.match(action.draft, /Fresh review/)
   assert.match(action.draft, /Needs a fix/)

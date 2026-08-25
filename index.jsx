@@ -209,11 +209,10 @@ export default function ContributeApp({ appId, token }) {
     window.mobius?.signal?.('app_ready', details)
   }, [])
 
-  // Every app-owned agent handoff uses the durable first-turn primitive. It
-  // creates one visible chat and waits until the first request is accepted,
-  // while Contribute stays in front. The button exposes an optional link to
-  // that conversation after the start succeeds. A single in-flight guard prevents two rapid taps
-  // from creating duplicate contribution cycles.
+  // Every app-owned agent handoff uses the durable first-turn primitive. A
+  // scoped handoff is admitted atomically by the platform, so two panes or a
+  // remounted frame resolve to one exact conversation without a read/create
+  // race. The local guard exists only for immediate button feedback.
   const startAgentTask = useCallback(async (action) => {
     if (!action?.title || !action?.draft) {
       return { ok: false, error: 'This agent handoff is incomplete.' }
@@ -235,8 +234,14 @@ export default function ContributeApp({ appId, token }) {
       if (!started?.chatId) throw new Error('Missing chat id')
       window.mobius?.signal?.(action.event || 'contribute_agent_handoff', {
         item_count: Number(action.count || 0),
+        outcome: started.outcome || (started.reused ? 'reused' : 'started'),
       })
-      return { ok: true, chatId: started.chatId }
+      return {
+        ok: true,
+        chatId: started.chatId,
+        reused: started.reused === true,
+        outcome: started.outcome || (started.reused ? 'reused' : 'started'),
+      }
     } catch {
       return { ok: false, error: 'Could not start the agent. Try again.' }
     } finally {

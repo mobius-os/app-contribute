@@ -14,6 +14,8 @@ import {
   canRunPrePrChecks,
   prePrCheckPhase,
   qualityReviewFor,
+  recoveryReviewAction,
+  reviewAllAction,
 } from '../review.js'
 import {
   autopilotState,
@@ -25,6 +27,7 @@ import {
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
+import { AgentHandoffButton } from './BatchAction.jsx'
 
 // One ledger row. Cards deliberately expose explicit targets only — the title
 // is the link on a linked PR/issue card, and prepared cards use their
@@ -278,8 +281,7 @@ function LabelOutcomeRow({ label, labels, tone = '' }) {
 // A persisted submit failure, shown as a real alert strip (not stray red text)
 // on the prepared card in both the collapsed and expanded states, so the reason
 // a Send bounced stays visible while the partner fixes it.
-function SubmitErrorAlert({ rec, reviewState, onFeedback }) {
-  const [note, setNote] = useState('')
+function SubmitErrorAlert({ rec, reviewState, onReview }) {
   const blocked = reviewState?.state === 'needs_refresh'
   if (!blocked && !rec.last_submit_error) return null
   const message = blocked
@@ -300,24 +302,6 @@ function SubmitErrorAlert({ rec, reviewState, onFeedback }) {
     typeof rec.last_pushed_branch_url === 'string' &&
     rec.last_pushed_branch_url.startsWith('https://github.com/')
   )
-
-  function fixAndReview() {
-    const draft = [
-      `Fix and review contribution ${rec.id} ("${rec.title || 'untitled'}").`,
-      '',
-      'Refresh the recorded pull request and branch first. If the exact reviewed head already reached the pull request, reconcile the contribution record and inspect its current checks. If the branch moved, rebuild the private review on its current head and run the relevant checks.',
-      '',
-      'Keep any further public update behind the existing approval button.',
-    ].join('\n')
-    const outcome = (typeof onFeedback === 'function' && onFeedback(
-      rec, { draft },
-    )) || {}
-    if (!outcome.ok) {
-      setNote(outcome.reason === 'missing-chat'
-        ? 'This older record does not know which chat created it.'
-        : 'Open Contribute inside Möbius to return to the source chat.')
-    }
-  }
 
   return (
     <div className={'co-alert' + (blocked ? ' is-follow-up' : '')} role="status">
@@ -341,16 +325,14 @@ function SubmitErrorAlert({ rec, reviewState, onFeedback }) {
           View pushed branch
         </a>
       ) : null}
-      {typeof onFeedback === 'function' ? (
-        <button
-          type="button"
+      {typeof onReview === 'function' ? (
+        <AgentHandoffButton
+          action={recoveryReviewAction(rec)}
+          onStart={onReview}
           className="co-btn co-btn-sm co-btn-primary"
-          onClick={fixAndReview}
-        >
-          Fix and review
-        </button>
+          icon="review"
+        />
       ) : null}
-      {note ? <p className="co-review-error">{note}</p> : null}
     </div>
   )
 }
@@ -820,16 +802,12 @@ function ReviewActions({
           ) : isPr ? (
             <>
               {reviewIncomplete && typeof onReview === 'function' ? (
-                <button
-                  type="button"
+                <AgentHandoffButton
+                  action={reviewAllAction([rec])}
                   className="co-icon-btn co-review-btn is-primary"
-                  onClick={() => onReview(rec)}
-                  aria-label="Review this contribution"
-                  title="Review this contribution"
-                >
-                  <Icon name="review" />
-                  <span>Review</span>
-                </button>
+                  onStart={onReview}
+                  icon="review"
+                />
               ) : null}
               {mayRunChecks ? (
                 <button
@@ -1308,7 +1286,7 @@ export function ContributionCard({
       <SubmitErrorAlert
         rec={rec}
         reviewState={reviewState}
-        onFeedback={onFeedback}
+        onReview={onReview}
       />
       <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
       {showPublishedLabelOutcome ? (

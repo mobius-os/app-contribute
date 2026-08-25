@@ -13,6 +13,7 @@ import {
   projectReadyToPrepare,
   projectRowFacts,
   projectSourceState,
+  projectPreparationState,
   projectStatus,
   sourcePathRelationship,
 } from '../source-map.js'
@@ -32,6 +33,18 @@ const snapshot = {
     tree: { available: true, files: 0, insertions: 0, deletions: 0 },
     working: { available: true, files: 0 },
   }],
+}
+
+function installedApp(overrides = {}) {
+  return {
+    key: 'app:7', kind: 'app', name: 'Notes',
+    canonical_repo: 'mobius-apps/notes', available: true,
+    state: 'working', branch: 'main',
+    working: { files: 1, paths: [{ path: 'index.jsx', group: 'untracked' }] },
+    tree: { available: true, files: 0, paths: [] },
+    reconciliation: { available: true }, origin: {},
+    ...overrides,
+  }
 }
 
 test('joins only active contribution records to their source project', () => {
@@ -537,4 +550,112 @@ test('prepare all batches only projects with eligible local contribution changes
   assert.match(action.draft, /Möbius, Contribute/)
   assert.doesNotMatch(action.draft, /Incoming/)
   assert.match(action.draft, /Do not publish anything/)
+})
+
+test('an exact current contribution covers its prepared local paths', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'current-head',
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 1, authored_files: 1, paths: [] },
+      reconciliation: {
+        available: true,
+        local_only_count: 1,
+        local_only_paths: ['index.jsx'],
+      },
+    })],
+  }, [{
+    type: 'pr', status: 'prepared', repo: 'mobius-apps/notes',
+    plan: {
+      source_sha: 'current-head',
+      diff_stat: ' index.jsx | 4 +++-\n 1 file changed, 3 insertions(+), 1 deletion(-)',
+    },
+  }])
+
+  assert.equal(notes.coveredLocalFiles, 1)
+  assert.deepEqual(notes.coveredLocalPaths, ['index.jsx'])
+  assert.deepEqual(notes.localOnlyPaths, [])
+  assert.equal(notes.localFiles, 0)
+  assert.equal(projectNeedsPreparation(notes), false)
+})
+
+test('a stale contribution never covers the current source', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'current-head',
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 1, authored_files: 1, paths: [] },
+      reconciliation: {
+        available: true,
+        local_only_count: 1,
+        local_only_paths: ['index.jsx'],
+      },
+    })],
+  }, [{
+    type: 'pr', status: 'prepared', repo: 'mobius-apps/notes',
+    plan: {
+      source_sha: 'older-head',
+      files: ['index.jsx'],
+    },
+  }])
+
+  assert.equal(notes.coveredLocalFiles, 0)
+  assert.deepEqual(notes.localOnlyPaths, ['index.jsx'])
+  assert.equal(projectNeedsPreparation(notes), true)
+})
+
+test('coverage preserves local counts when source status omits path details', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'current-head',
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 2, authored_files: 2, paths: [] },
+      reconciliation: { available: true, local_only_count: 2 },
+    })],
+  }, [])
+
+  assert.deepEqual(notes.localOnlyPaths, [])
+  assert.equal(notes.localFiles, 2)
+  assert.equal(projectNeedsPreparation(notes), true)
+})
+
+test('partial current coverage leaves only the unprepared paths actionable', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'current-head',
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 2, authored_files: 2, paths: [] },
+      reconciliation: {
+        available: true,
+        local_only_count: 2,
+        local_only_paths: ['api.js', 'index.jsx'],
+      },
+    })],
+  }, [{
+    type: 'pr', status: 'open', repo: 'mobius-apps/notes',
+    plan: {
+      source_sha: 'current-head',
+      files: [{ path: 'api.js' }],
+    },
+  }])
+
+  assert.deepEqual(notes.coveredLocalPaths, ['api.js'])
+  assert.deepEqual(notes.localOnlyPaths, ['index.jsx'])
+  assert.equal(notes.localFiles, 1)
+  assert.equal(projectPreparationState(notes), 'sorting')
+})
+
+test('tracked app work needs sorting when no current shared position is available', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 1, authored_files: 1, paths: [] },
+      reconciliation: { available: true, local_only_count: 1, local_only_paths: ['index.jsx'] },
+      origin: {},
+      base_sha: 'recorded',
+    })],
+  }, [])
+
+  assert.equal(projectNeedsPreparation(notes), true)
+  assert.equal(projectPreparationState(notes), 'sorting')
 })
