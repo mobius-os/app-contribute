@@ -53,8 +53,8 @@ const ACTION_LABELS = {
 }
 
 const PREPARED_ACTION_LABELS = {
-  pr: 'New pull request',
-  pr_update: 'Update existing pull request',
+  pr: 'New PR',
+  pr_update: 'Update PR',
   issue: 'New issue',
   issue_comment: 'New issue comment',
   discussion_comment: 'New discussion reply',
@@ -783,7 +783,7 @@ function ReviewActions({
               {reviewIncomplete && typeof onReview === 'function' ? (
                 <button
                   type="button"
-                  className="co-icon-btn is-primary"
+                  className="co-icon-btn co-review-btn is-primary"
                   onClick={() => onReview(rec)}
                   aria-label="Review this contribution"
                   title="Review this contribution"

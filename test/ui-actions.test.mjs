@@ -25,6 +25,14 @@ test('send actions keep a visible label instead of relying on the icon alone', (
   )
 })
 
+test('focused review actions keep one strong primary and compact phone-safe secondary controls', () => {
+  assert.match(cardSource, /className="co-icon-btn co-review-btn is-primary"/)
+  assert.match(themeSource, /\.co-icon-btn\.co-review-btn\.is-primary \{[\s\S]*?background: var\(--accent\); color: var\(--accent-fg\)/)
+  assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: 44px;[\s\S]*?background: transparent/)
+  assert.match(themeSource, /\.co-technical-summary \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
+  assert.match(themeSource, /\.co-review-changes-head span \{[\s\S]*?white-space: nowrap;[\s\S]*?border-radius: 999px/)
+})
+
 test('prepared platform checks stay a separate confirmed no-PR action', () => {
   assert.match(cardSource, /Run GitHub checks/)
   assert.match(cardSource, /Run on my fork/)

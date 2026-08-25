@@ -363,7 +363,7 @@ function ReviewWorkspace({
   if (missingTarget) {
     return (
       <section className="co-review-workspace is-focus">
-        <ViewHeading title="Reviews" description="The contribution may have moved or been removed." />
+        <h2 className="co-visually-hidden">Contribution review</h2>
         <div className="co-focus-view">
           <button type="button" className="co-focus-back" onClick={() => setMissingTarget(false)}>
             <Icon name="left" size={15} /> Back to reviews
@@ -381,7 +381,7 @@ function ReviewWorkspace({
   if (selected) {
     return (
       <section className="co-review-workspace is-focus">
-        <ViewHeading title="Reviews" description="Inspect the complete change before you act." />
+        <h2 className="co-visually-hidden">Contribution review</h2>
         <div className="co-focus-view">
           <button type="button" className="co-focus-back" onClick={() => setSelectedKey(null)}>
             <Icon name="left" size={15} /> Back to {copy[0].toLowerCase()}

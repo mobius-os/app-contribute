@@ -70,6 +70,8 @@ test('the app consumes trusted intents only after the authoritative ledger is re
   assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
   assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
   assert.match(feedSource, /Review no longer available/)
+  assert.match(feedSource, /<h2 className="co-visually-hidden">Contribution review<\/h2>/)
+  assert.doesNotMatch(feedSource, /<ViewHeading title="Reviews" description="Inspect the complete change before you act\."/)
 })
 
 test('indexes only recognized review verdicts', () => {
@@ -323,7 +325,7 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /rec\.plan\?\.action === 'pr_update'/)
   assert.match(appSource, /updateContribution\(\{ appId, token, rec \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
-  assert.match(cardSource, /pr_update: 'Update existing pull request'/)
+  assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
   assert.match(cardSource, /Pull request updated on GitHub/)
 })

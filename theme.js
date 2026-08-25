@@ -445,7 +445,7 @@ button.co-workspace-task { cursor: pointer; }
 .co-source-dot.tone-warn { background: var(--co-warn); }
 .co-source-dot.tone-danger { background: var(--danger); }
 .co-focus-view { width: min(100%, 780px); margin-inline: auto; }
-.co-focus-back { margin: -8px 0 9px; color: var(--accent); }
+.co-focus-back { margin: 5px 0 14px; color: var(--accent); }
 .co-source-error,
 .co-source-unavailable {
   border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
@@ -1039,10 +1039,12 @@ button.co-workspace-task { cursor: pointer; }
    stack and the collapsed co-author tag are gone (co-author now lives in the
    expanded review). */
 .co-technical-summary {
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: 7px 12px;
   margin-top: 9px;
 }
 .co-plan-meta {
+  grid-column: 1 / -1;
   display: flex; align-items: baseline; gap: 6px; min-width: 0;
   font-size: 12px; line-height: 1.4; color: var(--muted);
 }
@@ -1269,11 +1271,13 @@ button.co-workspace-task { cursor: pointer; }
   align-self: stretch; margin: 0; font-size: 12.5px; line-height: 1.5;
   color: var(--muted);
 }
-.co-review-changes-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 8px; }
+.co-review-changes-head { align-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 8px; }
 .co-review-changes-head strong { font-size: 13px; }
 .co-review-changes-head span {
-  max-width: 62%; overflow-wrap: anywhere; text-align: right;
-  color: var(--muted); font-size: 9.5px; line-height: 1.35;
+  flex: 0 0 auto; max-width: 62%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; padding: 4px 8px; border-radius: 999px;
+  background: var(--surface2, var(--surface)); color: var(--muted);
+  font-size: 9.5px; font-weight: 650; line-height: 1.2;
 }
 .co-pr-metadata { margin-top: 12px; border-top: 1px solid var(--border); }
 .co-pr-metadata > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; color: var(--muted); font-size: 11px; font-weight: 650; cursor: pointer; }
@@ -1404,6 +1408,11 @@ button.co-workspace-task { cursor: pointer; }
   width: auto; padding: 0 11px; gap: 7px;
   font-size: 12.5px; font-weight: 700;
 }
+.co-icon-btn.co-review-btn.is-primary {
+  width: auto; min-width: 92px; padding: 0 14px; gap: 7px;
+  border-color: transparent; background: var(--accent); color: var(--accent-fg);
+}
+.co-icon-btn.co-review-btn.is-primary:hover { color: var(--accent-fg); }
 .co-icon-btn.is-primary {
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
   background: color-mix(in srgb, var(--accent) 11%, var(--surface));
@@ -1722,6 +1731,15 @@ button.co-workspace-task { cursor: pointer; }
   .co-focus-view .co-action-block,
   .co-focus-view .co-review-actions { width: 100%; }
   .co-focus-view .co-review-actions { justify-content: flex-start; }
+  .co-focus-view .co-review-btn { flex: 1 1 auto; }
+  .co-focus-view .co-secondary-action {
+    width: 44px; flex: 0 0 44px; padding: 0; border-color: transparent;
+    background: transparent;
+  }
+  .co-focus-view .co-secondary-action > span {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
   .co-card-footer:has(.co-confirm) { align-items: stretch; flex-direction: column; }
   .co-card-footer:has(.co-confirm) .co-details-toggle { align-self: flex-start; }
   .co-action-block:has(.co-confirm) { width: 100%; align-items: stretch; }
