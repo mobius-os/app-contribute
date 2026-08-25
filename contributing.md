@@ -1,10 +1,18 @@
 # Contributing upstream
 
-How to send an improvement back to the Möbius ecosystem — the GitHub connection,
-studying prior issues and PRs, staging a reviewable plan in the Contribute app,
-and the exact `gh` sequences. `Read` this before ANY public GitHub action. The
-constitution's end-of-task checklist routes you here when your change would help
-other users; "share this" or "report that bug upstream" lands here too.
+This is the Contribute app's project-collaboration skill. It owns the reusable
+cycle for moving changes from a local project into private review, public
+collaboration, and safe local reconciliation. The current built-in adapters are
+Möbius platform/app projects published through GitHub, but the cycle itself is
+project-shaped rather than `mobius-os`-shaped so future owner projects can use
+the same intents and UI.
+
+Use this when the owner says **prepare my changes**, **prepare all**, **address
+the existing contributions**, **finish the contribution cycle**, **submit and
+sync**, or **align my projects with upstream**. `Read` this before ANY public
+GitHub action. The constitution's end-of-task checklist routes you here when a
+change would help other users; "share this" or "report that bug upstream" lands
+here too.
 
 ---
 
@@ -23,6 +31,124 @@ Three rules never bend. The rest of this doc assumes them and points back here.
 3. **Never submit stale work.** If the staged plan's `base_sha`/`head_sha` or
    canonical branch diff has drifted since the partner reviewed it, do NOT
    submit — re-stage and tell them what changed.
+
+## The built-in project cycle
+
+These names are complete workflow requests, not hints that the owner must
+expand into a checklist every time. Preserve every hard stop above while doing
+the routine discovery and sequencing without asking the owner to restate it.
+
+Every project adapter must supply five owning facts: the working source, the
+accepted/shared source, the publication target, the reviewed local update path,
+and the categories of private or local-only material that must be preserved.
+The stages below do not change when those facts come from another repository or
+project type. If a project has no truthful adapter yet, keep it visible but
+name that missing capability instead of guessing with raw Git commands.
+
+### Prepare my changes
+
+Treat **prepare my changes**, **prepare all**, and a project-level Contribute
+handoff as explicit approval for private preparation only. When the owner does
+not narrow the scope, inventory every current Contribute project source
+position, then prepare every coherent, reusable change that is safe to share.
+Do not assume that every customized, personal, or local-only project belongs
+upstream.
+
+1. Start with the Contribute queue snapshot and the read-only Projects/source
+   status. Refresh both rather than trusting counts copied into a handoff.
+2. Classify each difference as a working draft, reusable local change, landed
+   contribution already recognized, incoming shared work, compatible change,
+   true conflict, private/personal project, or unavailable source. Never turn
+   incoming-only work into a contribution and never publish runtime data.
+3. Group reusable work by owning repository and dependency. Deduplicate it
+   against existing PRs/issues, perform the two review passes, run proportionate
+   checks, and stage exact private review records. Use a stack only when the
+   changes truly depend on one another.
+4. Stop with the prepared records in Contribute. Report what was prepared and
+   what was intentionally left local, private, incomplete, duplicated, or
+   blocked. Nothing public happens in this intent.
+
+When this spans several projects or review units, make it a durable Goal with
+inventory, preparation, verification, and handoff stages. A single small
+project can remain an ordinary bounded turn.
+
+### Finish the contribution cycle
+
+Treat **finish the contribution cycle**, **handle the existing changes and
+submit them**, **submit and sync**, **align my projects with upstream**, and the
+Möbius-specific **align this Möbius with upstream** as one durable outcome. The
+default scope is every active Contribute PR plus every current reusable local
+change, unless the owner names a narrower repository or project. This intent
+almost always earns a Goal because it crosses review, external waits, and local
+reconciliation.
+
+1. Refresh the complete queue and Projects status. Re-read live record states;
+   prepared records may have become public or merged since the handoff was
+   created.
+2. Privately repair stale reviews, failed checks, merge conflicts, and sound
+   review feedback. Prepare newly discovered reusable changes. Leave genuine
+   owner choices, unsafe work, and unrelated refactors explicitly blocked.
+3. Present the exact ready set in Contribute. **Send all ready** is the reviewed
+   public approval boundary and stops if any branch or diff moved. The broad
+   cycle request does not authorize an unenumerated push, comment, PR, issue, or
+   merge from chat.
+4. After submission, let Contribute autopilot own ordinary PR feedback. When
+   this chat promises to continue after CI, review, queue, or merge, declare a
+   durable read-only wait using the `waiting` skill; prose alone is not a
+   watcher. Refresh the real current head and outcome whenever the chat resumes.
+5. Once every in-scope public item is merged, closed, superseded, or honestly
+   blocked, reconcile each local project through the reviewed update path named
+   by its adapter. Preserve private/local-only work and genuine local overlays,
+   send overlaps to the owning resolver rather than resetting them, and retain
+   any separately confirmed activation or restart gate.
+6. Refresh Projects one final time. Completion means the accepted upstream work
+   is present locally and every remaining difference is classified as
+   intentional local work, private data, an active draft, unavailable source,
+   or a named blocker. Report prepared, sent, merged/superseded, blocked,
+   aligned, and deliberately local outcomes in one concise handoff.
+
+Do not replace these stages with a blind reset or a one-click destructive
+shortcut. The streamlining is that the owner names the outcome once; exact
+publication, update review, conflicts, and restart retain their existing gates.
+
+### Thoroughly review prepared work
+
+Treat **review all**, **review this PR**, and **fix and review again** as complete
+private review intents. The owner should not have to restate the usual rubric.
+
+1. Refresh each named record, inspect its complete diff, and mark
+   `quality_review.state` as `reviewing` with CAS before material review work.
+2. Review correctness, maintainability, simplicity, tests, security/privacy,
+   and avoidable technical debt. Expand into owning callers and invariants when
+   the changed surface warrants it; do not turn this into unrelated cleanup.
+3. For owner-authored work, fix every sound finding privately, update the
+   prepared branch/plan/diff, and repeat the complete review on the new head.
+   For someone else's work, do not change their branch: prepare concrete,
+   actionable suggestions and leave them private until approved.
+4. Set `changes_needed` while a sound finding remains. Set `all_clear` only
+   after the complete current head passes. A changed head invalidates the old
+   verdict even if the diff looks similar.
+5. Stop with the durable verdict visible in Contribute. Review work does not
+   authorize a push, PR, comment, review, merge, or other GitHub mutation.
+
+### Current Möbius adapter
+
+For the platform and installed apps currently shown in Contribute Projects:
+
+- the working source is the live platform checkout or app source directory;
+- the accepted/shared source is the configured canonical branch or installed
+  app release marker;
+- publication is staged through Contribute and, once explicitly approved,
+  sent through the GitHub path in this skill;
+- accepted platform work returns through the reviewed Möbius update flow;
+- eligible tracked apps return through App Store's reviewed **Update all** flow;
+- private/local-only apps and genuine local overlays are preserved;
+- overlaps use the existing resolver instead of a reset; and
+- platform activation keeps its separately confirmed restart gate.
+
+These are adapter rules, not definitions of the contribution cycle. A future
+owner repository should register equivalent source, publication, update, and
+privacy facts and then reuse the same **Prepare** and **Run full cycle** intents.
 
 ---
 
@@ -601,6 +727,42 @@ the review worktree and store `source_repo_path: "/data/platform"` beside
 No origin → be honest: platform
 contributions need the updated platform bootstrap; app contributions still work.
 
+### Updating an existing open PR
+
+When a new owner-authored change belongs on a PR that is already open, update
+that contribution's existing record instead of opening a duplicate or pushing
+around Contribute. This is still a private preparation until the owner presses
+**Update PR**.
+
+1. Refresh GitHub read-only and require that the recorded repository, PR
+   number, public head repository, and topic branch still name one open PR.
+   Re-anchor the durable review worktree at the public pushed head before
+   applying the new local patch. Never build on an unpushed local attempt.
+2. Keep the same record id, PR URL, number, branch, `head_repository`, original
+   `submitted_at`, and original PR base. Set the record back to `prepared` and
+   set `plan.action` to `pr_update`; update `plan.head_sha`, the complete
+   base-to-new-head diff/hash/stat, source witness, body draft, and timestamps.
+   The stored diff is the complete current PR, not only the new delta, because
+   the all-clear verdict must describe exactly what maintainers will review.
+3. Re-run the full private review on the new head and pin
+   `quality_review.reviewed_head_sha` to it. The ordinary local review-status
+   endpoint understands both `pr` and `pr_update`; a changed checkout, source
+   witness, diff, ancestry, or upstream conflict blocks the action before the
+   owner clicks.
+4. Stop in Contribute. **Update PR** is the explicit public approval boundary.
+   Its platform route rechecks the live PR identity before any push and then
+   allows only the exact reviewed fast-forward. Ordinary **Send PR** continues
+   to reject a branch that already has a PR, and raw `git push` is never a
+   substitute.
+5. After a successful update, the same record returns to `open`, retains its
+   original submission time, records `last_updated_pr_at`, and advances an
+   existing Autopilot grant to the new public head without creating, enabling,
+   or retargeting a grant.
+
+If the installed platform does not yet expose the reviewed update route, keep
+the record privately prepared and say that a restart or platform update is
+needed. Do not fall back to a duplicate PR or an unguarded branch rewrite.
+
 ## PLATFORM CI
 
 For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit
@@ -772,6 +934,25 @@ claimed the record and the action is in flight; `commented` = terminal for
 comment actions. A record stuck in `submitting` with an old `updated_at` (crashed
 submit) → verify via `gh search` whether the action actually happened before
 redoing it.
+
+`quality_review.state` ∈ `reviewing | changes_needed | all_clear`. The
+`reviewed_head_sha` must exactly equal the record's current `plan.head_sha`.
+Every re-stage or amended commit must replace or invalidate the verdict; never
+carry `all_clear` across heads. Publication endpoints enforce this invariant.
+The CAS update adds this sibling block to the full record:
+
+```json
+"quality_review": {
+  "state": "all_clear",
+  "reviewed_head_sha": "<exact plan.head_sha>",
+  "reviewed_at": "<ISO>",
+  "iteration": 2,
+  "chat_id": "<review chat id>",
+  "scope": ["correctness", "maintainability", "simplicity", "tests",
+            "security_privacy", "technical_debt"],
+  "summary": "Complete current head passes review."
+}
+```
 The scheduled refresh job only tracks `pr | issue` records in `draft | open`.
 
 App NOT installed: no staging, no review card, no tracking — but Hard stop #1

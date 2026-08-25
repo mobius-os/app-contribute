@@ -3,22 +3,18 @@ import test from 'node:test'
 import {
   actionableSourceProjects,
   attachSourceProjects,
-  contributionRelationship,
-  formatSourceDelta,
-  prepareAllAction,
-  preparableSourceProjects,
-  projectAgentAction,
+  prepareProjectsAction,
   projectDetailSummary,
-  projectFlowStatus,
   projectMatchesFilter,
+  projectNeedsPreparation,
+  projectNeedsSorting,
   projectOverview,
   projectForks,
+  projectReadyToPrepare,
   projectRowFacts,
   projectSourceState,
   projectStatus,
-  recordBranch,
   sourcePathRelationship,
-  sourceSummary,
 } from '../source-map.js'
 
 const snapshot = {
@@ -49,7 +45,7 @@ test('joins only active contribution records to their source project', () => {
   assert.equal(projects[0].name, 'Möbius')
   assert.deepEqual(projects[0].contributions.map((r) => r.id), ['ready'])
   assert.deepEqual(projects[1].contributions.map((r) => r.id), ['open'])
-  assert.equal(sourceSummary(projects).active, 2)
+  assert.equal(projects.reduce((total, project) => total + project.contributions.length, 0), 2)
 })
 
 test('tree equality wins over bookkeeping-only ahead history', () => {
@@ -99,7 +95,7 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(project.conflictFiles, 1)
   assert.equal(projectStatus(project).label, '1 file needs a choice')
   assert.equal(projectSourceState(project), 'conflict')
-  assert.equal(projectFlowStatus(project).tone, 'danger')
+  assert.equal(projectOverview(project).tone, 'danger')
   assert.match(projectDetailSummary(project), /remaining overlapping files/)
   assert.ok(projectRowFacts(project).includes('1 needs a choice'))
   assert.equal(sourcePathRelationship(project, 'local.js'), 'local')
@@ -107,8 +103,8 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(sourcePathRelationship(project, 'compatible.js'), 'compatible')
   assert.equal(sourcePathRelationship(project, 'choice.js'), 'conflict')
   assert.equal(sourcePathRelationship(project, 'outside-preview.js'), 'changed')
-  assert.match(projectAgentAction(project).draft, /shared submissions are already excluded/)
-  assert.match(projectAgentAction(project).draft, /1 file is local-only/)
+  assert.equal(projectNeedsSorting(project), true)
+  assert.match(prepareProjectsAction([project]).draft, /Classify working drafts/)
 })
 
 test('semantic conflict counts outrank a stale customized state everywhere', () => {
@@ -133,8 +129,7 @@ test('semantic conflict counts outrank a stale customized state everywhere', () 
   assert.equal(projectSourceState(project), 'conflict')
   assert.equal(projectStatus(project).tone, 'danger')
   assert.equal(projectOverview(project).tone, 'danger')
-  assert.equal(projectFlowStatus(project).tone, 'danger')
-  assert.equal(projectAgentAction(project).event, 'resolve_source_state')
+  assert.equal(projectNeedsSorting(project), true)
 })
 
 test('semantic counts normalize invalid receipt numbers at the boundary', () => {
@@ -190,8 +185,8 @@ test('incoming-only semantic paths are not offered as local contributions', () =
 
   assert.equal(project.different, false)
   assert.equal(projectStatus(project).label, 'Shared changes')
-  assert.equal(projectAgentAction(project).event, 'review_source_update')
-  assert.equal(preparableSourceProjects([project]).length, 0)
+  assert.equal(projectNeedsPreparation(project), false)
+  assert.equal(prepareProjectsAction([project]), null)
 })
 
 test('installed apps ignore full-repository origin projections', () => {
@@ -224,7 +219,7 @@ test('installed apps ignore full-repository origin projections', () => {
   assert.equal(notes.attention, false)
   assert.equal(projectStatus(notes).label, 'Aligned')
   assert.equal(projectOverview(notes), null)
-  assert.equal(projectAgentAction(notes), null)
+  assert.equal(projectNeedsPreparation(notes), false)
   assert.equal(projectMatchesFilter(notes, 'changed'), false)
 })
 
@@ -254,7 +249,7 @@ test('exact canonical tree equality outranks a stale installer marker', () => {
   assert.equal(project.sourceComparisonRequired, false)
   assert.equal(projectStatus(project).label, 'Aligned')
   assert.equal(projectOverview(project), null)
-  assert.equal(projectAgentAction(project), null)
+  assert.equal(projectNeedsPreparation(project), false)
 })
 
 test('a moved canonical source is compared before local work is prepared', () => {
@@ -278,9 +273,8 @@ test('a moved canonical source is compared before local work is prepared', () =>
   assert.equal(projectOverview(project).label, 'Compare before contributing')
   assert.match(projectDetailSummary(project), /Compare both versions/)
   assert.ok(projectRowFacts(project).includes('Compare shared source'))
-  assert.equal(projectAgentAction(project).event, 'review_source_position')
-  assert.equal(preparableSourceProjects([project]).length, 0)
-  assert.equal(prepareAllAction([project]), null)
+  assert.equal(projectNeedsSorting(project), true)
+  assert.match(prepareProjectsAction([project]).draft, /Classify working drafts/)
 })
 
 test('installed apps still surface genuine local work plus a release update', () => {
@@ -311,9 +305,8 @@ test('installed apps still surface genuine local work plus a release update', ()
   assert.equal(demo.attention, true)
   assert.equal(projectStatus(demo).label, 'Both sides changed')
   assert.equal(projectOverview(demo).label, 'Both versions changed')
-  assert.equal(projectAgentAction(demo).event, 'resolve_source_state')
-  assert.match(projectAgentAction(demo).draft, /local version and the shared version/)
-  assert.doesNotMatch(projectAgentAction(demo).draft, /semantic source receipt/)
+  assert.equal(projectNeedsSorting(demo), true)
+  assert.match(prepareProjectsAction([demo]).draft, /Classify working drafts/)
 })
 
 test('active records for an uninstalled repo stay visible', () => {
@@ -339,8 +332,8 @@ test('keeps locally built apps at the bottom as publishing candidates', () => {
   }, [])
   assert.equal(projects.at(-1).name, 'Local scratchpad')
   assert.equal(projectStatus(projects.at(-1)).label, 'Built here')
-  assert.equal(projectMatchesFilter(projects.at(-1), 'changed'), true)
-  assert.equal(sourceSummary(projects).sources, 3)
+  assert.equal(projectMatchesFilter(projects.at(-1), 'changed'), false)
+  assert.equal(projects.length, 3)
 })
 
 test('does not offer to publish an app that already has a GitHub repository', () => {
@@ -354,8 +347,7 @@ test('does not offer to publish an app that already has a GitHub repository', ()
   }, [])[0]
   assert.equal(project.builtHere, false)
   assert.equal(projectStatus(project).label, 'No shared source')
-  assert.equal(projectAgentAction(project).event, 'review_missing_source')
-  assert.doesNotMatch(projectAgentAction(project).draft, /publish the locally built app/)
+  assert.equal(projectNeedsPreparation(project), false)
 })
 
 test('attention and relationship labels preserve real PR head topology', () => {
@@ -365,14 +357,7 @@ test('attention and relationship labels preserve real PR head topology', () => {
     plan: { base_sha: 'bbbbbbbb', head_sha: 'ffffffff' },
   }])[0]
   assert.equal(projectStatus(project).label, 'Needs attention')
-  assert.equal(contributionRelationship(project.contributions[0], project), 'Published as eeeeeee')
-})
-
-test('reviewed plan branch wins over a stale top-level mirror', () => {
-  assert.equal(recordBranch({
-    branch: 'stale-branch',
-    plan: { branch: 'stack/current/01-layer' },
-  }), 'stack/current/01-layer')
+  assert.equal(project.contributions[0].last_submit_push_sha, 'eeeeeeee')
 })
 
 test('joins configured and contribution-discovered forks without duplication', () => {
@@ -411,12 +396,13 @@ test('install-managed deltas are visible without counting as customization', () 
   assert.equal(adapted.different, false)
   assert.equal(adapted.adapted, true)
   assert.equal(projectStatus(adapted).label, 'Install-managed')
-  assert.equal(formatSourceDelta(adapted), '3 install-managed')
+  assert.ok(projectRowFacts(adapted).includes('Installed normally'))
 })
 
 test('formats authoritative endpoint tree delta', () => {
-  assert.equal(formatSourceDelta(snapshot.platform), '4 source files')
-  assert.equal(formatSourceDelta(snapshot.apps[0]), 'Source trees match')
+  const projects = attachSourceProjects(snapshot, [])
+  assert.equal(projects[0].authoredFiles, 4)
+  assert.equal(projects[1].different, false)
 })
 
 test('opening overview includes only useful local or shared-source positions', () => {
@@ -441,9 +427,8 @@ test('opening overview includes only useful local or shared-source positions', (
     ],
   }, [])
   const overview = actionableSourceProjects(projects)
-  assert.deepEqual(overview.map((project) => project.name), ['Notes', 'My app'])
-  assert.equal(projectOverview(overview[0]).label, 'Local edits in progress')
-  assert.equal(projectOverview(overview[1]).detail, 'This app does not have a GitHub home yet')
+  assert.deepEqual(overview, [])
+  assert.deepEqual(projects.map((project) => project.name), ['Möbius', 'Contribute', 'Notes', 'My app'])
 })
 
 test('agent actions prepare local changes and guard public app publishing', () => {
@@ -456,20 +441,21 @@ test('agent actions prepare local changes and guard public app publishing', () =
     },
     apps: [],
   }, [])[0]
-  const prepare = projectAgentAction(changed)
-  assert.equal(prepare.label, 'Ask agent to prepare')
-  assert.match(prepare.draft, /stage them in Contribute so I can review them first/)
+  const prepare = prepareProjectsAction([changed])
+  assert.equal(prepare.label, 'Prepare changes')
+  assert.match(prepare.draft, /stage it privately in Contribute/)
 
   const localApp = attachSourceProjects({
     platform: null,
     apps: [{
       key: 'app:new', kind: 'app', name: 'My app', available: true,
-      canonical_repo: null, state: 'local_only', working: { files: 0 },
+      canonical_repo: null, state: 'local_only', working: { files: 1 },
     }],
   }, [])[0]
-  const publish = projectAgentAction(localApp)
-  assert.equal(publish.label, 'Ask agent to publish')
-  assert.match(publish.draft, /confirm the repository name and visibility/)
+  const publish = prepareProjectsAction([localApp])
+  assert.equal(publish.label, 'Prepare changes')
+  assert.match(publish.draft, /Classify working drafts/)
+  assert.match(publish.draft, /Do not publish anything/)
 })
 
 test('active reviews turn a broad source delta into an inventory, not a mega-PR prompt', () => {
@@ -487,13 +473,11 @@ test('active reviews turn a broad source delta into an inventory, not a mega-PR 
 
   assert.equal(projectOverview(changed).label, 'Committed version differs')
   assert.equal(projectOverview(changed).detail, '264 files remain local after shared work')
-  const action = projectAgentAction(changed)
-  assert.equal(action.label, 'Ask agent to inventory')
-  assert.equal(action.event, 'review_remaining_changes')
-  assert.match(action.draft, /already represented by active Contribute reviews/)
-  assert.match(action.draft, /264 files committed only here/)
-  assert.doesNotMatch(action.draft, /prepare an upstream contribution/)
-  assert.equal(preparableSourceProjects([changed]).length, 0)
+  const action = prepareProjectsAction([changed])
+  assert.equal(projectNeedsSorting(changed), true)
+  assert.match(action.draft, /Classify working drafts/)
+  assert.match(action.draft, /Do not publish anything/)
+  assert.equal(projectReadyToPrepare(changed), false)
 })
 
 test('working-only projects with active reviews describe the edits instead of zero local files', () => {
@@ -516,10 +500,10 @@ test('working-only projects with active reviews describe the edits instead of ze
     id: 'open', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
   }])[0]
 
-  const action = projectAgentAction(changed)
-  assert.equal(action.label, 'Ask agent to inventory')
-  assert.match(action.draft, /2 files being edited/)
-  assert.doesNotMatch(action.draft, /0 files/)
+  const action = prepareProjectsAction([changed])
+  assert.equal(projectNeedsSorting(changed), true)
+  assert.equal(action.label, 'Prepare changes')
+  assert.match(projectRowFacts(changed).join(' · '), /Being edited/)
 })
 
 test('prepare all batches only projects with eligible local contribution changes', () => {
@@ -544,14 +528,12 @@ test('prepare all batches only projects with eligible local contribution changes
     ],
   }, [])
 
-  const candidates = preparableSourceProjects(projects)
+  const candidates = projects.filter(projectNeedsPreparation)
   assert.deepEqual(candidates.map((project) => project.name), ['Möbius', 'Contribute'])
-  const action = prepareAllAction(projects)
-  assert.equal(action.label, 'Prepare all (2)')
-  assert.equal(action.event, 'prepare_all_contributions')
-  assert.equal(action.autoSend, true)
-  assert.match(action.draft, /- Möbius — mobius-os\/mobius/)
-  assert.match(action.draft, /- Contribute — mobius-os\/app-contribute/)
+  const action = prepareProjectsAction(projects)
+  assert.equal(action.label, 'Prepare all')
+  assert.equal(action.event, 'prepare_all_project_changes')
+  assert.match(action.draft, /Möbius, Contribute/)
   assert.doesNotMatch(action.draft, /Incoming/)
-  assert.match(action.draft, /Do not publish, push, open an issue, or open a pull request/)
+  assert.match(action.draft, /Do not publish anything/)
 })

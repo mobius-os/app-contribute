@@ -120,10 +120,8 @@ export async function fetchGithubStatus(token) {
   }
 }
 
-// Fetch-free local Git metadata for the Sources view. The endpoint is narrow:
-// refs, ancestry/diff magnitudes, working-tree counts, and bounded path names —
-// never source contents or absolute paths. A failure leaves the contribution
-// feed usable and lets the Sources view offer an explicit retry.
+// Fetch-free local Git metadata for the Projects view. The endpoint returns
+// refs, ancestry/diff magnitudes, working-tree counts, and bounded path names.
 export async function fetchSourceStatus(token) {
   try {
     const r = await fetchRead('/api/github/source-status', {
@@ -138,6 +136,37 @@ export async function fetchSourceStatus(token) {
     }
     const body = await r.json()
     return { ok: true, data: body }
+  } catch {
+    return { ok: false, offline: true, status: 0 }
+  }
+}
+
+// Source contents remain behind an explicit, project-bound read. The caller
+// supplies only the opaque project key + endpoint commits it already inspected;
+// the platform chooses the repository/ref and caps the returned unified patch.
+export async function fetchSourceDiff(token, project) {
+  if (!project?.key || !project?.head_sha) {
+    return { ok: false, status: 422 }
+  }
+  const query = new URLSearchParams({
+    project: project.key,
+    head: project.head_sha,
+  })
+  const comparison = project.comparison_sha || project.base_sha
+  if (comparison) query.set('comparison', comparison)
+  try {
+    const response = await fetchRead('/api/github/source-diff?' + query, {
+      headers: authHeaders(token),
+    })
+    if (!response.ok) {
+      return {
+        ok: false,
+        stale: response.status === 409,
+        unsupported: response.status === 404,
+        status: response.status,
+      }
+    }
+    return { ok: true, data: await response.json() }
   } catch {
     return { ok: false, offline: true, status: 0 }
   }
@@ -184,17 +213,47 @@ export async function fetchLiveStates(token, query) {
   }
 }
 
+export async function fetchIncomingReviews(token) {
+  const query = `query ContributeIncomingReviews {
+    search(query: "is:pr is:open review-requested:@me -assignee:@me", type: ISSUE, first: 20) {
+      nodes { ... on PullRequest { number title url headRefOid author { login } repository { nameWithOwner } } }
+    }
+  }`
+  const data = await fetchLiveStates(token, query)
+  const nodes = Array.isArray(data?.search?.nodes) ? data.search.nodes : []
+  return nodes.filter((item) => item?.repository?.nameWithOwner && item?.number && item?.url)
+}
+
+export async function assignIncomingReview({ appId, token, repo, number }) {
+  try {
+    const response = await fetch(
+      `/api/github/contributions/${encodeURIComponent(appId)}/assign-review`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo, number }),
+      },
+    )
+    if (!response.ok) {
+      return { ok: false, error: await responseDetail(response, 'Could not assign this review.') }
+    }
+    return { ok: true, data: await response.json() }
+  } catch {
+    return { ok: false, error: 'Could not confirm the assignment. Refresh before trying again.' }
+  }
+}
+
 // Identified device attempt: start returns attempt_id + expiry, every poll and
 // cancellation names that exact attempt, and pending responses carry the next
 // server-approved retry delay.
 export function connectStart(
   token,
-  { workflow = true, signal, timeoutMs = 45000 } = {},
+  { workflow = true, privateRepos = false, signal, timeoutMs = 45000 } = {},
 ) {
   return fetchWithDeadline('/api/github/connect/start', {
     method: 'POST',
     headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow }),
+    body: JSON.stringify({ workflow, private_repos: privateRepos }),
     signal,
   }, timeoutMs)
 }
@@ -294,6 +353,135 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
     }
+  }
+}
+
+// Owner-approved fast-forward of an already-open pull request. A prepared
+// `pr_update` record carries the exact new head and complete reviewed diff; the
+// platform verifies the live PR identity before it pushes anything.
+export async function updateContribution({ appId, token, rec }) {
+  try {
+    const r = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) +
+        '/update-existing',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    )
+    const body = await r.json().catch(() => null)
+    if (r.ok && body?.record) {
+      return { ok: body.record, url: body?.url || '' }
+    }
+    const detail = body?.detail
+    if (
+      r.status === 409 &&
+      detail === 'This contribution is no longer waiting for approval.'
+    ) {
+      return { alreadyHandled: true }
+    }
+    if (r.status === 404) {
+      return {
+        unsupported: true,
+        error: 'Restart Möbius to load the reviewed PR update action.',
+      }
+    }
+    if (detail && typeof detail === 'object') {
+      return {
+        error: detail.message || 'Could not update this PR.',
+        record: detail.record || null,
+      }
+    }
+    return {
+      error: typeof detail === 'string' ? detail : 'Could not update this PR.',
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved contribution before offering a retry…',
+    }
+  }
+}
+
+// Launcher path: the scoped app token reaches only the platform BFF. The BFF
+// rechecks the reviewed record, asks the root-owned identity broker for one
+// body-bound contribution capability, and sends an always-draft request to the
+// configured GitHub App target. No personal GitHub token enters this frame.
+export async function submitContributionViaMobius({ appId, token, rec }) {
+  try {
+    const r = await fetch(
+      '/api/contribution-relay/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) +
+        '/submit',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirm_publication: true,
+          public_identity: 'anonymous',
+          submitter: 'contribute-button',
+        }),
+      },
+    )
+    const body = await r.json().catch(() => null)
+    if (r.ok && body?.record) {
+      if (body.record.url) {
+        return { ok: body.record, url: body.record.url, viaMobius: true }
+      }
+      return { pending: body.record, viaMobius: true }
+    }
+    const detail = body?.detail
+    if (
+      r.status === 409 &&
+      detail === 'This contribution is no longer waiting for approval.'
+    ) {
+      return { alreadyHandled: true, viaMobius: true }
+    }
+    if (detail && typeof detail === 'object') {
+      return {
+        error: detail.message || 'Could not submit this draft through Möbius.',
+        record: detail.record || null,
+        viaMobius: true,
+      }
+    }
+    return {
+      error: typeof detail === 'string'
+        ? detail
+        : 'Could not submit this draft through Möbius.',
+      viaMobius: true,
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved contribution before offering a retry…',
+      viaMobius: true,
+    }
+  }
+}
+
+export async function fetchMobiusContributionStatus({ appId, token, rec }) {
+  try {
+    const r = await fetch(
+      '/api/contribution-relay/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) +
+        '/status',
+      { headers: authHeaders(token) },
+    )
+    const body = await r.json().catch(() => null)
+    if (r.ok && body?.record) return { ok: body.record }
+    const detail = body?.detail
+    return {
+      error: detail && typeof detail === 'object'
+        ? detail.message
+        : (typeof detail === 'string' ? detail : 'Could not check the Möbius draft.'),
+    }
+  } catch {
+    return { error: 'Could not reach the Möbius contribution service.' }
   }
 }
 

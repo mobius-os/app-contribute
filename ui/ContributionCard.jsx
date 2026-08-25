@@ -13,6 +13,7 @@ import { contributionLabelOutcome } from '../labels.js'
 import {
   canRunPrePrChecks,
   prePrCheckPhase,
+  qualityReviewFor,
 } from '../review.js'
 import {
   autopilotState,
@@ -41,13 +42,22 @@ import { Icon } from './Icons.jsx'
 //   - without one (a record staged by a v1-skill agent), the card keeps the
 //     plain fallback and Send returns a re-stage error from the platform.
 // Send calls the platform submit endpoint directly for PR plans; Feedback
-// returns to the source chat; Dismiss CAS-flips to abandoned via storage.js.
+// returns to the source chat; Move to History CAS-flips to abandoned via storage.js.
 
 const ACTION_LABELS = {
-  pr: 'New PR to',
-  issue: 'New issue in',
-  issue_comment: 'Comment on',
-  discussion_comment: 'Comment on',
+  pr: 'Pull request',
+  pr_update: 'Pull request update',
+  issue: 'Issue',
+  issue_comment: 'Issue comment',
+  discussion_comment: 'Discussion reply',
+}
+
+const PREPARED_ACTION_LABELS = {
+  pr: 'New PR',
+  pr_update: 'Update PR',
+  issue: 'New issue',
+  issue_comment: 'New issue comment',
+  discussion_comment: 'New discussion reply',
 }
 
 // The collapsed prepared card's one meta line: repo · branch · timeAgo. Kept to
@@ -65,7 +75,7 @@ function PlanMeta({ rec }) {
   ].filter(Boolean)
   if (parts.length === 0) return null
   return (
-    <div className="co-plan-meta">
+    <div className={'co-plan-meta' + (branch ? ' has-branch' : '')}>
       {parts.map((part, i) => (
         <React.Fragment key={part.cls}>
           {i > 0 ? (
@@ -94,10 +104,19 @@ function DiffLine({ stat }) {
 }
 
 function PlanSummary({ rec }) {
+  const quality = qualityReviewFor(rec)
+  const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
+  const showReadiness = isPr || rec.status === 'prepared'
   return (
     <div className="co-technical-summary">
       <PlanMeta rec={rec} />
       <DiffLine stat={rec.plan?.diff_stat} />
+      {showReadiness ? (
+        <span className={isPr ? 'co-quality-pill is-' + quality.state : 'co-quality-pill'}>
+          <Icon name={isPr ? (quality.state === 'all_clear' ? 'check' : quality.state === 'changes_needed' ? 'fix' : 'review') : 'feedback'} size={13} />
+          {isPr ? quality.label : 'Draft ready'}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -486,42 +505,49 @@ function PublicationReviewNote({ rec }) {
 // the full diff on expand — no raw diff_stat block, no excerpt step.
 export function ReviewPlan({ rec, loadDiff }) {
   const plan = rec.plan
-  const where = plan.repo || rec.repo || ''
-  const badge = (ACTION_LABELS[plan.action] || 'Contribution to') +
-    (where ? ' ' + where : '')
+  const labels = rec.status === 'prepared' ? PREPARED_ACTION_LABELS : ACTION_LABELS
+  const badge = labels[plan.action] || 'Contribution'
   const isPr = plan.action === 'pr' || rec.type === 'pr'
 
   return (
     <>
-      <span className="co-review-badge">{badge}</span>
-      {plan.title ? (
-        <section className="co-review-section">
-          <div className="co-review-section-title">GitHub title</div>
-          <div className="co-review-title">{plan.title}</div>
-        </section>
-      ) : null}
       {isPr ? (
-        <div className="co-review-coauthor" title="The contribution workflow adds this commit trailer before publishing.">
-          <span>Co-authored with</span>
-          <strong>Möbius Agent</strong>
+        <>
+          <div className="co-review-changes-head"><strong>Changes</strong><span>{badge}</span></div>
+          <FileDiffList rec={rec} loadDiff={loadDiff} />
+        </>
+      ) : null}
+      <details className="co-pr-metadata">
+        <summary><span>{isPr ? 'PR details' : 'Request details'}</span><Icon name="chevron" size={15} /></summary>
+        <div className="co-pr-metadata-body">
+          {plan.title ? (
+            <section className="co-review-section">
+              <div className="co-review-section-title">GitHub title</div>
+              <div className="co-review-title">{plan.title}</div>
+            </section>
+          ) : null}
+          {isPr ? (
+            <div className="co-review-coauthor" title="The contribution workflow adds this commit trailer before publishing.">
+              <span>Co-authored with</span>
+              <strong>Möbius Agent</strong>
+            </div>
+          ) : null}
+          <PublicationReviewNote rec={rec} />
+          <PriorWorkEvidence priorWork={plan.prior_work} />
+          <PlanLabels rec={rec} />
+          {plan.body_draft ? (
+            <section className="co-review-section">
+              <div className="co-review-section-title">Description</div>
+              <MarkdownView markdown={plan.body_draft} />
+            </section>
+          ) : null}
+          <p className="co-review-assurance">
+            {isPr
+              ? 'Contains only code and docs your agent changed — no personal data, chats, or memory.'
+              : 'Prepared from the source conversation. Nothing is published until you continue with that context.'}
+          </p>
         </div>
-      ) : null}
-      <PublicationReviewNote rec={rec} />
-      <PriorWorkEvidence priorWork={plan.prior_work} />
-      <PlanLabels rec={rec} />
-      {plan.body_draft ? (
-        <section className="co-review-section">
-          <div className="co-review-section-title">Description</div>
-          <MarkdownView markdown={plan.body_draft} />
-        </section>
-      ) : null}
-      {/* What the source-only allowlist already guarantees, said plainly right
-          above the diff. Do not widen this claim beyond that allowlist. */}
-      <p className="co-review-assurance">
-        Contains only code and docs your agent changed — no personal data,
-        chats, or memory.
-      </p>
-      <FileDiffList rec={rec} loadDiff={loadDiff} />
+      </details>
       {typeof plan.target_url === 'string' &&
         plan.target_url.startsWith('https://github.com/') && (
         <a
@@ -540,21 +566,23 @@ export function ReviewPlan({ rec, loadDiff }) {
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
 function ReviewActions({
-  rec, reviewState, onSend, onRunPrePrChecks, onFeedback, onDismiss,
+  rec, reviewState, onSend, onRunPrePrChecks, onReview, onFeedback, onDismiss,
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
   const [sendElapsed, setSendElapsed] = useState(0)
   const [dismissing, setDismissing] = useState(false)
-  // Dismiss abandons the prepared record (a CAS flip the skill treats as
-  // terminal), so it must never fire on a single stray tap. The first tap arms
-  // this in-card confirm; only the explicit Discard inside it runs dismiss().
+  // Dismiss moves the prepared record to History. It is reversible there, but
+  // still must not fire on a stray tap because it leaves the active queue.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
   const [confirmingChecks, setConfirmingChecks] = useState(false)
   const [startingChecks, setStartingChecks] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
+  const isUpdate = rec.plan?.action === 'pr_update'
   const blocked = reviewState?.state === 'needs_refresh'
+  const quality = qualityReviewFor(rec)
+  const reviewIncomplete = isPr && quality.state !== 'all_clear'
   const checksActive = prePrCheckPhase(rec) === 'running'
   const mayRunChecks = canRunPrePrChecks(rec) &&
     typeof onRunPrePrChecks === 'function' && !checksActive
@@ -564,7 +592,7 @@ function ReviewActions({
   const checkConfirmDescriptionId = useId()
 
   // The confirm replaces the action row. Move focus to the safe choice so
-  // keyboard and switch users never land on the destructive action by default.
+  // keyboard and switch users never land on the state-changing action by default.
   useEffect(() => {
     if (confirmingDismiss) keepButtonRef.current?.focus()
   }, [confirmingDismiss])
@@ -586,18 +614,26 @@ function ReviewActions({
   }, [sending])
 
   async function send() {
-    if (!isPr || blocked || checksActive) return
+    if (!isPr || blocked || reviewIncomplete || checksActive) return
     setSending(true)
     setSendNote(null)
     setNote(null)
     try {
       const outcome = (await onSend(rec)) || {}
       if (outcome.ok) {
-        setSendNote('Pull request opened on GitHub for review.')
+        setSendNote(outcome.updated
+          ? 'Pull request updated on GitHub.'
+          : outcome.viaMobius
+            ? 'Draft pull request opened through Möbius.'
+            : 'Pull request opened on GitHub for review.')
       } else if (outcome.pending) {
-        setSendNote('Publishing is still in progress. Contribute will update this card when GitHub finishes.')
+        setSendNote(outcome.viaMobius
+          ? 'Möbius accepted the reviewed change and is opening the draft. This card will update automatically.'
+          : 'Publishing is still in progress. Contribute will update this card when GitHub finishes.')
       } else {
-        setNote(outcome.error || 'Could not submit this contribution.')
+        setNote(outcome.error || (isUpdate
+          ? 'Could not update this pull request.'
+          : 'Could not submit this contribution.'))
       }
     } finally {
       setSending(false)
@@ -674,12 +710,12 @@ function ReviewActions({
         <div
           className="co-confirm"
           role="alertdialog"
-          aria-label="Confirm drop"
+          aria-label="Confirm move to History"
           aria-describedby={confirmDescriptionId}
         >
           <p id={confirmDescriptionId} className="co-confirm-text">
-            Drop this prepared contribution? It moves to History — you can undrop
-            it there anytime.
+            Move this {isPr ? 'prepared contribution' : 'draft'} to History? You
+            can restore it there anytime.
           </p>
           <div className="co-confirm-actions">
             <button
@@ -689,15 +725,15 @@ function ReviewActions({
               disabled={dismissing}
               onClick={() => setConfirmingDismiss(false)}
             >
-              Keep it
+              Cancel
             </button>
             <button
               type="button"
-              className="co-btn co-btn-sm co-btn-danger"
+              className="co-btn co-btn-sm co-btn-caution"
               disabled={dismissing}
               onClick={dismiss}
             >
-              {dismissing ? 'Dropping…' : 'Drop'}
+              {dismissing ? 'Moving…' : 'Move to History'}
             </button>
           </div>
         </div>
@@ -734,7 +770,7 @@ function ReviewActions({
           </div>
         </div>
       ) : (
-        <div className="co-review-actions" aria-label="Contribution actions">
+        <div className="co-review-actions" role="group" aria-label="Contribution actions">
           {blocked ? (
             <button
               type="button"
@@ -748,67 +784,103 @@ function ReviewActions({
             </button>
           ) : isPr ? (
             <>
+              {reviewIncomplete && typeof onReview === 'function' ? (
+                <button
+                  type="button"
+                  className="co-icon-btn co-review-btn is-primary"
+                  onClick={() => onReview(rec)}
+                  aria-label="Review this contribution"
+                  title="Review this contribution"
+                >
+                  <Icon name="review" />
+                  <span>Review</span>
+                </button>
+              ) : null}
               {mayRunChecks ? (
                 <button
                   type="button"
                   className="co-icon-btn co-check-btn"
                   onClick={() => setConfirmingChecks(true)}
                   aria-label={rec.pre_pr_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
-                  title={rec.pre_pr_checks ? 'Run checks again' : 'Run GitHub checks'}
+                  title={rec.pre_pr_checks
+                    ? 'Run the full GitHub checks again on your fork'
+                    : 'Run the full GitHub checks on your fork'}
                 >
-                  <Icon name="refresh" />
-                  {!rec.pre_pr_checks ? <span>Test</span> : null}
+                  <Icon name={rec.pre_pr_checks ? 'refresh' : 'check'} />
+                  <span>{rec.pre_pr_checks ? 'Check again' : 'Run checks'}</span>
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
-                disabled={sending || checksActive}
-                onClick={send}
-                aria-busy={sending}
-                aria-label={checksActive ? 'GitHub checks are still running' : sending ? 'Sending pull request' : 'Send pull request for review'}
-                title={checksActive ? 'Wait for checks' : 'Send for review'}
-              >
-                <Icon name="send" />
-                <span className="co-action-label">
-                  <span>{checksActive ? 'Checking' : 'Send'}</span>
-                  {sending ? (
-                    <span className="co-action-label-sweep" aria-hidden="true">Send</span>
-                  ) : null}
-                </span>
-              </button>
+              {!reviewIncomplete ? (
+                <button
+                  type="button"
+                  className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
+                  disabled={sending || checksActive}
+                  onClick={send}
+                  aria-busy={sending}
+                  aria-label={checksActive
+                    ? 'GitHub checks are still running'
+                    : sending
+                      ? (isUpdate ? 'Updating pull request' : 'Opening pull request')
+                      : (isUpdate ? 'Update pull request' : 'Open pull request for review')}
+                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Update pull request' : 'Open pull request')}
+                >
+                  <Icon name="send" />
+                  <span className="co-action-label">
+                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Update PR' : 'Open PR')}</span>
+                    {sending ? (
+                      <span className="co-action-label-sweep" aria-hidden="true">
+                        {isUpdate ? 'Update PR' : 'Open PR'}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              ) : null}
             </>
-          ) : null}
-          {!blocked ? (
+          ) : typeof onFeedback === 'function' ? (
             <button
               type="button"
-              className="co-icon-btn"
+              className="co-icon-btn co-send-btn is-primary"
+              onClick={feedback}
+              aria-label="Open this request's source conversation"
+              title="Open source conversation"
+            >
+              <Icon name="feedback" />
+              <span>Open chat</span>
+            </button>
+          ) : null}
+          {!blocked && isPr ? (
+            <button
+              type="button"
+              className="co-icon-btn co-secondary-action"
               onClick={feedback}
               aria-label="Give feedback"
               title="Give feedback"
             >
               <Icon name="feedback" />
+              <span>Feedback</span>
             </button>
           ) : null}
           <button
             type="button"
-            className="co-icon-btn is-danger"
+            className={isPr ? 'co-icon-btn co-secondary-action' : 'co-request-history'}
             onClick={() => setConfirmingDismiss(true)}
-            aria-label="Drop contribution"
-            title="Drop"
+            aria-label={isPr ? 'Move contribution to History' : 'Move request draft to History'}
+            title="Move to History"
           >
-            <Icon name="trash" />
+            {isPr ? <><Icon name="cycle" /><span>History</span></> : 'Move to History'}
           </button>
         </div>
       )}
-      {!isPr ? (
+      {!isPr && rec.status === 'prepared' ? (
         <p className="co-review-note">
-          Only prepared PRs can be sent to GitHub from here right now.
+          Requests stay connected to their source conversation, where you can refine or publish them with the full context intact.
         </p>
       ) : null}
       {sending && (
         <p className="co-review-note" role="status" aria-live="polite">
-          Checking the reviewed source and publishing it to GitHub
+          {isUpdate
+            ? 'Checking the reviewed source and updating the pull request'
+            : 'Checking the reviewed source and publishing it to GitHub'}
           {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
         </p>
       )}
@@ -827,11 +899,11 @@ function ReviewActions({
   )
 }
 
-// Undrop: bring a dropped (abandoned) record back to Ready for review. No
-// confirm — restoring is non-destructive (the opposite of Drop), one tap. Its
+// Restore: bring an archived (abandoned) record back to Ready for review. No
+// confirm — restoring is non-destructive, one tap. Its
 // outcome messaging mirrors ReviewActions' dismiss so a conflict/offline reads
 // the same everywhere.
-function UndropAction({ rec, onRestore }) {
+function RestoreAction({ rec, onRestore }) {
   const [restoring, setRestoring] = useState(false)
   const [note, setNote] = useState(null)
 
@@ -846,8 +918,8 @@ function UndropAction({ rec, onRestore }) {
         setNote('This record no longer exists — the feed has been refreshed.')
       } else if (outcome.error) {
         setNote(outcome.error === 'offline'
-          ? 'You are offline — undropping needs a connection; try again once you are back online.'
-          : 'Could not undrop: ' + outcome.error)
+          ? 'You are offline — restoring needs a connection; try again once you are back online.'
+          : 'Could not restore: ' + outcome.error)
       }
     } finally {
       setRestoring(false)
@@ -862,7 +934,7 @@ function UndropAction({ rec, onRestore }) {
         disabled={restoring}
         onClick={restore}
       >
-        {restoring ? 'Undropping…' : 'Undrop'}
+        {restoring ? 'Restoring…' : 'Restore'}
       </button>
       {note && (
         <p className="co-review-error" role="status" aria-live="polite">{note}</p>
@@ -1009,6 +1081,7 @@ export function ContributionCard({
   reviewState,
   onSend,
   onRunPrePrChecks,
+  onReview,
   onFeedback,
   onDismiss,
   onRestore,
@@ -1016,17 +1089,29 @@ export function ContributionCard({
   onConnectApp,
   loadDiff,
   reviewOnly = false,
+  initialExpanded = false,
 }) {
   const status = rec.status || 'prepared'
+  const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const blocked = status === 'prepared' && reviewState?.state === 'needs_refresh'
-  const statusLabel = blocked ? 'Agent update' : (STATUS_LABELS[status] || status)
+  const qualityState = qualityReviewFor(rec)
+  const statusLabel = blocked
+    ? 'Needs update'
+    : status === 'prepared'
+      ? (isPr ? qualityState.label : 'Draft')
+      : (STATUS_LABELS[status] || status)
+  const statusClass = blocked
+    ? 'needs-refresh'
+    : status === 'prepared' && isPr
+      ? qualityState.state
+      : status
   // The one plain-language line under the chip. A blocked card leads with its
   // SubmitErrorAlert instead, and an attention record with its callout, so both
   // suppress the calm lifecycle narration here.
   const narration = blocked ? '' : statusNarration(rec)
   const typeLabel = TYPE_LABELS[rec.type] || rec.type || 'Contribution'
   const when = timeAgo(rec.updated_at || rec.created_at)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(initialExpanded)
 
   // Reflection engagement signal: fire once each time the review opens, never
   // on collapse. `expanded` only ever goes true for a plan card, so this is
@@ -1052,7 +1137,7 @@ export function ContributionCard({
         typeof onSend === 'function' && typeof onDismiss === 'function'
       )
     )
-  const hasPlan = reviewable && rec.plan && typeof rec.plan === 'object'
+  const hasPlan = !!(rec.plan && typeof rec.plan === 'object' && (reviewable || initialExpanded))
   const displayTitle = hasPlan ? (rec.plan.title || title) : title
   const planSummary = hasPlan && rec.summary && rec.summary !== displayTitle
     ? rec.summary
@@ -1061,22 +1146,28 @@ export function ContributionCard({
   return (
     <div className={`co-card${blocked ? ' is-blocked' : ''}${reviewOnly ? ' is-stack-layer' : ''}`}>
       <div className="co-card-top">
-        {hasLink ? (
-          <a
-            className="co-card-title"
-            href={rec.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {displayTitle}
-          </a>
-        ) : (
-          <span className="co-card-title">{displayTitle}</span>
-        )}
-        <span className={`co-chip is-${blocked ? 'needs-refresh' : status}`}>{statusLabel}</span>
+        <h3 className="co-card-heading">
+          {hasLink ? (
+            <a
+              className="co-card-title"
+              href={rec.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {displayTitle}
+            </a>
+          ) : (
+            <span className="co-card-title">{displayTitle}</span>
+          )}
+        </h3>
+        <span className={`co-chip is-${statusClass}`}>{statusLabel}</span>
       </div>
       {narration ? <p className="co-card-status">{narration}</p> : null}
-      {planSummary ? <p className="co-card-summary is-clamped">{planSummary}</p> : null}
+      {planSummary ? (
+        <p className={'co-card-summary' + (expanded ? '' : ' is-clamped')}>
+          {planSummary}
+        </p>
+      ) : null}
       {!hasPlan && rec.summary ? <p className="co-card-summary">{rec.summary}</p> : null}
       {/* Non-plan cards keep the generic type · repo#number · time line; a
           prepared plan card carries its own repo · branch · time line inside
@@ -1112,12 +1203,15 @@ export function ContributionCard({
             <span>{expanded ? 'Hide details' : 'Details'}</span>
             <span className={expanded ? 'is-open' : ''}><Icon name="chevron" size={16} /></span>
           </button>
-          {!reviewOnly && (
+          {/* Focused History/Open cards keep their reviewed plan readable, but
+              active-queue actions belong only to still-prepared work. */}
+          {!reviewOnly && reviewable && (
             <ReviewActions
               rec={rec}
               reviewState={reviewState}
               onSend={onSend}
               onRunPrePrChecks={onRunPrePrChecks}
+              onReview={onReview}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
             />
@@ -1131,6 +1225,7 @@ export function ContributionCard({
             reviewState={reviewState}
             onSend={onSend}
             onRunPrePrChecks={onRunPrePrChecks}
+            onReview={onReview}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
           />
@@ -1143,7 +1238,7 @@ export function ContributionCard({
         </div>
       )}
       {status === 'abandoned' && typeof onRestore === 'function' && (
-        <UndropAction rec={rec} onRestore={onRestore} />
+        <RestoreAction rec={rec} onRestore={onRestore} />
       )}
     </div>
   )

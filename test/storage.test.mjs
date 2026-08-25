@@ -1,7 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { abandonPrepared, loadLedger, restoreAbandoned } from '../storage.js'
+import {
+  abandonPrepared,
+  buildFeedSnapshot,
+  loadLedger,
+  normalizeAppSettings,
+  normalizeCycleState,
+  normalizeSourceSnapshotCache,
+  restoreAbandoned,
+} from '../storage.js'
+
+test('follow sent PRs defaults on without overriding a saved choice', () => {
+  assert.equal(normalizeAppSettings(null).autopilot_default, true)
+  assert.equal(normalizeAppSettings({}).autopilot_default, true)
+  assert.equal(normalizeAppSettings({ autopilot_default: false }).autopilot_default, false)
+})
 
 test('ledger uses JSON content batched into the storage listing', async () => {
   const gets = []
@@ -27,6 +41,46 @@ test('ledger uses JSON content batched into the storage listing', async () => {
   assert.deepEqual(result.records.map((record) => record.id).sort(), ['a', 'b'])
   assert.deepEqual(gets, [])
   assert.deepEqual(result.omitted, [])
+})
+
+test('a canonical ledger record outranks its stale legacy mirror', async () => {
+  globalThis.window = {
+    mobius: {
+      storage: {
+        async list() {
+          return [
+            {
+              name: 'review.record.json', type: 'file', content: {
+                id: 'review', status: 'prepared', updated_at: '2026-08-04T12:00:00Z',
+              },
+            },
+            {
+              name: 'review.json', type: 'file', content: {
+                id: 'review', status: 'abandoned', updated_at: '2026-08-11T12:00:00Z',
+              },
+            },
+            {
+              name: 'legacy-only.record.json', type: 'file', content: {
+                id: 'legacy-only', status: 'prepared',
+              },
+            },
+          ]
+        },
+      },
+    },
+  }
+
+  const { records } = await loadLedger()
+  assert.deepEqual(records.map(({ id, status, path }) => ({ id, status, path })), [
+    {
+      id: 'review', status: 'abandoned',
+      path: 'contributions/review.json',
+    },
+    {
+      id: 'legacy-only', status: 'prepared',
+      path: 'contributions/legacy-only.record.json',
+    },
+  ])
 })
 
 test('ledger isolates entries without batched content without request fan-out', async () => {
@@ -196,4 +250,52 @@ test('restore refuses to write when a CAS version is unavailable', async () => {
   const result = await restoreAbandoned({ rec: { id: 'unsafe' } })
   assert.equal(result.error, 'Safe storage updates are unavailable.')
   assert.equal(writes, 0)
+})
+
+
+test('first-load snapshot keeps every current item and only recent history', () => {
+  const current = [
+    { id: 'prepared', status: 'prepared' },
+    { id: 'open', status: 'open' },
+    { id: 'attention', status: 'merged', needs_attention: true },
+  ]
+  const history = Array.from({ length: 40 }, (_, index) => ({
+    id: `history-${index}`,
+    status: 'merged',
+    updated_at: new Date(2026, 0, index + 1).toISOString(),
+  }))
+
+  const snapshot = buildFeedSnapshot([...history, ...current])
+  assert.deepEqual(snapshot.slice(0, 3).map((record) => record.id), [
+    'prepared', 'open', 'attention',
+  ])
+  assert.equal(snapshot.length, 27)
+  assert.equal(snapshot[3].id, 'history-39')
+  assert.equal(snapshot.at(-1).id, 'history-16')
+})
+
+test('first-load snapshot ignores malformed entries', () => {
+  assert.deepEqual(buildFeedSnapshot([null, {}, { id: 'ok', status: 'draft' }]), [
+    { id: 'ok', status: 'draft' },
+  ])
+})
+
+test('project snapshot cache accepts wrapped and legacy snapshots', () => {
+  const snapshot = { platform: { dirty: true }, apps: [] }
+  assert.equal(normalizeSourceSnapshotCache({ snapshot }), snapshot)
+  assert.equal(normalizeSourceSnapshotCache(snapshot), snapshot)
+  assert.equal(normalizeSourceSnapshotCache([]), null)
+  assert.equal(normalizeSourceSnapshotCache(null), null)
+})
+
+test('cycle state keeps only a bounded conversation pointer', () => {
+  assert.deepEqual(normalizeCycleState({
+    chat_id: ' cycle-chat ',
+    started_at: '2026-08-24T00:00:00Z',
+    secret: 'drop',
+  }), {
+    chat_id: 'cycle-chat',
+    started_at: '2026-08-24T00:00:00Z',
+  })
+  assert.equal(normalizeCycleState({ chat_id: '  ' }), null)
 })

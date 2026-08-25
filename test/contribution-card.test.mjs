@@ -44,8 +44,42 @@ test('open and draft cards expose durable label failures without Send controls',
     assert.match(html, /GitHub did not confirm these labels were applied\./)
     assert.match(html, /Review labels on GitHub/)
     assert.match(html, /do not send it again/)
-    assert.doesNotMatch(html, /Send pull request|Send for review|Contribution actions/)
+    assert.doesNotMatch(html, /(?:Send|Open) pull request|Send for review|Contribution actions/)
   }
+})
+
+test('a prepared request keeps its source-conversation action and note', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+  const html = renderCard({
+    id: 'request-draft', type: 'issue', status: 'prepared',
+    title: 'Clarify the review flow', repo: 'mobius-os/app-demo',
+    plan: { action: 'issue', title: 'Clarify the review flow' },
+  })
+  assert.match(html, /Open this request&#x27;s source conversation/)
+  assert.match(html, /Requests stay connected to their source conversation/)
+})
+
+test('request details do not render an empty pull-request changes section', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderReview } = await cardRenderer()
+  const html = renderReview({
+    id: 'published-request', type: 'issue', status: 'open',
+    repo: 'mobius-os/mobius',
+    plan: {
+      action: 'issue',
+      title: 'Clarify the review flow',
+    },
+  })
+  assert.match(html, /Request details/)
+  assert.doesNotMatch(html, />Changes</)
+  assert.doesNotMatch(html, /co-diff/)
 })
 
 test('prepared platform cards offer a confirmed pre-PR check action', async (t) => {
@@ -57,11 +91,16 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
   const html = renderCard({
     id: 'platform-check', type: 'pr', status: 'prepared',
     repo: 'mobius-os/mobius', title: 'Test before sending',
-    plan: { action: 'pr', repo: 'mobius-os/mobius', title: 'Test before sending' },
+    plan: {
+      action: 'pr', repo: 'mobius-os/mobius', title: 'Test before sending',
+      head_sha: 'reviewed-head',
+    },
+    quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
   assert.match(html, /aria-label="Run GitHub checks"/)
-  assert.match(html, />Test</)
-  assert.match(html, /Send pull request for review/)
+  assert.match(html, /title="Run the full GitHub checks on your fork"/)
+  assert.match(html, />Run checks</)
+  assert.match(html, /Open pull request for review/)
 })
 
 test('prepared cards narrate running, failed, and passing pre-PR checks', async (t) => {
@@ -84,7 +123,7 @@ test('prepared cards narrate running, failed, and passing pre-PR checks', async 
   })
   assert.match(running, /GitHub checks running/)
   assert.match(running, /No pull request is open/)
-  assert.match(running, /GitHub checks are still running/)
+  assert.match(running, /View run on GitHub/)
 
   const failed = renderCard({
     ...base,

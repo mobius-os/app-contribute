@@ -18,6 +18,12 @@ export function hasFullPrAccess(scopes) {
   )
 }
 
+// Only GitHub's full `repo` scope grants write to the owner's PRIVATE repos;
+// `public_repo` does not. Mirrors the backend has_private_repo_access.
+export function hasPrivateRepoAccess(scopes) {
+  return Array.isArray(scopes) && scopes.includes('repo')
+}
+
 export class ConnectionAttemptError extends Error {
   constructor(message, {
     code = 'connection_error',
@@ -95,9 +101,10 @@ export function createGithubDeviceTransport(
   { requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
 ) {
   return {
-    async start({ workflow = true, signal } = {}) {
+    async start({ workflow = true, privateRepos = false, signal } = {}) {
       const response = await connectStart(token, {
         workflow,
+        privateRepos,
         signal,
         timeoutMs: requestTimeoutMs,
       })
@@ -220,6 +227,7 @@ export async function runDeviceConnection({
   transport,
   existingAttempt = null,
   workflow = true,
+  privateRepos = false,
   signal,
   onPending = () => {},
   onProgress = () => {},
@@ -229,7 +237,7 @@ export async function runDeviceConnection({
 }) {
   try {
     const started = existingAttempt
-      || await transport.start({ workflow, signal })
+      || await transport.start({ workflow, privateRepos, signal })
     if (signal?.aborted) {
       return { status: 'cancelled', issue: null }
     }

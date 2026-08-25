@@ -39,9 +39,9 @@ export const STATUS_LABELS = {
   superseded: 'Already shared',
   closed: 'Not merged',
   commented: 'Commented',
-  // Status VALUE stays `abandoned` (the platform ledger contract); only the
-  // owner-facing wording is "Dropped" — matches the Drop / Undrop buttons.
-  abandoned: 'Dropped',
+  // Status VALUE stays `abandoned` (the platform ledger contract); the owner
+  // sees the reversible destination rather than internal lifecycle wording.
+  abandoned: 'In History',
 }
 
 // Plain-language narration for the lifecycle state the owner actually sees.
@@ -59,7 +59,7 @@ export const STATUS_NARRATION = {
   superseded: 'Superseded — the improvement reached main through another contribution',
   closed: 'Not merged — see GitHub for details',
   commented: 'Comment posted',
-  abandoned: 'Dropped — you can undrop it from History anytime',
+  abandoned: 'Moved to History — restore it anytime',
 }
 
 // A record flagged needs_attention leads with the attention callout instead of
@@ -75,6 +75,13 @@ export const ATTENTION_DETAIL = 'Your agent can look and sort it out.'
 export function statusNarration(rec) {
   if (!rec || typeof rec !== 'object' || rec.needs_attention) return ''
   return STATUS_NARRATION[rec.status] || ''
+}
+
+// Review-history rows deliberately collapse every non-merged outcome to the
+// same settled label. Keep that display decision pure so merged and closed
+// histories stay behaviorally covered rather than inferred from Feed source.
+export function historyContributionLabel(status) {
+  return status === 'merged' ? 'Merged' : 'Closed'
 }
 
 // Backend problem codes → one short, human headline. The review-status and
