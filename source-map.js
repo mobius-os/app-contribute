@@ -14,13 +14,20 @@ function repoKey(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
+// Project identity is already present in the source-status key, so the UI can
+// reuse the canonical app artwork without growing another project/icon
+// registry. Unknown and external projects intentionally return no URL and let
+// the view render its stable letter fallback.
+export function projectIconUrl(project) {
+  if (project?.kind === 'platform') return '/moebius.png'
+  if (project?.kind !== 'app') return ''
+  const match = /^app:(\d+)$/.exec(String(project.key || ''))
+  return match ? `/api/apps/${match[1]}/icon?size=64` : ''
+}
+
 export function activeContribution(rec) {
   const isPullRequest = rec?.type === 'pr' || rec?.plan?.action === 'pr'
   return !!rec && isPullRequest && ACTIVE.has(rec.status)
-}
-
-export function recordBranch(rec) {
-  return rec?.plan?.branch || rec?.branch || ''
 }
 
 export function attachSourceProjects(snapshot, records) {
@@ -32,7 +39,9 @@ export function attachSourceProjects(snapshot, records) {
     // sort it into a quiet "Built here" group instead of mislabelling it as a
     // broken tracked project.
     base.push(...snapshot.apps.filter((project) => (
-      repoKey(project?.canonical_repo) || project?.state === 'local_only'
+      repoKey(project?.canonical_repo)
+      || project?.state === 'local_only'
+      || nonnegativeCount(project?.working?.files) > 0
     )))
   }
   const active = (records || []).filter(activeContribution)
@@ -83,6 +92,86 @@ export function attachSourceProjects(snapshot, records) {
     if (a.different !== b.different) return a.different ? -1 : 1
     return String(a.name).localeCompare(String(b.name))
   })
+}
+
+// A preparation handoff covers owner-authored work, never an incoming-only
+// update. The agent still refreshes the owning snapshots and classifies the
+// candidate before staging anything; this predicate only decides whether the
+// Projects UI has a truthful local-work action to offer.
+export function projectNeedsPreparation(project) {
+  if (!project || project.kind === 'external' || !project.available) return false
+  return !!(
+    project.workingFiles > 0
+    || project.localFiles > 0
+    || project.compatibleFiles > 0
+    || project.conflictFiles > 0
+    || (project.builtHere && project.authoredFiles > 0)
+    || (project.sourceComparisonRequired && project.different)
+  )
+}
+
+// Projects deliberately separates a proven local candidate from work whose
+// intent or coverage still needs an agent to establish. A local-only semantic
+// delta is strong evidence of owner-authored work, but overlapping/incoming
+// source, an outdated comparison point, or an active contribution makes the
+// remaining scope ambiguous at project level.
+export function projectPreparationState(project) {
+  if (!projectNeedsPreparation(project)) return 'none'
+  const needsClassification = !!(
+    project.sourceComparisonRequired
+    || (!project.builtHere && project.kind === 'app' && !project.origin?.sha)
+    || !project.semanticAvailable
+    || project.compatibleFiles > 0
+    || project.conflictFiles > 0
+    || project.incomingFiles > 0
+    || (project.contributions?.length || 0) > 0
+  )
+  return needsClassification ? 'sorting' : 'candidate'
+}
+
+export function projectReadyToPrepare(project) {
+  return projectPreparationState(project) === 'candidate'
+}
+
+export function projectNeedsSorting(project) {
+  return projectPreparationState(project) === 'sorting'
+}
+
+export function prepareProjectsAction(projects) {
+  const candidates = (Array.isArray(projects) ? projects : [])
+    .filter(projectNeedsPreparation)
+  if (candidates.length === 0) return null
+
+  const one = candidates.length === 1
+  const names = candidates.slice(0, 12).map((project) => project.name)
+  const remaining = candidates.length - names.length
+  const scope = one
+    ? `Scope this preparation to ${candidates[0].name} and directly required tests or documentation.`
+    : 'Scope this preparation to every current reusable local change shown in Contribute Projects.'
+  const listed = remaining > 0
+    ? `${names.join(', ')}, and ${remaining} more`
+    : names.join(', ')
+
+  return {
+    event: one ? 'prepare_project_changes' : 'prepare_all_project_changes',
+    title: one ? `Prepare ${candidates[0].name} changes` : 'Prepare project changes',
+    label: one ? 'Prepare changes' : 'Prepare all',
+    busyLabel: 'Starting…',
+    startedLabel: one ? `Preparing ${candidates[0].name}` : 'Preparing your projects',
+    startedMessage: 'Stay in Contribute. New reviews and decisions will appear here when they are ready.',
+    count: candidates.length,
+    draft: [
+      one ? `Prepare my changes for ${candidates[0].name}.` : 'Prepare my project changes.',
+      '',
+      scope,
+      `Projects currently indicating local work: ${listed}.`,
+      '',
+      'Refresh the Contribute queue and Projects/source status before deciding what is current.',
+      'Classify working drafts, reusable changes, landed work, incoming updates, conflicts, and private or local-only work.',
+      'Prepare every coherent, privacy-safe upstream contribution in scope and stage it privately in Contribute.',
+      'Do not publish anything. Finish with what was prepared and what remains deliberately local or blocked.',
+    ].join('\n'),
+  }
 }
 
 function decorateProject(project, contributions) {
@@ -154,15 +243,19 @@ function decorateProject(project, contributions) {
   const forks = projectForks(project, contributions)
   const contributionAttention = contributions.some((rec) => rec.needs_attention)
   const builtHere = project?.kind === 'app'
-    && project?.state === 'local_only'
     && !repoKey(project?.canonical_repo)
+    && (
+      project?.state === 'local_only'
+      || workingFiles > 0
+      || authoredFiles > 0
+    )
   const attention = (
     project?.state === 'conflict' ||
     project?.state === 'diverged' ||
     conflictFiles > 0 ||
     compatibleFiles > 0 ||
     incomingFiles > 0 ||
-    workingFiles > 0 ||
+    (sourceComparisonRequired && workingFiles > 0) ||
     contributionAttention
   )
   const ready = contributions.filter((rec) => rec.status === 'prepared').length
@@ -228,25 +321,12 @@ export function projectForks(project, contributions = []) {
   return [...forks.values()].sort((a, b) => a.repo.localeCompare(b.repo))
 }
 
-export function sourceSummary(projects) {
-  return (projects || []).reduce((out, project) => {
-    out.sources += 1
-    out.different += Number(project.different)
-    out.working += Number(project.workingFiles || 0)
-    out.active += project.contributions?.length || 0
-    out.forks += project.forks?.length || 0
-    out.adapted += Number(project.adapted)
-    out.attention += Number(project.attention)
-    return out
-  }, { sources: 0, different: 0, working: 0, active: 0, forks: 0, adapted: 0, attention: 0 })
-}
-
 export function projectMatchesFilter(project, filter) {
   if (filter === 'attention') return project.attention
   if (filter === 'changed') {
-    return project.state === 'local_only' || project.different || project.workingFiles > 0
+    return project.different || project.incomingFiles > 0
   }
-  if (filter === 'shared') return project.contributions.length > 0 || project.forks.length > 0
+  if (filter === 'editing') return project.workingFiles > 0
   return true
 }
 
@@ -271,7 +351,6 @@ export function projectSourceState(project) {
   if (!project.available) return 'unavailable'
   if (project.state === 'conflict' || project.conflictFiles > 0) return 'conflict'
   if (project.sourceComparisonRequired && project.workingFiles > 0) return 'comparison_needed'
-  if (project.workingFiles > 0) return 'working'
   if (
     project.compatibleFiles > 0
     || (project.localFiles > 0 && project.incomingFiles > 0)
@@ -284,6 +363,7 @@ export function projectSourceState(project) {
     return 'comparison_needed'
   }
   if (project.state === 'customized' || project.different) return 'local_changes'
+  if (project.workingFiles > 0) return 'working'
   if (project.state === 'adapted' || project.adapted) return 'adapted'
   return 'aligned'
 }
@@ -308,7 +388,7 @@ export function projectStatus(project) {
     return { label: 'Needs attention', tone: 'danger' }
   }
   if (state === 'comparison_needed') return { label: 'Needs comparison', tone: 'warn' }
-  if (state === 'working') return { label: project.workingFiles + ' working', tone: 'warn' }
+  if (state === 'working') return { label: 'Editing', tone: 'quiet' }
   if (state === 'both_changed') return { label: 'Both sides changed', tone: 'warn' }
   if (state === 'incoming') {
     return { label: project.incomingFiles > 0 ? 'Shared changes' : 'Update available', tone: 'accent' }
@@ -321,50 +401,13 @@ export function projectStatus(project) {
   return { label: 'Aligned', tone: 'ok' }
 }
 
-export function projectFlowStatus(project) {
-  const state = projectSourceState(project)
-  const views = {
-    external: { label: 'Not installed', tone: 'quiet' },
-    built_here: { label: 'Built here', tone: 'accent' },
-    local_only: { label: 'No shared source', tone: 'warn' },
-    unavailable: { label: 'Not tracked', tone: 'quiet' },
-    conflict: { label: 'Update conflict', tone: 'danger' },
-    comparison_needed: { label: 'Needs comparison', tone: 'warn' },
-    working: { label: 'Being edited', tone: 'warn' },
-    both_changed: { label: 'Both changed', tone: 'warn' },
-    incoming: { label: 'Update available', tone: 'accent' },
-    detached: { label: 'Another version', tone: 'warn' },
-    branch: { label: 'Another version', tone: 'warn' },
-    local_changes: { label: 'Committed differences', tone: 'accent' },
-    adapted: { label: 'Installed normally', tone: 'quiet' },
-    aligned: { label: 'Up to date', tone: 'ok' },
-    unknown: { label: 'Not tracked', tone: 'quiet' },
-  }
-  return views[state]
-}
-
 function fileCount(value) {
   const count = Number(value || 0)
   return count + (count === 1 ? ' file' : ' files')
 }
 
-function presentVerb(value) {
-  return Number(value || 0) === 1 ? 'is' : 'are'
-}
-
 function localCount(value) {
   return `${fileCount(value)} ${Number(value || 0) === 1 ? 'remains' : 'remain'} local`
-}
-
-function localWorkDescription(project) {
-  return [
-    project.localFiles > 0
-      ? `${fileCount(project.localFiles)} committed only here`
-      : '',
-    project.workingFiles > 0
-      ? `${fileCount(project.workingFiles)} being edited`
-      : '',
-  ].filter(Boolean).join(' and ') || 'remaining local work'
 }
 
 function incomingCount(project) {
@@ -436,13 +479,7 @@ export function projectOverview(project) {
       tone: 'warn',
     }
   }
-  if (state === 'working') {
-    return {
-      label: 'Local edits in progress',
-      detail: fileCount(project.workingFiles) + ' being edited',
-      tone: 'warn',
-    }
-  }
+  if (state === 'working') return null
   if (state === 'local_changes') {
     return {
       label: 'Committed version differs',
@@ -542,142 +579,8 @@ export function projectRowFacts(project) {
 }
 
 export function actionableSourceProjects(projects) {
-  return (projects || []).filter((project) => projectOverview(project))
-}
-
-export function preparableSourceProjects(projects) {
-  return (projects || []).filter(
-    (project) => projectAgentAction(project)?.event === 'prepare_contribution',
-  )
-}
-
-export function prepareAllAction(projects) {
-  const candidates = preparableSourceProjects(projects)
-  if (candidates.length === 0) return null
-  const projectList = candidates.map((project) => {
-    const repo = project.canonical_repo ? ` — ${project.canonical_repo}` : ''
-    return `- ${project.name || 'Unnamed project'}${repo}`
-  }).join('\n')
-  return {
-    label: `Prepare all (${candidates.length})`,
-    event: 'prepare_all_contributions',
-    autoSend: true,
-    count: candidates.length,
-    draft: [
-      'Prepare private upstream contributions for every eligible local change below:',
-      '',
-      projectList,
-      '',
-      'Inspect each project, check for overlapping upstream work, and stage every worthwhile contribution in Contribute for my review. Do not publish, push, open an issue, or open a pull request. If a project is not ready or should stay local, leave it untouched and explain why.',
-    ].join('\n'),
-  }
-}
-
-// Agent handoffs are specific to the inspected project and conservative about
-// public work. Ordinary project actions open a reviewable draft; explicit batch
-// actions opt into auto-send so the work begins after the owner clicks the
-// clearly labelled Prepare all / Address all button.
-export function projectAgentAction(project) {
-  if (!project) return null
-  const name = project.name || 'this project'
-  const repo = project.canonical_repo ? ` (${project.canonical_repo})` : ''
-  const state = projectSourceState(project)
-  if (state === 'built_here') {
-    return {
-      label: 'Ask agent to publish',
-      event: 'publish_local_app',
-      draft: `Help me publish the locally built app "${name}" to GitHub. Inspect the app first, then confirm the repository name and visibility with me before creating or pushing anything public.`,
-    }
-  }
-  if (state === 'local_only') {
-    return {
-      label: 'Ask agent to review',
-      event: 'review_missing_source',
-      draft: `Inspect ${name}${repo}. It has a GitHub repository but no shared update source on this Möbius. Explain whether the source should be connected before making any changes.`,
-    }
-  }
-  if (state === 'conflict' || state === 'both_changed') {
-    const hasSemanticOverlap = project.semanticAvailable && (
-      project.conflictFiles > 0
-      || project.compatibleFiles > 0
-      || (project.localFiles > 0 && project.incomingFiles > 0)
-    )
-    return {
-      label: 'Ask agent for help',
-      event: 'resolve_source_state',
-      draft: hasSemanticOverlap
-        ? `Inspect ${name}${repo}. Use the semantic source receipt: shared submissions are already excluded, ${fileCount(project.localFiles)} ${presentVerb(project.localFiles)} local-only, ${incomingCount(project)} ${presentVerb(project.incomingFiles)} incoming-only, ${fileCount(project.compatibleFiles)} ${presentVerb(project.compatibleFiles)} compatible, and ${fileCount(project.conflictFiles)} ${presentVerb(project.conflictFiles)} unresolved. Explain the remaining groups and help me choose a safe next step without discarding local work.`
-        : `Inspect ${name}${repo}. My local version and the shared version both have changes. Explain what differs and help me choose a safe next step without discarding local work.`,
-    }
-  }
-  if (state === 'comparison_needed') {
-    return {
-      label: 'Ask agent to compare',
-      event: 'review_source_position',
-      draft: `Inspect ${name}${repo}. The shared repository and this app’s recorded update source point to different revisions. Compare the live source with current shared work, separate already-landed changes from genuine local work, and explain what remains. Do not prepare or publish anything yet.`,
-    }
-  }
-  if (state === 'working' || state === 'local_changes') {
-    const localWork = localWorkDescription(project)
-    if (project.contributions?.length > 0) {
-      return {
-        label: 'Ask agent to inventory',
-        event: 'review_remaining_changes',
-        draft: project.semanticAvailable
-          ? `Inventory the changes still shown for ${name}${repo} after landed submissions were excluded: ${localWork}. Separate changes already represented by active Contribute reviews from genuinely unreviewed work and intentional local-only behavior. Do not prepare or publish anything yet; explain the remaining groups first.`
-          : `Inventory the local changes in ${name}${repo}: ${localWork}. Separate changes already represented by active Contribute reviews from genuinely unreviewed work and intentional local-only behavior. Do not prepare or publish anything yet; explain the remaining groups first.`,
-      }
-    }
-    return {
-      label: 'Ask agent to prepare',
-      event: 'prepare_contribution',
-      draft: project.semanticAvailable
-        ? `Inspect the changes still shown for ${name}${repo} after landed submissions were excluded: ${localWork}. Prepare upstream contributions for the worthwhile changes. Do not publish anything yet; stage them in Contribute so I can review them first.`
-        : `Inspect the local changes in ${name}${repo}: ${localWork}. Prepare upstream contributions for the worthwhile changes. Do not publish anything yet; stage them in Contribute so I can review them first.`,
-    }
-  }
-  if (state === 'incoming') {
-    return {
-      label: 'Ask agent about update',
-      event: 'review_source_update',
-      draft: `Review the available shared update for ${name}${repo}. Explain what changed and whether it is safe to update my local version before making any changes.`,
-    }
-  }
-  if (state === 'detached' || state === 'branch') {
-    return {
-      label: 'Ask agent to review',
-      event: 'review_source_position',
-      draft: `Inspect the current local version of ${name}${repo}. Explain how it relates to main and whether any local work needs to be preserved or contributed.`,
-    }
-  }
-  return null
-}
-
-export function contributionRelationship(rec, project) {
-  const plan = rec?.plan || {}
-  const reviewedHead = plan.head_sha || ''
-  const remoteHead = rec?.last_submit_push_sha || reviewedHead
-  const base = plan.base_sha || rec?.last_submit_upstream_sha || ''
-  const local = project?.head_sha || ''
-  if (remoteHead && local && remoteHead === local) return 'Matches your main'
-  if (base && local && base === local) return 'Based on your main'
-  if (rec?.status === 'prepared') {
-    return base ? 'Private · based on ' + base.slice(0, 7) : 'Private · not public'
-  }
-  if (remoteHead && remoteHead !== reviewedHead) {
-    return 'Published as ' + remoteHead.slice(0, 7)
-  }
-  return base ? 'Based on ' + base.slice(0, 7) : 'Relationship unknown'
-}
-
-export function formatSourceDelta(project) {
-  const tree = project?.tree
-  if (!tree?.available) return 'Source comparison unavailable'
-  const authored = Number(tree.authored_files ?? tree.files ?? 0)
-  const managed = Number(tree.managed_files || 0)
-  if (!authored && !managed) return 'Source trees match'
-  const parts = []
-  if (authored) parts.push(authored + (authored === 1 ? ' source file' : ' source files'))
-  if (managed) parts.push(managed + ' install-managed')
-  return parts.join(' · ')
+  return (projects || []).filter((project) => {
+    const state = projectSourceState(project)
+    return state !== 'working' && state !== 'built_here' && projectOverview(project)
+  })
 }
