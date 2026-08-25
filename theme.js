@@ -71,7 +71,7 @@ export const CSS = `
 }
 
 .co-header-shell {
-  flex: 0 0 auto; width: 100%; background: var(--bg); border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; width: 100%; background: var(--bg);
 }
 .co-header {
   position: relative; display: grid;
@@ -1736,15 +1736,6 @@ button.co-workspace-task { cursor: pointer; }
 
 /* mobius-ui:CenteredRail v1 */
 @media (min-width: 900px) {
-  .co-root {
-    background:
-      linear-gradient(var(--bg), var(--bg)) center / min(100%, 760px) 100% no-repeat,
-      radial-gradient(ellipse 76% 112% at 50% 46%,
-        color-mix(in srgb, var(--accent) 18%, var(--bg)) 0%,
-        color-mix(in srgb, var(--accent) 7%, var(--bg)) 46%,
-        color-mix(in srgb, var(--text) 2%, var(--bg)) 100%);
-
-  }
   .co-header-shell { width: min(100%, 760px); margin-inline: auto; }
 }
 /* /mobius-ui:CenteredRail */

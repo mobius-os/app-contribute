@@ -161,13 +161,14 @@ test('lost single and stacked submit responses reconcile durable state', () => {
   assert.doesNotMatch(apiSource, /return \{ error: String\(\(err && err\.message\)/)
 })
 
-test('wide collection and review views share one centered rail', () => {
+test('wide collection and review views share centered guides on one continuous canvas', () => {
   assert.match(themeSource, /\.co-page \{[\s\S]*?width: min\(100%, 1120px\)/)
   assert.match(themeSource, /\.co-tabs,\s*\.co-contributions-view \{\s*width: min\(100%, 760px\); margin-inline: auto/)
   assert.match(themeSource, /\.co-header \{[^}]*width: min\(100%, 760px\); margin-inline: auto/)
-  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-root \{[\s\S]*?linear-gradient\(var\(--bg\), var\(--bg\)\) center \/ min\(100%, 760px\) 100% no-repeat/)
+  assert.doesNotMatch(themeSource, /radial-gradient|linear-gradient\(var\(--bg\), var\(--bg\)\)/)
   assert.doesNotMatch(themeSource, /\.co-root::before/)
   assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 760px\); margin-inline: auto/)
+  assert.match(themeSource, /\.co-header-shell \{\s*flex: 0 0 auto; width: 100%; background: var\(--bg\);\s*\}/)
   assert.match(appSource, /<div className="co-header-shell">[\s\S]*?<\/div>\s*<main/)
   assert.doesNotMatch(themeSource, /\.co-page\.is-sources \{\s*width:/)
 })
