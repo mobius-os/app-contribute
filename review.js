@@ -465,6 +465,7 @@ export function partitionReviewUnits(units, reviewStatus) {
 }
 
 const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
+const REVIEW_QUEUE_INTENT = 'reviews:queue'
 
 // Shell cards address one immutable ledger identity. The record's current
 // stage and stack membership remain Contribute's decision, so a stale card can
@@ -472,8 +473,74 @@ const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
 // may have changed since the card rendered.
 export function contributionReviewTargetFromIntent(intent) {
   if (typeof intent !== 'string') return null
-  const match = REVIEW_INTENT.exec(intent.trim())
+  const normalized = intent.trim()
+  if (normalized === REVIEW_QUEUE_INTENT) return { queue: true }
+  const match = REVIEW_INTENT.exec(normalized)
   return match ? { recordId: match[1] } : null
+}
+
+function focusedStackMeta(record) {
+  const raw = record?.plan?.stack || record?.stack
+  if (!raw || typeof raw !== 'object') return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const total = Number(raw.total)
+  const position = Number(raw.position)
+  if (!id || !Number.isInteger(total) || total < 1) return null
+  return {
+    id,
+    repo: String(record?.plan?.repo || record?.repo || ''),
+    total,
+    position: Number.isInteger(position) ? position : 0,
+  }
+}
+
+// A shell handoff may arrive while the authoritative ledger is still paging.
+// The cached snapshot deliberately contains every active record, so a complete
+// stack there is enough to render immediately. Publication still fresh-reads
+// every exact record; this only removes an avoidable navigation wait.
+export function focusedContributionReady(records, recordId) {
+  const list = Array.isArray(records) ? records : []
+  const focused = list.find((record) => record?.id === recordId)
+  if (!focused) return false
+  const stack = focusedStackMeta(focused)
+  if (!stack) return true
+  const positions = new Set(list.flatMap((record) => {
+    const candidate = focusedStackMeta(record)
+    return candidate
+      && candidate.id === stack.id
+      && candidate.repo === stack.repo
+      && candidate.total === stack.total
+      && candidate.position >= 1
+      && candidate.position <= stack.total
+      ? [candidate.position]
+      : []
+  }))
+  return positions.size === stack.total
+}
+
+// Opening the same record twice can reuse a previously settled lookup, while
+// an already-mounted app can have a globally complete but now-stale ledger.
+// Bind readiness to the exact intent nonce, then let a later ledger refresh
+// satisfy an incomplete stack without ever treating global ledger readiness
+// as proof that this named review is absent.
+export function focusedContributionNavigationReady(focusTarget, lookup, records) {
+  if (!focusTarget) return true
+  if (focusTarget.queue) {
+    return lookup?.nonce === focusTarget.nonce
+      && lookup?.queue === true
+      && lookup?.ready === true
+  }
+  const recordId = typeof focusTarget.recordId === 'string'
+    ? focusTarget.recordId
+    : ''
+  if (
+    !recordId
+    || lookup?.nonce !== focusTarget.nonce
+    || lookup?.recordId !== recordId
+  ) {
+    return false
+  }
+  return lookup.ready === true || focusedContributionReady(records, recordId)
 }
 
 export function locateContributionReview(phaseUnits, recordId) {

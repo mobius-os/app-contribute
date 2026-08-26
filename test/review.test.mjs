@@ -8,6 +8,8 @@ import {
   contributionReviewTargetFromIntent,
   contributionsNeedingAttention,
   finishContributionCycleAction,
+  focusedContributionNavigationReady,
+  focusedContributionReady,
   contributionCyclePhase,
   contributionCycleProgress,
   isContributionCycleChat,
@@ -41,6 +43,9 @@ test('shell review intents name one ledger record without encoding presentation 
   assert.equal(contributionReviewTargetFromIntent('review:../escape'), null)
   assert.equal(contributionReviewTargetFromIntent('reviews:record'), null)
   assert.equal(contributionReviewTargetFromIntent(null), null)
+  assert.deepEqual(contributionReviewTargetFromIntent('reviews:queue'), {
+    queue: true,
+  })
 })
 
 test('a record intent resolves its current phase and enclosing stack', () => {
@@ -62,22 +67,92 @@ test('a record intent resolves its current phase and enclosing stack', () => {
   assert.equal(locateContributionReview(phases, 'missing'), null)
 })
 
-test('the app resolves trusted standalone intents without waiting for the full ledger', () => {
+test('the app resolves trusted focused intents without waiting for the full ledger', () => {
   assert.match(appSource, /event\.origin !== window\.location\.origin/)
   assert.match(appSource, /event\.source !== window\.parent/)
   assert.match(appSource, /contributionReviewTargetFromIntent\(event\.data\.intent\)/)
   assert.match(appSource, /setView\('prs'\)/)
   assert.match(appSource, /loadContributionRecord\(recordId\)/)
   assert.match(appSource, /upsertRecord\(recordsRef\.current, record\)/)
+  assert.match(appSource, /focusedContributionReady\(next, recordId\)/)
   assert.match(appSource, /focusTarget=\{reviewFocus\}/)
   assert.match(appSource, /focusReady=\{focusedReviewReady\}/)
   assert.match(appSource, /loading \|\| !focusedReviewReady/)
-  assert.match(feedSource, /!focusTarget\?\.recordId \|\| !focusReady/)
+  assert.match(feedSource, /if \(!focusTarget \|\| !focusReady\) return/)
+  assert.match(feedSource, /if \(focusTarget\.queue\)/)
   assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
   assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
   assert.match(feedSource, /Review no longer available/)
   assert.match(feedSource, /<h2 className="co-visually-hidden">Contribution review<\/h2>/)
   assert.doesNotMatch(feedSource, /<ViewHeading title="Reviews" description="Inspect the complete change before you act\."/)
+})
+
+test('a focused review waits for its exact refresh instead of trusting a stale ledger', () => {
+  const focus = { recordId: 'layer-1', nonce: 'new-intent' }
+  const pending = { recordId: 'layer-1', nonce: 'new-intent', ready: false }
+  const staleLookup = { recordId: 'layer-1', nonce: 'old-intent', ready: true }
+  const stack = {
+    id: 'review-stack', name: 'Review stack', position: 1, total: 2,
+  }
+  const first = { id: 'layer-1', plan: { repo: 'mobius-os/mobius', stack } }
+  const second = {
+    id: 'layer-2',
+    plan: {
+      repo: 'mobius-os/mobius',
+      stack: { ...stack, position: 2 },
+    },
+  }
+
+  assert.equal(focusedContributionNavigationReady(null, pending, []), true)
+  assert.equal(focusedContributionNavigationReady(
+    { queue: true, nonce: 'queue-intent' },
+    { queue: true, nonce: 'old-intent', ready: true },
+    [],
+  ), false)
+  assert.equal(focusedContributionNavigationReady(
+    { queue: true, nonce: 'queue-intent' },
+    { queue: true, nonce: 'queue-intent', ready: true },
+    [],
+  ), true)
+  assert.equal(focusedContributionNavigationReady(focus, staleLookup, [first, second]), false)
+  assert.equal(focusedContributionNavigationReady(focus, pending, [first]), false)
+  assert.equal(focusedContributionNavigationReady(focus, pending, [first, second]), true)
+  assert.equal(focusedContributionNavigationReady(
+    focus,
+    { ...pending, ready: true },
+    [],
+  ), true)
+})
+
+test('review-facing refreshes reject stale async settlements', () => {
+  assert.match(appSource, /const reviewStatusRequestRef = useRef\(0\)/)
+  assert.match(appSource, /requestId !== reviewStatusRequestRef\.current/)
+  assert.match(appSource, /const incomingReviewsRequestRef = useRef\(0\)/)
+  assert.match(appSource, /requestId !== incomingReviewsRequestRef\.current/)
+  assert.match(appSource, /connRef\.current\.state !== 'connected'/)
+  assert.match(appSource, /incomingReviewsRequestRef\.current \+= 1/)
+  assert.match(appSource, /refreshMountedLedger: ledgerReadyRef\.current/)
+  assert.match(appSource, /await refreshCoordinatorRef\.current\(\)/)
+  assert.match(appSource, /document\.addEventListener\('visibilitychange', resolveIncompleteStack\)/)
+  assert.match(appSource, /window\.mobius\?\.online === false/)
+})
+
+test('mount-time live state reconciles with newer focused and action results', () => {
+  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next\)\)/)
+  assert.match(appSource, /slower startup work cannot overwrite it/)
+})
+
+test('a complete active stack can open from the fast snapshot', () => {
+  const stack = (id, position, total = 3) => ({
+    id,
+    repo: 'mobius-os/mobius',
+    plan: { repo: 'mobius-os/mobius', stack: { id: 'drawer', position, total } },
+  })
+  const records = [stack('one', 1), stack('two', 2), stack('three', 3)]
+  assert.equal(focusedContributionReady(records, 'one'), true)
+  assert.equal(focusedContributionReady(records.slice(0, 2), 'one'), false)
+  assert.equal(focusedContributionReady([{ id: 'single' }], 'single'), true)
+  assert.equal(focusedContributionReady(records, 'missing'), false)
 })
 
 test('only mount and foreground freshness enumerate the complete history', () => {

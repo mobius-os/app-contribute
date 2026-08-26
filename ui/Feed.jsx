@@ -337,7 +337,16 @@ function ReviewWorkspace({
   }, [phaseUnits, selectedKey])
 
   useEffect(() => {
-    if (!focusTarget?.recordId || !focusReady) return
+    if (!focusTarget || !focusReady) return
+    if (focusTarget.queue) {
+      setFilter(firstNonempty)
+      setSelectedKey(null)
+      setMissingTarget(false)
+      setVisibleLimit(STAGE_PAGE_SIZE)
+      onFocusConsumed?.(focusTarget.nonce)
+      return
+    }
+    if (!focusTarget.recordId) return
     const located = locateContributionReview(phaseUnits, focusTarget.recordId)
     if (located) {
       setFilter(located.phase)

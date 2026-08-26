@@ -35,8 +35,8 @@ import {
   syncSetupCompletion,
   upsertRecord,
 } from './domain.js'
-import { contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
-import { preparedContributionUnits, stackMeta } from './stack.js'
+import { contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
+import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
@@ -178,7 +178,7 @@ export default function ContributeApp({ appId, token }) {
   })
   const [reviewFocus, setReviewFocus] = useState(null)
   const [focusedRecordLookup, setFocusedRecordLookup] = useState({
-    recordId: '', ready: false,
+    nonce: '', recordId: '', ready: false,
   })
   const [incomingReviews, setIncomingReviews] = useState([])
   // Whether a new Send grants autopilot. Default on; consulted only at Send
@@ -196,6 +196,8 @@ export default function ContributeApp({ appId, token }) {
   useEffect(() => { recordsRef.current = records }, [records])
   const connRef = useRef(conn)
   const connectionRequestRef = useRef(0)
+  const reviewStatusRequestRef = useRef(0)
+  const incomingReviewsRequestRef = useRef(0)
   const agentStartRef = useRef(false)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
@@ -396,8 +398,11 @@ export default function ContributeApp({ appId, token }) {
   }, [fetchRefreshed, replaceFeed])
 
   const refreshReviewStatus = useCallback(async () => {
+    const requestId = reviewStatusRequestRef.current + 1
+    reviewStatusRequestRef.current = requestId
     setReviewStatus((current) => ({ ...current, state: 'loading' }))
     const outcome = await fetchReviewStatus(token, appId)
+    if (requestId !== reviewStatusRequestRef.current) return null
     if (outcome.ok) {
       const indexed = indexReviewStatus(outcome.data)
       setReviewStatus(indexed)
@@ -479,18 +484,23 @@ export default function ContributeApp({ appId, token }) {
   }, [token, fromCache, runLiveRefresh, refreshPrePrChecksState])
 
   const refreshIncomingReviews = useCallback(async () => {
+    const requestId = incomingReviewsRequestRef.current + 1
+    incomingReviewsRequestRef.current = requestId
     if (connRef.current.state !== 'connected') {
       setIncomingReviews([])
       return []
     }
     const rows = await fetchIncomingReviews(token)
+    if (
+      requestId !== incomingReviewsRequestRef.current
+      || connRef.current.state !== 'connected'
+    ) return []
     setIncomingReviews(rows)
     return rows
   }, [token])
 
   useEffect(() => {
-    if (conn.state === 'connected') refreshIncomingReviews()
-    else setIncomingReviews([])
+    refreshIncomingReviews()
   }, [conn.state, refreshIncomingReviews])
 
   // Mount: the cached first screen, GitHub status, and app preferences are all
@@ -548,16 +558,19 @@ export default function ContributeApp({ appId, token }) {
 
       if (ledger.fromCache) return
       let toCache = recs
+      let feedReplaced = false
       if (status.state === 'connected') {
         const next = await fetchRefreshed(recs)
         if (cancelled) return
         if (next !== recs) {
-          recordsRef.current = next
-          setRecords(next)
-          toCache = next
+          // A public action or focused exact read may have advanced one row
+          // while the mount-time GitHub overlay was in flight. Reconcile at
+          // settlement so that slower startup work cannot overwrite it.
+          toCache = replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
+          feedReplaced = true
         }
       }
-      cacheFeed(toCache)
+      if (!feedReplaced) cacheFeed(toCache)
     }
     load().catch((err) => {
       if (cancelled) return
@@ -571,7 +584,7 @@ export default function ContributeApp({ appId, token }) {
       })
     })
     return () => { cancelled = true }
-  }, [token, fetchRefreshed, signalReady])
+  }, [token, fetchRefreshed, replaceFeed, signalReady])
 
   // Event-driven liveness: refresh when the app becomes actionable again.
   // Focus + visibility can fire together, and an online transition can land
@@ -662,6 +675,7 @@ export default function ContributeApp({ appId, token }) {
       setReviewFocus({
         ...target,
         nonce: String(event.data.nonce ?? Date.now()),
+        refreshMountedLedger: ledgerReadyRef.current,
       })
       setView('prs')
       window.mobius?.signal?.('contribution_review_opened', { id: target.recordId })
@@ -670,43 +684,139 @@ export default function ContributeApp({ appId, token }) {
     return () => window.removeEventListener('message', onReviewIntent)
   }, [setView])
 
+  // A queue intent has no exact record to fresh-read. If it arrived after the
+  // app had already mounted, join the same deduplicated foreground refresh as
+  // focus/visibility events before exposing the queue. An intent that arrived
+  // during the initial authoritative scan can use that scan when it settles.
+  useEffect(() => {
+    const nonce = reviewFocus?.nonce
+    if (!reviewFocus?.queue || !nonce) return undefined
+    let cancelled = false
+    let resolving = false
+    setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: false })
+
+    const resolveFocusedQueue = async () => {
+      if (cancelled || resolving || !ledgerReadyRef.current) return
+      if (!reviewFocus.refreshMountedLedger) {
+        setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: true })
+        return
+      }
+      if (document.visibilityState !== 'visible') return
+      resolving = true
+      try {
+        await refreshCoordinatorRef.current()
+        if (!cancelled) {
+          setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: true })
+        }
+      } finally {
+        resolving = false
+      }
+    }
+
+    resolveFocusedQueue()
+    document.addEventListener('visibilitychange', resolveFocusedQueue)
+    window.addEventListener('focus', resolveFocusedQueue)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', resolveFocusedQueue)
+      window.removeEventListener('focus', resolveFocusedQueue)
+    }
+  }, [reviewFocus?.queue, reviewFocus?.nonce, reviewFocus?.refreshMountedLedger, ledgerReady])
+
   // The full contribution history is intentionally loaded in the background,
-  // but it can span hundreds of records. A standalone review should not wait
-  // for that enumeration: fetch its exact row directly and add it to the live
-  // feed. A dependency stack still waits for the ledger because showing only
-  // one layer would make the review incomplete and potentially misleading.
+  // but it can span hundreds of records. Fetch the exact focused row directly,
+  // then render as soon as the active snapshot contains either that standalone
+  // record or every layer in its stack. Public actions still fresh-read their
+  // exact records, so this fast path changes navigation latency, not authority.
   useEffect(() => {
     const recordId = reviewFocus?.recordId
-    if (!recordId || ledgerReady) return undefined
+    const nonce = reviewFocus?.nonce
+    if (reviewFocus?.queue || !recordId || !nonce) return undefined
     let cancelled = false
-    setFocusedRecordLookup({ recordId, ready: false })
-    loadContributionRecord(recordId).then((record) => {
-      if (cancelled) return
-      if (record) {
-        const next = upsertRecord(recordsRef.current, record)
-        recordsRef.current = next
-        setRecords(next)
-        setLoading(false)
+    let resolvingStack = false
+    let needsStackRefresh = false
+    setFocusedRecordLookup({ nonce, recordId, ready: false })
+
+    const resolveIncompleteStack = async () => {
+      if (
+        cancelled
+        || resolvingStack
+        || !needsStackRefresh
+        || !ledgerReadyRef.current
+        || window.mobius?.online === false
+        || document.visibilityState !== 'visible'
+      ) return
+      resolvingStack = true
+      try {
+        await refreshCoordinatorRef.current()
+        if (!cancelled) setFocusedRecordLookup({ nonce, recordId, ready: true })
+      } finally {
+        resolvingStack = false
       }
-      setFocusedRecordLookup({
-        recordId,
-        ready: !record || !stackMeta(record),
-      })
-    }).catch(() => {
+    }
+
+    async function resolveFocusedReview() {
+      const record = await loadContributionRecord(recordId)
+      if (cancelled) return
+      if (!record) {
+        if (window.mobius?.online === false) {
+          // An absent offline cache entry is not proof that the review was
+          // deleted. A complete cached unit may still open safely; otherwise
+          // keep waiting for a real foreground read.
+          if (focusedContributionReady(recordsRef.current, recordId)) {
+            setFocusedRecordLookup({ nonce, recordId, ready: true })
+          } else {
+            needsStackRefresh = true
+          }
+          return
+        }
+        // Both canonical and legacy exact reads settled without a record. This
+        // is the only focused path that may truthfully report disappearance
+        // without waiting for the larger ledger scan.
+        setFocusedRecordLookup({ nonce, recordId, ready: true })
+        return
+      }
+
+      const next = upsertRecord(recordsRef.current, record)
+      recordsRef.current = next
+      setRecords(next)
+      setLoading(false)
+      if (focusedContributionReady(next, recordId)) {
+        setFocusedRecordLookup({ nonce, recordId, ready: true })
+        return
+      }
+
+      // A focused stack record does not name every sibling. If the mounted
+      // app's prior ledger predates this stack, join the existing deduplicated
+      // foreground refresh rather than creating a third full-history reader.
+      // Mount already owns the same scan while the first ledger is loading.
+      needsStackRefresh = true
+      await resolveIncompleteStack()
+    }
+    document.addEventListener('visibilitychange', resolveIncompleteStack)
+    window.addEventListener('focus', resolveIncompleteStack)
+    window.addEventListener('online', resolveIncompleteStack)
+    resolveFocusedReview().catch(() => {
       // A failed direct read is not proof that the review disappeared. Keep
-      // waiting for the already-running authoritative ledger scan instead.
-      if (!cancelled) setFocusedRecordLookup({ recordId, ready: false })
+      // waiting for any foreground ledger refresh instead.
+      if (!cancelled) setFocusedRecordLookup({ nonce, recordId, ready: false })
     })
-    return () => { cancelled = true }
-  }, [reviewFocus?.recordId, ledgerReady])
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', resolveIncompleteStack)
+      window.removeEventListener('focus', resolveIncompleteStack)
+      window.removeEventListener('online', resolveIncompleteStack)
+    }
+  }, [reviewFocus?.recordId, reviewFocus?.nonce, ledgerReady])
 
   const consumeReviewFocus = useCallback((nonce) => {
     setReviewFocus((current) => current?.nonce === nonce ? null : current)
   }, [])
 
-  const focusedReviewReady = !reviewFocus || ledgerReady || (
-    focusedRecordLookup.recordId === reviewFocus.recordId
-      && focusedRecordLookup.ready
+  const focusedReviewReady = focusedContributionNavigationReady(
+    reviewFocus,
+    focusedRecordLookup,
+    records,
   )
 
   const viewProjects = useCallback((projectKey = '') => {
@@ -1074,6 +1184,10 @@ export default function ContributeApp({ appId, token }) {
         error: 'Assigned on GitHub, but the review conversation did not start. Try again to resume it.',
       }
     }
+    // The assignment settled after any earlier incoming-review request began.
+    // Invalidate that request before hiding this row so its stale response
+    // cannot put the just-assigned review back into the queue.
+    incomingReviewsRequestRef.current += 1
     setIncomingReviews((current) => current.filter((row) => row.url !== item.url))
     return { ok: true }
   }, [appId, token, startAgentTask])
