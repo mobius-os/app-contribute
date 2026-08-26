@@ -1054,7 +1054,7 @@ def main() -> int:
     args = parser.parse_args()
     app_id = os.environ.get("APP_ID", "")
     api = os.environ.get("API_BASE_URL", "http://localhost:8000")
-    token = os.environ.get("SERVICE_TOKEN", "")
+    token = os.environ.get("APP_TOKEN", "")
     if not app_id or not token:
         return 0
     counts = run(Storage(api, token, app_id), GitHub(), dry_run=args.dry_run)
