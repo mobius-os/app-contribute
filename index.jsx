@@ -61,6 +61,7 @@ import {
   submitContributionViaMobius,
   submitContributionStack,
   updateContribution,
+  updateContributionStack,
   withdrawMobiusContribution,
 } from './api.js'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
@@ -1208,7 +1209,13 @@ export default function ContributeApp({ appId, token }) {
         error: 'Related PR stacks still use your personal GitHub connection. Connect GitHub and choose Personal GitHub, or prepare these as independent changes.',
       }
     }
-    const outcome = await submitContributionStack({
+    const updating = stackRecords.every(
+      (rec) => rec?.plan?.action === 'pr_update',
+    )
+    const writeStack = updating
+      ? updateContributionStack
+      : submitContributionStack
+    const outcome = await writeStack({
       appId,
       token,
       recordIds: stackRecords.map((rec) => rec.id),
@@ -1218,10 +1225,13 @@ export default function ContributeApp({ appId, token }) {
       applyRecordUpdates(updates)
     }
     if (outcome.ok) {
-      window.mobius?.signal?.('contribution_stack_submitted', {
-        stack_id: stackRecords[0]?.plan?.stack?.id || '',
-        item_count: outcome.submitted?.length || 0,
-      })
+      window.mobius?.signal?.(
+        updating ? 'contribution_stack_updated' : 'contribution_stack_submitted',
+        {
+          stack_id: stackRecords[0]?.plan?.stack?.id || '',
+          item_count: outcome.submitted?.length || 0,
+        },
+      )
       refreshReviewStatus()
       return { ok: true, submitted: outcome.submitted?.length || 0 }
     }

@@ -5,6 +5,7 @@ import {
   fetchMobiusContributionStatus,
   submitContributionViaMobius,
   updateContribution,
+  updateContributionStack,
   withdrawMobiusContribution,
 } from '../api.js'
 
@@ -140,6 +141,43 @@ test('existing PR update uses the dedicated reviewed fast-forward endpoint', asy
     assert.deepEqual(JSON.parse(seen.options.body), {})
     assert.equal(outcome.ok.status, 'open')
     assert.equal(outcome.url, 'https://github.com/mobius-os/app-contribute/pull/58')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('existing PR stack update uses the complete-chain fast-forward endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  let seen = null
+  globalThis.fetch = async (url, options) => {
+    seen = { url, options }
+    return response(200, {
+      records: [
+        { id: 'stack-01', status: 'open', number: 58 },
+        { id: 'stack-02', status: 'open', number: 59 },
+      ],
+      updated: [
+        { id: 'stack-01', number: 58 },
+        { id: 'stack-02', number: 59 },
+      ],
+    })
+  }
+  try {
+    const outcome = await updateContributionStack({
+      appId: 80,
+      token: 'scoped-token',
+      recordIds: ['stack-01', 'stack-02'],
+    })
+    assert.equal(
+      seen.url,
+      '/api/github/contributions/80/update-stack',
+    )
+    assert.equal(seen.options.method, 'POST')
+    assert.deepEqual(JSON.parse(seen.options.body), {
+      record_ids: ['stack-01', 'stack-02'],
+    })
+    assert.equal(outcome.ok.length, 2)
+    assert.deepEqual(outcome.submitted.map((item) => item.number), [58, 59])
   } finally {
     globalThis.fetch = originalFetch
   }
