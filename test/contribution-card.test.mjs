@@ -97,9 +97,9 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
     },
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
-  assert.match(html, /aria-label="Run GitHub checks"/)
+  assert.match(html, /aria-label="Run GitHub checks on my fork"/)
   assert.match(html, /title="Run the full GitHub checks on your fork"/)
-  assert.match(html, />Run checks</)
+  assert.match(html, />Check on fork</)
   assert.match(html, /Open pull request for review/)
 })
 
@@ -185,7 +185,7 @@ test('prepared cards narrate running, failed, and passing pre-PR checks', async 
   })
   assert.match(failed, /GitHub checks need a fix/)
   assert.match(failed, /Fix in chat/)
-  assert.match(failed, /Run GitHub checks again/)
+  assert.match(failed, /Run GitHub checks on my fork again/)
 
   const passed = renderCard({
     ...base,

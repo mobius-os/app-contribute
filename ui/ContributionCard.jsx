@@ -578,7 +578,7 @@ export function ReviewPlan({ rec, loadDiff }) {
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
 function ReviewActions({
-  rec, reviewState, onSend, onRunPrePrChecks, onReview, onFeedback, onDismiss,
+  rec, reviewState, reviewAction, onSend, onRunPrePrChecks, onReview, onFeedback, onDismiss,
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
@@ -803,9 +803,9 @@ function ReviewActions({
             <>
               {reviewIncomplete && typeof onReview === 'function' ? (
                 <AgentHandoffButton
-                  action={reviewAllAction([rec])}
-                  className="co-icon-btn co-review-btn is-primary"
+                  action={reviewAction || reviewAllAction([rec])}
                   onStart={onReview}
+                  className="co-icon-btn co-review-btn is-primary"
                   icon="review"
                 />
               ) : null}
@@ -814,13 +814,13 @@ function ReviewActions({
                   type="button"
                   className="co-icon-btn co-check-btn"
                   onClick={() => setConfirmingChecks(true)}
-                  aria-label={rec.pre_pr_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
+                  aria-label={rec.pre_pr_checks ? 'Run GitHub checks on my fork again' : 'Run GitHub checks on my fork'}
                   title={rec.pre_pr_checks
                     ? 'Run the full GitHub checks again on your fork'
                     : 'Run the full GitHub checks on your fork'}
                 >
                   <Icon name={rec.pre_pr_checks ? 'refresh' : 'check'} />
-                  <span>{rec.pre_pr_checks ? 'Check again' : 'Run checks'}</span>
+                  <span>{rec.pre_pr_checks ? 'Check fork again' : 'Check on fork'}</span>
                 </button>
               ) : null}
               {!reviewIncomplete && !submitFailed ? (
@@ -875,12 +875,12 @@ function ReviewActions({
           ) : null}
           <button
             type="button"
-            className={isPr ? 'co-icon-btn co-secondary-action' : 'co-request-history'}
+            className={isPr ? 'co-icon-btn co-secondary-action co-history-action' : 'co-request-history'}
             onClick={() => setConfirmingDismiss(true)}
             aria-label={isPr ? 'Move contribution to History' : 'Move request draft to History'}
             title="Move to History"
           >
-            {isPr ? <><Icon name="cycle" /><span>History</span></> : 'Move to History'}
+            {isPr ? <><Icon name="cycle" /><span>Move to history</span></> : 'Move to History'}
           </button>
         </div>
       )}
@@ -1169,6 +1169,76 @@ function WithdrawAction({ rec, onWithdraw }) {
   )
 }
 
+// Action and attention live beside the record, not inside it. The focused
+// review page can now answer two separate questions at a glance: what needs a
+// decision (this tray), and what the pull request contains (ContributionCard).
+export function ContributionDecision({
+  rec,
+  reviewState,
+  reviewAction,
+  onSend,
+  onRunPrePrChecks,
+  onReview,
+  onFeedback,
+  onDismiss,
+  onRestore,
+  onWithdraw,
+  onConnectApp,
+}) {
+  const status = rec?.status || 'prepared'
+  const isPr = rec?.plan?.action === 'pr' || rec?.type === 'pr'
+  const hasAttention = rec?.needs_attention === true || !!rec?.attention?.title || !!rec?.attention?.message
+  const hasSubmitAlert = reviewState?.state === 'needs_refresh' || !!rec?.last_submit_error
+  const hasChecks = !!(rec?.pre_pr_checks && typeof rec.pre_pr_checks === 'object')
+  const hasPreparedAction = status === 'prepared' && typeof onDismiss === 'function'
+  const hasRestore = status === 'abandoned' && typeof onRestore === 'function'
+  const hasWithdraw = rec?.submission_mode === 'mobius-bot' &&
+    ['draft', 'open'].includes(status) &&
+    typeof rec?.relay_contribution_id === 'string' &&
+    typeof onWithdraw === 'function'
+  const hasConnection = status === 'merged' && !!publicationHandoff(rec)
+  const quality = qualityReviewFor(rec)
+  const reviewInProgress = quality.state === 'reviewing' || quality.state === 'queued'
+  const hasDecision = hasAttention || hasSubmitAlert || hasChecks ||
+    hasPreparedAction || hasRestore || hasWithdraw || hasConnection
+  if (!hasDecision) return null
+
+  const title = hasSubmitAlert || hasAttention
+    ? 'Needs attention'
+    : reviewInProgress
+      ? 'Review in progress'
+      : status === 'prepared'
+        ? 'Ready for your decision'
+        : 'Follow-up'
+
+  return (
+    <section className="co-decision-surface" aria-label={title}>
+      <div className="co-decision-kicker">{title}</div>
+      <AttentionCallout rec={rec} onFeedback={onFeedback} />
+      <SubmitErrorAlert rec={rec} reviewState={reviewState} onReview={onReview} />
+      <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
+      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
+      <WithdrawAction rec={rec} onWithdraw={onWithdraw} />
+      {hasPreparedAction && !hasSubmitAlert && !hasAttention ? (
+        <ReviewActions
+          rec={rec}
+          reviewState={reviewState}
+          reviewAction={reviewAction}
+          onSend={onSend}
+          onRunPrePrChecks={onRunPrePrChecks}
+          onReview={onReview}
+          onFeedback={onFeedback}
+          onDismiss={onDismiss}
+        />
+      ) : null}
+      {hasRestore ? <RestoreAction rec={rec} onRestore={onRestore} /> : null}
+      {!isPr && status === 'prepared' && typeof onFeedback !== 'function' ? (
+        <p className="co-review-note">Open the source conversation to continue this request.</p>
+      ) : null}
+    </section>
+  )
+}
+
 export function ContributionCard({
   rec,
   reviewState,
@@ -1184,6 +1254,7 @@ export function ContributionCard({
   loadDiff,
   reviewOnly = false,
   initialExpanded = false,
+  showDecision = true,
 }) {
   const status = rec.status || 'prepared'
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
@@ -1278,21 +1349,23 @@ export function ContributionCard({
           ))}
         </div>
       )}
-      <AttentionCallout rec={rec} onFeedback={onFeedback} />
+      {showDecision && !reviewOnly ? <AttentionCallout rec={rec} onFeedback={onFeedback} /> : null}
       {status !== 'prepared' && autopilotState(rec) ? (
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
-      <WithdrawAction rec={rec} onWithdraw={onWithdraw} />
-      <SubmitErrorAlert
-        rec={rec}
-        reviewState={reviewState}
-        onReview={onReview}
-      />
-      <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
+      {showDecision && !reviewOnly ? <WithdrawAction rec={rec} onWithdraw={onWithdraw} /> : null}
+      {showDecision && !reviewOnly ? (
+        <SubmitErrorAlert
+          rec={rec}
+          reviewState={reviewState}
+          onReview={onReview}
+        />
+      ) : null}
+      {showDecision && !reviewOnly ? <PrePrChecksPanel rec={rec} onFeedback={onFeedback} /> : null}
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
-      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
+      {showDecision && !reviewOnly ? <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} /> : null}
       {hasPlan && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button
@@ -1306,7 +1379,7 @@ export function ContributionCard({
           </button>
           {/* Focused History/Open cards keep their reviewed plan readable, but
               active-queue actions belong only to still-prepared work. */}
-          {!reviewOnly && reviewable && (
+          {showDecision && !reviewOnly && reviewable && (
             <ReviewActions
               rec={rec}
               reviewState={reviewState}
@@ -1319,7 +1392,7 @@ export function ContributionCard({
           )}
         </div>
       )}
-      {reviewable && !hasPlan && !reviewOnly && (
+      {showDecision && reviewable && !hasPlan && !reviewOnly && (
         <div className="co-card-footer is-actions-only">
           <ReviewActions
             rec={rec}
@@ -1338,7 +1411,7 @@ export function ContributionCard({
           <ReviewPlan rec={rec} loadDiff={loadDiff} />
         </div>
       )}
-      {status === 'abandoned' && typeof onRestore === 'function' && (
+      {showDecision && status === 'abandoned' && typeof onRestore === 'function' && (
         <RestoreAction rec={rec} onRestore={onRestore} />
       )}
     </div>

@@ -150,7 +150,7 @@ function FeedLoadingState({ view }) {
   return (
     <div className="co-feed-loading" role="status" aria-live="polite">
       <span className="ma-spinner is-compact" aria-hidden="true" />
-      <span>Loading {view === 'issues' ? 'requests' : 'reviews'}…</span>
+      <span>Loading {view === 'issues' ? 'issues' : 'pull requests'}…</span>
     </div>
   )
 }
@@ -1574,7 +1574,7 @@ export default function ContributeApp({ appId, token }) {
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
-  // Design world: four distinct rooms, one quiet collaboration language.
+  // Four owner-facing rooms: action first, then the objects being contributed.
   return (
     <div className="co-root" data-design-seed="1c15eb06">
       <style>{CSS}</style>
@@ -1611,7 +1611,7 @@ export default function ContributeApp({ appId, token }) {
             onClick={() => setView('overview')}
             onKeyDown={onTabKeyDown}
           >
-            Overview
+            To do
           </button>
           <button
             type="button"
@@ -1641,7 +1641,7 @@ export default function ContributeApp({ appId, token }) {
             onClick={() => setView('prs')}
             onKeyDown={onTabKeyDown}
           >
-            Reviews
+            Pull requests
           </button>
           <button
             type="button"
@@ -1656,7 +1656,7 @@ export default function ContributeApp({ appId, token }) {
             onClick={() => setView('issues')}
             onKeyDown={onTabKeyDown}
           >
-            Requests
+            Issues
           </button>
         </nav>
 

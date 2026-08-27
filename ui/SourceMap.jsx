@@ -13,18 +13,17 @@ import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
 
 const FILTERS = [
-  ['prepare', 'To prepare'],
-  ['sorting', 'Needs sorting'],
-  ['align', 'Needs alignment'],
-  ['reviews', 'Reviews'],
+  ['attention', 'Needs attention'],
   ['all', 'All projects'],
 ]
 
 function projectMatchesJourney(project, filter) {
-  if (filter === 'prepare') return projectReadyToPrepare(project)
-  if (filter === 'sorting') return projectNeedsSorting(project)
-  if (filter === 'align') return project.incomingFiles > 0 || project.compatibleFiles > 0 || project.conflictFiles > 0
-  if (filter === 'reviews') return (project.contributions?.length || 0) > 0
+  if (filter === 'attention') return !!(
+    projectReadyToPrepare(project)
+    || projectNeedsSorting(project)
+    || project.incomingFiles > 0
+    || (project.contributions || []).some((record) => record.needs_attention)
+  )
   return true
 }
 
@@ -35,14 +34,10 @@ function localWorkLabel(project, ending) {
 }
 
 function projectNextStep(project, journey = 'all') {
-  if (journey === 'prepare') return localWorkLabel(project, 'to prepare')
-  if (journey === 'sorting') return localWorkLabel(project, 'to sort')
-  if (journey === 'align') {
-    if (project.conflictFiles > 0) return `${project.conflictFiles} need a choice`
-    if (project.compatibleFiles > 0) return `${project.compatibleFiles} combine with shared work`
-    return 'Shared update available'
+  if (journey === 'attention') {
+    if (projectReadyToPrepare(project)) return localWorkLabel(project, 'to prepare')
+    if (projectNeedsSorting(project)) return 'Review local and shared changes'
   }
-  if (journey === 'reviews') return `${project.contributions.length} active ${project.contributions.length === 1 ? 'review' : 'reviews'}`
   if (project.conflictFiles > 0) return `${project.conflictFiles} need a choice`
   if (project.workingFiles > 0) return `${project.workingFiles} being edited`
   if (project.localFiles > 0 || project.compatibleFiles > 0) {
@@ -181,7 +176,7 @@ function ProjectReviews({ project, onViewReviews }) {
   if (!rows.length) return null
   return (
     <section className="co-project-reviews">
-      <header><strong>Pull requests</strong><button type="button" onClick={onViewReviews}>Open reviews <Icon name="right" size={14} /></button></header>
+      <header><strong>Pull requests</strong><button type="button" onClick={onViewReviews}>Open pull requests <Icon name="right" size={14} /></button></header>
       {rows.slice(0, 4).map((rec) => (
         <button type="button" key={rec.id} onClick={onViewReviews}>
           <span>{rec.plan?.title || rec.title || 'Untitled pull request'}</span>
@@ -213,7 +208,7 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onStartAg
           <AgentHandoffButton action={detailAction} onStart={onStartAgent} icon="review" />
         ) : reviews ? (
           <button type="button" className="co-btn co-btn-primary co-btn-sm" onClick={onViewReviews}>
-            <Icon name="review" size={14} /> Open reviews
+            <Icon name="review" size={14} /> Open pull requests
           </button>
         ) : null}
       </div>
@@ -251,7 +246,7 @@ function ProjectGroup({ label, projects, journey, selectedKey, onSelect }) {
 }
 
 function LoadingState() {
-  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong>Checking projects…</strong><span>Comparing accepted source and active reviews.</span></div></div>
+  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong>Checking projects…</strong><span>Comparing local, shared, and prepared work.</span></div></div>
 }
 
 export function SourceMap({
@@ -266,7 +261,7 @@ export function SourceMap({
   onStartAgent,
   onViewReviews,
 }) {
-  const [filter, setFilter] = useState(() => focusKey ? 'all' : 'prepare')
+  const [filter, setFilter] = useState(() => focusKey ? 'all' : 'attention')
   const filtered = useMemo(
     () => projects.filter((project) => projectMatchesJourney(project, filter)),
     [projects, filter],
@@ -308,21 +303,9 @@ export function SourceMap({
   const builtHere = filtered.filter((project) => project.builtHere)
   const tracked = filtered.filter((project) => !project.builtHere)
   const copy = {
-    prepare: {
-      title: 'Ready to prepare',
-      description: 'Reusable local work that can move into private review.',
-    },
-    sorting: {
-      title: 'Needs sorting',
-      description: 'Local work that needs context before it can become a contribution.',
-    },
-    align: {
-      title: 'Needs alignment',
-      description: 'Projects where shared work and your local version need to come together.',
-    },
-    reviews: {
-      title: 'Active reviews',
-      description: 'Projects with contributions already moving through review.',
+    attention: {
+      title: 'Needs attention',
+      description: 'Projects with local or shared changes that need preparing, understanding, or aligning.',
     },
     all: {
       title: 'All projects',
@@ -349,7 +332,7 @@ export function SourceMap({
         <header className="co-view-heading">
           <div>
             <h2>Projects</h2>
-            <p>See what can move, what needs context, and what should stay local.</p>
+            <p>Understand local and shared changes, then open a project only when you need the detail.</p>
           </div>
           <button
             type="button"
@@ -358,7 +341,7 @@ export function SourceMap({
             disabled={loading}
           >
             <Icon name="refresh" size={15} />
-            {loading ? 'Checking…' : 'Check projects'}
+            {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </header>
       )}

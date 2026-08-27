@@ -1,30 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { ContributionCard } from './ContributionCard.jsx'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ContributionCard, ContributionDecision } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits, stackLandable } from '../stack.js'
 import {
   partitionReviewUnits,
   locateContributionReview,
   prePrCheckPhase,
+  progressReviewAction,
   qualityReviewFor,
   reviewStateFor,
 } from '../review.js'
+import { AgentHandoffButton, openAgentConversation } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { historyContributionLabel, STATUS_LABELS, timeAgo } from '../domain.js'
 
 const REVIEW_STAGES = [
-  ['action', 'Needs action'],
-  ['working', 'In review'],
-  ['clear', 'All clear'],
-  ['open', 'Open'],
-  ['history', 'History'],
+  ['action', 'Needs you'],
+  ['working', 'In progress'],
+  ['clear', 'Ready to send'],
+  ['open', 'Published'],
+  ['history', 'Past'],
 ]
 
 const REQUEST_STAGES = [
   ['action', 'Drafts'],
   ['open', 'Published'],
-  ['history', 'History'],
+  ['history', 'Past'],
 ]
 
 const STAGE_PAGE_SIZE = 16
@@ -54,7 +56,7 @@ function unitKey(unit) {
 
 function phaseLabel(unit, phase, reviewStatus) {
   const records = unitRecords(unit)
-  if (phase === 'clear') return 'All clear'
+  if (phase === 'clear') return 'Ready to send'
   if (phase === 'working') {
     if (records.some((rec) => prePrCheckPhase(rec) === 'running')) return 'Checks running'
     return 'Reviewing'
@@ -88,11 +90,11 @@ function StageNav({ stages, phaseUnits, active, onChange, label }) {
         <button
           type="button"
           key={key}
-          className={active === key ? 'is-active' : ''}
+          className={(active === key ? 'is-active' : '') + (key === 'history' ? ' is-secondary' : '')}
           aria-pressed={active === key}
           onClick={() => onChange(key)}
         >
-          <span>{title}</span><b>{phaseUnits[key]?.length || 0}</b>
+          <span>{title}</span>{key === 'history' ? null : <b>{phaseUnits[key]?.length || 0}</b>}
         </button>
       ))}
     </nav>
@@ -111,27 +113,84 @@ function ListContinuation({ shown, total, onContinue }) {
   )
 }
 
-function ReviewRow({ unit, phase, reviewStatus, onSelect }) {
+function ReviewRow({
+  unit, phase, reviewStatus, onSelect, onStartAgent, onSend,
+}) {
   const count = unitRecords(unit).length
   const record = primaryRecord(unit)
+  const [busy, setBusy] = useState(false)
+  const [startedChatId, setStartedChatId] = useState('')
+  const [note, setNote] = useState('')
   const detail = count > 1
     ? `${count} linked pull requests`
     : phase === 'history'
       ? timeAgo(record?.updated_at || record?.created_at)
       : ''
+  const privateAction = phase === 'action'
+    ? progressReviewAction(unitRecords(unit), reviewStatus)
+    : null
+  const canPublishHere = phase === 'clear' && unit.type !== 'stack'
+  const actionLabel = privateAction
+    ? (startedChatId ? 'Open review' : privateAction.count === 1 ? 'Review' : `Review ${privateAction.count}`)
+    : canPublishHere
+      ? (record?.plan?.action === 'pr_update' ? 'Update' : 'Send')
+      : 'View'
+
+  async function runDefault() {
+    if (busy) return
+    if (!privateAction && !canPublishHere) {
+      onSelect()
+      return
+    }
+    if (startedChatId) {
+      openAgentConversation(startedChatId)
+      return
+    }
+    setBusy(true)
+    setNote('')
+    try {
+      const outcome = privateAction
+        ? await onStartAgent?.(privateAction)
+        : await onSend?.(record)
+      if (privateAction && outcome?.ok) {
+        setStartedChatId(String(outcome.chatId || ''))
+      } else if (!privateAction && (outcome?.ok || outcome?.pending || outcome?.alreadyHandled)) {
+        setNote(outcome.pending ? 'Publishing…' : 'Sent')
+      } else {
+        setNote(outcome?.error || 'Try again')
+      }
+    } catch {
+      setNote('Try again')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <button type="button" className={'co-review-row' + (detail ? '' : ' is-compact')} onClick={onSelect}>
+    <div className={'co-review-row' + (detail ? '' : ' is-compact')}>
+      <button type="button" className="co-review-row-main" onClick={onSelect}>
       <span className="co-review-row-copy">
         <strong>{unitTitle(unit)}</strong>
-        {detail ? <small>{detail}</small> : null}
+        {note ? <small role="status">{note}</small> : detail ? <small>{detail}</small> : null}
       </span>
       <span className={'co-review-state is-' + phase}>{phaseLabel(unit, phase, reviewStatus)}</span>
-      <Icon name="right" size={14} />
-    </button>
+      </button>
+      <button
+        type="button"
+        className={'co-review-default' + (privateAction || canPublishHere ? ' is-primary' : '')}
+        disabled={busy}
+        aria-busy={busy}
+        onClick={runDefault}
+      >
+        {busy ? 'Working…' : actionLabel}
+      </button>
+    </div>
   )
 }
 
-function ReviewList({ units, phase, projects, reviewStatus, onSelect }) {
+function ReviewList({
+  units, phase, projects, reviewStatus, onSelect, onStartAgent, onSend,
+}) {
   const groups = groupByProject(units, projects)
   return (
     <div className="co-review-list">
@@ -149,12 +208,108 @@ function ReviewList({ units, phase, projects, reviewStatus, onSelect }) {
               phase={phase}
               reviewStatus={reviewStatus}
               onSelect={() => onSelect(unit)}
+              onStartAgent={onStartAgent}
+              onSend={onSend}
             />
           ))}
         </section>
       ))}
     </div>
   )
+}
+
+function BatchPublishAction({ units, onSend }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const cancelRef = useRef(null)
+  const descriptionId = useId()
+  // A stack has its own confirmation that names every layer and base → branch
+  // pair. Keep the stage shortcut to independent PRs so it cannot bypass that
+  // stronger approval boundary.
+  const preparedUnits = units.filter((unit) => (
+    unit.type !== 'stack' && primaryRecord(unit)?.status === 'prepared'
+  ))
+  const prepared = preparedUnits.map(primaryRecord)
+  useEffect(() => {
+    if (confirming) cancelRef.current?.focus()
+  }, [confirming])
+  if (prepared.length < 2) return null
+
+  async function publishAll() {
+    if (busy) return
+    const snapshot = [...preparedUnits]
+    setBusy(true)
+    setNote('')
+    let completed = 0
+    let failed = 0
+    for (const unit of snapshot) {
+      try {
+        const outcome = await onSend?.(primaryRecord(unit))
+        if (outcome?.ok || outcome?.pending || outcome?.alreadyHandled) completed += 1
+        else failed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    setBusy(false)
+    setConfirming(false)
+    setNote(failed
+      ? `${completed} completed · ${failed} still need attention`
+      : 'All selected pull requests are being sent.')
+  }
+
+  if (confirming) {
+    return (
+      <div className="co-stage-batch-confirm" role="alertdialog" aria-label="Confirm sending all reviewed pull requests" aria-describedby={descriptionId}>
+        <p id={descriptionId}>Publish {prepared.length} reviewed pull-request actions on GitHub? This may open new pull requests or update existing ones. Nothing will be merged.</p>
+        <ul className="co-stage-batch-list" aria-label="Pull requests to send">
+          {prepared.map((record) => (
+            <li key={record.id}>
+              <span>{record.plan?.title || record.title || record.summary || 'Untitled contribution'}</span>
+              <small>{record.plan?.action === 'pr_update' ? 'Update pull request' : 'Open pull request'}</small>
+            </li>
+          ))}
+        </ul>
+        <div>
+          <button ref={cancelRef} type="button" className="co-btn co-btn-sm" disabled={busy} onClick={() => setConfirming(false)}>Not now</button>
+          <button type="button" className="co-btn co-btn-sm co-btn-primary" disabled={busy} onClick={publishAll}>
+            {busy ? 'Sending…' : `Send all ${prepared.length}`}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="co-stage-action">
+      <button type="button" className="co-btn co-btn-sm co-btn-primary" onClick={() => setConfirming(true)}>
+        Send all {prepared.length}
+      </button>
+      {note ? <small className="co-stage-action-note" role="status">{note}</small> : null}
+    </div>
+  )
+}
+
+function StageDefaultAction({ phase, units, reviewStatus, onStartAgent, onSend }) {
+  if (phase === 'action') {
+    const action = progressReviewAction(units.flatMap(unitRecords), reviewStatus)
+    if (!action || action.count < 2) return null
+    return (
+      <div className="co-stage-action">
+        <AgentHandoffButton
+          action={action}
+          onStart={onStartAgent}
+          className="co-btn co-btn-sm co-btn-primary"
+          icon="review"
+        />
+      </div>
+    )
+  }
+  if (phase === 'clear') {
+    return <BatchPublishAction units={units} onSend={onSend} />
+  }
+  return null
 }
 
 function SelectedUnit({
@@ -191,22 +346,30 @@ function SelectedUnit({
   }
   const rec = primaryRecord(unit)
   return (
-    <ContributionCard
-      key={rec.id}
-      rec={rec}
-      reviewState={reviewStateFor(rec, reviewStatus)}
-      onSend={onSend}
-      onRunPrePrChecks={onRunPrePrChecks}
-      onReview={onStartAgent}
-      onFeedback={onFeedback}
-      onDismiss={onDismiss}
-      onRestore={onRestore}
-      onSetAutopilot={onSetAutopilot}
-      onWithdraw={onWithdraw}
-      onConnectApp={onConnectApp}
-      loadDiff={loadDiff}
-      initialExpanded
-    />
+    <div className="co-focus-unit">
+      <ContributionDecision
+        rec={rec}
+        reviewState={reviewStateFor(rec, reviewStatus)}
+        reviewAction={progressReviewAction([rec], reviewStatus)}
+        onSend={onSend}
+        onRunPrePrChecks={onRunPrePrChecks}
+        onReview={onStartAgent}
+        onFeedback={onFeedback}
+        onDismiss={onDismiss}
+        onRestore={onRestore}
+        onWithdraw={onWithdraw}
+        onConnectApp={onConnectApp}
+      />
+      <ContributionCard
+        key={rec.id}
+        rec={rec}
+        reviewState={reviewStateFor(rec, reviewStatus)}
+        onSetAutopilot={onSetAutopilot}
+        loadDiff={loadDiff}
+        initialExpanded
+        showDecision={false}
+      />
+    </div>
   )
 }
 
@@ -222,12 +385,12 @@ const REVIEW_EMPTY_STAGES = {
   action: {
     icon: 'check',
     tone: 'is-clear',
-    title: 'No reviews need action',
-    detail: 'Prepared work will appear here when it needs your decision.',
+    title: 'No pull requests need you',
+    detail: 'Private work will appear here when it needs review or a decision.',
   },
   working: {
     icon: 'review',
-    title: 'No reviews in progress',
+    title: 'Nothing in progress',
     detail: 'Reviews and checks that are running will appear here.',
   },
   clear: {
@@ -242,8 +405,8 @@ const REVIEW_EMPTY_STAGES = {
   },
   history: {
     icon: 'cycle',
-    title: 'No review history yet',
-    detail: 'Finished and deliberately dropped contributions will collect here.',
+    title: 'No past pull requests yet',
+    detail: 'Finished and deliberately dropped work will collect here.',
   },
 }
 
@@ -251,8 +414,8 @@ const REQUEST_EMPTY_STAGES = {
   action: {
     icon: 'check',
     tone: 'is-clear',
-    title: 'No request drafts',
-    detail: 'Requests prepared for your decision will appear here.',
+    title: 'No issue drafts',
+    detail: 'Issues and replies prepared for your decision will appear here.',
   },
   open: {
     icon: 'send',
@@ -261,8 +424,8 @@ const REQUEST_EMPTY_STAGES = {
   },
   history: {
     icon: 'cycle',
-    title: 'No request history yet',
-    detail: 'Settled requests will collect here.',
+    title: 'No past issues yet',
+    detail: 'Settled issues and replies will collect here.',
   },
 }
 
@@ -321,7 +484,9 @@ function ReviewWorkspace({
     open: openUnits,
     history: historyUnits,
   }), [partition.needsAttention, partition.needsReview, partition.reviewing, partition.checking, partition.readyToSend, openUnits, historyUnits])
-  const firstNonempty = REVIEW_STAGES.find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
+  const firstNonempty = REVIEW_STAGES
+    .filter(([key]) => key !== 'history')
+    .find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
   const [filter, setFilter] = useState(firstNonempty)
   const [selectedKey, setSelectedKey] = useState(null)
   const [missingTarget, setMissingTarget] = useState(false)
@@ -359,16 +524,16 @@ function ReviewWorkspace({
     setSelectedKey(null)
     setMissingTarget(true)
     onFocusConsumed?.(focusTarget.nonce)
-  }, [focusTarget, focusReady, phaseUnits, onFocusConsumed])
+  }, [focusTarget, focusReady, phaseUnits, firstNonempty, onFocusConsumed])
 
   const visibleUnits = phaseUnits[filter] || []
   const renderedUnits = visibleUnits.slice(0, visibleLimit)
   const copy = {
-    action: ['Needs action', 'Review and improve this private work before anything is published.'],
-    working: ['In review', 'Agents and checks currently working through prepared contributions.'],
-    clear: ['All clear', 'Reviewed work whose exact current version is ready for your public approval.'],
-    open: ['Open', 'Published pull requests moving through checks, feedback, and merge.'],
-    history: ['History', 'Merged, closed, superseded, and deliberately dropped work.'],
+    action: ['Needs you', 'Review or improve this private work before anything is published.'],
+    working: ['In progress', 'Reviews and checks already working through prepared changes.'],
+    clear: ['Ready to send', 'Reviewed pull requests waiting for your public approval.'],
+    open: ['Published', 'Pull requests moving through checks, feedback, and merge.'],
+    history: ['Past pull requests', 'Merged, closed, superseded, and deliberately dropped work.'],
   }[filter]
 
   if (missingTarget) {
@@ -377,7 +542,7 @@ function ReviewWorkspace({
         <h2 className="co-visually-hidden">Contribution review</h2>
         <div className="co-focus-view">
           <button type="button" className="co-focus-back" onClick={() => setMissingTarget(false)}>
-            <Icon name="left" size={15} /> Back to reviews
+            <Icon name="left" size={15} /> Back to pull requests
           </button>
           <div className="co-stage-empty">
             <Icon name="cycle" size={20} />
@@ -421,7 +586,7 @@ function ReviewWorkspace({
 
   return (
     <section className="co-review-workspace">
-      <ViewHeading title="Reviews" description="Move each contribution from private review to a deliberate public handoff." />
+      <ViewHeading title="Pull requests" description="Review private work, approve what is ready, and follow what is already published." />
       <StageNav
         stages={REVIEW_STAGES}
         phaseUnits={phaseUnits}
@@ -432,10 +597,17 @@ function ReviewWorkspace({
           setMissingTarget(false)
           setVisibleLimit(STAGE_PAGE_SIZE)
         }}
-        label="Review stages"
+        label="Pull request stages"
       />
       <section className="co-stage-intro" aria-labelledby="co-review-stage-title">
         <div><h3 id="co-review-stage-title">{copy[0]}</h3><p>{copy[1]}</p></div>
+        <StageDefaultAction
+          phase={filter}
+          units={visibleUnits}
+          reviewStatus={reviewStatus}
+          onStartAgent={onStartAgent}
+          onSend={onSend}
+        />
       </section>
       {visibleUnits.length ? (
         <ReviewList
@@ -444,6 +616,8 @@ function ReviewWorkspace({
           projects={projects}
           reviewStatus={reviewStatus}
           onSelect={(unit) => setSelectedKey(unitKey(unit))}
+          onStartAgent={onStartAgent}
+          onSend={onSend}
         />
       ) : <EmptyStage phase={filter} />}
       <ListContinuation
@@ -511,7 +685,9 @@ function RequestsWorkspace({
     open: groups.open.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
     history: groups.history.map((record) => ({ type: 'single', id: record.id, record, records: [record] })),
   }), [groups.ready, groups.open, groups.history])
-  const firstNonempty = REQUEST_STAGES.find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
+  const firstNonempty = REQUEST_STAGES
+    .filter(([key]) => key !== 'history')
+    .find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
   const [filter, setFilter] = useState(firstNonempty)
   const [selected, setSelected] = useState(null)
   const [visibleLimit, setVisibleLimit] = useState(STAGE_PAGE_SIZE)
@@ -554,7 +730,7 @@ function RequestsWorkspace({
 
   return (
     <section className="co-requests-workspace">
-      <ViewHeading title="Requests" description="Decide what to ask, say, or publish without losing the conversation that shaped it." />
+      <ViewHeading title="Issues" description="Review drafts, publish deliberately, and follow the issues or replies already shared." />
       <StageNav
         stages={REQUEST_STAGES}
         phaseUnits={phaseUnits}
@@ -564,7 +740,7 @@ function RequestsWorkspace({
           setSelected(null)
           setVisibleLimit(STAGE_PAGE_SIZE)
         }}
-        label="Request stages"
+        label="Issue stages"
       />
       {visibleUnits.length ? (
         <div className="co-request-list">
