@@ -137,15 +137,15 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(appSource, /resolveUncertainSubmission/)
 })
 
-test('blocked contributions have one calm full-width recovery action', () => {
-  assert.match(cardSource, /className="co-action-block"/)
-  assert.match(cardSource, /<span>Refresh<\/span>/)
-  assert.match(cardSource, /aria-label="Refresh contribution in chat"/)
+test('blocked contributions have one calm recovery action', () => {
+  assert.doesNotMatch(cardSource, /function fixAndReview\(\)/)
+  assert.match(cardSource, /<AgentHandoffButton/)
+  assert.match(cardSource, /action=\{recoveryReviewAction\(rec\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
   assert.doesNotMatch(cardSource, /Draft follow-up/)
   assert.match(cardSource, /'Fresh review needed'/)
-  assert.match(cardSource, /Your agent can update it safely\./)
-  assert.match(cardSource, /Nothing was published/)
-  assert.match(cardSource, /The reviewed branch was pushed/)
+  assert.match(cardSource, /This review needs a quick check before it can continue\./)
+  assert.match(cardSource, /The reviewed branch reached GitHub/)
   assert.match(cardSource, /co-alert' \+ \(blocked \? ' is-follow-up'/)
   assert.match(themeSource, /\.co-section\.is-follow-up/)
   assert.match(themeSource, /\.co-alert\.is-follow-up/)
@@ -158,6 +158,21 @@ test('published check follow-ups use the same calm refresh treatment', () => {
   assert.doesNotMatch(
     themeSource,
     /\.co-attention \{[^}]*var\(--danger\)/,
+  )
+})
+
+test('Möbius-bot withdrawal keeps the destructive action behind confirmation', () => {
+  assert.match(cardSource, /function WithdrawAction\(\{ rec, onWithdraw \}\)/)
+  assert.match(
+    cardSource,
+    /submission_mode === 'mobius-bot'[\s\S]*?\['draft', 'open'\]\.includes\(rec\.status\)[\s\S]*?relay_contribution_id/,
+  )
+  assert.match(cardSource, /onClick=\{\(\) => \{ setNote\(''\); setConfirming\(true\) \}\}/)
+  assert.match(cardSource, /role="alertdialog"[\s\S]*?Confirm contribution withdrawal/)
+  assert.match(cardSource, /ref=\{keepRef\}[\s\S]*?>\s*Keep open\s*<\/button>/)
+  assert.match(
+    cardSource,
+    /className="co-btn co-btn-sm co-btn-caution"[\s\S]*?onClick=\{withdraw\}/,
   )
 })
 

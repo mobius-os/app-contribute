@@ -7,7 +7,6 @@ import {
   locateContributionReview,
   prePrCheckPhase,
   qualityReviewFor,
-  reviewAllAction,
   reviewStateFor,
 } from '../review.js'
 import { Icon } from './Icons.jsx'
@@ -170,6 +169,7 @@ function SelectedUnit({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -197,11 +197,12 @@ function SelectedUnit({
       reviewState={reviewStateFor(rec, reviewStatus)}
       onSend={onSend}
       onRunPrePrChecks={onRunPrePrChecks}
-      onReview={(record) => onStartAgent?.(reviewAllAction([record]))}
+      onReview={onStartAgent}
       onFeedback={onFeedback}
       onDismiss={onDismiss}
       onRestore={onRestore}
       onSetAutopilot={onSetAutopilot}
+      onWithdraw={onWithdraw}
       onConnectApp={onConnectApp}
       loadDiff={loadDiff}
       initialExpanded
@@ -289,6 +290,7 @@ function ReviewWorkspace({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -335,7 +337,16 @@ function ReviewWorkspace({
   }, [phaseUnits, selectedKey])
 
   useEffect(() => {
-    if (!focusTarget?.recordId || !focusReady) return
+    if (!focusTarget || !focusReady) return
+    if (focusTarget.queue) {
+      setFilter(firstNonempty)
+      setSelectedKey(null)
+      setMissingTarget(false)
+      setVisibleLimit(STAGE_PAGE_SIZE)
+      onFocusConsumed?.(focusTarget.nonce)
+      return
+    }
+    if (!focusTarget.recordId) return
     const located = locateContributionReview(phaseUnits, focusTarget.recordId)
     if (located) {
       setFilter(located.phase)
@@ -398,6 +409,7 @@ function ReviewWorkspace({
             onDismiss={onDismiss}
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
+            onWithdraw={onWithdraw}
             onConnectApp={onConnectApp}
             onStartAgent={onStartAgent}
             loadDiff={loadDiff}
@@ -489,6 +501,7 @@ function RequestsWorkspace({
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   onStartAgent,
   loadDiff,
@@ -529,6 +542,7 @@ function RequestsWorkspace({
             onDismiss={onDismiss}
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
+            onWithdraw={onWithdraw}
             onConnectApp={onConnectApp}
             onStartAgent={onStartAgent}
             loadDiff={loadDiff}

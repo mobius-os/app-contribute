@@ -38,6 +38,26 @@ const QUALITY_REVIEW_STATES = new Set([
   'queued', 'reviewing', 'changes_needed', 'all_clear',
 ])
 
+// One exact prepared head owns one review conversation. The scope travels with
+// the app-owned chat, so a second tap (or a remounted Contribute frame) can find
+// the already-running review instead of starting another agent. A compact
+// 64-bit digest keeps batch scopes inside the platform's bounded metadata field
+// without making the UI remember a parallel registry.
+export function contributionReviewScope(records, mode = 'review') {
+  const identities = (Array.isArray(records) ? records : [])
+    .filter((rec) => rec && typeof rec.id === 'string' && rec.id)
+    .map((rec) => `${rec.id}\u0000${String(rec.plan?.head_sha || '')}`)
+    .sort()
+  if (identities.length === 0) return ''
+  const input = `${mode}\u0000${identities.join('\u0001')}`
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= BigInt(input.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return `contribute-review:${hash.toString(16).padStart(16, '0')}`
+}
+
 // A quality verdict belongs to one immutable prepared head. Source freshness
 // and agent review are separate claims: the platform proves the former, while
 // the agent records the latter after its correctness/maintenance review.
@@ -82,6 +102,8 @@ function reviewAction(records, mode = 'review') {
     startedLabel: fixing ? 'Fixing and reviewing' : 'Reviewing contributions',
     startedMessage: 'Stay in Contribute. Review verdicts will update here.',
     count: candidates.length,
+    scope: contributionReviewScope(candidates, mode),
+    scopeLabel: fixing ? 'Fix and review contributions' : 'Review contributions',
     draft: [
       fixing
         ? 'Fix and thoroughly re-review the prepared contributions listed below.'
@@ -101,6 +123,34 @@ function reviewAction(records, mode = 'review') {
 
 export function reviewAllAction(records) { return reviewAction(records, 'review') }
 export function fixAndReviewAction(records) { return reviewAction(records, 'fix') }
+
+// A failed publication is not another GitHub mutation. One app-owned recovery
+// conversation refreshes the recorded branch, reconciles a response that may
+// have been lost after GitHub accepted it, and leaves any public retry on the
+// existing approval surface. The exact record+head scope matches the compact
+// chat card so either doorway resumes the same work.
+export function recoveryReviewAction(rec) {
+  if (!rec?.id) return null
+  return {
+    event: 'recover_contribution_review',
+    title: `Fix and review ${rec.title || 'contribution'}`,
+    label: 'Fix and review',
+    busyLabel: 'Starting…',
+    startedLabel: 'Fixing and reviewing',
+    reusedLabel: 'Review already running',
+    startedMessage: 'Stay in Contribute. This exact review will update here.',
+    count: 1,
+    scope: contributionReviewScope([rec], 'recovery'),
+    scopeLabel: 'Fix and review contribution',
+    draft: [
+      `Fix and review contribution ${rec.id} ("${rec.title || 'untitled'}").`,
+      '',
+      'Refresh the recorded pull request and branch first. If the exact reviewed head already reached the pull request, reconcile the contribution record and inspect its current checks. If the branch moved, rebuild the private review on its current head and run the relevant checks.',
+      '',
+      'Keep any further public update behind the existing approval button.',
+    ].join('\n'),
+  }
+}
 
 // The Needs action queue can contain three different private jobs: a fresh
 // quality review, fixes after a review, or a stale/conflicted prepared head.
@@ -141,6 +191,8 @@ export function progressReviewAction(records, reviewStatus) {
     startedLabel: 'Working through reviews',
     startedMessage: 'Stay in Contribute. Each item will move as its current head is resolved and reviewed.',
     count: candidates.length,
+    scope: contributionReviewScope(candidates, 'progress'),
+    scopeLabel: 'Work through contribution reviews',
     draft: [
       'Work through the exact Contribute review queue listed below.',
       '',
@@ -396,7 +448,7 @@ export function partitionReviewUnits(units, reviewStatus) {
     const reviewRecords = privateRecords.length > 0 ? privateRecords : records
     if (reviewRecords.some((rec) => prePrCheckPhase(rec) === 'running')) {
       checking.push(unit)
-    } else if (reviewRecords.some(
+    } else if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
     ) || reviewRecords.some((rec) => prePrCheckPhase(rec) === 'failed') ||
       reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
@@ -413,6 +465,7 @@ export function partitionReviewUnits(units, reviewStatus) {
 }
 
 const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
+const REVIEW_QUEUE_INTENT = 'reviews:queue'
 
 // Shell cards address one immutable ledger identity. The record's current
 // stage and stack membership remain Contribute's decision, so a stale card can
@@ -420,8 +473,74 @@ const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
 // may have changed since the card rendered.
 export function contributionReviewTargetFromIntent(intent) {
   if (typeof intent !== 'string') return null
-  const match = REVIEW_INTENT.exec(intent.trim())
+  const normalized = intent.trim()
+  if (normalized === REVIEW_QUEUE_INTENT) return { queue: true }
+  const match = REVIEW_INTENT.exec(normalized)
   return match ? { recordId: match[1] } : null
+}
+
+function focusedStackMeta(record) {
+  const raw = record?.plan?.stack || record?.stack
+  if (!raw || typeof raw !== 'object') return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const total = Number(raw.total)
+  const position = Number(raw.position)
+  if (!id || !Number.isInteger(total) || total < 1) return null
+  return {
+    id,
+    repo: String(record?.plan?.repo || record?.repo || ''),
+    total,
+    position: Number.isInteger(position) ? position : 0,
+  }
+}
+
+// A shell handoff may arrive while the authoritative ledger is still paging.
+// The cached snapshot deliberately contains every active record, so a complete
+// stack there is enough to render immediately. Publication still fresh-reads
+// every exact record; this only removes an avoidable navigation wait.
+export function focusedContributionReady(records, recordId) {
+  const list = Array.isArray(records) ? records : []
+  const focused = list.find((record) => record?.id === recordId)
+  if (!focused) return false
+  const stack = focusedStackMeta(focused)
+  if (!stack) return true
+  const positions = new Set(list.flatMap((record) => {
+    const candidate = focusedStackMeta(record)
+    return candidate
+      && candidate.id === stack.id
+      && candidate.repo === stack.repo
+      && candidate.total === stack.total
+      && candidate.position >= 1
+      && candidate.position <= stack.total
+      ? [candidate.position]
+      : []
+  }))
+  return positions.size === stack.total
+}
+
+// Opening the same record twice can reuse a previously settled lookup, while
+// an already-mounted app can have a globally complete but now-stale ledger.
+// Bind readiness to the exact intent nonce, then let a later ledger refresh
+// satisfy an incomplete stack without ever treating global ledger readiness
+// as proof that this named review is absent.
+export function focusedContributionNavigationReady(focusTarget, lookup, records) {
+  if (!focusTarget) return true
+  if (focusTarget.queue) {
+    return lookup?.nonce === focusTarget.nonce
+      && lookup?.queue === true
+      && lookup?.ready === true
+  }
+  const recordId = typeof focusTarget.recordId === 'string'
+    ? focusTarget.recordId
+    : ''
+  if (
+    !recordId
+    || lookup?.nonce !== focusTarget.nonce
+    || lookup?.recordId !== recordId
+  ) {
+    return false
+  }
+  return lookup.ready === true || focusedContributionReady(records, recordId)
 }
 
 export function locateContributionReview(phaseUnits, recordId) {

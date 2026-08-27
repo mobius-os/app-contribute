@@ -3,7 +3,7 @@
 // React and I/O stay in ui/SourceMap.jsx + api.js so these rules are cheap to
 // exercise under node:test.
 
-const ACTIVE = new Set(['prepared', 'submitting', 'draft', 'open'])
+const ACTIVE = new Set(['prepared', 'submitting', 'landing', 'draft', 'open'])
 
 function nonnegativeCount(value) {
   const count = typeof value === 'number' ? value : Number.NaN
@@ -12,6 +12,43 @@ function nonnegativeCount(value) {
 
 function repoKey(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function declaredContributionPaths(rec) {
+  const result = new Set()
+  for (const rows of [rec?.files, rec?.plan?.files]) {
+    if (!Array.isArray(rows)) continue
+    for (const row of rows) {
+      const path = typeof row === 'string' ? row : row?.path
+      if (typeof path === 'string' && path.trim()) result.add(path.trim())
+    }
+  }
+  return result
+}
+
+function currentContributionCoverage(project, contributions, localPaths) {
+  const currentSha = typeof project?.head_sha === 'string' ? project.head_sha : ''
+  if (!currentSha || localPaths.length === 0) return new Set()
+  const known = new Set(localPaths)
+  const covered = new Set()
+  for (const rec of contributions) {
+    if (String(rec?.plan?.source_sha || '') !== currentSha) continue
+    for (const path of declaredContributionPaths(rec)) {
+      if (known.has(path)) covered.add(path)
+    }
+    // Legacy records predate the explicit files field. Git's diff-stat still
+    // gives exact paths for ordinary rows; intersect only exact known paths so
+    // an abbreviated `.../file` can never cover unrelated work by guesswork.
+    const stat = rec?.diff_stat || rec?.plan?.diff_stat
+    if (typeof stat !== 'string') continue
+    for (const line of stat.split('\n')) {
+      const separator = line.search(/\s+\|\s+/)
+      if (separator < 0) continue
+      const path = line.slice(0, separator).trim()
+      if (known.has(path)) covered.add(path)
+    }
+  }
+  return covered
 }
 
 // Project identity is already present in the source-status key, so the UI can
@@ -215,6 +252,12 @@ function decorateProject(project, contributions) {
   const localOnlyPaths = Array.isArray(reconciliation.local_only_paths)
     ? reconciliation.local_only_paths
     : []
+  const coveredLocalPaths = currentContributionCoverage(
+    project, contributions, localOnlyPaths,
+  )
+  const remainingLocalOnlyPaths = localOnlyPaths.filter(
+    path => !coveredLocalPaths.has(path),
+  )
   const incomingPaths = Array.isArray(reconciliation.new_upstream_paths)
     ? reconciliation.new_upstream_paths
     : []
@@ -225,7 +268,12 @@ function decorateProject(project, contributions) {
     ? reconciliation.unresolved_conflict_paths
     : []
   const localFiles = semanticAvailable
-    ? nonnegativeCount(reconciliation.local_only_count ?? localOnlyPaths.length)
+    ? Math.max(
+        0,
+        nonnegativeCount(
+          reconciliation.local_only_count ?? localOnlyPaths.length,
+        ) - coveredLocalPaths.size,
+      )
     : authoredFiles
   const incomingFiles = semanticAvailable
     ? nonnegativeCount(reconciliation.new_upstream_count ?? incomingPaths.length)
@@ -271,7 +319,9 @@ function decorateProject(project, contributions) {
     reconciliation,
     semanticAvailable,
     sourceComparisonRequired,
-    localOnlyPaths,
+    localOnlyPaths: remainingLocalOnlyPaths,
+    coveredLocalPaths: [...coveredLocalPaths],
+    coveredLocalFiles: coveredLocalPaths.size,
     incomingPaths,
     compatiblePaths,
     conflictPaths,

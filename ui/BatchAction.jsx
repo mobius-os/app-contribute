@@ -58,7 +58,9 @@ export function AgentHandoffButton({
     return (
       <div className="co-agent-started" role="status" aria-live="polite">
         <span>
-          <strong>{action.startedLabel || 'Agent started'}</strong>
+          <strong>{started.reused
+            ? (action.reusedLabel || 'Review already running')
+            : (action.startedLabel || 'Agent started')}</strong>
           <small>{action.startedMessage || 'Keep working here. New decisions and ready changes will appear in Contribute.'}</small>
         </span>
         {window.parent !== window ? (

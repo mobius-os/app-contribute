@@ -4,9 +4,12 @@ import test from 'node:test'
 import {
   addressAllAction,
   canRunPrePrChecks,
+  contributionReviewScope,
   contributionReviewTargetFromIntent,
   contributionsNeedingAttention,
   finishContributionCycleAction,
+  focusedContributionNavigationReady,
+  focusedContributionReady,
   contributionCyclePhase,
   contributionCycleProgress,
   isContributionCycleChat,
@@ -14,6 +17,7 @@ import {
   locateContributionReview,
   progressReviewAction,
   qualityReviewFor,
+  recoveryReviewAction,
   reviewAllAction,
   prePrCheckPhase,
   blockedReviewCount,
@@ -22,6 +26,8 @@ import {
   reviewStateFor,
   summarizeReviewStatus,
 } from '../review.js'
+import { upsertRecord } from '../domain.js'
+import { contributionRecordPaths } from '../storage.js'
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
@@ -37,6 +43,9 @@ test('shell review intents name one ledger record without encoding presentation 
   assert.equal(contributionReviewTargetFromIntent('review:../escape'), null)
   assert.equal(contributionReviewTargetFromIntent('reviews:record'), null)
   assert.equal(contributionReviewTargetFromIntent(null), null)
+  assert.deepEqual(contributionReviewTargetFromIntent('reviews:queue'), {
+    queue: true,
+  })
 })
 
 test('a record intent resolves its current phase and enclosing stack', () => {
@@ -58,20 +67,122 @@ test('a record intent resolves its current phase and enclosing stack', () => {
   assert.equal(locateContributionReview(phases, 'missing'), null)
 })
 
-test('the app consumes trusted intents only after the authoritative ledger is ready', () => {
+test('the app resolves trusted focused intents without waiting for the full ledger', () => {
   assert.match(appSource, /event\.origin !== window\.location\.origin/)
   assert.match(appSource, /event\.source !== window\.parent/)
   assert.match(appSource, /contributionReviewTargetFromIntent\(event\.data\.intent\)/)
   assert.match(appSource, /setView\('prs'\)/)
+  assert.match(appSource, /loadContributionRecord\(recordId\)/)
+  assert.match(appSource, /upsertRecord\(recordsRef\.current, record\)/)
+  assert.match(appSource, /focusedContributionReady\(next, recordId\)/)
   assert.match(appSource, /focusTarget=\{reviewFocus\}/)
-  assert.match(appSource, /focusReady=\{ledgerReady\}/)
-  assert.match(appSource, /reviewFocus && !ledgerReady/)
-  assert.match(feedSource, /!focusTarget\?\.recordId \|\| !focusReady/)
+  assert.match(appSource, /focusReady=\{focusedReviewReady\}/)
+  assert.match(appSource, /loading \|\| !focusedReviewReady/)
+  assert.match(feedSource, /if \(!focusTarget \|\| !focusReady\) return/)
+  assert.match(feedSource, /if \(focusTarget\.queue\)/)
   assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
   assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
   assert.match(feedSource, /Review no longer available/)
   assert.match(feedSource, /<h2 className="co-visually-hidden">Contribution review<\/h2>/)
   assert.doesNotMatch(feedSource, /<ViewHeading title="Reviews" description="Inspect the complete change before you act\."/)
+})
+
+test('a focused review waits for its exact refresh instead of trusting a stale ledger', () => {
+  const focus = { recordId: 'layer-1', nonce: 'new-intent' }
+  const pending = { recordId: 'layer-1', nonce: 'new-intent', ready: false }
+  const staleLookup = { recordId: 'layer-1', nonce: 'old-intent', ready: true }
+  const stack = {
+    id: 'review-stack', name: 'Review stack', position: 1, total: 2,
+  }
+  const first = { id: 'layer-1', plan: { repo: 'mobius-os/mobius', stack } }
+  const second = {
+    id: 'layer-2',
+    plan: {
+      repo: 'mobius-os/mobius',
+      stack: { ...stack, position: 2 },
+    },
+  }
+
+  assert.equal(focusedContributionNavigationReady(null, pending, []), true)
+  assert.equal(focusedContributionNavigationReady(
+    { queue: true, nonce: 'queue-intent' },
+    { queue: true, nonce: 'old-intent', ready: true },
+    [],
+  ), false)
+  assert.equal(focusedContributionNavigationReady(
+    { queue: true, nonce: 'queue-intent' },
+    { queue: true, nonce: 'queue-intent', ready: true },
+    [],
+  ), true)
+  assert.equal(focusedContributionNavigationReady(focus, staleLookup, [first, second]), false)
+  assert.equal(focusedContributionNavigationReady(focus, pending, [first]), false)
+  assert.equal(focusedContributionNavigationReady(focus, pending, [first, second]), true)
+  assert.equal(focusedContributionNavigationReady(
+    focus,
+    { ...pending, ready: true },
+    [],
+  ), true)
+})
+
+test('review-facing refreshes reject stale async settlements', () => {
+  assert.match(appSource, /const reviewStatusRequestRef = useRef\(0\)/)
+  assert.match(appSource, /requestId !== reviewStatusRequestRef\.current/)
+  assert.match(appSource, /const incomingReviewsRequestRef = useRef\(0\)/)
+  assert.match(appSource, /requestId !== incomingReviewsRequestRef\.current/)
+  assert.match(appSource, /connRef\.current\.state !== 'connected'/)
+  assert.match(appSource, /incomingReviewsRequestRef\.current \+= 1/)
+  assert.match(appSource, /refreshMountedLedger: ledgerReadyRef\.current/)
+  assert.match(appSource, /await refreshCoordinatorRef\.current\(\)/)
+  assert.match(appSource, /document\.addEventListener\('visibilitychange', resolveIncompleteStack\)/)
+  assert.match(appSource, /window\.mobius\?\.online === false/)
+})
+
+test('mount-time live state reconciles with newer focused and action results', () => {
+  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next\)\)/)
+  assert.match(appSource, /slower startup work cannot overwrite it/)
+})
+
+test('a complete active stack can open from the fast snapshot', () => {
+  const stack = (id, position, total = 3) => ({
+    id,
+    repo: 'mobius-os/mobius',
+    plan: { repo: 'mobius-os/mobius', stack: { id: 'drawer', position, total } },
+  })
+  const records = [stack('one', 1), stack('two', 2), stack('three', 3)]
+  assert.equal(focusedContributionReady(records, 'one'), true)
+  assert.equal(focusedContributionReady(records.slice(0, 2), 'one'), false)
+  assert.equal(focusedContributionReady([{ id: 'single' }], 'single'), true)
+  assert.equal(focusedContributionReady(records, 'missing'), false)
+})
+
+test('only mount and foreground freshness enumerate the complete history', () => {
+  assert.equal(appSource.match(/loadLedger\(\)/g)?.length, 2)
+  assert.match(appSource, /if \(!ledgerReadyRef\.current\) return/)
+  assert.match(appSource, /loadContributionRecord\(recordId\)/)
+  assert.match(appSource, /loadFreshContributionRecord\(rec\.id\)/)
+  assert.match(appSource, /loadFreshContributionRecords\(/)
+})
+
+test('focused record paths are bounded and reject unsafe ids', () => {
+  assert.deepEqual(contributionRecordPaths('record.1-ready'), [
+    'contributions/record.1-ready.json',
+    'contributions/record.1-ready.record.json',
+  ])
+  assert.deepEqual(contributionRecordPaths('../escape'), [])
+  assert.deepEqual(contributionRecordPaths(''), [])
+})
+
+test('a focused record is inserted or refreshed without losing its storage path', () => {
+  assert.deepEqual(upsertRecord([{ id: 'other', path: 'contributions/other.json' }], {
+    id: 'focus', path: 'contributions/focus.json', status: 'prepared',
+  }).map((record) => record.id), ['focus', 'other'])
+  assert.deepEqual(upsertRecord([{
+    id: 'focus', path: 'contributions/focus.record.json', status: 'prepared',
+  }], {
+    id: 'focus', status: 'open',
+  }), [{
+    id: 'focus', path: 'contributions/focus.record.json', status: 'open',
+  }])
 })
 
 test('indexes only recognized review verdicts', () => {
@@ -168,6 +279,11 @@ test('batch and feed share the same needs-attention partition', () => {
       records: [{ id: 'blocked', status: 'prepared' }],
     },
     {
+      type: 'record', id: 'attention',
+      record: { ...clear('attention'), needs_attention: true },
+      records: [{ ...clear('attention'), needs_attention: true }],
+    },
+    {
       type: 'stack', id: 'stack',
       records: [
         { id: 'stack-1', status: 'open' },
@@ -179,10 +295,11 @@ test('batch and feed share the same needs-attention partition', () => {
     byId: {
       ready: { state: 'ready' },
       blocked: { state: 'needs_refresh' },
+      attention: { state: 'ready' },
       'stack-2': { state: 'ready' },
     },
   })
-  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked'])
+  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked', 'attention'])
   assert.deepEqual(partition.checking, [])
   assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
 })
@@ -319,15 +436,66 @@ test('prepared work stays out of send until a thorough review is all clear', () 
   assert.deepEqual(parts.readyToSend.map((unit) => unit.id), ['clear'])
   assert.match(reviewAllAction([needed]).draft, /correctness, maintainability, simplicity/)
   assert.match(reviewAllAction([needed]).draft, /Do not push, publish, comment, merge/)
+  assert.equal(reviewAllAction([needed]).scope, contributionReviewScope([needed]))
+})
+
+test('one exact prepared head has one stable review conversation scope', () => {
+  const first = { id: 'first', plan: { head_sha: 'a'.repeat(40) } }
+  const second = { id: 'second', plan: { head_sha: 'b'.repeat(40) } }
+  const scope = contributionReviewScope([first, second])
+
+  assert.match(scope, /^contribute-review:[0-9a-f]{16}$/)
+  assert.equal(contributionReviewScope([second, first]), scope)
+  assert.notEqual(
+    contributionReviewScope([first, { ...second, plan: { head_sha: 'c'.repeat(40) } }]),
+    scope,
+  )
+  assert.notEqual(contributionReviewScope([first, second], 'fix'), scope)
+})
+
+test('the card review action exposes launch progress and the started conversation', () => {
+  assert.match(cardSource, /<AgentHandoffButton/)
+  assert.match(cardSource, /action=\{reviewAllAction\(\[rec\]\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
+  assert.doesNotMatch(cardSource, /onClick=\{\(\) => onReview\(rec\)\}/)
+  assert.match(feedSource, /onReview=\{onStartAgent\}/)
+})
+
+test('a scoped review delegates exactly-once admission to chat.start', () => {
+  assert.doesNotMatch(appSource, /chat\.list\(\{ scope: action\.scope \}\)/)
+  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: action\.scope/)
+  assert.match(appSource, /reused: started\.reused === true/)
+  assert.match(appSource, /outcome: started\.outcome/)
 })
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
-  assert.match(appSource, /rec\.plan\?\.action === 'pr_update'/)
-  assert.match(appSource, /updateContribution\(\{ appId, token, rec \}\)/)
+  assert.match(appSource, /refreshed\.plan\?\.action === 'pr_update'/)
+  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
   assert.match(cardSource, /Pull request updated on GitHub/)
+})
+
+test('submit failures lead back to private agent recovery without overstating a stale push', () => {
+  const record = {
+    id: 'existing-pr', title: 'Refine the existing contribution',
+    plan: { head_sha: 'a'.repeat(40) },
+  }
+  const action = recoveryReviewAction(record)
+  assert.equal(action.scope, 'contribute-review:b0661670f342e064')
+  assert.equal(action.reusedLabel, 'Review already running')
+  assert.match(action.draft, /reconcile the contribution record/)
+  assert.match(action.draft, /existing approval button/)
+  assert.match(cardSource, /rec\.last_submit_stage === 'pushed'/)
+  assert.match(cardSource, /rec\.last_submit_push_sha/)
+  assert.match(cardSource, /rec\.plan\?\.head_sha/)
+  assert.match(cardSource, /action=\{recoveryReviewAction\(rec\)\}/)
+  assert.match(cardSource, /onStart=\{onReview\}/)
+  assert.match(cardSource, /Review needs refreshing/)
+  assert.match(cardSource, /<summary>Technical details<\/summary>/)
+  assert.match(cardSource, /const submitFailed = Boolean\(rec\.last_submit_error\)/)
+  assert.match(cardSource, /!reviewIncomplete && !submitFailed/)
 })
 
 test('one queue handoff owns every visible private review job', () => {
@@ -350,6 +518,7 @@ test('one queue handoff owns every visible private review job', () => {
   } }
   const action = progressReviewAction(records, source)
   assert.equal(action.count, 3)
+  assert.equal(action.scope, contributionReviewScope(records.slice(0, 3), 'progress'))
   assert.equal(action.label, 'Work through 3')
   assert.match(action.draft, /Fresh review/)
   assert.match(action.draft, /Needs a fix/)

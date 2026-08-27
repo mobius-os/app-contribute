@@ -135,6 +135,22 @@ export function mergeRecordUpdates(records, updates) {
   })
 }
 
+// A focused review can arrive before the full ledger. Insert that exact row
+// when it is absent, or refresh it without losing the real storage path when a
+// cached copy is already on screen.
+export function upsertRecord(records, update) {
+  if (!update?.id) return records
+  const current = Array.isArray(records) ? records : []
+  const index = current.findIndex((record) => record?.id === update.id)
+  if (index < 0) return [update, ...current]
+  const next = [...current]
+  next[index] = {
+    ...update,
+    path: update.path || current[index].path,
+  }
+  return next
+}
+
 // Resolve the ambiguous result of a public submit whose browser response was
 // lost. The durable ledger is the authority: a successful server action has
 // already advanced the row, while a rejected action has persisted its blocker.

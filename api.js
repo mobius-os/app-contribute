@@ -485,6 +485,37 @@ export async function fetchMobiusContributionStatus({ appId, token, rec }) {
   }
 }
 
+export async function withdrawMobiusContribution({ appId, token, rec }) {
+  try {
+    const r = await fetch(
+      '/api/contribution-relay/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) +
+        '/withdraw',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm_withdrawal: true }),
+      },
+    )
+    const body = await r.json().catch(() => null)
+    if (r.ok && body?.record) return { ok: body.record }
+    const detail = body?.detail
+    return {
+      error: detail && typeof detail === 'object'
+        ? detail.message
+        : (typeof detail === 'string'
+            ? detail
+            : 'Could not withdraw this contribution.'),
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Refresh Contribute before trying again.',
+    }
+  }
+}
+
 // Explicit pre-PR test action. The backend rechecks the reviewed diff, pushes
 // only that branch to the owner's fork, and dispatches the allowlisted Tests
 // workflow without opening a pull request. Like Send, a lost response is

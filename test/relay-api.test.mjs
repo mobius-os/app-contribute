@@ -5,6 +5,7 @@ import {
   fetchMobiusContributionStatus,
   submitContributionViaMobius,
   updateContribution,
+  withdrawMobiusContribution,
 } from '../api.js'
 
 function response(status, body) {
@@ -74,6 +75,36 @@ test('Möbius status reader returns the saved draft URL', async () => {
     })
     assert.equal(outcome.ok.status, 'draft')
     assert.equal(outcome.ok.url, 'https://github.com/owner/mobius/pull/123')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('Möbius withdrawal requires an explicit confirmation body', async () => {
+  const originalFetch = globalThis.fetch
+  let seen = null
+  globalThis.fetch = async (url, options) => {
+    seen = { url, options }
+    return response(200, {
+      record: {
+        id: 'review-1',
+        status: 'closed',
+        relay_status: 'withdrawn',
+      },
+    })
+  }
+  try {
+    const outcome = await withdrawMobiusContribution({
+      appId: 80,
+      token: 'scoped-token',
+      rec: { id: 'review-1' },
+    })
+    assert.equal(seen.url, '/api/contribution-relay/80/review-1/withdraw')
+    assert.equal(seen.options.method, 'POST')
+    assert.deepEqual(JSON.parse(seen.options.body), {
+      confirm_withdrawal: true,
+    })
+    assert.equal(outcome.ok.relay_status, 'withdrawn')
   } finally {
     globalThis.fetch = originalFetch
   }
