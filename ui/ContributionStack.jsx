@@ -6,8 +6,14 @@ import {
   stackProgress,
   stackReadiness,
 } from '../stack.js'
-import { blockedReviewCount, reviewStateFor } from '../review.js'
+import {
+  blockedReviewCount,
+  fixAndReviewAction,
+  progressReviewAction,
+  reviewStateFor,
+} from '../review.js'
 import { ContributionCard } from './ContributionCard.jsx'
+import { AgentHandoffButton } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 
 function branchOf(rec) {
@@ -102,13 +108,14 @@ export function ContributionStack({
   onSendStack,
   onLandStack,
   onFeedback,
+  onStartAgent,
   onSetAutopilot,
   loadDiff,
 }) {
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendElapsed, setSendElapsed] = useState(0)
   const [note, setNote] = useState('')
+  const [accepted, setAccepted] = useState(false)
   const isLandingAction = action === 'land'
   const progress = stackProgress(unit)
   const ready = unit.records.filter((rec) => rec.status === 'prepared')
@@ -123,6 +130,10 @@ export function ContributionStack({
   const canAct = readiness.ok && blocked === 0
   const canRecoverLanding = isLandingAction && readiness.code === 'landing'
   const canRun = canAct || canRecoverLanding
+  const repairAction = !isLandingAction && blocked > 0
+    ? (progressReviewAction(unit.records, reviewStatus) || fixAndReviewAction(unit.records))
+    : null
+  const sendLabel = ready.length === 1 ? 'Send PR' : 'Send PRs'
   const keepPrivateRef = useRef(null)
   const readinessId = useId()
   const confirmDescriptionId = useId()
@@ -135,21 +146,10 @@ export function ContributionStack({
     if (!canAct && confirming) setConfirming(false)
   }, [canAct, confirming])
 
-  useEffect(() => {
-    if (!sending) {
-      setSendElapsed(0)
-      return undefined
-    }
-    const startedAt = Date.now()
-    const update = () => setSendElapsed(Math.floor((Date.now() - startedAt) / 1000))
-    update()
-    const timer = window.setInterval(update, 1000)
-    return () => window.clearInterval(timer)
-  }, [sending])
-
   async function runAction() {
     if (!canRun) return
     setSending(true)
+    setAccepted(true)
     setNote('')
     try {
       const handler = isLandingAction ? onLandStack : onSendStack
@@ -165,9 +165,23 @@ export function ContributionStack({
           : 'Publishing is still in progress for this chain. Contribute will update each change as it finishes.')
         setConfirming(false)
       } else {
-        setNote(outcome.error || (isLandingAction
-          ? 'Could not land this PR stack.'
-          : 'Could not submit this PR stack.'))
+        const recovery = !isLandingAction
+          ? await onStartAgent?.(fixAndReviewAction(unit.records))
+          : null
+        if (!recovery?.ok) {
+          setAccepted(false)
+          setNote(outcome.error || recovery?.error || (isLandingAction
+            ? 'Could not land this PR stack.'
+            : 'Could not submit this PR stack.'))
+        }
+      }
+    } catch {
+      const recovery = !isLandingAction
+        ? await onStartAgent?.(fixAndReviewAction(unit.records))
+        : null
+      if (!recovery?.ok) {
+        setAccepted(false)
+        setNote(recovery?.error || 'Could not continue this contribution stack.')
       }
     } finally {
       setSending(false)
@@ -187,6 +201,8 @@ export function ContributionStack({
     }) || {}
     if (!outcome.ok) setNote('Open Contribute inside Möbius to return to the source chat.')
   }
+
+  if (accepted) return null
 
   return (
     <article className="co-stack-card">
@@ -312,16 +328,17 @@ export function ContributionStack({
               </span>
             </button>
           </div>
-          {sending ? (
-            <p className="co-review-note" role="status" aria-live="polite">
-              {isLandingAction ? 'Landing the verified changes together' : 'Publishing the reviewed pull requests in order'}
-              {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
-            </p>
-          ) : null}
         </div>
       ) : (
         <div className="co-stack-actions">
-          <button
+          {repairAction ? (
+            <AgentHandoffButton
+              action={repairAction}
+              onStart={onStartAgent}
+              className="co-icon-btn co-review-btn is-primary"
+              icon="review"
+            />
+          ) : <button
             type="button"
             className="co-icon-btn co-send-btn is-primary"
             disabled={!canRun}
@@ -337,8 +354,8 @@ export function ContributionStack({
             onClick={() => canRecoverLanding ? runAction() : setConfirming(true)}
           >
             <Icon name={isLandingAction ? 'merge' : 'send'} />
-            <span>{canRecoverLanding ? 'Check' : isLandingAction ? 'Land' : 'Send'}</span>
-          </button>
+            <span>{canRecoverLanding ? 'Check' : isLandingAction ? 'Land' : sendLabel}</span>
+          </button>}
           {!isLandingAction && <button
             type="button"
             className="co-icon-btn"

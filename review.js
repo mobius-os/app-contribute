@@ -342,7 +342,7 @@ export function addressAllAction(records, reviewStatus) {
   return {
     event: 'address_all_contributions',
     title: 'Address contribution follow-up',
-    label: `Address all ${attentionRecords.length}`,
+    label: attentionRecords.length === 1 ? 'Fix' : `Address all ${attentionRecords.length}`,
     busyLabel: 'Starting…',
     startedLabel: 'Agent is handling follow-up',
     startedMessage: 'Stay in Contribute. Refreshed reviews and any decisions will appear here.',
@@ -400,6 +400,29 @@ export function finishContributionCycleAction(records, reviewStatus, projectCoun
       'Preserve private and local-only work, route overlaps through the project’s existing resolver, and keep any activation or restart separately confirmed.',
       'Finish by classifying every remaining local difference and reporting prepared, sent, merged, blocked, aligned, and deliberately local outcomes.',
     ].join('\n'),
+  }
+}
+
+/** One direct default for the complete Needs-you queue, including mixed work. */
+export function actionQueueDefaultAction(records, reviewStatus) {
+  const safe = Array.isArray(records) ? records : []
+  const reviewAction = progressReviewAction(safe, reviewStatus)
+  const attentionAction = addressAllAction(safe, reviewStatus)
+  if (!reviewAction) return attentionAction
+  if (!attentionAction) return reviewAction
+
+  const candidates = new Set([
+    ...contributionsNeedingReviewAction(safe, reviewStatus).map(rec => rec.id),
+    ...contributionsNeedingAttention(safe, reviewStatus).map(rec => rec.id),
+  ])
+  const cycle = finishContributionCycleAction(safe, reviewStatus, 0)
+  if (!cycle) return reviewAction
+  return {
+    ...cycle,
+    event: 'handle_contribution_action_queue',
+    title: 'Handle every contribution needing work',
+    label: candidates.size === 1 ? 'Fix and review' : `Handle all ${candidates.size}`,
+    count: candidates.size,
   }
 }
 

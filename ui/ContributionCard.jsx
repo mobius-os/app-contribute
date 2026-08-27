@@ -582,7 +582,7 @@ function ReviewActions({
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
-  const [sendElapsed, setSendElapsed] = useState(0)
+  const [accepted, setAccepted] = useState(false)
   const [dismissing, setDismissing] = useState(false)
   // Dismiss moves the prepared record to History. It is reversible there, but
   // still must not fire on a stray tap because it leaves the active queue.
@@ -618,39 +618,30 @@ function ReviewActions({
     if (confirmingChecks) cancelChecksRef.current?.focus()
   }, [confirmingChecks])
 
-  useEffect(() => {
-    if (!sending) {
-      setSendElapsed(0)
-      return undefined
-    }
-    const startedAt = Date.now()
-    const update = () => setSendElapsed(Math.floor((Date.now() - startedAt) / 1000))
-    update()
-    const timer = window.setInterval(update, 1000)
-    return () => window.clearInterval(timer)
-  }, [sending])
-
   async function send() {
     if (!isPr || blocked || submitFailed || reviewIncomplete || checksActive) return
     setSending(true)
+    setAccepted(true)
     setSendNote(null)
     setNote(null)
     try {
       const outcome = (await onSend(rec)) || {}
-      if (outcome.ok) {
-        setSendNote(outcome.updated
-          ? 'Pull request updated on GitHub.'
-          : outcome.viaMobius
-            ? 'Draft pull request opened through Möbius.'
-            : 'Pull request opened on GitHub for review.')
-      } else if (outcome.pending) {
-        setSendNote(outcome.viaMobius
-          ? 'Möbius accepted the reviewed change and is opening the draft. This card will update automatically.'
-          : 'Publishing is still in progress. Contribute will update this card when GitHub finishes.')
-      } else {
-        setNote(outcome.error || (isUpdate
-          ? 'Could not update this pull request.'
-          : 'Could not submit this contribution.'))
+      // Success and pending states already move the record out of this action
+      // state. Only failures need a second line of explanation.
+      if (!outcome.ok && !outcome.pending) {
+        const recovery = await onReview?.(recoveryReviewAction(rec))
+        if (!recovery?.ok) {
+          setAccepted(false)
+          setNote(outcome.error || recovery?.error || (isUpdate
+            ? 'Could not update this pull request.'
+            : 'Could not submit this contribution.'))
+        }
+      }
+    } catch {
+      const recovery = await onReview?.(recoveryReviewAction(rec))
+      if (!recovery?.ok) {
+        setAccepted(false)
+        setNote(recovery?.error || 'Could not continue this contribution.')
       }
     } finally {
       setSending(false)
@@ -714,6 +705,8 @@ function ReviewActions({
       setConfirmingDismiss(false)
     }
   }
+
+  if (accepted) return null
 
   return (
     <div className="co-action-block">
@@ -833,16 +826,16 @@ function ReviewActions({
                   aria-label={checksActive
                     ? 'GitHub checks are still running'
                     : sending
-                      ? (isUpdate ? 'Updating pull request' : 'Opening pull request')
-                      : (isUpdate ? 'Update pull request' : 'Open pull request for review')}
-                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Update pull request' : 'Open pull request')}
+                      ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
+                      : (isUpdate ? 'Send pull request update' : 'Send pull request for review')}
+                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Send pull request update' : 'Send pull request')}
                 >
                   <Icon name="send" />
                   <span className="co-action-label">
-                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Update PR' : 'Open PR')}</span>
+                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Send update' : 'Send PR')}</span>
                     {sending ? (
                       <span className="co-action-label-sweep" aria-hidden="true">
-                        {isUpdate ? 'Update PR' : 'Open PR'}
+                        {isUpdate ? 'Send update' : 'Send PR'}
                       </span>
                     ) : null}
                   </span>
@@ -889,14 +882,6 @@ function ReviewActions({
           Requests stay connected to their source conversation, where you can refine or publish them with the full context intact.
         </p>
       ) : null}
-      {sending && (
-        <p className="co-review-note" role="status" aria-live="polite">
-          {isUpdate
-            ? 'Checking the reviewed source and updating the pull request'
-            : 'Checking the reviewed source and publishing it to GitHub'}
-          {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
-        </p>
-      )}
       {startingChecks && (
         <p className="co-review-note" role="status" aria-live="polite">
           Verifying the reviewed branch, updating your fork, and starting GitHub checks…

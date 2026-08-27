@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  actionQueueDefaultAction,
   addressAllAction,
   canRunPrePrChecks,
   contributionReviewScope,
@@ -32,6 +33,8 @@ import { contributionRecordPaths } from '../storage.js'
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
+const batchSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
+const stackSource = readFileSync(new URL('../ui/ContributionStack.jsx', import.meta.url), 'utf8')
 const overviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
 
@@ -159,7 +162,7 @@ test('a complete active stack can open from the fast snapshot', () => {
 
 test('review queues own compact defaults and one grouped action', () => {
   assert.match(feedSource, /className=\{'co-review-default/)
-  assert.match(feedSource, /progressReviewAction\(unitRecords\(unit\), reviewStatus\)/)
+  assert.match(feedSource, /actionQueueDefaultAction\(unitRecords\(unit\), reviewStatus\)/)
   assert.match(feedSource, /<StageDefaultAction/)
   assert.match(feedSource, /Send all \{prepared\.length\}/)
   assert.match(feedSource, /unit\.type !== 'stack'/)
@@ -514,8 +517,21 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
-  assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
-  assert.match(cardSource, /Pull request updated on GitHub/)
+  assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
+})
+
+test('sending a pull request stays concise instead of repeating publication narration', () => {
+  assert.doesNotMatch(cardSource, /Opening pull request/)
+  assert.doesNotMatch(cardSource, /Pull request opened on GitHub for review/)
+  assert.doesNotMatch(cardSource, /sendElapsed/)
+  assert.match(cardSource, /setAccepted\(true\)[\s\S]*await onSend\(rec\)/)
+  assert.match(cardSource, /if \(accepted\) return null/)
+  assert.match(cardSource, /await onReview\?\.\(recoveryReviewAction\(rec\)\)/)
+  assert.match(feedSource, /setAccepted\(true\)[\s\S]*await onSend\?\.\(record\)/)
+  assert.doesNotMatch(feedSource, /setNote\(outcome\.pending \? 'Publishing…'/)
+  assert.match(batchSource, /collapseOnStart = true/)
+  assert.match(batchSource, /if \(collapseOnStart\) return null/)
+  assert.match(stackSource, /repairAction[\s\S]*<AgentHandoffButton/)
 })
 
 test('submit failures lead back to private agent recovery without overstating a stale push', () => {
@@ -566,6 +582,24 @@ test('one queue handoff owns every visible private review job', () => {
   assert.match(action.draft, /Stale head/)
   assert.doesNotMatch(action.draft, /Already clear/)
   assert.match(action.draft, /Do not push, publish, comment, merge/)
+})
+
+test('the Needs-you default covers mixed private review and public attention', () => {
+  const records = [
+    { id: 'review', type: 'pr', status: 'prepared', title: 'Review me' },
+    { id: 'attention', type: 'pr', status: 'open', title: 'Fix checks', needs_attention: true },
+  ]
+  const action = actionQueueDefaultAction(records, { byId: {} })
+  assert.equal(action.label, 'Handle all 2')
+  assert.equal(action.count, 2)
+  assert.match(action.draft, /Do not push, publish, comment, merge/)
+  assert.match(feedSource, /actionQueueDefaultAction\(unitRecords\(unit\), reviewStatus\)/)
+  assert.doesNotMatch(feedSource, /privateAction\.count === 1 \? 'Review'/)
+  assert.equal(actionQueueDefaultAction([records[0]], { byId: {} }).label, 'Review now')
+  assert.equal(actionQueueDefaultAction([records[1]], { byId: {} }).label, 'Fix')
+  assert.equal(actionQueueDefaultAction([{
+    ...records[0], needs_attention: true,
+  }], { byId: {} }).label, 'Fix and review')
 })
 
 test('a focused active review reuses the queue scope instead of starting a second review', () => {

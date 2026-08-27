@@ -18,6 +18,7 @@ export function AgentHandoffButton({
   onStart,
   className = 'co-btn co-btn-sm',
   icon = '',
+  collapseOnStart = true,
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -55,6 +56,7 @@ export function AgentHandoffButton({
   }
 
   if (started) {
+    if (collapseOnStart) return null
     return (
       <div className="co-agent-started" role="status" aria-live="polite">
         <span>

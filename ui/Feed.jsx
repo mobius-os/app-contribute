@@ -3,11 +3,14 @@ import { ContributionCard, ContributionDecision } from './ContributionCard.jsx'
 import { ContributionStack } from './ContributionStack.jsx'
 import { preparedContributionUnits, publicContributionUnits, stackLandable } from '../stack.js'
 import {
+  actionQueueDefaultAction,
   partitionReviewUnits,
+  fixAndReviewAction,
   locateContributionReview,
   prePrCheckPhase,
   progressReviewAction,
   qualityReviewFor,
+  recoveryReviewAction,
   reviewStateFor,
 } from '../review.js'
 import { AgentHandoffButton, openAgentConversation } from './BatchAction.jsx'
@@ -119,6 +122,7 @@ function ReviewRow({
   const count = unitRecords(unit).length
   const record = primaryRecord(unit)
   const [busy, setBusy] = useState(false)
+  const [accepted, setAccepted] = useState(false)
   const [startedChatId, setStartedChatId] = useState('')
   const [note, setNote] = useState('')
   const detail = count > 1
@@ -127,11 +131,11 @@ function ReviewRow({
       ? timeAgo(record?.updated_at || record?.created_at)
       : ''
   const privateAction = phase === 'action'
-    ? progressReviewAction(unitRecords(unit), reviewStatus)
+    ? actionQueueDefaultAction(unitRecords(unit), reviewStatus)
     : null
   const canPublishHere = phase === 'clear' && unit.type !== 'stack'
   const actionLabel = privateAction
-    ? (startedChatId ? 'Open review' : privateAction.count === 1 ? 'Review' : `Review ${privateAction.count}`)
+    ? (startedChatId ? 'Open review' : privateAction.label)
     : canPublishHere
       ? (record?.plan?.action === 'pr_update' ? 'Update' : 'Send')
       : 'View'
@@ -146,6 +150,7 @@ function ReviewRow({
       openAgentConversation(startedChatId)
       return
     }
+    setAccepted(true)
     setBusy(true)
     setNote('')
     try {
@@ -155,16 +160,25 @@ function ReviewRow({
       if (privateAction && outcome?.ok) {
         setStartedChatId(String(outcome.chatId || ''))
       } else if (!privateAction && (outcome?.ok || outcome?.pending || outcome?.alreadyHandled)) {
-        setNote(outcome.pending ? 'Publishing…' : 'Sent')
+        // The authoritative feed will place the record in its next stage.
       } else {
-        setNote(outcome?.error || 'Try again')
+        const recovery = !privateAction
+          ? await onStartAgent?.(recoveryReviewAction(record))
+          : null
+        if (!recovery?.ok) {
+          setAccepted(false)
+          setNote(outcome?.error || recovery?.error || 'Try again')
+        }
       }
     } catch {
+      setAccepted(false)
       setNote('Try again')
     } finally {
       setBusy(false)
     }
   }
+
+  if (accepted) return null
 
   return (
     <div className={'co-review-row' + (detail ? '' : ' is-compact')}>
@@ -218,10 +232,11 @@ function ReviewList({
   )
 }
 
-function BatchPublishAction({ units, onSend }) {
+function BatchPublishAction({ units, onSend, onStartAgent }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [accepted, setAccepted] = useState(false)
   const cancelRef = useRef(null)
   const descriptionId = useId()
   // A stack has its own confirmation that names every layer and base → branch
@@ -239,25 +254,33 @@ function BatchPublishAction({ units, onSend }) {
   async function publishAll() {
     if (busy) return
     const snapshot = [...preparedUnits]
+    setAccepted(true)
     setBusy(true)
     setNote('')
     let completed = 0
-    let failed = 0
+    const failedRecords = []
     for (const unit of snapshot) {
       try {
         const outcome = await onSend?.(primaryRecord(unit))
         if (outcome?.ok || outcome?.pending || outcome?.alreadyHandled) completed += 1
-        else failed += 1
+        else failedRecords.push(primaryRecord(unit))
       } catch {
-        failed += 1
+        failedRecords.push(primaryRecord(unit))
+      }
+    }
+    if (failedRecords.length > 0) {
+      const recovery = await onStartAgent?.(fixAndReviewAction(failedRecords))
+      if (!recovery?.ok) {
+        setAccepted(false)
+        setNote(recovery?.error || `${failedRecords.length} still need attention`)
       }
     }
     setBusy(false)
     setConfirming(false)
-    setNote(failed
-      ? `${completed} completed · ${failed} still need attention`
-      : 'All selected pull requests are being sent.')
+    void completed
   }
+
+  if (accepted) return null
 
   if (confirming) {
     return (
@@ -293,7 +316,7 @@ function BatchPublishAction({ units, onSend }) {
 
 function StageDefaultAction({ phase, units, reviewStatus, onStartAgent, onSend }) {
   if (phase === 'action') {
-    const action = progressReviewAction(units.flatMap(unitRecords), reviewStatus)
+    const action = actionQueueDefaultAction(units.flatMap(unitRecords), reviewStatus)
     if (!action || action.count < 2) return null
     return (
       <div className="co-stage-action">
@@ -307,7 +330,7 @@ function StageDefaultAction({ phase, units, reviewStatus, onStartAgent, onSend }
     )
   }
   if (phase === 'clear') {
-    return <BatchPublishAction units={units} onSend={onSend} />
+    return <BatchPublishAction units={units} onSend={onSend} onStartAgent={onStartAgent} />
   }
   return null
 }
@@ -339,6 +362,7 @@ function SelectedUnit({
         onSendStack={onSendStack}
         onLandStack={onLandStack}
         onFeedback={onFeedback}
+        onStartAgent={onStartAgent}
         onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
       />

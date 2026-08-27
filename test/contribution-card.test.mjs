@@ -100,7 +100,8 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
   assert.match(html, /aria-label="Run GitHub checks on my fork"/)
   assert.match(html, /title="Run the full GitHub checks on your fork"/)
   assert.match(html, />Check on fork</)
-  assert.match(html, /Open pull request for review/)
+  assert.match(html, /aria-label="Send pull request for review"/)
+  assert.match(html, />Send PR</)
 })
 
 test('a settled update target blocks another public action and leads to recovery', async (t) => {
