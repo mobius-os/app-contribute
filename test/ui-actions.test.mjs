@@ -17,11 +17,11 @@ test('send actions keep a visible label instead of relying on the icon alone', (
   assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
   assert.match(
     stackSource,
-    /<span>\{isLandingAction \? 'Land stack' : 'Send for review'\}<\/span>/,
+    /<span>\{isLandingAction \? 'Land stack' : sendLabel\}<\/span>/,
   )
   assert.match(
     stackSource,
-    /<span>\{canRecoverLanding \? 'Check' : isLandingAction \? 'Land' : 'Send'\}<\/span>/,
+    /<span>\{canRecoverLanding \? 'Check' : isLandingAction \? 'Land' : sendLabel\}<\/span>/,
   )
 })
 
@@ -189,6 +189,12 @@ test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(cardSource, /Publishing is still in progress/)
   assert.match(stackSource, /Publishing is still in progress for this chain/)
   assert.doesNotMatch(apiSource, /return \{ error: String\(\(err && err\.message\)/)
+})
+
+test('existing pull-request stacks expose one exact update action', () => {
+  assert.match(stackSource, /rec\?\.plan\?\.action === 'pr_update'/)
+  assert.match(stackSource, /ready\.length === 1 \? 'Update PR' : 'Update PRs'/)
+  assert.match(stackSource, /fast-forward the linked pull/)
 })
 
 test('wide collection and review views share centered guides on one continuous canvas', () => {
