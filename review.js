@@ -186,7 +186,6 @@ export function contributionsNeedingReviewAction(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || rec.status !== 'prepared') return false
     return reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      prePrCheckPhase(rec) === 'failed' ||
       qualityReviewFor(rec).state === 'changes_needed' ||
       !isAllClear(rec, reviewStatus)
   })
@@ -202,24 +201,20 @@ export function progressReviewAction(records, reviewStatus) {
     const state = reviewStateFor(rec, reviewStatus)?.state
     const step = state === 'needs_refresh'
       ? 'refresh the prepared head'
-      : prePrCheckPhase(rec) === 'failed'
-        ? 'fix the failed checks'
-        : quality === 'changes_needed'
-          ? 'fix findings and review again'
-          : 'complete the quality review'
+      : quality === 'changes_needed'
+        ? 'fix findings and review again'
+        : 'complete the quality review'
     return `- ${title} — ${repo} — ${step} (${rec.id})`
   })
   const first = candidates[0]
   const firstQuality = qualityReviewFor(first).state
   const singleLabel = reviewStateFor(first, reviewStatus)?.state === 'needs_refresh'
     ? 'Fix in chat'
-    : prePrCheckPhase(first) === 'failed'
-      ? 'Fix in chat'
-      : firstQuality === 'changes_needed'
-        ? 'Fix'
-        : firstQuality === 'reviewing' || firstQuality === 'queued'
-          ? 'Open chat'
-          : 'Review'
+    : firstQuality === 'changes_needed'
+      ? 'Fix'
+      : firstQuality === 'reviewing' || firstQuality === 'queued'
+        ? 'Open chat'
+        : 'Review'
   return {
     event: 'progress_contribution_reviews',
     title: 'Work through contribution reviews',
@@ -235,7 +230,7 @@ export function progressReviewAction(records, reviewStatus) {
       '',
       ...list,
       '',
-      'Refresh every record first. Resolve stale prepared heads and failed private checks, then thoroughly review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
+      'Refresh every record first. Resolve stale prepared heads, then thoroughly review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
       'For owner-authored work, fix every sound finding privately and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.',
       'CAS-update quality_review throughout the loop. Mark all_clear only when reviewed_head_sha exactly matches the current plan.head_sha.',
       'Do not push, publish, comment, merge, or otherwise change GitHub. Stop with every listed item either all clear on its exact head or carrying one precise blocker.',
@@ -255,22 +250,6 @@ export function summarizeQualityReviews(records, reviewStatus) {
     else summary.needed += 1
   }
   return summary
-}
-
-const PRE_PR_CHECK_ACTIVE = new Set([
-  'dispatching', 'uncertain', 'queued', 'in_progress',
-])
-const PRE_PR_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
-
-export function prePrCheckPhase(rec) {
-  const checks = rec?.pre_pr_checks
-  if (!checks || typeof checks !== 'object') return 'idle'
-  if (PRE_PR_CHECK_ACTIVE.has(checks.state)) return 'running'
-  if (checks.state === 'error') return 'failed'
-  if (checks.state !== 'completed') return 'idle'
-  return PRE_PR_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
-    ? 'passed'
-    : 'failed'
 }
 
 export function summarizeReviewStatus(records, reviewStatus) {
@@ -319,10 +298,6 @@ export function attentionReason(rec, reviewStatus) {
   if (review?.state === 'needs_refresh') {
     return review.message || 'This changed after it was reviewed and needs to be refreshed.'
   }
-  if (prePrCheckPhase(rec) === 'failed') {
-    return rec.pre_pr_checks?.message ||
-      'The pre-PR GitHub checks need a fix before this is sent.'
-  }
   if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
     return rec.last_submit_error.trim()
   }
@@ -336,8 +311,7 @@ export function contributionsNeedingAttention(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
     return hasPublishedAttention(rec) ||
-      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      prePrCheckPhase(rec) === 'failed'
+      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
   })
 }
 
@@ -514,7 +488,6 @@ export function contributionCycleProgress(runtime) {
 
 export function partitionReviewUnits(units, reviewStatus) {
   const needsAttention = []
-  const checking = []
   const readyToSend = []
   const needsReview = []
   const reviewing = []
@@ -526,12 +499,9 @@ export function partitionReviewUnits(units, reviewStatus) {
     // permanently impossible to review or send.
     const privateRecords = records.filter((rec) => rec.status === 'prepared')
     const reviewRecords = privateRecords.length > 0 ? privateRecords : records
-    if (reviewRecords.some((rec) => prePrCheckPhase(rec) === 'running')) {
-      checking.push(unit)
-    } else if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
+    if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
-    ) || reviewRecords.some((rec) => prePrCheckPhase(rec) === 'failed') ||
-      reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
+    ) || reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
       needsAttention.push(unit)
     } else if (reviewRecords.some((rec) => ['queued', 'reviewing'].includes(qualityReviewFor(rec).state))) {
       reviewing.push(unit)
@@ -541,7 +511,7 @@ export function partitionReviewUnits(units, reviewStatus) {
       readyToSend.push(unit)
     }
   }
-  return { needsAttention, checking, needsReview, reviewing, readyToSend }
+  return { needsAttention, needsReview, reviewing, readyToSend }
 }
 
 const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/

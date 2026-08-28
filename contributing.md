@@ -862,65 +862,17 @@ needed. Do not fall back to a duplicate PR or an unguarded branch rewrite.
 
 For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit
 `npm test`, `packager-unit`, `core-apps-unit`, `core-apps-sync` via
-`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e. The same
-suite can run before a PR exists, but preparation itself remains private and
-must NEVER push automatically.
+`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e.
 
-For a standalone prepared `mobius-os/mobius` PR, Contribute shows **Run GitHub
-checks**. Its in-card confirmation—or an explicit, unambiguous chat approval of
-the same current record—is approval for exactly these public actions: create or
-fast-forward the connected owner's personal fork when needed, enable the
-allowlisted Tests workflow there, push the exact reviewed branch, and manually
-dispatch `.github/workflows/test.yml`. It does NOT open a PR, mention a team,
-comment, or email the organization. GitHub's ordinary Actions completion
-notification is directed to the triggerer according to their personal
-notification settings. The run is recorded under the prepared record's
-top-level `pre_pr_checks` field, and Contribute refreshes it while the app is
-open.
-
-The manual trigger must already exist on upstream's default branch. The PR that
-bootstraps `workflow_dispatch` is therefore the one exception that must use the
-ordinary Send path before pre-PR checks become available for later work. For a
-branch already pushed to a personal fork, the command-line equivalent is:
-
-```bash
-gh workflow run test.yml -R <owner>/mobius --ref <reviewed-branch>
-```
-
-That command is a public GitHub action too: never run it, create/update a fork,
-or push the branch without a fresh explicit yes for those exact actions. A
-clear chat yes is sufficient; do not require a Contribute press as well. Use
-the guarded Contribute operation when available because it preserves the
-reviewed SHA, run id, and no-PR boundary as one durable operation, but the
-partner does not need to navigate to the app to make an already-explicit chat
-approval valid.
-
-When pre-PR checks fail, **Fix in chat** returns to the source chat with the run
-URL. Inspect the failed jobs and artifacts read-only, fix the owning live source,
-run the narrowest focused local checks, then re-stage the SAME record on a fresh
-private branch and checkout. Recompute its canonical diff/hash, update its
-reviewed base/head/source witness with CAS, and remove the stale `pre_pr_checks`
-and old pushed-branch evidence from the refreshed record. Do not overwrite the
-old public fork branch or dispatch another run: the owner reviews the new diff
-and gives a fresh exact chat approval or presses **Run GitHub checks** again for
-that new branch. A passing pre-PR run is evidence for the exact stored
-`head_sha`; any re-stage clears it.
+The complete upstream suite begins after the owner explicitly sends the pull
+request. Contribute has one public path for a prepared change: **Send PR**.
+Preparation and local verification stay private; there is no second fork-push
+or workflow-dispatch action to reconcile.
 
 Before staging, run the cheapest focused checks that cover the changed files.
 Classify the evidence honestly: local focused checks are fast implementation
 feedback; a lock-matched hosted run proves the exact reviewed revision in the
 full environment; the merge queue is the unconditional final gate.
-
-Recommend **Run GitHub checks** explicitly before **Send PR** when the change
-touches concurrency or ordering, persistence, auth or security, migrations,
-provider protocols, dependencies/runtime behavior, or a broad cross-cutting
-path. The same recommendation applies when the partner asks for a thorough or
-expanding-scope review and the complete environment could reveal something
-the local container cannot. This is a risk-based owner choice, never an
-automatic push: small documentation, styling, or narrowly covered changes do
-not earn a duplicate expensive run merely because the button exists. When the
-recommendation is earned, include it in the prepared handoff so the owner sees
-the early full-suite option before sending the PR.
 
 Do **not** run Playwright locally by default. The Möbius app container does not
 have Docker, so agents normally diagnose browser failures from the hosted CI

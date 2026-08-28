@@ -527,34 +527,6 @@ export async function withdrawMobiusContribution({ appId, token, rec }) {
   }
 }
 
-// Read-only GitHub status refresh plus a local ledger write. The endpoint
-// returns full updated records so the app can repaint without a second storage
-// scan. It is safe to repeat while a run is queued or in progress.
-export async function refreshPrePrChecks(token, appId) {
-  try {
-    const r = await fetchRead(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) +
-        '/pre-pr-checks/refresh',
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-      },
-      20000,
-    )
-    if (!r.ok) {
-      return { ok: false, unsupported: r.status === 404, status: r.status }
-    }
-    const body = await r.json()
-    return {
-      ok: true,
-      records: Array.isArray(body?.refreshed) ? body.refreshed : [],
-    }
-  } catch {
-    return { ok: false, offline: true, status: 0 }
-  }
-}
-
 // Complete the reviewed publication handoff after GitHub merges an app PR.
 // The platform re-verifies the PR and immutable merged source/permissions before it
 // attaches that public identity to the original local app row. The endpoint is

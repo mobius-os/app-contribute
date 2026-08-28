@@ -8,7 +8,6 @@ import {
   indexReviewStatus,
   isContributionCycleChat,
   partitionReviewUnits,
-  prePrCheckPhase,
   reviewStateFor,
   summarizeReviewStatus,
 } from '../review.js'
@@ -89,31 +88,7 @@ test('feed and batch actions share one review partition', () => {
     'stack-2': { state: 'ready' },
   } })
   assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked', 'attention'])
-  assert.deepEqual(partition.checking, [])
   assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
-})
-
-test('saved pre-PR checks affect readiness without exposing a second start action', () => {
-  assert.equal(prePrCheckPhase({ pre_pr_checks: { state: 'in_progress' } }), 'running')
-  assert.equal(prePrCheckPhase({
-    pre_pr_checks: { state: 'completed', conclusion: 'success' },
-  }), 'passed')
-  assert.equal(prePrCheckPhase({
-    pre_pr_checks: { state: 'completed', conclusion: 'failure' },
-  }), 'failed')
-
-  const record = (id, checks) => ({ ...clear(id), pre_pr_checks: checks })
-  const units = [
-    { type: 'record', id: 'running', record: record('running', { state: 'queued' }), records: [record('running', { state: 'queued' })] },
-    { type: 'record', id: 'failed', record: record('failed', { state: 'completed', conclusion: 'failure' }), records: [record('failed', { state: 'completed', conclusion: 'failure' })] },
-    { type: 'record', id: 'passed', record: record('passed', { state: 'completed', conclusion: 'success' }), records: [record('passed', { state: 'completed', conclusion: 'success' })] },
-  ]
-  const partition = partitionReviewUnits(units, { byId: {
-    running: { state: 'ready' }, failed: { state: 'ready' }, passed: { state: 'ready' },
-  } })
-  assert.deepEqual(partition.checking.map((unit) => unit.id), ['running'])
-  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['failed'])
-  assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['passed'])
 })
 
 test('address all includes active blockers, not history or healthy public work', () => {

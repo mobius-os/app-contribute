@@ -35,7 +35,7 @@ import {
   syncSetupCompletion,
   upsertRecord,
 } from './domain.js'
-import { contributionActionScope, contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, organizePrivateWorkAction, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
+import { contributionActionScope, contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, organizePrivateWorkAction, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
 import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
@@ -54,7 +54,6 @@ import {
   fetchSourceDiff,
   fetchSourceStatus,
   landContributionStack,
-  refreshPrePrChecks,
   setAutopilot,
   submitContribution,
   submitContributionViaMobius,
@@ -418,15 +417,6 @@ export default function ContributeApp({ appId, token }) {
     return next
   }, [token, appId])
 
-  const refreshPrePrChecksState = useCallback(async () => {
-    if (connRef.current.state !== 'connected') return { ok: false }
-    const outcome = await refreshPrePrChecks(token, appId)
-    if (outcome.ok && outcome.records.length > 0) {
-      applyRecordUpdates(outcome.records)
-    }
-    return outcome
-  }, [token, appId, applyRecordUpdates])
-
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
   // backend route was restarted into the running server, so say that plainly.
@@ -479,10 +469,9 @@ export default function ContributeApp({ appId, token }) {
     setConn(status)
     if (status.state === 'connected' && !fromCache) {
       runLiveRefresh(recordsRef.current)
-      refreshPrePrChecksState()
     }
     return status
-  }, [token, fromCache, runLiveRefresh, refreshPrePrChecksState])
+  }, [token, fromCache, runLiveRefresh])
 
   const refreshIncomingReviews = useCallback(async () => {
     const requestId = incomingReviewsRequestRef.current + 1
@@ -598,9 +587,6 @@ export default function ContributeApp({ appId, token }) {
     // Mount already owns the first authoritative scan. Startup focus and
     // visibility events must not queue another full pass behind it.
     if (!ledgerReadyRef.current) return
-    if (connRef.current.state === 'connected') {
-      await refreshPrePrChecksState()
-    }
     const [ledger] = await Promise.all([
       loadLedger(),
       refreshReviewStatus(),
@@ -614,7 +600,7 @@ export default function ContributeApp({ appId, token }) {
       replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
       setFromCache(false)
     }
-  }, [fetchRefreshed, refreshPrePrChecksState, refreshReviewStatus, replaceFeed])
+  }, [fetchRefreshed, refreshReviewStatus, replaceFeed])
   refreshWorkRef.current = runRefreshWork
   const refreshCoordinatorRef = useRef(null)
   if (!refreshCoordinatorRef.current) {
@@ -639,24 +625,6 @@ export default function ContributeApp({ appId, token }) {
       window.removeEventListener('message', refreshOnForeground)
     }
   }, [])
-
-  const hasActivePrePrChecks = records.some(
-    (rec) => prePrCheckPhase(rec) === 'running',
-  )
-  useEffect(() => {
-    if (!hasActivePrePrChecks || conn.state !== 'connected') return undefined
-    let cancelled = false
-    let timer = null
-    const poll = async () => {
-      await refreshPrePrChecksState()
-      if (!cancelled) timer = window.setTimeout(poll, 15000)
-    }
-    timer = window.setTimeout(poll, 2500)
-    return () => {
-      cancelled = true
-      if (timer) window.clearTimeout(timer)
-    }
-  }, [hasActivePrePrChecks, conn.state, refreshPrePrChecksState])
 
   const setView = useCallback((next) => {
     if (!CONTRIBUTION_VIEWS.includes(next)) next = 'overview'
@@ -1554,10 +1522,6 @@ export default function ContributeApp({ appId, token }) {
   const attentionPrCount = useMemo(
     () => contributionsNeedingAttention(prRecords, reviewStatus).length,
     [prRecords, reviewStatus],
-  )
-  const runningCheckCount = useMemo(
-    () => prRecords.filter((rec) => prePrCheckPhase(rec) === 'running').length,
-    [prRecords],
   )
   const activePublicPrCount = prGroups.open.length
   const isEmpty = visibleRecords.length === 0

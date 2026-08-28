@@ -14,7 +14,7 @@ const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(
     stackSource,
     /<span>\{sending \? \(isLandingAction \? 'Landing…' : 'Sending…'\) : \(isLandingAction \? 'Land stack' : sendLabel\)\}<\/span>/,
@@ -35,14 +35,10 @@ test('focused review actions keep one strong primary and compact phone-safe seco
   assert.match(themeSource, /\.co-pr-metadata \{[^}]*align-self: stretch;[^}]*width: 100%/)
 })
 
-test('saved platform check results stay visible without a second public-action path', () => {
-  assert.match(cardSource, /GitHub checks running/)
-  assert.match(cardSource, /GitHub checks need a fix/)
-  assert.match(cardSource, /GitHub checks passed/)
-  assert.doesNotMatch(cardSource, /Run GitHub checks/)
-  assert.doesNotMatch(apiSource, /export async function runPrePrChecks/)
-  assert.match(apiSource, /\/pre-pr-checks\/refresh/)
-  assert.doesNotMatch(appSource, /pre_pr_checks_started/)
+test('prepared work has no parallel fork-check workflow', () => {
+  for (const source of [cardSource, apiSource, appSource]) {
+    assert.doesNotMatch(source, /pre[_-]pr[_-]checks|pre-pr-checks|Run GitHub checks/)
+  }
 })
 
 test('single and stacked sends leave the action queue as soon as accepted', () => {
@@ -131,7 +127,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(sourceOverviewSource, /Earlier work paused/)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing will be merged\./)
   assert.match(feedSource, /open new pull requests or update existing ones/)

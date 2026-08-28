@@ -8,7 +8,6 @@ import {
   partitionReviewUnits,
   fixAndReviewAction,
   locateContributionReview,
-  prePrCheckPhase,
   progressReviewAction,
   qualityReviewFor,
   recoveryReviewAction,
@@ -62,7 +61,6 @@ function phaseLabel(unit, phase, reviewStatus) {
   const records = unitRecords(unit)
   if (phase === 'clear') return 'Ready to send'
   if (phase === 'working') {
-    if (records.some((rec) => prePrCheckPhase(rec) === 'running')) return 'Checks running'
     return 'Reviewing'
   }
   if (phase === 'open') return records.some((rec) => rec.status === 'submitting') ? 'Publishing' : 'Open'
@@ -511,11 +509,11 @@ function ReviewWorkspace({
   )
   const phaseUnits = useMemo(() => ({
     action: [...partition.needsAttention, ...partition.needsReview],
-    working: [...partition.reviewing, ...partition.checking],
+    working: partition.reviewing,
     clear: partition.readyToSend,
     open: openUnits,
     history: historyUnits,
-  }), [partition.needsAttention, partition.needsReview, partition.reviewing, partition.checking, partition.readyToSend, openUnits, historyUnits])
+  }), [partition.needsAttention, partition.needsReview, partition.reviewing, partition.readyToSend, openUnits, historyUnits])
   const firstNonempty = REVIEW_STAGES
     .filter(([key]) => key !== 'history')
     .find(([key]) => phaseUnits[key]?.length)?.[0] || 'action'
