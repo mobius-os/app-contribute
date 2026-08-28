@@ -2,12 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  actionQueueDefaultAction,
   addressAllAction,
   canRunPrePrChecks,
+  contributionActionScope,
+  contributionFailureOwner,
   contributionReviewScope,
   contributionReviewTargetFromIntent,
   contributionsNeedingAttention,
-  finishContributionCycleAction,
   focusedContributionNavigationReady,
   focusedContributionReady,
   contributionCyclePhase,
@@ -15,6 +17,7 @@ import {
   isContributionCycleChat,
   isAllClear,
   locateContributionReview,
+  organizePrivateWorkAction,
   progressReviewAction,
   qualityReviewFor,
   recoveryReviewAction,
@@ -32,6 +35,8 @@ import { contributionRecordPaths } from '../storage.js'
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
+const batchSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
+const stackSource = readFileSync(new URL('../ui/ContributionStack.jsx', import.meta.url), 'utf8')
 const overviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
 
@@ -159,7 +164,7 @@ test('a complete active stack can open from the fast snapshot', () => {
 
 test('review queues own compact defaults and one grouped action', () => {
   assert.match(feedSource, /className=\{'co-review-default/)
-  assert.match(feedSource, /progressReviewAction\(unitRecords\(unit\), reviewStatus\)/)
+  assert.match(feedSource, /actionQueueDefaultAction\(unitRecords\(unit\), reviewStatus\)/)
   assert.match(feedSource, /<StageDefaultAction/)
   assert.match(feedSource, /Send all \{prepared\.length\}/)
   assert.match(feedSource, /unit\.type !== 'stack'/)
@@ -177,7 +182,10 @@ test('the app navigation and supporting screens follow the owner task instead of
   assert.match(appSource, />\s*To do\s*</)
   assert.match(appSource, />\s*Pull requests\s*</)
   assert.match(appSource, />\s*Issues\s*</)
-  assert.match(overviewSource, /idle: 'Handle everything'/)
+  assert.match(overviewSource, /idle: 'Organize private work'/)
+  assert.match(overviewSource, /Status and reconciliation are automatic/)
+  assert.match(overviewSource, /Earlier work paused/)
+  assert.match(overviewSource, /Organize latest work/)
   assert.match(overviewSource, /title="Needs you"/)
   assert.doesNotMatch(overviewSource, /Review queue/)
   assert.match(sourceMapSource, /\['attention', 'Needs attention'\]/)
@@ -455,10 +463,11 @@ test('prepared decisions keep their private escape hatch when attention is prese
   assert.match(cardSource, /<span>Move to history<\/span>/)
 })
 
-test('compact public actions disappear only after the accepted send', () => {
-  assert.match(feedSource, /!privateAction && \(outcome\?\.ok \|\| outcome\?\.pending \|\| outcome\?\.alreadyHandled\)[\s\S]*?setAccepted\(true\)/)
+test('compact public actions collapse once while private reviews keep their re-entry action', () => {
+  assert.match(feedSource, /if \(!privateAction\) setAccepted\(true\)[\s\S]*?await onSend\?\.\(record\)/)
   assert.match(feedSource, /if \(accepted\) return null/)
   assert.match(feedSource, /privateAction && outcome\?\.ok[\s\S]*?setStartedChatId/)
+  assert.match(feedSource, /startedChatId \? 'Open review'/)
 })
 
 test('all clear belongs to the exact prepared head', () => {
@@ -516,9 +525,19 @@ test('the card review action exposes launch progress and the started conversatio
 
 test('a scoped review delegates exactly-once admission to chat.start', () => {
   assert.doesNotMatch(appSource, /chat\.list\(\{ scope: action\.scope \}\)/)
-  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: action\.scope/)
+  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: contributionActionScope\(action\)/)
   assert.match(appSource, /reused: started\.reused === true/)
   assert.match(appSource, /outcome: started\.outcome/)
+})
+
+test('all private handoffs use changed-work scopes instead of permanent one-shot chats', () => {
+  const action = { event: 'prepare', title: 'Prepare work', draft: 'Current source A' }
+  const scope = contributionActionScope(action)
+  assert.match(scope, /^contribute-task:[0-9a-f]{16}$/)
+  assert.equal(contributionActionScope({ ...action }), scope)
+  assert.notEqual(contributionActionScope({ ...action, draft: 'Current source B' }), scope)
+  assert.equal(contributionActionScope({ ...action, scope: 'exact-head' }), 'exact-head')
+  assert.doesNotMatch(appSource, /scope: 'contribute-cycle'/)
 })
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
@@ -526,9 +545,26 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
-  assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
-  assert.match(cardSource, /Pull request updated on GitHub/)
   assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
+  assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
+})
+
+test('sending a pull request stays concise instead of repeating publication narration', () => {
+  assert.doesNotMatch(cardSource, /Opening pull request/)
+  assert.doesNotMatch(cardSource, /Pull request opened on GitHub for review/)
+  assert.doesNotMatch(cardSource, /sendElapsed/)
+  assert.match(cardSource, /setAccepted\(true\)[\s\S]*await onSend\(rec\)/)
+  assert.match(cardSource, /if \(accepted\) return null/)
+  assert.match(cardSource, /await onReview\?\.\(recoveryReviewAction\(rec\)\)/)
+  assert.match(feedSource, /if \(!privateAction\) setAccepted\(true\)[\s\S]*await onSend\?\.\(record\)/)
+  assert.doesNotMatch(feedSource, /setNote\(outcome\.pending \? 'Publishing…'/)
+  assert.match(batchSource, /collapseOnStart = true/)
+  assert.match(batchSource, /if \(collapseOnStart\) return null/)
+  assert.match(stackSource, /repairAction[\s\S]*<AgentHandoffButton/)
+})
+
+test('batch recovery always releases its confirmation state', () => {
+  assert.match(feedSource, /async function publishAll\(\)[\s\S]*?try \{[\s\S]*?await onStartAgent\?\.\(fixAndReviewAction\(failedRecords\)\)[\s\S]*?\} catch \{[\s\S]*?\} finally \{[\s\S]*?setBusy\(false\)[\s\S]*?setConfirming\(false\)/)
 })
 
 test('submit failures lead back to private agent recovery without overstating a stale push', () => {
@@ -581,6 +617,24 @@ test('one queue handoff owns every visible private review job', () => {
   assert.match(action.draft, /Do not push, publish, comment, merge/)
 })
 
+test('the Needs-you default covers mixed private review and public attention', () => {
+  const records = [
+    { id: 'review', type: 'pr', status: 'prepared', title: 'Review me' },
+    { id: 'attention', type: 'pr', status: 'open', title: 'Fix checks', needs_attention: true },
+  ]
+  const action = actionQueueDefaultAction(records, { byId: {} })
+  assert.equal(action.label, 'Organize all')
+  assert.equal(action.count, 2)
+  assert.match(action.draft, /Do not push, publish, update a pull request, comment, merge/)
+  assert.match(feedSource, /actionQueueDefaultAction\(unitRecords\(unit\), reviewStatus\)/)
+  assert.doesNotMatch(feedSource, /privateAction\.count === 1 \? 'Review'/)
+  assert.equal(actionQueueDefaultAction([records[0]], { byId: {} }).label, 'Review now')
+  assert.equal(actionQueueDefaultAction([records[1]], { byId: {} }).label, 'Fix')
+  assert.equal(actionQueueDefaultAction([{
+    ...records[0], needs_attention: true,
+  }], { byId: {} }).label, 'Fix and review')
+})
+
 test('a focused active review reuses the queue scope instead of starting a second review', () => {
   const record = {
     id: 'active', type: 'pr', status: 'prepared',
@@ -629,29 +683,56 @@ test('address all handoff stays private and names every active blocker', () => {
   assert.match(action.draft, /Do not push, reply, publish, merge/)
 })
 
-test('finish cycle handoff spans review, durable waiting, and local alignment', () => {
-  const action = finishContributionCycleAction([
+test('private work excludes healthy public PRs and delegates only judgment', () => {
+  const action = organizePrivateWorkAction([
     { id: 'one', type: 'pr', status: 'prepared' },
     { id: 'two', type: 'pr', status: 'open', needs_attention: true },
+    { id: 'healthy', type: 'pr', status: 'open' },
     { id: 'old', type: 'pr', status: 'merged' },
-  ], { byId: {} }, 3)
+  ], { byId: {} }, [{ name: 'Notes' }, { name: 'Voice' }])
 
-  assert.equal(action.label, 'Run full cycle')
-  assert.equal(action.count, 5)
-  assert.match(action.draft, /^Finish the contribution cycle for these projects\./)
-  assert.match(action.draft, /1 privately prepared/)
-  assert.match(action.draft, /1 public or publishing/)
-  assert.match(action.draft, /3 projects needing reconciliation/)
-  assert.match(action.draft, /durable waits/)
-  assert.match(action.draft, /reconcile each local project/)
-  assert.match(action.draft, /activation or restart separately confirmed/)
-  assert.match(action.startedMessage, /Stay in Contribute/)
+  assert.equal(action.label, 'Organize all')
+  assert.equal(action.count, 4)
+  assert.match(action.draft, /^Organize the current private contribution work/)
+  assert.match(action.draft, /Notes/)
+  assert.match(action.draft, /Voice/)
+  assert.match(action.draft, /deterministic reconciliation helpers/)
+  assert.match(action.draft, /Use agent judgment only where it is actually required/)
+  assert.doesNotMatch(action.draft, /healthy/)
+  assert.doesNotMatch(action.draft, /durable waits/)
+  assert.match(action.startedMessage, /approval buttons update/)
 })
 
-test('finish cycle handoff is absent when there is no active work', () => {
-  assert.equal(finishContributionCycleAction([
+test('private work starts a fresh scoped task only when represented work changes', () => {
+  const first = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'first' } },
+  ], { byId: {} }, [])
+  const same = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'first' } },
+  ], { byId: {} }, [])
+  const changed = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'second' } },
+  ], { byId: {} }, [])
+
+  assert.equal(contributionActionScope(first), contributionActionScope(same))
+  assert.notEqual(contributionActionScope(first), contributionActionScope(changed))
+})
+
+test('healthy public work stays automatic instead of creating an agent task', () => {
+  assert.equal(organizePrivateWorkAction([
+    { id: 'open', type: 'pr', status: 'open' },
     { id: 'old', type: 'pr', status: 'merged' },
-  ], { byId: {} }, 0), null)
+  ], { byId: {} }, []), null)
+})
+
+test('public action failures have one truthful owner', () => {
+  assert.equal(contributionFailureOwner({ failure: { owner: 'automatic' } }), 'automatic')
+  assert.equal(contributionFailureOwner({ failure: { status: 403 } }), 'owner')
+  assert.equal(contributionFailureOwner({ failure: { code: 'github_not_connected' } }), 'owner')
+  assert.equal(contributionFailureOwner({ failure: { code: 'review_refresh_needed' } }), 'agent')
+  assert.match(cardSource, /contributionFailureOwner\(outcome\) === 'agent'/)
+  assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
+  assert.match(stackSource, /contributionFailureOwner\(outcome\) === 'agent'/)
 })
 
 test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {

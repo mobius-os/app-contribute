@@ -265,6 +265,7 @@ export function normalizeCycleState(raw) {
   return {
     chat_id: chatId.slice(0, 128),
     started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
+    scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 128) : '',
   }
 }
 

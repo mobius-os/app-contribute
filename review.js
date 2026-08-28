@@ -3,6 +3,8 @@
 // own authoritative validation; this layer makes invalidated work visible
 // before the user attempts to submit it.
 
+import { projectWorkRevision } from './source-map.js'
+
 export function indexReviewStatus(payload) {
   const byId = {}
   const rows = Array.isArray(payload?.records) ? payload.records : []
@@ -56,6 +58,28 @@ export function contributionReviewScope(records, mode = 'review') {
     hash = BigInt.asUintN(64, hash * 0x100000001b3n)
   }
   return `contribute-review:${hash.toString(16).padStart(16, '0')}`
+}
+
+// Every app-owned private task gets an immutable problem identity. Actions
+// that already carry a narrower record/head scope keep it; project and mixed
+// work use the complete task draft, so a repeated tap reuses the same running
+// conversation while changed source or ledger facts naturally start a fresh
+// one. This is deliberately not a permanent "Contribute agent" scope: the
+// platform's scoped-start primitive is exactly-once for its whole lifetime.
+export function contributionActionScope(action) {
+  if (typeof action?.scope === 'string' && action.scope.trim()) {
+    return action.scope.trim()
+  }
+  const identity = [action?.event, action?.title, action?.revision, action?.draft]
+    .map((value) => String(value || '').trim())
+    .join('\u0000')
+  if (!identity.replaceAll('\u0000', '')) return ''
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= BigInt(identity.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return `contribute-task:${hash.toString(16).padStart(16, '0')}`
 }
 
 // A quality verdict belongs to one immutable prepared head. Source freshness
@@ -342,7 +366,7 @@ export function addressAllAction(records, reviewStatus) {
   return {
     event: 'address_all_contributions',
     title: 'Address contribution follow-up',
-    label: `Address all ${attentionRecords.length}`,
+    label: attentionRecords.length === 1 ? 'Fix' : `Address all ${attentionRecords.length}`,
     busyLabel: 'Starting…',
     startedLabel: 'Agent is handling follow-up',
     startedMessage: 'Stay in Contribute. Refreshed reviews and any decisions will appear here.',
@@ -359,48 +383,108 @@ export function addressAllAction(records, reviewStatus) {
   }
 }
 
-export function finishContributionCycleAction(records, reviewStatus, projectCount = 0) {
-  const active = (Array.isArray(records) ? records : []).filter((rec) =>
-    rec?.type === 'pr' && ACTIVE_PR_STATUSES.has(rec.status))
-  const localProjects = Number.isFinite(Number(projectCount))
-    ? Math.max(0, Math.floor(Number(projectCount)))
-    : 0
-  if (active.length === 0 && localProjects === 0) return null
+export function organizePrivateWorkAction(records, reviewStatus, projects = []) {
+  const safe = Array.isArray(records) ? records : []
+  const projectList = Array.isArray(projects) ? projects : []
+  const candidates = new Map()
+  for (const rec of [
+    ...contributionsNeedingReviewAction(safe, reviewStatus),
+    ...contributionsNeedingAttention(safe, reviewStatus),
+  ]) candidates.set(rec.id, rec)
+  const contributionList = [...candidates.values()]
+  if (contributionList.length === 0 && projectList.length === 0) return null
 
-  const prepared = active.filter((rec) => rec.status === 'prepared').length
-  const publicCount = active.length - prepared
-  const attention = contributionsNeedingAttention(active, reviewStatus).length
-  const facts = [
-    prepared ? `${prepared} privately prepared` : '',
-    publicCount ? `${publicCount} public or publishing` : '',
-    attention ? `${attention} needing attention` : '',
-    localProjects ? `${localProjects} projects needing reconciliation` : '',
-  ].filter(Boolean).join(' · ')
-
+  const contributionRows = contributionList.map((rec) => {
+    const title = rec.plan?.title || rec.title || rec.summary || 'Untitled pull request'
+    return `- ${title} — ${rec.repo || rec.plan?.repo || 'project'} (${rec.id})`
+  })
+  const projectRows = projectList.map((project) => (
+    `- ${project.name || project.canonical_repo || project.key || 'Local project'}`
+  ))
+  const count = contributionList.length + projectList.length
+  const includesPublicAttention = contributionList.some((rec) => rec.status !== 'prepared')
+  const includesAttention = contributionsNeedingAttention(
+    contributionList, reviewStatus,
+  ).length > 0
+  const singleReview = contributionList.length === 1
+    ? progressReviewAction(contributionList, reviewStatus)
+    : null
+  const label = projectList.length > 0
+    ? (count === 1 ? 'Organize' : 'Organize all')
+    : contributionList.length === 1
+      ? (includesAttention && singleReview
+          ? 'Fix and review'
+          : singleReview?.label || 'Fix')
+      : includesPublicAttention ? 'Organize all' : 'Review all'
+  const contributionRevision = contributionList.map((rec) => {
+    const review = reviewStateFor(rec, reviewStatus) || {}
+    return [
+      rec.id,
+      rec.status,
+      rec.plan?.head_sha,
+      rec.updated_at,
+      rec.attention?.key,
+      rec.attention?.message,
+      review.state,
+      review.code,
+    ].map((value) => String(value || '')).join('\u0000')
+  })
+  const projectRevision = projectList.map(projectWorkRevision)
   return {
-    event: 'finish_contribution_cycle',
-    title: 'Finish contribution cycle',
-    label: 'Run full cycle',
+    event: 'organize_private_contributions',
+    title: 'Organize private contribution work',
+    label,
     busyLabel: 'Starting…',
-    startedLabel: 'Working through the contribution cycle',
-    startedMessage: 'Stay in Contribute. The agent will bring back ready work and decisions as the cycle moves.',
-    count: active.length + localProjects,
+    startedLabel: 'Private work is running',
+    reusedLabel: 'This private work is already running',
+    startedMessage: 'Keep working here. Reviews and approval buttons update in Contribute.',
+    count,
+    scopeLabel: 'Private contribution work',
+    revision: [...contributionRevision, ...projectRevision].sort().join('\u0001'),
     draft: [
-      'Finish the contribution cycle for these projects.',
+      'Organize the current private contribution work listed below.',
       '',
-      `The current Contribute view indicates: ${facts}.`,
-      'Refresh the complete queue and Projects/source status before acting; these counts are only a handoff.',
+      projectRows.length ? 'Projects with local work:' : '',
+      ...projectRows,
+      contributionRows.length ? 'Contributions needing judgment or repair:' : '',
+      ...contributionRows,
       '',
-      'Privately prepare reusable local changes, then thoroughly review every prepared PR for correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
-      'Fix sound findings in owner-authored work and repeat the review on every changed head until each item is all clear; prepare suggestions rather than changing someone else’s branch.',
-      'CAS-update each record’s quality_review throughout the loop. All clear is valid only when reviewed_head_sha exactly matches plan.head_sha.',
-      'Stop at one Contribute checkpoint that enumerates the exact all-clear set. Do not push, publish, comment, merge, or otherwise change GitHub before that approval.',
-      'Follow approved work through CI, review, merge, closure, or supersession using durable waits whenever the chat promises to resume later.',
-      'Then reconcile each local project with accepted upstream work through its reviewed project update flow.',
-      'Preserve private and local-only work, route overlaps through the project’s existing resolver, and keep any activation or restart separately confirmed.',
-      'Finish by classifying every remaining local difference and reporting prepared, sent, merged, blocked, aligned, and deliberately local outcomes.',
-    ].join('\n'),
+      'Start with Contribute’s current snapshot and deterministic reconciliation helpers. Accept their proven status, landing, duplicate, and lost-response outcomes instead of recreating that work by hand.',
+      'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
+      'Privately prepare every worthwhile change in scope and thoroughly review each exact head. CAS-update quality_review throughout; all_clear is valid only when reviewed_head_sha equals plan.head_sha.',
+      'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',
+      'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',
+    ].filter(Boolean).join('\n'),
   }
+}
+
+/** One direct default for the complete Needs-you queue, including mixed work. */
+export function actionQueueDefaultAction(records, reviewStatus) {
+  const safe = Array.isArray(records) ? records : []
+  const reviewAction = progressReviewAction(safe, reviewStatus)
+  const attentionAction = addressAllAction(safe, reviewStatus)
+  if (!reviewAction) return attentionAction
+  if (!attentionAction) return reviewAction
+
+  return organizePrivateWorkAction(safe, reviewStatus, []) || reviewAction
+}
+
+const OWNER_FAILURE_CODES = new Set([
+  'github_not_connected', 'missing_github_token', 'forbidden',
+  'insufficient_permission', 'permission_denied',
+])
+
+// A public-action failure should summon private repair only when code or review
+// work can help. Connection/permission choices stay with the owner; ambiguous
+// responses stay on the deterministic ledger-refresh path instead of paying
+// for an agent that can learn nothing new.
+export function contributionFailureOwner(outcome) {
+  const failure = outcome?.failure || {}
+  if (failure.owner === 'owner' || failure.owner === 'automatic') return failure.owner
+  const status = Number(failure.status)
+  const code = String(failure.code || '').toLowerCase()
+  if (status === 401 || status === 403 || OWNER_FAILURE_CODES.has(code)) return 'owner'
+  return 'agent'
 }
 
 export function contributionCyclePhase(runtime) {
@@ -419,7 +503,7 @@ export function isContributionCycleChat(chat) {
     .filter((value) => typeof value === 'string')
     .join(' ')
     .toLowerCase()
-  return legacyLabel.includes('contribution cycle')
+  return legacyLabel.includes('contribution cycle') || legacyLabel.includes('private contribution work')
 }
 
 export function contributionCycleProgress(runtime) {

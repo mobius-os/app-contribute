@@ -86,6 +86,12 @@ Contribute feels like a calm collaboration workspace, not a Git client or an adm
 
 The interface leads with plain-language state and the next meaningful object. Technical detail is immediate after selection but does not compete with the first viewport. Accent color is rare and functional: active location, a private next step, or one high-value decision.
 
+Overview may offer one private **Organize** action for all current work that
+still needs judgment. It must say that status and reconciliation are automatic,
+must exclude healthy public pull requests, and must reuse the same conversation
+until the represented work changes. This is an orientation shortcut, not a
+second queue or a permanent background agent.
+
 **Key Characteristics:**
 - Centered reading canvas with generous negative space.
 - Thin stage rails instead of boxed filter bars or overflow menus.

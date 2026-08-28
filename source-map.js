@@ -174,6 +174,30 @@ export function projectNeedsSorting(project) {
   return projectPreparationState(project) === 'sorting'
 }
 
+// The app-owned task scope must move when the represented source moves. Keep
+// this projection deliberately smaller than the full source-status payload:
+// identities, accepted commits, and exact path sets are the facts that change
+// the work, while labels and counts are presentation.
+export function projectWorkRevision(project) {
+  const paths = [
+    ...(project?.working?.paths || []).map((row) => (
+      typeof row === 'string' ? row : `${row?.path || ''}:${row?.group || ''}`
+    )),
+    ...(project?.localOnlyPaths || []),
+    ...(project?.incomingPaths || []),
+    ...(project?.compatiblePaths || []),
+    ...(project?.conflictPaths || []),
+  ].filter(Boolean).sort()
+  return [
+    project?.key,
+    project?.head_sha,
+    project?.base_sha,
+    project?.comparison_sha,
+    project?.origin?.sha,
+    ...paths,
+  ].map((value) => String(value || '')).join('\u0000')
+}
+
 export function prepareProjectsAction(projects) {
   const candidates = (Array.isArray(projects) ? projects : [])
     .filter(projectNeedsPreparation)
@@ -197,6 +221,7 @@ export function prepareProjectsAction(projects) {
     startedLabel: one ? `Preparing ${candidates[0].name}` : 'Preparing your projects',
     startedMessage: 'Stay in Contribute. New reviews and decisions will appear here when they are ready.',
     count: candidates.length,
+    revision: candidates.map(projectWorkRevision).sort().join('\u0001'),
     draft: [
       one ? `Prepare my changes for ${candidates[0].name}.` : 'Prepare my project changes.',
       '',

@@ -29,6 +29,10 @@ The core journey is prepare, review, fix or suggest, mark all clear, send, follo
 - Existing local and private work must be preserved during reconciliation.
 - Project status can establish source relationships, but it cannot always infer whether local differences are reusable, personal, or already covered. The UI must distinguish clear preparation candidates from work that needs sorting.
 - The same workflow should extend beyond Möbius-owned projects as project adapters grow.
+- Chat keeps only decisions and attention above the composer; healthy public and settled work belongs in the chat's persistent Changes view and in Contribute.
+- Recorded edits may prompt one lightweight preparation card. The card never performs private preparation until the owner presses it.
+- Deterministic status refresh, landing recognition, duplicate detection, and lost-response reconciliation run automatically; they never summon an agent merely to repeat the ledger.
+- One changed-work conversation owns the remaining private judgment. Repeated actions reuse it until the represented source or contribution head changes.
 
 ## Brand Commitments
 
@@ -45,6 +49,8 @@ Live local project status, private contribution records and stored diffs, and co
 3. Group work by project and stage.
 4. Make detail and diffs immediate once an item is selected.
 5. Keep one deliberate owner checkpoint for public actions.
+6. Let chat prompt the next decision, Changes preserve the chat lifecycle, and Contribute own the cross-project view.
+7. Automate facts; reserve agent work for intent, grouping, review, and repair.
 
 ## Accessibility & Inclusion
 

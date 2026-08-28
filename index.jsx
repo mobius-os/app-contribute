@@ -35,7 +35,7 @@ import {
   syncSetupCompletion,
   upsertRecord,
 } from './domain.js'
-import { contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
+import { contributionActionScope, contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, organizePrivateWorkAction, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, qualityReviewFor, summarizeQualityReviews } from './review.js'
 import { preparedContributionUnits } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
@@ -231,7 +231,7 @@ export default function ContributeApp({ appId, token }) {
       const started = await window.mobius.chat.start({
         title: action.title,
         draft: action.draft,
-        scope: action.scope,
+        scope: contributionActionScope(action),
         scopeLabel: action.scopeLabel,
       })
       if (!started?.chatId) throw new Error('Missing chat id')
@@ -263,6 +263,7 @@ export default function ContributeApp({ appId, token }) {
             phase,
             chatId,
             startedAt: startedAt || current.startedAt,
+            scope: current.scope,
             runtime,
             error: '',
           })
@@ -287,10 +288,7 @@ export default function ContributeApp({ appId, token }) {
       let saved = await loadCycleState()
       if (!saved && typeof window.mobius?.chat?.list === 'function') {
         try {
-          let chats = await window.mobius.chat.list({ scope: 'contribute-cycle' })
-          if (!chats.length) {
-            chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
-          }
+          const chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
           chats.sort((a, b) => String(b.activity_at || b.updated_at || '').localeCompare(
             String(a.activity_at || a.updated_at || ''),
           ))
@@ -301,6 +299,7 @@ export default function ContributeApp({ appId, token }) {
               saved = {
                 chat_id: String(chat.id),
                 started_at: chat.created_at || chat.updated_at || '',
+                scope: typeof chat.scope === 'string' ? chat.scope : '',
               }
               await saveCycleState(saved)
               if (!cancelled) {
@@ -308,6 +307,7 @@ export default function ContributeApp({ appId, token }) {
                   phase,
                   chatId: saved.chat_id,
                   startedAt: saved.started_at,
+                  scope: saved.scope,
                   runtime,
                   error: '',
                 })
@@ -322,6 +322,7 @@ export default function ContributeApp({ appId, token }) {
         phase: 'checking',
         chatId: saved.chat_id,
         startedAt: saved.started_at,
+        scope: saved.scope,
         runtime: null,
         error: '',
       })
@@ -862,6 +863,7 @@ export default function ContributeApp({ appId, token }) {
     if (!canonical) {
       return {
         error: 'Contribute could not refresh the saved review. Nothing was sent; try again once it reconnects.',
+        failure: { owner: 'automatic' },
       }
     }
     const refreshed = { ...canonical, path: canonical.path || rec.path }
@@ -874,6 +876,7 @@ export default function ContributeApp({ appId, token }) {
         reviewNeeded: true,
         record: refreshed,
         error: 'Review this exact version first. The Review action is ready on this card.',
+        failure: { owner: 'agent' },
       }
     }
     const updating = refreshed.plan?.action === 'pr_update'
@@ -881,7 +884,10 @@ export default function ContributeApp({ appId, token }) {
     let outcome
     if (updating) {
       if (connRef.current.state !== 'connected') {
-        return { error: 'Connect GitHub before updating this pull request.' }
+        return {
+          error: 'Connect GitHub before updating this pull request.',
+          failure: { owner: 'owner', code: 'github_not_connected' },
+        }
       }
       outcome = await updateContribution({ appId, token, rec: refreshed })
     } else {
@@ -890,7 +896,10 @@ export default function ContributeApp({ appId, token }) {
         submissionMethod,
         connRef.current.state,
       )
-      if (decision.error) return { error: decision.error }
+      if (decision.error) return {
+        error: decision.error,
+        failure: { owner: 'owner' },
+      }
       viaMobius = decision.method === 'mobius'
       outcome = viaMobius
         ? await submitContributionViaMobius({ appId, token, rec: refreshed })
@@ -980,16 +989,23 @@ export default function ContributeApp({ appId, token }) {
         }
         if (resolution.state === 'blocked') {
           refreshReviewStatus()
-          return { error: 'Nothing was sent. This contribution needs an update before you try again.' }
+          return {
+            error: 'Nothing was sent. This contribution needs an update before you try again.',
+            failure: { owner: 'agent', code: 'review_refresh_needed' },
+          }
         }
       }
       refreshReviewStatus()
       return {
         error: 'We could not confirm the result. Reopen Contribute to check before trying again; a retry will not create a duplicate.',
+        failure: { owner: 'automatic' },
       }
     }
     refreshReviewStatus()
-    return { error: outcome.error || 'Could not submit this PR.' }
+    return {
+      error: outcome.error || 'Could not submit this PR.',
+      failure: outcome.failure,
+    }
   }, [
     appId,
     token,
@@ -1203,7 +1219,10 @@ export default function ContributeApp({ appId, token }) {
       submissionMethod,
       connRef.current.state,
     )
-    if (decision.error) return { error: decision.error }
+    if (decision.error) return {
+      error: decision.error,
+      failure: { owner: 'owner' },
+    }
     if (decision.method === 'mobius') {
       return {
         error: 'Related PR stacks still use your personal GitHub connection. Connect GitHub and choose Personal GitHub, or prepare these as independent changes.',
@@ -1294,14 +1313,19 @@ export default function ContributeApp({ appId, token }) {
           error: summary.published > 0
             ? 'Saved progress was restored. The remaining changes show what needs updating.'
             : 'Nothing was sent. These changes need an update before you try again.',
+          failure: { owner: 'agent', code: 'review_refresh_needed' },
         }
       }
       return {
         error: 'We could not confirm the result. Reopen Contribute to check before trying again; a retry will not create duplicates.',
+        failure: { owner: 'automatic' },
       }
     }
     refreshReviewStatus()
-    return { error: outcome.error || 'Could not submit this PR stack.' }
+    return {
+      error: outcome.error || 'Could not submit this PR stack.',
+      failure: outcome.failure,
+    }
   }, [
     appId,
     token,
@@ -1490,22 +1514,18 @@ export default function ContributeApp({ appId, token }) {
     [sourceProjects],
   )
   const cycleAction = useMemo(
-    () => finishContributionCycleAction(
-      prRecords,
-      reviewStatus,
-      actionableProjects.length,
-    ),
-    [prRecords, reviewStatus, actionableProjects.length],
+    () => organizePrivateWorkAction(prRecords, reviewStatus, actionableProjects),
+    [prRecords, reviewStatus, actionableProjects],
   )
   const onStartCycle = useCallback(async () => {
     if (!cycleAction) return
+    const scope = contributionActionScope(cycleAction)
     setCycle({
-      phase: 'starting', chatId: '', startedAt: '', runtime: null, error: '',
+      phase: 'starting', chatId: '', startedAt: '', scope, runtime: null, error: '',
     })
     const outcome = await startAgentTask({
       ...cycleAction,
-      scope: 'contribute-cycle',
-      scopeLabel: 'Contribution cycle',
+      scopeLabel: 'Private contribution work',
     })
     if (!outcome.ok) {
       setCycle({
@@ -1515,10 +1535,11 @@ export default function ContributeApp({ appId, token }) {
       return
     }
     const startedAt = new Date().toISOString()
-    const saved = { chat_id: outcome.chatId, started_at: startedAt }
+    const saved = { chat_id: outcome.chatId, started_at: startedAt, scope }
     await saveCycleState(saved)
     setCycle({
       phase: 'running', chatId: outcome.chatId, startedAt,
+      scope,
       runtime: { running: true }, error: '',
     })
     await refreshCycle(outcome.chatId, startedAt)

@@ -19,3 +19,10 @@ test('chat approval stays bound to the exact current public action', () => {
   assert.match(prose, /The broad cycle request alone still does not authorize an unenumerated push/)
   assert.match(prose, /Preparing is still private/)
 })
+
+test('chat classifications are durable outcomes rather than prose-only exclusions', () => {
+  assert.match(prose, /settle_chat_changes\.py/)
+  assert.match(prose, /newest `ts` actually reviewed/)
+  assert.match(prose, /A later edit to the same path becomes Unsorted again/)
+  assert.match(prose, /do not substitute a prose summary for this write/)
+})

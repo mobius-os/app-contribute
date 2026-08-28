@@ -14,7 +14,7 @@ const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(
     stackSource,
     /<span>\{isLandingAction \? 'Land stack' : sendLabel\}<\/span>/,
@@ -43,10 +43,11 @@ test('prepared platform checks stay a separate confirmed no-PR action', () => {
   assert.match(appSource, /pre_pr_checks_started/)
 })
 
-test('single and stacked sends expose elapsed progress to assistive technology', () => {
+test('single and stacked sends leave the action queue as soon as accepted', () => {
   for (const source of [cardSource, stackSource]) {
-    assert.match(source, /role="status" aria-live="polite"/)
-    assert.match(source, /sendElapsed/)
+    assert.match(source, /setAccepted\(true\)/)
+    assert.match(source, /if \(accepted\) return null/)
+    assert.doesNotMatch(source, /sendElapsed/)
   }
 })
 
@@ -83,7 +84,7 @@ test('review details show reviewed labels and truthful published outcomes', () =
 
 test('agent handoffs start one durable project chat and open only its accepted conversation', () => {
   assert.match(appSource, /window\.mobius\?\.chat\?\.start/)
-  assert.match(appSource, /scope: action\.scope/)
+  assert.match(appSource, /scope: contributionActionScope\(action\)/)
   assert.match(batchActionSource, /function openAgentConversation\(chatId\)/)
   assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId,[\s\S]*}, '\*'\)/)
   assert.match(batchActionSource, /openAgentConversation\(started\?\.chatId\)/)
@@ -123,11 +124,12 @@ test('an assigned incoming review stays recoverable until its conversation start
 })
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
-  assert.match(sourceOverviewSource, /Handle everything/)
-  assert.match(sourceOverviewSource, /You still approve anything public\./)
+  assert.match(sourceOverviewSource, /Organize private work/)
+  assert.match(sourceOverviewSource, /Status and reconciliation are automatic\./)
+  assert.match(sourceOverviewSource, /Earlier work paused/)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing will be merged\./)
   assert.match(feedSource, /open new pull requests or update existing ones/)
@@ -191,8 +193,8 @@ test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(stackSource, /canRecoverLanding \? 'Check'/)
   assert.match(appSource, /return \{ pending: true, record: next, viaMobius \}/)
   assert.match(appSource, /summary\.state === 'publishing'/)
-  assert.match(cardSource, /Publishing is still in progress/)
-  assert.match(stackSource, /Publishing is still in progress for this chain/)
+  assert.match(cardSource, /if \(accepted\) return null/)
+  assert.match(stackSource, /if \(accepted\) return null/)
   assert.doesNotMatch(apiSource, /return \{ error: String\(\(err && err\.message\)/)
 })
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { projectNeedsPreparation, projectStatus } from '../source-map.js'
-import { contributionCycleProgress } from '../review.js'
+import { contributionActionScope, contributionCycleProgress } from '../review.js'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 
@@ -51,26 +51,35 @@ function IncomingReview({ item, onAssign }) {
 }
 
 function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
-  const phase = cycle?.phase || 'idle'
+  const storedPhase = cycle?.phase || 'idle'
+  const currentScope = contributionActionScope(cycleAction)
+  const earlier = !!cycleAction && !!currentScope && currentScope !== cycle?.scope
+  const phase = earlier && ['complete', 'stopped'].includes(storedPhase)
+    ? 'idle'
+    : storedPhase
   if (!cycleAction && phase === 'idle') return null
   const progress = contributionCycleProgress(cycle?.runtime)
   const busy = ['checking', 'starting', 'stopping'].includes(phase)
   const running = phase === 'running'
   const canOpen = !!cycle?.chatId
-  const title = {
-    idle: 'Handle everything',
+  const title = earlier && ['paused', 'failed'].includes(phase)
+    ? (phase === 'paused' ? 'Earlier work paused' : 'Earlier work stopped')
+    : ({
+    idle: 'Organize private work',
     checking: 'Checking current work…',
     starting: 'Starting one conversation…',
-    running: 'Handling your contribution work',
+    running: 'Reviewing private work',
     stopping: 'Stopping safely…',
     stopped: 'Work stopped',
     waiting: 'Your input is needed',
     paused: 'Work paused',
     failed: 'Work stopped with a problem',
-    complete: 'Everything is up to date',
-  }[phase] || 'Contribution work'
-  const detail = {
-    idle: 'One conversation prepares and reviews the current work. You still approve anything public.',
+    complete: 'Private work organized',
+  }[phase] || 'Contribution work')
+  const detail = earlier && ['paused', 'failed'].includes(phase)
+    ? 'That conversation is still available. The latest changes can be organized separately.'
+    : ({
+    idle: 'Status and reconciliation are automatic. One background review handles only work that needs judgment.',
     checking: 'Restoring the latest progress.',
     starting: 'Opening it while you stay in Contribute.',
     stopping: 'Finishing the current safe step before stopping.',
@@ -78,8 +87,8 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
     waiting: 'Open the conversation to answer the pending decision.',
     paused: 'Open the conversation when you are ready to continue.',
     failed: 'Open the conversation for details, or try the current work again.',
-    complete: 'Projects and pull requests reflect the latest completed work.',
-  }[phase]
+    complete: 'Projects and pull requests reflect the latest completed private work.',
+  }[phase])
 
   return (
     <section className={'co-cycle-card is-' + phase} aria-live="polite">
@@ -90,7 +99,7 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
       </span>
       <div className="co-cycle-copy">
         <h2>{title}</h2>
-        {running ? <p>Preparing and reviewing the current work.</p> : <p>{detail}</p>}
+        {running ? <p>Preparing and reviewing only the work that needs judgment.</p> : <p>{detail}</p>}
         {running && progress.total > 0 ? (
           <div className="co-cycle-progress">
             <span><i style={{ transform: `scaleX(${progress.percent / 100})` }} /></span>
@@ -102,7 +111,7 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
       <div className="co-cycle-actions">
         {phase === 'idle' ? (
           <button type="button" className="co-btn co-btn-primary co-btn-sm" disabled={!cycleAction} onClick={onStart}>
-            <Icon name="cycle" size={15} /> Handle all
+            <Icon name="cycle" size={15} /> {cycleAction?.label || 'Organize all'}
           </button>
         ) : null}
         {running ? (
@@ -114,7 +123,9 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
           <button type="button" className="co-btn co-btn-sm" onClick={onOpen}>Open conversation</button>
         ) : null}
         {['stopped', 'paused', 'failed', 'complete'].includes(phase) && cycleAction ? (
-          <button type="button" className="co-btn co-btn-sm" onClick={onStart}>Handle current work</button>
+          <button type="button" className="co-btn co-btn-sm" onClick={onStart}>
+            {earlier ? 'Organize latest work' : 'Organize current work'}
+          </button>
         ) : null}
       </div>
     </section>
@@ -201,7 +212,7 @@ export function ContributionOverview({
           {!hasTasks ? (
             <div className="co-workspace-card co-workspace-empty-row is-clear">
               <strong>You’re caught up</strong>
-              <small>There are no contribution decisions waiting for you.</small>
+              <small>There are no contribution decisions waiting for you. Status and reconciliation continue automatically.</small>
             </div>
           ) : null}
           {reviewing > 0 ? (

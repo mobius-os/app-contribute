@@ -68,9 +68,30 @@ upstream.
    incoming-only work into a contribution and never publish runtime data.
 3. Group reusable work by owning repository and dependency. Deduplicate it
    against existing PRs/issues, perform the two review passes, run proportionate
-   checks, and stage exact private review records. Use a stack only when the
-   changes truly depend on one another.
-4. Stop with the prepared records in Contribute. Report what was prepared and
+   checks, and stage exact private review records. When a later chat refines an
+   existing record, preserve its original `chat_id` and CAS-add both the
+   original and current chat to `chat_ids`; one review can then reconcile every
+   source chat without duplicating or moving the contribution. Use a stack only
+   when the changes truly depend on one another.
+4. For a chat-scoped request, durably settle every recorded source path that
+   was intentionally excluded. Fetch that chat's current `edit-diffs` before
+   classification, retain the newest `ts` actually reviewed, and after the
+   source recheck run the app helper once per disposition/summary group:
+
+   ```bash
+   python3 /data/apps/contribute/settle_chat_changes.py \
+     --chat "$CHAT_ID" --through '<newest-reviewed-ts>' \
+     --disposition local-only --summary 'Kept local by design.' \
+     /data/platform/path/to/file /data/apps/example/path/to/file
+   ```
+
+   Use `personal`, `experimental`, `incoming-only`, or `duplicate` when that is
+   the truthful reason. The helper writes the Contribute-owned temporal
+   disposition through the platform domain route; never hand-edit its storage.
+   A later edit to the same path becomes Unsorted again. Do not settle a path
+   you did not inspect through the supplied timestamp, and do not substitute a
+   prose summary for this write—without it the same card will return.
+5. Stop with the prepared records in Contribute. Report what was prepared and
    what was intentionally left local, private, incomplete, duplicated, or
    blocked. Nothing public happens in this intent.
 
@@ -281,10 +302,14 @@ don't propose.
 ## The approval gate
 
 Private preparation begins only from an explicit partner request, including a
-project-level or **Prepare all** handoff from Contribute. Do not surface an
-unsolicited contribution question at the end of an otherwise complete chat:
-Contribute's Projects view owns discovery of local changes and lets the partner
-start preparation when they want it.
+project-level or **Prepare all** handoff from Contribute. The source chat's
+automatic **Changes ready to organize** card is the lightweight preparation
+suggestion after coherent file edits: it only reflects already-recorded work
+and never starts an agent, reviews a diff, or inspects GitHub on its own. The
+agent must not duplicate that visible choice with another question at the end
+of the turn. Pressing **Prepare all** on the card or in Changes is an
+explicit private-preparation request; dismissing it only hides that revision
+of the suggestion and keeps the work in Changes and Contribute.
 
 **One decision, no duplicate approval.** A live Contribute/prepare block is one
 owner decision surface for the exact action it represents. Never also call
@@ -970,7 +995,8 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
   -H "If-None-Match: *" -d '{
   "id": "<record-id>", "type": "pr", "repo": "<owner>/<repo>",
   "status": "prepared", "title": "<title>", "branch": "fix/<slug>-<short>",
-  "chat_id": "'"$CHAT_ID"'", "created_at": "<ISO>", "updated_at": "<ISO>",
+  "chat_id": "'"$CHAT_ID"'", "chat_ids": ["'"$CHAT_ID"'"],
+  "created_at": "<ISO>", "updated_at": "<ISO>",
   "summary": "<one plain-language sentence about what improves for people>",
   "plan": {"action": "pr", "repo": "<owner>/<repo>", "title": "<title>",
            "body_draft": "<full PR body, word for word>",
@@ -982,6 +1008,14 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
            "diff_stat": "<git diff --stat tail>"}
 }'
 ```
+
+`chat_id` is the immutable creation/provenance chat. `chat_ids` is private,
+additive coverage metadata for the source conversations whose edits the same
+record has reconciled. A newly created record may contain only the current
+chat. When reusing a prepared or public record from another chat, CAS-union the
+existing primary/list values with the current `$CHAT_ID`; never overwrite the
+primary id or create a duplicate merely to make the new chat's Changes view
+settle. Neither field is published to GitHub.
 
 Store the full diff beside it as raw text (the once-only write named above):
 

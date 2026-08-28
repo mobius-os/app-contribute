@@ -16,6 +16,7 @@ import {
   projectPreparationState,
   projectStatus,
   sourcePathRelationship,
+  projectWorkRevision,
 } from '../source-map.js'
 
 const snapshot = {
@@ -417,6 +418,25 @@ test('formats authoritative endpoint tree delta', () => {
   const projects = attachSourceProjects(snapshot, [])
   assert.equal(projects[0].authoredFiles, 4)
   assert.equal(projects[1].different, false)
+})
+
+test('project work identity is stable until the represented source changes', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'first-head',
+      base_sha: 'shared-base',
+      working: { files: 1, paths: [{ path: 'index.jsx', group: 'authored' }] },
+    })],
+  }, [])
+  const same = { ...notes }
+  const changed = { ...notes, head_sha: 'second-head' }
+
+  assert.equal(projectWorkRevision(notes), projectWorkRevision(same))
+  assert.notEqual(projectWorkRevision(notes), projectWorkRevision(changed))
+  assert.notEqual(
+    prepareProjectsAction([notes]).revision,
+    prepareProjectsAction([changed]).revision,
+  )
 })
 
 test('opening overview includes only useful local or shared-source positions', () => {

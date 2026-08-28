@@ -325,6 +325,7 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
         return {
           uncertain: true,
           error: 'We could not confirm the result. Checking the saved contribution now…',
+          failure: { owner: 'automatic' },
         }
       }
       return {
@@ -343,15 +344,18 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
       return {
         error: detail.message || 'Could not submit this PR.',
         record: detail.record || null,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : 'Could not submit this PR.',
+      failure: { status: r.status, code: '' },
     }
   } catch (err) {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -387,21 +391,25 @@ export async function updateContribution({ appId, token, rec }) {
       return {
         unsupported: true,
         error: 'Restart Möbius to load the reviewed PR update action.',
+        failure: { owner: 'owner', status: r.status },
       }
     }
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not update this PR.',
         record: detail.record || null,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : 'Could not update this PR.',
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -446,6 +454,7 @@ export async function submitContributionViaMobius({ appId, token, rec }) {
         error: detail.message || 'Could not submit this draft through Möbius.',
         record: detail.record || null,
         viaMobius: true,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
@@ -453,12 +462,14 @@ export async function submitContributionViaMobius({ appId, token, rec }) {
         ? detail
         : 'Could not submit this draft through Möbius.',
       viaMobius: true,
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
       viaMobius: true,
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -652,6 +663,7 @@ async function writeContributionStack({
         return {
           uncertain: true,
           error: 'We could not confirm the result. Checking the saved contributions now…',
+          failure: { owner: 'automatic' },
         }
       }
       return {
@@ -679,17 +691,20 @@ async function writeContributionStack({
         submitted: Array.isArray(updating ? detail.updated : detail.submitted)
           ? (updating ? detail.updated : detail.submitted)
           : [],
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : (updating
         ? 'Could not update this PR stack.'
         : 'Could not submit this PR stack.'),
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contributions before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
