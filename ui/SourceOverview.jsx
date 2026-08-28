@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { projectStatus } from '../source-map.js'
+import { projectNeedsPreparation, projectStatus } from '../source-map.js'
 import { contributionCycleProgress } from '../review.js'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
@@ -13,13 +13,15 @@ function SectionHeading({ id, title, action, onAction }) {
   )
 }
 
-function ReviewStep({ icon, label, count, tone = '' }) {
+function TaskRow({ title, detail, count, tone = '', onOpen }) {
   return (
-    <span className={'co-review-step ' + tone}>
-      <Icon name={icon} size={15} />
-      <strong>{count}</strong>
-      <small>{label}</small>
-    </span>
+    <button type="button" className={'co-workspace-task ' + tone} onClick={onOpen}>
+      <span className="co-workspace-task-top">
+        <strong>{title}</strong>
+        <em>{count}</em>
+      </span>
+      <span className="co-workspace-task-copy">{detail}</span>
+    </button>
   )
 }
 
@@ -56,27 +58,27 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
   const running = phase === 'running'
   const canOpen = !!cycle?.chatId
   const title = {
-    idle: 'Run contribution cycle',
-    checking: 'Checking contribution cycle…',
-    starting: 'Starting contribution cycle…',
-    running: 'Cycle in progress',
-    stopping: 'Stopping contribution cycle…',
-    stopped: 'Cycle stopped',
-    waiting: 'Cycle needs you',
-    paused: 'Cycle paused',
-    failed: 'Cycle stopped with a problem',
-    complete: 'Cycle finished',
-  }[phase] || 'Contribution cycle'
+    idle: 'Handle everything',
+    checking: 'Checking current work…',
+    starting: 'Starting one conversation…',
+    running: 'Handling your contribution work',
+    stopping: 'Stopping safely…',
+    stopped: 'Work stopped',
+    waiting: 'Your input is needed',
+    paused: 'Work paused',
+    failed: 'Work stopped with a problem',
+    complete: 'Everything is up to date',
+  }[phase] || 'Contribution work'
   const detail = {
-    idle: 'Prepares and reviews what needs attention. Nothing goes public without your approval.',
+    idle: 'One conversation prepares and reviews the current work. You still approve anything public.',
     checking: 'Restoring the latest progress.',
-    starting: 'Opening one agent conversation while you stay here.',
-    stopping: 'Asking the active agent to stop safely.',
+    starting: 'Opening it while you stay in Contribute.',
+    stopping: 'Finishing the current safe step before stopping.',
     stopped: 'No further work is running.',
     waiting: 'Open the conversation to answer the pending decision.',
     paused: 'Open the conversation when you are ready to continue.',
-    failed: 'Open the conversation for details, or start a fresh cycle.',
-    complete: 'Projects and reviews now reflect the latest completed work.',
+    failed: 'Open the conversation for details, or try the current work again.',
+    complete: 'Projects and pull requests reflect the latest completed work.',
   }[phase]
 
   return (
@@ -88,7 +90,7 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
       </span>
       <div className="co-cycle-copy">
         <h2>{title}</h2>
-        {running ? <p>{progress.label}</p> : <p>{detail}</p>}
+        {running ? <p>Preparing and reviewing the current work.</p> : <p>{detail}</p>}
         {running && progress.total > 0 ? (
           <div className="co-cycle-progress">
             <span><i style={{ transform: `scaleX(${progress.percent / 100})` }} /></span>
@@ -100,7 +102,7 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
       <div className="co-cycle-actions">
         {phase === 'idle' ? (
           <button type="button" className="co-btn co-btn-primary co-btn-sm" disabled={!cycleAction} onClick={onStart}>
-            <Icon name="cycle" size={15} /> Start cycle
+            <Icon name="cycle" size={15} /> Handle all
           </button>
         ) : null}
         {running ? (
@@ -109,10 +111,10 @@ function CycleCard({ cycleAction, cycle, onStart, onStop, onOpen }) {
           </button>
         ) : null}
         {canOpen && !busy ? (
-          <button type="button" className="co-cycle-link" onClick={onOpen}>Open conversation</button>
+          <button type="button" className="co-btn co-btn-sm" onClick={onOpen}>Open conversation</button>
         ) : null}
         {['stopped', 'paused', 'failed', 'complete'].includes(phase) && cycleAction ? (
-          <button type="button" className="co-cycle-link" onClick={onStart}>Run again</button>
+          <button type="button" className="co-btn co-btn-sm" onClick={onStart}>Handle current work</button>
         ) : null}
       </div>
     </section>
@@ -141,6 +143,14 @@ export function ContributionOverview({
   const needsReview = Number(reviews.needed || 0)
   const reviewing = Number(reviews.reviewing || 0)
   const changesNeeded = Number(reviews.changesNeeded || 0)
+  const reviewAttention = needsReview + changesNeeded
+  const projectAttention = (projects || []).filter((project) => (
+    projectNeedsPreparation(project)
+    || Number(project.incomingFiles || 0) > 0
+    || (project.contributions || []).some((record) => record.needs_attention)
+  )).length
+  const hasTasks = projectAttention > 0 || reviewAttention > 0 || reviewing > 0 ||
+    allClear > 0 || (incomingReviews || []).length > 0
 
   return (
     <section id="co-panel-overview" className="co-workspace" role="tabpanel" aria-labelledby="co-tab-overview">
@@ -151,8 +161,60 @@ export function ContributionOverview({
         onStop={onStopCycle}
         onOpen={onOpenCycle}
       />
+      <section className="co-workspace-section" aria-labelledby="co-workspace-attention">
+        <SectionHeading id="co-workspace-attention" title="Needs you" />
+        {(incomingReviews || []).length > 0 ? (
+          <div className="co-workspace-card co-incoming-list">
+            {incomingReviews.map((item) => (
+              <IncomingReview key={item.url} item={item} onAssign={onAssignIncomingReview} />
+            ))}
+          </div>
+        ) : null}
+        <div className="co-workspace-card-list">
+          {projectAttention > 0 ? (
+            <TaskRow
+              title={`${projectAttention} ${projectAttention === 1 ? 'project needs' : 'projects need'} attention`}
+              detail="Prepare local work, understand overlaps, or align shared changes."
+              count={projectAttention}
+              tone="is-call"
+              onOpen={onViewProjects}
+            />
+          ) : null}
+          {reviewAttention > 0 ? (
+            <TaskRow
+              title={`${reviewAttention} ${reviewAttention === 1 ? 'pull request needs' : 'pull requests need'} review`}
+              detail="Review or fix the private work before anything is published."
+              count={reviewAttention}
+              tone="is-call"
+              onOpen={onViewReviews}
+            />
+          ) : null}
+          {allClear > 0 ? (
+            <TaskRow
+              title={`${allClear} ${allClear === 1 ? 'pull request is' : 'pull requests are'} ready to send`}
+              detail="The current versions passed review and are waiting for your public approval."
+              count={allClear}
+              tone="is-call"
+              onOpen={onViewReviews}
+            />
+          ) : null}
+          {!hasTasks ? (
+            <div className="co-workspace-card co-workspace-empty-row is-clear">
+              <strong>You’re caught up</strong>
+              <small>There are no contribution decisions waiting for you.</small>
+            </div>
+          ) : null}
+          {reviewing > 0 ? (
+            <div className="co-workspace-status-row">
+              <span className="ma-spinner is-compact" aria-hidden="true" />
+              {reviewing} {reviewing === 1 ? 'review is' : 'reviews are'} already in progress
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <section className="co-workspace-section" aria-labelledby="co-workspace-projects">
-        <SectionHeading id="co-workspace-projects" title="Projects" action="View all" onAction={onViewProjects} />
+        <SectionHeading id="co-workspace-projects" title="Projects" action="All projects" onAction={onViewProjects} />
         <div className="co-workspace-card co-workspace-projects">
           {loading ? (
             <div className="co-workspace-loading" role="status" aria-live="polite">
@@ -172,27 +234,6 @@ export function ContributionOverview({
             <div className="co-workspace-empty-row"><strong>No local changes</strong></div>
           )}
         </div>
-      </section>
-
-      {(incomingReviews || []).length > 0 ? (
-        <section className="co-workspace-section" aria-labelledby="co-workspace-incoming">
-          <SectionHeading id="co-workspace-incoming" title="Needs you" />
-          <div className="co-workspace-card co-incoming-list">
-            {incomingReviews.map((item) => (
-              <IncomingReview key={item.url} item={item} onAssign={onAssignIncomingReview} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="co-workspace-section" aria-labelledby="co-workspace-reviews">
-        <SectionHeading id="co-workspace-reviews" title="Review queue" action="Open" onAction={onViewReviews} />
-        <button type="button" className="co-workspace-card co-review-pipeline" onClick={onViewReviews}>
-          <ReviewStep icon="review" label="To review" count={needsReview} />
-          <ReviewStep icon="refresh" label="Reviewing" count={reviewing} tone="is-progress" />
-          <ReviewStep icon="fix" label="Needs fixes" count={changesNeeded} tone="is-warn" />
-          <ReviewStep icon="check" label="All clear" count={allClear} tone="is-clear" />
-        </button>
       </section>
 
       {omittedCount > 0 ? (

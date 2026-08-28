@@ -76,6 +76,6 @@
       { "name": "Flat by Default", "body": "Persistent content surfaces use borders and tone, not floating trays or ambient dashboard shadows.", "section": "elevation" }
     ],
     "dos": ["Do show the current stage and its contents before offering action.", "Do put complete diffs and technical metadata one selection away.", "Do keep project and request language understandable without Git terminology.", "Do preserve practical touch targets and visible focus states."],
-    "donts": ["Don't add More menus for core stages; keep the stage rail horizontally scrollable.", "Don't place bulk prepare all, review all, or floating run trays inside Projects, Reviews, or Requests.", "Don't reuse one generic queue composition across tabs with different user journeys.", "Don't use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction."]
+    "donts": ["Don't add More menus for core stages; keep the stage rail horizontally scrollable.", "Don't add floating bulk trays or mix stages in one batch; a grouped action belongs to the exact stage whose rows share that default.", "Don't reuse one generic queue composition across tabs with different user journeys.", "Don't use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction."]
   }
 }

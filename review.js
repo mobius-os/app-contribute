@@ -183,10 +183,21 @@ export function progressReviewAction(records, reviewStatus) {
           : 'complete the quality review'
     return `- ${title} — ${repo} — ${step} (${rec.id})`
   })
+  const first = candidates[0]
+  const firstQuality = qualityReviewFor(first).state
+  const singleLabel = reviewStateFor(first, reviewStatus)?.state === 'needs_refresh'
+    ? 'Refresh'
+    : prePrCheckPhase(first) === 'failed'
+      ? 'Fix checks'
+      : firstQuality === 'changes_needed'
+        ? 'Fix & review again'
+        : firstQuality === 'reviewing' || firstQuality === 'queued'
+          ? 'Open review'
+          : 'Review now'
   return {
     event: 'progress_contribution_reviews',
     title: 'Work through contribution reviews',
-    label: `Work through ${candidates.length}`,
+    label: candidates.length === 1 ? singleLabel : `Work through ${candidates.length}`,
     busyLabel: 'Starting…',
     startedLabel: 'Working through reviews',
     startedMessage: 'Stay in Contribute. Each item will move as its current head is resolved and reviewed.',
