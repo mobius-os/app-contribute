@@ -138,7 +138,7 @@ function ReviewRow({
   const actionLabel = privateAction
     ? (startedChatId ? 'Open review' : privateAction.label)
     : canPublishHere
-      ? (record?.plan?.action === 'pr_update' ? 'Update' : 'Send')
+      ? 'Send'
       : 'View'
 
   async function runDefault() {
@@ -351,7 +351,6 @@ function SelectedUnit({
   phase,
   reviewStatus,
   onSend,
-  onRunPrePrChecks,
   onSendStack,
   onLandStack,
   onFeedback,
@@ -387,7 +386,6 @@ function SelectedUnit({
         reviewState={reviewStateFor(rec, reviewStatus)}
         reviewAction={progressReviewAction([rec], reviewStatus)}
         onSend={onSend}
-        onRunPrePrChecks={onRunPrePrChecks}
         onReview={onStartAgent}
         onFeedback={onFeedback}
         onDismiss={onDismiss}
@@ -481,7 +479,6 @@ function ReviewWorkspace({
   projects,
   reviewStatus,
   onSend,
-  onRunPrePrChecks,
   onSendStack,
   onLandStack,
   onFeedback,
@@ -602,7 +599,6 @@ function ReviewWorkspace({
             phase={filter}
             reviewStatus={reviewStatus}
             onSend={onSend}
-            onRunPrePrChecks={onRunPrePrChecks}
             onSendStack={onSendStack}
             onLandStack={onLandStack}
             onFeedback={onFeedback}
@@ -703,7 +699,6 @@ function RequestsWorkspace({
   projects,
   reviewStatus,
   onSend,
-  onRunPrePrChecks,
   onSendStack,
   onLandStack,
   onFeedback,
@@ -746,7 +741,6 @@ function RequestsWorkspace({
             phase={filter}
             reviewStatus={reviewStatus}
             onSend={onSend}
-            onRunPrePrChecks={onRunPrePrChecks}
             onSendStack={onSendStack}
             onLandStack={onLandStack}
             onFeedback={onFeedback}

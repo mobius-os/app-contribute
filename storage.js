@@ -12,9 +12,6 @@ const SOURCE_CACHE = 'source-cache.json'
 const CYCLE_STATE = 'cycle-state.json'
 const RECORD_PREFIX = 'contributions/'
 const RECORD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
-const LEGACY_FILE_MAX = 64 * 1024
-const LEGACY_PAGE_MAX = 1024 * 1024
-const LEGACY_RECORD_MAX = 100
 const CURRENT_STATUSES = new Set([
   'prepared', 'submitting', 'landing', 'draft', 'open',
 ])
@@ -24,35 +21,6 @@ function recordTime(record) {
   const value = record?.updated_at || record?.created_at || ''
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-function isCanonicalRecord(record) {
-  return record?.path === `${RECORD_PREFIX}${record?.id}.json`
-}
-
-// Older Contribute versions could leave an <id>.record.json mirror beside the
-// canonical <id>.json record. Preserve a legacy-only record, but once its
-// canonical successor exists the successor owns the lifecycle state even when
-// the mirror still claims that settled work is active.
-function preferCanonicalLedgerRecords(records) {
-  const selected = new Map()
-  for (const record of Array.isArray(records) ? records : []) {
-    if (!record || typeof record !== 'object' || !record.id) continue
-    const current = selected.get(record.id)
-    if (!current) {
-      selected.set(record.id, record)
-      continue
-    }
-    const currentCanonical = isCanonicalRecord(current)
-    const nextCanonical = isCanonicalRecord(record)
-    if (
-      (nextCanonical && !currentCanonical)
-      || (nextCanonical === currentCanonical && recordTime(record) > recordTime(current))
-    ) {
-      selected.set(record.id, record)
-    }
-  }
-  return [...selected.values()]
 }
 
 // The cache is the fast, bounded first screen—not a second source of truth.
@@ -73,24 +41,19 @@ export function buildFeedSnapshot(records) {
 export async function loadCachedFeed() {
   try {
     const cached = await window.mobius.storage.get(FEED_CACHE)
-    const records = Array.isArray(cached) ? cached : cached?.records
-    return Array.isArray(records) ? records : []
+    return Array.isArray(cached?.records) ? cached.records : []
   } catch {
     return []
   }
 }
 
 // A shell review handoff names one already-validated contribution id. Resolve
-// that record with at most two small reads instead of holding the interaction
-// behind the full paged ledger scan. The legacy suffix keeps old prepared work
-// reachable without turning this focused path into another enumeration.
+// that record with one small read instead of holding the interaction behind
+// the full paged ledger scan.
 export function contributionRecordPaths(recordId) {
   const id = typeof recordId === 'string' ? recordId.trim() : ''
   if (!RECORD_ID_RE.test(id)) return []
-  return [
-    `${RECORD_PREFIX}${id}.json`,
-    `${RECORD_PREFIX}${id}.record.json`,
-  ]
+  return [`${RECORD_PREFIX}${id}.json`]
 }
 
 export async function loadContributionRecord(recordId) {
@@ -138,10 +101,8 @@ export async function loadFreshContributionRecords(recordIds) {
 
 async function readLedger() {
   // Current platforms page include-content listings at a bounded byte budget.
-  // A pre-batch runtime ignores the option and returns metadata for every JSON
-  // record, so retain a strictly bounded sequential fallback for that one
-  // recognizable shape. Mixed responses and oversized sets never fan out:
-  // their exceptional entries are isolated and reported to the UI instead.
+  // Exceptional oversized entries stay isolated and are reported to the UI;
+  // this reader never falls back to an N+1 scan.
   const entries = await window.mobius.storage.list(RECORD_PREFIX, {
     includeContent: true,
   })
@@ -154,30 +115,11 @@ async function readLedger() {
   const records = []
   const omitted = []
   const jsonEntries = entries.filter((entry) =>
-    entry.type === 'file' && entry.name.endsWith('.json'))
-  const hasBatchedContent = jsonEntries.some((entry) =>
-    Object.prototype.hasOwnProperty.call(entry, 'content'))
-  const legacyBytes = jsonEntries.reduce((total, entry) => (
-    total + (Number.isFinite(entry.size) ? entry.size : LEGACY_PAGE_MAX + 1)
-  ), 0)
-  const useLegacyFallback = jsonEntries.length > 0
-    && !hasBatchedContent
-    && jsonEntries.length <= LEGACY_RECORD_MAX
-    && jsonEntries.every((entry) => Number.isFinite(entry.size)
-      && entry.size <= LEGACY_FILE_MAX)
-    && legacyBytes <= LEGACY_PAGE_MAX
+    entry.type === 'file' && entry.name.endsWith('.json')
+    && !entry.name.endsWith('.record.json'))
 
   for (const entry of jsonEntries) {
     const path = entry.path || RECORD_PREFIX + entry.name
-    if (useLegacyFallback) {
-      const rec = await window.mobius.storage.get(path)
-      if (rec && typeof rec === 'object' && rec.id) {
-        records.push({ ...rec, path })
-      } else {
-        omitted.push(path)
-      }
-      continue
-    }
     if (!Object.prototype.hasOwnProperty.call(entry, 'content')) {
       omitted.push(path)
       continue
@@ -194,7 +136,7 @@ async function readLedger() {
     }
   }
   return {
-    records: preferCanonicalLedgerRecords(records),
+    records,
     fromCache: false,
     omitted,
   }
@@ -227,11 +169,14 @@ export async function cacheFeed(records) {
   }
 }
 
-export function normalizeSourceSnapshotCache(raw) {
-  const snapshot = raw?.snapshot || raw
+function validSourceSnapshot(snapshot) {
   return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
     ? snapshot
     : null
+}
+
+export function normalizeSourceSnapshotCache(raw) {
+  return validSourceSnapshot(raw?.snapshot)
 }
 
 export async function loadCachedSourceSnapshot() {
@@ -245,7 +190,7 @@ export async function loadCachedSourceSnapshot() {
 }
 
 export async function cacheSourceSnapshot(snapshot) {
-  if (!normalizeSourceSnapshotCache(snapshot)) return false
+  if (!validSourceSnapshot(snapshot)) return false
   try {
     await window.mobius.storage.set(SOURCE_CACHE, {
       schema: 1,

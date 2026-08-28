@@ -9,7 +9,7 @@ const cardRenderer = () => renderModule(`
   export function renderCard(rec) {
     return renderToStaticMarkup(React.createElement(ContributionCard, {
       rec, onSend: () => {}, onDismiss: () => {},
-      onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
+      onFeedback: () => ({ ok: true }),
       onConnectApp: () => {}, onWithdraw: () => ({ ok: true }),
     }))
   }
@@ -82,7 +82,7 @@ test('request details do not render an empty pull-request changes section', asyn
   assert.doesNotMatch(html, /co-diff/)
 })
 
-test('prepared platform cards offer a confirmed pre-PR check action', async (t) => {
+test('prepared platform cards keep one explicit public action', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
     return
@@ -97,10 +97,8 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
     },
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
-  assert.match(html, /aria-label="Run GitHub checks on my fork"/)
-  assert.match(html, /title="Run the full GitHub checks on your fork"/)
-  assert.match(html, />Check on fork</)
-  assert.match(html, /aria-label="Send pull request for review"/)
+  assert.doesNotMatch(html, /Check on fork|Run GitHub checks/)
+  assert.match(html, /aria-label="Send pull request"/)
   assert.match(html, />Send PR</)
 })
 
@@ -126,7 +124,7 @@ test('a settled update target blocks another public action and leads to recovery
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
   assert.match(html, /Pull request #59 already merged/)
-  assert.match(html, /Refresh/)
+  assert.match(html, /Fix in chat/)
   assert.doesNotMatch(html, /Update pull request|>Update PR</)
 })
 
@@ -186,7 +184,7 @@ test('prepared cards narrate running, failed, and passing pre-PR checks', async 
   })
   assert.match(failed, /GitHub checks need a fix/)
   assert.match(failed, /Fix in chat/)
-  assert.match(failed, /Run GitHub checks on my fork again/)
+  assert.doesNotMatch(failed, /Run GitHub checks on my fork again/)
 
   const passed = renderCard({
     ...base,

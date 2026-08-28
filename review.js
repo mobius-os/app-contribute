@@ -121,7 +121,9 @@ function reviewAction(records, mode = 'review') {
   return {
     event: fixing ? 'fix_and_review_contributions' : 'review_contributions',
     title: fixing ? 'Fix and review contributions' : 'Review contributions',
-    label: fixing ? 'Fix & review again' : `Review ${candidates.length === 1 ? 'now' : 'all'}`,
+    label: fixing
+      ? (candidates.length === 1 ? 'Fix' : 'Fix all')
+      : (candidates.length === 1 ? 'Review' : 'Review all'),
     busyLabel: 'Starting…',
     startedLabel: fixing ? 'Fixing and reviewing' : 'Reviewing contributions',
     startedMessage: 'Stay in Contribute. Review verdicts will update here.',
@@ -158,7 +160,7 @@ export function recoveryReviewAction(rec) {
   return {
     event: 'recover_contribution_review',
     title: `Fix and review ${rec.title || 'contribution'}`,
-    label: 'Fix and review',
+    label: 'Fix in chat',
     busyLabel: 'Starting…',
     startedLabel: 'Fixing and reviewing',
     reusedLabel: 'Review already running',
@@ -210,18 +212,18 @@ export function progressReviewAction(records, reviewStatus) {
   const first = candidates[0]
   const firstQuality = qualityReviewFor(first).state
   const singleLabel = reviewStateFor(first, reviewStatus)?.state === 'needs_refresh'
-    ? 'Refresh'
+    ? 'Fix in chat'
     : prePrCheckPhase(first) === 'failed'
-      ? 'Fix checks'
+      ? 'Fix in chat'
       : firstQuality === 'changes_needed'
-        ? 'Fix & review again'
+        ? 'Fix'
         : firstQuality === 'reviewing' || firstQuality === 'queued'
-          ? 'Open review'
-          : 'Review now'
+          ? 'Open chat'
+          : 'Review'
   return {
     event: 'progress_contribution_reviews',
     title: 'Work through contribution reviews',
-    label: candidates.length === 1 ? singleLabel : `Work through ${candidates.length}`,
+    label: candidates.length === 1 ? singleLabel : 'Review all',
     busyLabel: 'Starting…',
     startedLabel: 'Working through reviews',
     startedMessage: 'Stay in Contribute. Each item will move as its current head is resolved and reviewed.',
@@ -259,17 +261,6 @@ const PRE_PR_CHECK_ACTIVE = new Set([
   'dispatching', 'uncertain', 'queued', 'in_progress',
 ])
 const PRE_PR_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
-
-export function canRunPrePrChecks(rec) {
-  const plan = rec?.plan || {}
-  return !!(
-    rec?.status === 'prepared' &&
-    rec?.type === 'pr' &&
-    plan.action === 'pr' &&
-    !plan.stack &&
-    (plan.repo || rec.repo) === 'mobius-os/mobius'
-  )
-}
 
 export function prePrCheckPhase(rec) {
   const checks = rec?.pre_pr_checks
@@ -497,13 +488,7 @@ export function contributionCyclePhase(runtime) {
 }
 
 export function isContributionCycleChat(chat) {
-  if (!chat || typeof chat !== 'object') return false
-  if (chat.scope === 'contribute-cycle') return true
-  const legacyLabel = [chat.scope_label, chat.title]
-    .filter((value) => typeof value === 'string')
-    .join(' ')
-    .toLowerCase()
-  return legacyLabel.includes('contribution cycle') || legacyLabel.includes('private contribution work')
+  return !!chat && typeof chat === 'object' && chat.scope === 'contribute-cycle'
 }
 
 export function contributionCycleProgress(runtime) {

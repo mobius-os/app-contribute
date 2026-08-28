@@ -55,7 +55,6 @@ import {
   fetchSourceStatus,
   landContributionStack,
   refreshPrePrChecks,
-  runPrePrChecks,
   setAutopilot,
   submitContribution,
   submitContributionViaMobius,
@@ -1082,43 +1081,6 @@ export default function ContributeApp({ appId, token }) {
     return outcome
   }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
-  const onRunPrePrChecks = useCallback(async (rec) => {
-    const outcome = await runPrePrChecks({ appId, token, rec })
-    if (outcome.ok) {
-      const next = { ...outcome.ok, path: rec.path }
-      applyRecordUpdates(next)
-      window.mobius?.signal?.('pre_pr_checks_started', {
-        id: rec.id,
-        url: next.pre_pr_checks?.url || '',
-      })
-      return { ok: true, record: next }
-    }
-    if (outcome.record) {
-      applyRecordUpdates({ ...outcome.record, path: rec.path })
-    }
-    if (outcome.uncertain) {
-      try {
-        const fresh = await loadFreshContributionRecord(rec.id)
-        if (fresh) {
-          applyRecordUpdates({ ...fresh, path: rec.path })
-          const phase = prePrCheckPhase(fresh)
-          if (phase === 'running') {
-            return { pending: true, record: fresh }
-          }
-          if (phase === 'passed') return { ok: true, record: fresh }
-          if (phase === 'failed') {
-            return { error: fresh.pre_pr_checks?.message || outcome.error }
-          }
-        }
-      } catch { /* the visibility refresh remains authoritative */ }
-      return { pending: true }
-    }
-    return {
-      error: outcome.error || 'Could not start GitHub checks.',
-      unsupported: outcome.unsupported,
-    }
-  }, [appId, token, applyRecordUpdates])
-
   // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
   // write); on success we re-read that record so the mirrored autopilot block
   // and any cleared human_required flag land in the feed.
@@ -1748,9 +1710,6 @@ export default function ContributeApp({ appId, token }) {
                 projects={sourceProjects}
                 reviewStatus={reviewStatus}
                 onSend={onSend}
-                onRunPrePrChecks={submissionMethod === 'github'
-                  ? onRunPrePrChecks
-                  : null}
                 onSendStack={onSendStack}
                 onLandStack={onLandStack}
                 onFeedback={onFeedback}

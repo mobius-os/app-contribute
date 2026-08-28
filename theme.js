@@ -1381,7 +1381,7 @@ button.co-workspace-task { cursor: pointer; }
 }
 .co-review-actions {
   align-self: auto; display: flex; align-items: center; justify-content: flex-end;
-  gap: 6px; margin-left: auto;
+  flex-wrap: wrap; gap: 7px; margin-left: auto;
 }
 .co-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1395,13 +1395,12 @@ button.co-workspace-task { cursor: pointer; }
   width: auto; min-width: 76px; flex: 0 0 auto; padding: 0 12px; gap: 7px;
   font-size: 12.5px; font-weight: 700; white-space: nowrap;
 }
+.co-send-btn.is-primary {
+  border-color: transparent; background: var(--accent); color: var(--accent-fg);
+}
 .co-refresh-btn {
   width: auto; min-width: 132px; padding: 0 12px; gap: 7px;
   font-size: 12.5px; font-weight: 700;
-}
-.co-check-btn {
-  width: auto; min-width: 68px; padding: 0 11px; gap: 7px;
-  color: var(--accent); font-size: 12.5px; font-weight: 700;
 }
 .co-secondary-action {
   width: auto; padding: 0 11px; gap: 7px;
@@ -1433,6 +1432,7 @@ button.co-workspace-task { cursor: pointer; }
     color: var(--text);
   }
   .co-icon-btn.is-primary:hover { color: var(--accent); }
+  .co-send-btn.is-primary:hover { color: var(--accent-fg); }
   .co-icon-btn.is-danger:hover {
     border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
     background: color-mix(in srgb, var(--danger) 8%, transparent);
@@ -1612,20 +1612,12 @@ button.co-workspace-task { cursor: pointer; }
 .co-review-default:disabled { opacity: .58; cursor: default; }
 .co-focus-unit { display: flex; flex-direction: column; gap: 10px; }
 .co-decision-surface {
-  padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-}
-.co-decision-kicker {
-  margin-bottom: 9px; color: var(--accent); font-size: 10.5px; font-weight: 760;
-  letter-spacing: .06em; line-height: 1.2; text-transform: uppercase;
+  padding: 0; border: 0; background: transparent;
 }
 .co-decision-surface > .co-alert,
 .co-decision-surface > .co-attention,
 .co-decision-surface > .co-publication-action,
 .co-decision-surface > .co-published-action { margin: 0; }
-.co-decision-surface > .co-alert {
-  padding: 0; border: 0; border-radius: 0; background: transparent;
-}
 .co-decision-surface > .co-alert + .co-action-block,
 .co-decision-surface > .co-attention + .co-action-block { margin-top: 10px; }
 .co-review-workspace.is-focus .co-view-heading,
@@ -1780,23 +1772,15 @@ button.co-workspace-task { cursor: pointer; }
   .co-focus-view .co-details-toggle { align-self: flex-start; }
   .co-focus-view .co-action-block,
   .co-focus-view .co-review-actions { width: 100%; }
-  .co-focus-view .co-review-actions { justify-content: flex-start; }
-  .co-focus-view .co-review-btn { flex: 1 1 auto; }
+  .co-focus-view .co-review-actions {
+    display: grid; grid-template-columns: minmax(112px, 1fr) auto auto;
+    align-items: center; gap: 7px; margin: 0;
+  }
+  .co-focus-view .co-review-btn,
+  .co-focus-view .co-send-btn { width: 100%; min-width: 0; }
   .co-focus-view .co-secondary-action {
-    width: 44px; flex: 0 0 44px; padding: 0; border-color: transparent;
-    background: transparent;
-  }
-  .co-focus-view .co-secondary-action > span {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-  }
-  .co-focus-view .co-history-action {
-    width: auto; flex: 0 1 auto; padding-inline: 10px;
+    width: auto; flex: 0 0 auto; padding-inline: 11px;
     border-color: var(--border); background: var(--surface2, var(--surface));
-  }
-  .co-focus-view .co-history-action > span {
-    position: static; width: auto; height: auto; padding: 0; margin: 0;
-    overflow: visible; clip: auto; white-space: nowrap;
   }
   .co-card-footer:has(.co-confirm) { align-items: stretch; flex-direction: column; }
   .co-card-footer:has(.co-confirm) .co-details-toggle { align-self: flex-start; }

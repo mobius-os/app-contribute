@@ -28,7 +28,7 @@ class AgentSnapshotTests(unittest.TestCase):
         ["one", "two", "solo"],
       )
 
-  def test_canonical_record_settles_a_stale_active_legacy_mirror(self):
+  def test_only_canonical_record_names_enter_the_snapshot(self):
     with tempfile.TemporaryDirectory() as raw:
       ledger = Path(raw)
       (ledger / "review.record.json").write_text(json.dumps({
@@ -45,7 +45,7 @@ class AgentSnapshotTests(unittest.TestCase):
 
       self.assertEqual(
         [record["id"] for record in snapshot.load_active(ledger)],
-        ["legacy-only"],
+        [],
       )
 
   def test_one_graphql_query_covers_every_public_pull_request(self):

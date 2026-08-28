@@ -11,7 +11,6 @@ import {
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
 import {
-  canRunPrePrChecks,
   contributionFailureOwner,
   prePrCheckPhase,
   qualityReviewFor,
@@ -45,8 +44,8 @@ import { AgentHandoffButton } from './BatchAction.jsx'
 //     expands the exact markdown body and an on-demand structured diff.
 //   - without one (a record staged by a v1-skill agent), the card keeps the
 //     plain fallback and Send returns a re-stage error from the platform.
-// Send calls the platform submit endpoint directly for PR plans; Feedback
-// returns to the source chat; Move to History CAS-flips to abandoned via storage.js.
+// Send calls the platform submit endpoint directly for PR plans; Chat returns
+// to the source conversation; Dismiss CAS-flips to abandoned via storage.js.
 
 const ACTION_LABELS = {
   pr: 'Pull request',
@@ -458,12 +457,12 @@ function AttentionCallout({ rec, onFeedback }) {
         <button
           type="button"
           className="co-icon-btn co-refresh-btn is-primary"
-          aria-label="Refresh contribution in chat"
-          title="Refresh in chat"
+          aria-label="Fix this contribution in chat"
+          title="Fix in chat"
           onClick={handleAskAgent}
         >
           <Icon name="feedback" />
-          <span>Refresh</span>
+          <span>Fix in chat</span>
         </button>
       ) : null}
     </div>
@@ -579,17 +578,15 @@ export function ReviewPlan({ rec, loadDiff }) {
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
 function ReviewActions({
-  rec, reviewState, reviewAction, onSend, onRunPrePrChecks, onReview, onFeedback, onDismiss,
+  rec, reviewState, reviewAction, onSend, onReview, onFeedback, onDismiss,
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
   const [accepted, setAccepted] = useState(false)
   const [dismissing, setDismissing] = useState(false)
-  // Dismiss moves the prepared record to History. It is reversible there, but
-  // still must not fire on a stray tap because it leaves the active queue.
+  // Dismiss removes the prepared record from the active list. It is reversible
+  // from Past, but still must not fire on a stray tap.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
-  const [confirmingChecks, setConfirmingChecks] = useState(false)
-  const [startingChecks, setStartingChecks] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
@@ -602,22 +599,14 @@ function ReviewActions({
   const quality = qualityReviewFor(rec)
   const reviewIncomplete = isPr && quality.state !== 'all_clear'
   const checksActive = prePrCheckPhase(rec) === 'running'
-  const mayRunChecks = !submitFailed && canRunPrePrChecks(rec) &&
-    typeof onRunPrePrChecks === 'function' && !checksActive
   const keepButtonRef = useRef(null)
-  const cancelChecksRef = useRef(null)
   const confirmDescriptionId = useId()
-  const checkConfirmDescriptionId = useId()
 
   // The confirm replaces the action row. Move focus to the safe choice so
   // keyboard and switch users never land on the state-changing action by default.
   useEffect(() => {
     if (confirmingDismiss) keepButtonRef.current?.focus()
   }, [confirmingDismiss])
-
-  useEffect(() => {
-    if (confirmingChecks) cancelChecksRef.current?.focus()
-  }, [confirmingChecks])
 
   async function send() {
     if (!isPr || blocked || submitFailed || reviewIncomplete || checksActive) return
@@ -645,28 +634,6 @@ function ReviewActions({
       setNote('The result could not be confirmed. Refresh before trying again.')
     } finally {
       setSending(false)
-    }
-  }
-
-  async function runChecks() {
-    if (!mayRunChecks) return
-    setStartingChecks(true)
-    setSendNote(null)
-    setNote(null)
-    try {
-      const outcome = (await onRunPrePrChecks(rec)) || {}
-      if (outcome.ok) {
-        setSendNote('The reviewed branch is on your fork and GitHub checks are starting.')
-      } else if (outcome.pending) {
-        setSendNote('The branch was handled, but the run is still being reconciled. Contribute will update this card before another try.')
-      } else {
-        setNote(outcome.unsupported
-          ? 'Restart Möbius to load the companion GitHub checks service.'
-          : outcome.error || 'Could not start GitHub checks.')
-      }
-    } finally {
-      setStartingChecks(false)
-      setConfirmingChecks(false)
     }
   }
 
@@ -720,12 +687,12 @@ function ReviewActions({
         <div
           className="co-confirm"
           role="alertdialog"
-          aria-label="Confirm move to History"
+          aria-label="Confirm dismissal"
           aria-describedby={confirmDescriptionId}
         >
           <p id={confirmDescriptionId} className="co-confirm-text">
-            Move this {isPr ? 'prepared contribution' : 'draft'} to History? You
-            can restore it there anytime.
+            Dismiss this {isPr ? 'prepared pull request' : 'draft'}? It will leave
+            your active list and can be restored from Past.
           </p>
           <div className="co-confirm-actions">
             <button
@@ -735,7 +702,7 @@ function ReviewActions({
               disabled={dismissing}
               onClick={() => setConfirmingDismiss(false)}
             >
-              Cancel
+              Keep
             </button>
             <button
               type="button"
@@ -743,39 +710,7 @@ function ReviewActions({
               disabled={dismissing}
               onClick={dismiss}
             >
-              {dismissing ? 'Moving…' : 'Move to History'}
-            </button>
-          </div>
-        </div>
-      ) : confirmingChecks ? (
-        <div
-          className="co-confirm is-safe"
-          role="alertdialog"
-          aria-label="Confirm GitHub checks"
-          aria-describedby={checkConfirmDescriptionId}
-        >
-          <p id={checkConfirmDescriptionId} className="co-confirm-text">
-            This updates your personal fork if needed, pushes only the exact
-            reviewed branch, and starts the full GitHub test suite. It does not
-            open a pull request or email the organization.
-          </p>
-          <div className="co-confirm-actions">
-            <button
-              type="button"
-              ref={cancelChecksRef}
-              className="co-btn co-btn-sm"
-              disabled={startingChecks}
-              onClick={() => setConfirmingChecks(false)}
-            >
-              Not now
-            </button>
-            <button
-              type="button"
-              className="co-btn co-btn-sm co-btn-primary"
-              disabled={startingChecks}
-              onClick={runChecks}
-            >
-              {startingChecks ? 'Starting…' : 'Run on my fork'}
+              {dismissing ? 'Dismissing…' : 'Dismiss'}
             </button>
           </div>
         </div>
@@ -785,12 +720,12 @@ function ReviewActions({
             <button
               type="button"
               className="co-icon-btn co-refresh-btn is-primary"
-              aria-label="Refresh contribution in chat"
-              title="Refresh in chat"
+              aria-label="Fix this contribution in chat"
+              title="Fix in chat"
               onClick={feedback}
             >
               <Icon name="feedback" />
-              <span>Refresh</span>
+              <span>Fix in chat</span>
             </button>
           ) : isPr ? (
             <>
@@ -801,20 +736,6 @@ function ReviewActions({
                   className="co-icon-btn co-review-btn is-primary"
                   icon="review"
                 />
-              ) : null}
-              {mayRunChecks ? (
-                <button
-                  type="button"
-                  className="co-icon-btn co-check-btn"
-                  onClick={() => setConfirmingChecks(true)}
-                  aria-label={rec.pre_pr_checks ? 'Run GitHub checks on my fork again' : 'Run GitHub checks on my fork'}
-                  title={rec.pre_pr_checks
-                    ? 'Run the full GitHub checks again on your fork'
-                    : 'Run the full GitHub checks on your fork'}
-                >
-                  <Icon name={rec.pre_pr_checks ? 'refresh' : 'check'} />
-                  <span>{rec.pre_pr_checks ? 'Check fork again' : 'Check on fork'}</span>
-                </button>
               ) : null}
               {!reviewIncomplete && !submitFailed ? (
                 <button
@@ -827,15 +748,15 @@ function ReviewActions({
                     ? 'GitHub checks are still running'
                     : sending
                       ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
-                      : (isUpdate ? 'Send pull request update' : 'Send pull request for review')}
-                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Send pull request update' : 'Send pull request')}
+                      : (isUpdate ? 'Send pull request update' : 'Send pull request')}
+                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Send update' : 'Send PR')}
                 >
                   <Icon name="send" />
                   <span className="co-action-label">
-                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Send update' : 'Send PR')}</span>
+                    <span>{checksActive ? 'Checking' : sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
                     {sending ? (
                       <span className="co-action-label-sweep" aria-hidden="true">
-                        {isUpdate ? 'Send update' : 'Send PR'}
+                        Sending…
                       </span>
                     ) : null}
                   </span>
@@ -851,7 +772,7 @@ function ReviewActions({
               title="Open source conversation"
             >
               <Icon name="feedback" />
-              <span>Open chat</span>
+              <span>Chat</span>
             </button>
           ) : null}
           {!blocked && !attentionBlocked && isPr ? (
@@ -859,21 +780,21 @@ function ReviewActions({
               type="button"
               className="co-icon-btn co-secondary-action"
               onClick={feedback}
-              aria-label="Give feedback"
-              title="Give feedback"
+              aria-label="Open source chat"
+              title="Open source chat"
             >
               <Icon name="feedback" />
-              <span>Feedback</span>
+              <span>Chat</span>
             </button>
           ) : null}
           <button
             type="button"
             className={isPr ? 'co-icon-btn co-secondary-action co-history-action' : 'co-request-history'}
             onClick={() => setConfirmingDismiss(true)}
-            aria-label={isPr ? 'Move contribution to History' : 'Move request draft to History'}
-            title="Move to History"
+            aria-label={isPr ? 'Dismiss prepared pull request' : 'Dismiss request draft'}
+            title="Dismiss"
           >
-            {isPr ? <><Icon name="cycle" /><span>Move to history</span></> : 'Move to History'}
+            {isPr ? <span>Dismiss</span> : 'Dismiss'}
           </button>
         </div>
       )}
@@ -882,11 +803,6 @@ function ReviewActions({
           Requests stay connected to their source conversation, where you can refine or publish them with the full context intact.
         </p>
       ) : null}
-      {startingChecks && (
-        <p className="co-review-note" role="status" aria-live="polite">
-          Verifying the reviewed branch, updating your fork, and starting GitHub checks…
-        </p>
-      )}
       {sendNote && (
         <p className="co-review-note" role="status" aria-live="polite">{sendNote}</p>
       )}
@@ -1162,7 +1078,6 @@ export function ContributionDecision({
   reviewState,
   reviewAction,
   onSend,
-  onRunPrePrChecks,
   onReview,
   onFeedback,
   onDismiss,
@@ -1198,7 +1113,6 @@ export function ContributionDecision({
 
   return (
     <section className="co-decision-surface" aria-label={title}>
-      <div className="co-decision-kicker">{title}</div>
       <AttentionCallout rec={rec} onFeedback={onFeedback} />
       <SubmitErrorAlert rec={rec} reviewState={reviewState} onReview={onReview} />
       <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
@@ -1210,7 +1124,6 @@ export function ContributionDecision({
           reviewState={reviewState}
           reviewAction={reviewAction}
           onSend={onSend}
-          onRunPrePrChecks={onRunPrePrChecks}
           onReview={onReview}
           onFeedback={onFeedback}
           onDismiss={onDismiss}
@@ -1228,7 +1141,6 @@ export function ContributionCard({
   rec,
   reviewState,
   onSend,
-  onRunPrePrChecks,
   onReview,
   onFeedback,
   onDismiss,
@@ -1369,7 +1281,6 @@ export function ContributionCard({
               rec={rec}
               reviewState={reviewState}
               onSend={onSend}
-              onRunPrePrChecks={onRunPrePrChecks}
               onReview={onReview}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
@@ -1383,7 +1294,6 @@ export function ContributionCard({
             rec={rec}
             reviewState={reviewState}
             onSend={onSend}
-            onRunPrePrChecks={onRunPrePrChecks}
             onReview={onReview}
             onFeedback={onFeedback}
             onDismiss={onDismiss}

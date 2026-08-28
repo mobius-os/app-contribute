@@ -59,44 +59,22 @@ def find_ledger(db_path: Path = DB_PATH) -> Path:
 
 
 def load_active(ledger: Path, limit: int = 100) -> list[dict[str, Any]]:
-  selected: dict[str, tuple[Path, dict[str, Any]]] = {}
+  records = []
   for path in sorted(ledger.glob("*.json")):
+    if path.name.endswith(".record.json"):
+      continue
     try:
       record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
       continue
     if not isinstance(record, dict) or not record.get("id"):
       continue
-    record_id = str(record["id"])
-    current = selected.get(record_id)
-    if current is None or _candidate_owns_record(current, (path, record)):
-      selected[record_id] = (path, record)
-  records = [
-    record for _path, record in selected.values()
-    if record.get("status") in ACTIVE
-  ]
+    if path.name != f'{record["id"]}.json':
+      continue
+    if record.get("status") in ACTIVE:
+      records.append(record)
   records.sort(key=_dependency_key)
   return records[:limit]
-
-
-def _candidate_owns_record(
-  current: tuple[Path, dict[str, Any]],
-  candidate: tuple[Path, dict[str, Any]],
-) -> bool:
-  current_path, current_record = current
-  candidate_path, candidate_record = candidate
-  record_id = str(candidate_record["id"])
-  current_canonical = current_path.name == f"{record_id}.json"
-  candidate_canonical = candidate_path.name == f"{record_id}.json"
-  if candidate_canonical != current_canonical:
-    return candidate_canonical
-  current_time = str(
-    current_record.get("updated_at") or current_record.get("created_at") or ""
-  )
-  candidate_time = str(
-    candidate_record.get("updated_at") or candidate_record.get("created_at") or ""
-  )
-  return candidate_time > current_time
 
 
 def _dependency_key(record: dict[str, Any]) -> tuple:

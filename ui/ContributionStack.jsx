@@ -161,14 +161,14 @@ export function ContributionStack({
       const handler = isLandingAction ? onLandStack : onSendStack
       const outcome = (await handler?.(unit.records)) || {}
       if (outcome.ok) {
-        setNote(isLandingAction
-          ? `${outcome.landed || unit.records.length} verified changes landed together.`
-          : `${outcome.submitted || ready.length} linked pull requests opened on GitHub.`)
+        if (isLandingAction) {
+          setNote(`${outcome.landed || unit.records.length} verified changes landed together.`)
+        }
         setConfirming(false)
       } else if (outcome.pending) {
-        setNote(isLandingAction
-          ? 'Landing is still being reconciled from its saved journal. Check again shortly.'
-          : 'Publishing is still in progress for this chain. Contribute will update each change as it finishes.')
+        if (isLandingAction) {
+          setNote('Landing is still being reconciled. Check again shortly.')
+        }
         setConfirming(false)
       } else {
         const recovery = !isLandingAction && contributionFailureOwner(outcome) === 'agent'
@@ -288,7 +288,7 @@ export function ContributionStack({
         >
           <strong>{isLandingAction
             ? `Land ${unit.records.length} green changes together?`
-            : `Send ${ready.length} related ${ready.length === 1 ? 'change' : 'changes'} for review?`}</strong>
+            : `${updating ? 'Update' : 'Send'} ${ready.length} ${ready.length === 1 ? 'pull request' : 'pull requests'}?`}</strong>
           <p id={confirmDescriptionId}>
             {isLandingAction
               ? 'This advances the unchanged upstream branch to the top reviewed commit in one step. It stops safely if upstream moved.'
@@ -322,10 +322,10 @@ export function ContributionStack({
               aria-busy={sending}
             >
               <span className="co-action-label">
-                <span>{isLandingAction ? 'Land stack' : sendLabel}</span>
+                <span>{sending ? (isLandingAction ? 'Landing…' : 'Sending…') : (isLandingAction ? 'Land stack' : sendLabel)}</span>
                 {sending ? (
                   <span className="co-action-label-sweep" aria-hidden="true">
-                    {isLandingAction ? 'Land stack' : sendLabel}
+                    {isLandingAction ? 'Landing…' : 'Sending…'}
                   </span>
                 ) : null}
               </span>
@@ -347,8 +347,8 @@ export function ContributionStack({
             disabled={!canRun}
             aria-label={isLandingAction
               ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land green stack' : readiness.message)
-              : (blocked > 0 ? 'Fresh review required before sending' : 'Send related changes for review')}
-            title={isLandingAction ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land stack' : 'Not ready to land') : (blocked > 0 ? 'Fresh review required' : 'Send for review')}
+              : (blocked > 0 ? 'Fresh review required before sending' : sendLabel)}
+            title={isLandingAction ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land stack' : 'Not ready to land') : (blocked > 0 ? 'Fresh review required' : sendLabel)}
             aria-describedby={
               !canAct && (blocked > 0 || readiness.code !== 'settled')
                 ? readinessId
@@ -361,12 +361,13 @@ export function ContributionStack({
           </button>}
           {!isLandingAction && <button
             type="button"
-            className="co-icon-btn"
+            className="co-icon-btn co-secondary-action"
             onClick={feedback}
-            aria-label={blocked > 0 ? 'Ask agent to update this review' : 'Give feedback'}
-            title={blocked > 0 ? 'Ask agent to update' : 'Give feedback'}
+            aria-label="Open source chat"
+            title="Open source chat"
           >
             <Icon name="feedback" />
+            <span>Chat</span>
           </button>}
         </div>
       ))}

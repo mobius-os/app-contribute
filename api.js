@@ -527,49 +527,6 @@ export async function withdrawMobiusContribution({ appId, token, rec }) {
   }
 }
 
-// Explicit pre-PR test action. The backend rechecks the reviewed diff, pushes
-// only that branch to the owner's fork, and dispatches the allowlisted Tests
-// workflow without opening a pull request. Like Send, a lost response is
-// ambiguous because the public push/dispatch may already have completed; the
-// caller must reconcile from the ledger before offering another try.
-export async function runPrePrChecks({ appId, token, rec }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) + '/' +
-        encodeURIComponent(rec.id) +
-        '/pre-pr-checks',
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-      },
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok && body?.record) {
-      return { ok: body.record }
-    }
-    const detail = body?.detail
-    if (detail && typeof detail === 'object') {
-      return {
-        error: detail.message || 'Could not start GitHub checks.',
-        record: detail.record || null,
-      }
-    }
-    return {
-      unsupported: r.status === 404,
-      error: typeof detail === 'string'
-        ? detail
-        : 'Could not start GitHub checks.',
-    }
-  } catch {
-    return {
-      uncertain: true,
-      error: 'The response was lost. Checking the saved run before offering another try…',
-    }
-  }
-}
-
 // Read-only GitHub status refresh plus a local ledger write. The endpoint
 // returns full updated records so the app can repaint without a second storage
 // scan. It is safe to repeat while a run is queued or in progress.

@@ -14,10 +14,10 @@ const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(
     stackSource,
-    /<span>\{isLandingAction \? 'Land stack' : sendLabel\}<\/span>/,
+    /<span>\{sending \? \(isLandingAction \? 'Landing…' : 'Sending…'\) : \(isLandingAction \? 'Land stack' : sendLabel\)\}<\/span>/,
   )
   assert.match(
     stackSource,
@@ -28,19 +28,21 @@ test('send actions keep a visible label instead of relying on the icon alone', (
 test('focused review actions keep one strong primary and compact phone-safe secondary controls', () => {
   assert.match(cardSource, /className="co-icon-btn co-review-btn is-primary"/)
   assert.match(themeSource, /\.co-icon-btn\.co-review-btn\.is-primary \{[\s\S]*?background: var\(--accent\); color: var\(--accent-fg\)/)
-  assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: 44px;[\s\S]*?background: transparent/)
+  assert.match(themeSource, /\.co-focus-view \.co-review-actions \{[\s\S]*?grid-template-columns: minmax\(112px, 1fr\) auto auto/)
+  assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: auto;[\s\S]*?padding-inline: 11px/)
   assert.match(themeSource, /\.co-technical-summary \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
   assert.match(themeSource, /\.co-review-changes-head span \{[\s\S]*?white-space: nowrap;[\s\S]*?border-radius: 999px/)
   assert.match(themeSource, /\.co-pr-metadata \{[^}]*align-self: stretch;[^}]*width: 100%/)
 })
 
-test('prepared platform checks stay a separate confirmed no-PR action', () => {
-  assert.match(cardSource, /Run GitHub checks/)
-  assert.match(cardSource, /Run on my fork/)
-  assert.match(cardSource, /does not[\s\S]*open a pull request or email the organization/)
-  assert.match(apiSource, /\/pre-pr-checks/)
+test('saved platform check results stay visible without a second public-action path', () => {
+  assert.match(cardSource, /GitHub checks running/)
+  assert.match(cardSource, /GitHub checks need a fix/)
+  assert.match(cardSource, /GitHub checks passed/)
+  assert.doesNotMatch(cardSource, /Run GitHub checks/)
+  assert.doesNotMatch(apiSource, /export async function runPrePrChecks/)
   assert.match(apiSource, /\/pre-pr-checks\/refresh/)
-  assert.match(appSource, /pre_pr_checks_started/)
+  assert.doesNotMatch(appSource, /pre_pr_checks_started/)
 })
 
 test('single and stacked sends leave the action queue as soon as accepted', () => {
@@ -129,7 +131,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(sourceOverviewSource, /Earlier work paused/)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing will be merged\./)
   assert.match(feedSource, /open new pull requests or update existing ones/)
