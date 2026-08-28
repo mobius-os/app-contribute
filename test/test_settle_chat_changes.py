@@ -29,12 +29,24 @@ class SettleChatChangesTests(unittest.TestCase):
     )
 
     self.assertEqual(settle_chat_changes.build_payload(args), {
-      "coverage_at": "1787872878923",
+      "coverage_at": 1787872878923,
       "items": [
         {"path": "/data/platform/a.py", "disposition": "experimental", "summary": "Reviewed scratch work"},
         {"path": "/data/apps/x/b.js", "disposition": "experimental", "summary": "Reviewed scratch work"},
       ],
     })
+
+  def test_payload_preserves_iso_review_coverage(self):
+    args = argparse.Namespace(
+      through="2026-08-28T11:45:00Z",
+      disposition="local-only",
+      summary="Reviewed local work",
+      paths=["/data/apps/x/index.jsx"],
+    )
+    self.assertEqual(
+      settle_chat_changes.build_payload(args)["coverage_at"],
+      "2026-08-28T11:45:00Z",
+    )
 
   def test_missing_runtime_context_fails_before_app_discovery(self):
     with patch.dict(os.environ, {}, clear=True), patch.object(

@@ -22,8 +22,11 @@ DISPOSITIONS = (
 
 
 def build_payload(args: argparse.Namespace) -> dict:
+  coverage_at = args.through.strip()
+  if coverage_at.isdigit():
+    coverage_at = int(coverage_at)
   return {
-    "coverage_at": args.through,
+    "coverage_at": coverage_at,
     "items": [
       {
         "path": path,
