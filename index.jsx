@@ -1156,6 +1156,7 @@ export default function ContributeApp({ appId, token }) {
     if (decision.method === 'mobius') {
       return {
         error: 'Related PR stacks still use your personal GitHub connection. Connect GitHub and choose Personal GitHub, or prepare these as independent changes.',
+        failure: { owner: 'owner', code: 'github_not_connected' },
       }
     }
     const updating = stackRecords.every(

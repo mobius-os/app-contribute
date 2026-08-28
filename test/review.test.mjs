@@ -507,6 +507,7 @@ test('public action failures have one truthful owner', () => {
   assert.match(cardSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.match(stackSource, /contributionFailureOwner\(outcome\) === 'agent'/)
+  assert.match(appSource, /Related PR stacks still use your personal GitHub connection[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
 })
 
 test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {
