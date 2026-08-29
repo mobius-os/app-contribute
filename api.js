@@ -298,7 +298,13 @@ export function disconnect(token, { signal, timeoutMs = 60000 } = {}) {
 // GitHub, and writes the URL back to the record. The token stays server-side;
 // this app receives only the updated ledger record or an actionable error plus
 // the rolled-back record when available.
-export async function submitContribution({ appId, token, rec, autopilot = true }) {
+export async function submitContribution({
+  appId,
+  token,
+  rec,
+  autopilot = true,
+  publicationStage = 'ready',
+}) {
   try {
     const r = await fetch(
       '/api/github/contributions/' +
@@ -311,7 +317,10 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
         // The one-click grant: a successful submit authorizes the background
         // review-response loop for this PR (see review-followup.md). The owner
         // can flip the global default off in the app's Autopilot setting.
-        body: JSON.stringify({ autopilot: !!autopilot }),
+        body: JSON.stringify({
+          autopilot: !!autopilot,
+          publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
+        }),
       }
     )
     let body = null
@@ -573,6 +582,7 @@ async function writeContributionStack({
   token,
   recordIds,
   operation,
+  publicationStage = 'ready',
 }) {
   const updating = operation === 'update'
   try {
@@ -582,7 +592,12 @@ async function writeContributionStack({
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record_ids: recordIds }),
+        body: JSON.stringify({
+          record_ids: recordIds,
+          ...(updating ? {} : {
+            publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
+          }),
+        }),
       }
     )
     let body = null
@@ -646,6 +661,59 @@ export function updateContributionStack(args) {
   return writeContributionStack({ ...args, operation: 'update' })
 }
 
+// Move one exact personal-GitHub draft into review. The platform journals the
+// approved repo/PR/head before the mutation and turns a repeated call after a
+// lost response into read-only reconciliation, so the client may safely call
+// this once more only when the first response is explicitly uncertain.
+export async function markContributionReady({ appId, token, rec }) {
+  try {
+    const response = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) + '/ready',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_head_sha: rec.last_submit_push_sha || '',
+        }),
+      },
+    )
+    const body = await response.json().catch(() => null)
+    if (response.ok) {
+      if (body?.record) {
+        return { ok: body.record, url: body.url || body.record.url || '' }
+      }
+      return {
+        uncertain: true,
+        error: 'GitHub may have accepted the review request. Checking the saved action before offering another try…',
+        failure: { owner: 'automatic', status: response.status, code: 'ready_response_missing' },
+      }
+    }
+    const detail = body?.detail
+    if (detail && typeof detail === 'object') {
+      return {
+        uncertain: response.status === 503 && detail.code === 'ready_unconfirmed',
+        error: detail.message || 'Could not request review for this pull request.',
+        record: detail.record || null,
+        failure: { status: response.status, code: detail.code || '' },
+      }
+    }
+    return {
+      error: typeof detail === 'string'
+        ? detail
+        : 'Could not request review for this pull request.',
+      failure: { status: response.status, code: '' },
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved public action before offering another try…',
+      failure: { owner: 'automatic' },
+    }
+  }
+}
+
 // Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
 // a ledger write — the grant lives in a platform DB row the app can't edit, so
 // flipping the (display-only) ledger `autopilot` block could never actually stop
@@ -669,53 +737,5 @@ export async function setAutopilot({ appId, token, recordId, enabled }) {
     return { error: body?.detail || 'Could not update autopilot.' }
   } catch {
     return { error: 'The response was lost. Try again in a moment.' }
-  }
-}
-
-// One explicit landing confirmation advances an unchanged app repository from
-// the stack's reviewed base to its green top commit. The server owns every
-// invariant and returns all durable records so a partial/lost response can be
-// reconciled without guessing or blindly retrying a public action.
-export async function landContributionStack({ appId, token, recordIds }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' + encodeURIComponent(appId) + '/land-stack',
-      {
-        method: 'POST',
-        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record_ids: recordIds }),
-      }
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok) {
-      if (!Array.isArray(body?.records) || body.records.length === 0) {
-        return {
-          uncertain: true,
-          error: 'We could not confirm the landing. Checking the saved contributions now…',
-        }
-      }
-      return {
-        ok: body.records,
-        targetBranch: body.target_branch || '',
-        landedSha: body.landed_sha || '',
-      }
-    }
-    const detail = body?.detail
-    if (detail && typeof detail === 'object') {
-      return {
-        uncertain: detail.code === 'landing_unconfirmed',
-        error: detail.message || 'Could not land this PR stack.',
-        records: Array.isArray(detail.records) ? detail.records : [],
-      }
-    }
-    return {
-      error: typeof detail === 'string' ? detail : 'Could not land this PR stack.',
-    }
-  } catch {
-    return {
-      uncertain: true,
-      error: 'The response was lost. Checking the saved stack before offering a retry…',
-    }
   }
 }

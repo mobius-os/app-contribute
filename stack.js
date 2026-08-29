@@ -73,10 +73,12 @@ export function preparedContributionUnits(ready, allRecords) {
   const readyStackIds = new Set(
     (ready || []).map(stackMeta).filter(Boolean).map((meta) => meta.id)
   )
+  // Once any layer is prepared, that active unit owns every known sibling.
+  // Terminal and dismissed layers are part of why a chain may need repair;
+  // omitting them would both fragment the UI and hide the actual blocker.
   const stackRecords = (allRecords || []).filter((rec) => {
     const meta = stackMeta(rec)
-    return meta && readyStackIds.has(meta.id) &&
-      ['prepared', 'draft', 'open', 'merged'].includes(rec.status)
+    return meta && readyStackIds.has(meta.id)
   })
   const stackUnits = groupContributionUnits(stackRecords)
     .filter((unit) => unit.type === 'stack')
@@ -101,23 +103,28 @@ export function preparedContributionUnits(ready, allRecords) {
   })
 }
 
-// Public stacks stay grouped after Send so CI and the final atomic landing are
-// reviewed as one unit instead of becoming unrelated cards in Open. Include a
-// just-landed layer while any sibling is still live, which keeps a recovered
-// partial ledger write understandable rather than scattering the chain.
+// Public stacks stay grouped after Send so one related change remains legible
+// while GitHub owns its acceptance. Include an already-settled layer while any
+// sibling is still live, which keeps a recovered partial ledger write
+// understandable rather than scattering the chain.
 export function publicContributionUnits(live, allRecords) {
   const liveStackIds = new Set(
     (live || []).map(stackMeta).filter(Boolean).map((meta) => meta.id)
   )
+  // A live stack likewise owns every known sibling, including a terminal or
+  // dismissed layer. This keeps one exact chain visible and prevents a sibling
+  // from disappearing when Recent/Archive suppress records owned by live work.
   const stackRecords = (allRecords || []).filter((rec) => {
     const meta = stackMeta(rec)
-    return meta && liveStackIds.has(meta.id) &&
-      ['draft', 'open', 'landing', 'merged'].includes(rec.status)
+    return meta && liveStackIds.has(meta.id)
   })
   const stackUnits = groupContributionUnits(stackRecords)
     .filter((unit) => unit.type === 'stack')
   const standalone = (live || [])
-    .filter((rec) => !rec?.plan?.stack)
+    // Malformed additive stack metadata must never make an already-public PR
+    // disappear. It cannot safely participate in grouped stack actions, so it
+    // degrades to one visible, non-grouped public record instead.
+    .filter((rec) => !rec?.plan?.stack || !stackMeta(rec))
     .map((rec) => ({ type: 'record', id: rec.id, record: rec, records: [rec] }))
   return [...stackUnits, ...standalone].sort((a, b) => {
     const aRec = a.records.find((rec) => ['open', 'landing'].includes(rec.status)) || a.records[0]
@@ -125,56 +132,6 @@ export function publicContributionUnits(live, allRecords) {
     return String(bRec?.updated_at || bRec?.created_at || '').localeCompare(
       String(aRec?.updated_at || aRec?.created_at || ''))
   })
-}
-
-export function stackProgress(unit) {
-  const records = unit?.records || []
-  return {
-    ready: records.filter((rec) => rec.status === 'prepared').length,
-    open: records.filter((rec) => ['submitting', 'draft', 'open', 'landing'].includes(rec.status)).length,
-    landing: records.filter((rec) => rec.status === 'landing').length,
-    merged: records.filter((rec) => rec.status === 'merged').length,
-    total: unit?.total || records.length,
-  }
-}
-
-// Whether atomic Land may be offered for an open stack. Landability is a
-// repo-level fact stamped onto each record by the live refresh (land_eligible);
-// every layer shares the target repo, so the whole unit is landable only when
-// each layer positively confirms it. Anything else (unknown, protected/ruled
-// default branch, no push) lands through GitHub's own merge/queue instead.
-export function stackLandable(unit) {
-  const records = unit?.records || []
-  return records.length > 0 && records.every((rec) => rec.land_eligible === true)
-}
-
-export function stackLandingReadiness(unit) {
-  const records = sortStackRecords(unit?.records || [])
-  const total = Number(unit?.total || records.length)
-  const fail = (code, message) => ({ ok: false, code, message })
-  if (!Number.isInteger(total) || total < 2 || records.length !== total) {
-    return fail('incomplete', `This chain is incomplete: ${records.length} of ${total || '?'} layers are available.`)
-  }
-  if (records.some((rec) => rec.status === 'landing')) {
-    return fail('landing', 'Landing is already in progress.')
-  }
-  if (records.some((rec) => rec.status === 'draft')) {
-    return fail('draft', 'Every pull request must be ready for review before the stack can land.')
-  }
-  if (records.some((rec) => rec.status !== 'open')) {
-    return fail('settled', 'This stack is no longer entirely open.')
-  }
-  const states = records.map((rec) => rec.live_checks_state || '')
-  if (states.some((state) => ['FAILURE', 'ERROR'].includes(state))) {
-    return fail('failed', 'At least one automated check is failing.')
-  }
-  if (states.every((state) => state === 'SUCCESS')) {
-    return { ok: true, code: 'ready', message: '' }
-  }
-  if (states.some((state) => state === 'NONE')) {
-    return fail('none', 'At least one pull request has no CI result yet.')
-  }
-  return fail('pending', 'Waiting for every pull request to finish its automated checks.')
 }
 
 function recordBranch(rec) {

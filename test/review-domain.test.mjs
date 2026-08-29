@@ -3,13 +3,11 @@ import test from 'node:test'
 
 import {
   addressAllAction,
-  blockedReviewCount,
   contributionsNeedingAttention,
   indexReviewStatus,
   isContributionCycleChat,
   partitionReviewUnits,
   reviewStateFor,
-  summarizeReviewStatus,
 } from '../review.js'
 
 function clear(id) {
@@ -49,18 +47,6 @@ test('current review verdicts outrank old retryable send messages', () => {
   assert.equal(reviewStateFor({
     id: 'unchecked', status: 'prepared', last_submit_error: 'Branch changed.',
   }, { state: 'unavailable', byId: {} }), null)
-})
-
-test('review summaries count ready, blocked, and unchecked work', () => {
-  const records = ['a', 'b', 'c'].map((id) => ({ id, status: 'prepared' }))
-  const review = indexReviewStatus({ records: [
-    { id: 'a', state: 'ready' },
-    { id: 'b', state: 'needs_refresh' },
-  ] })
-  assert.deepEqual(summarizeReviewStatus(records, review), {
-    total: 3, ready: 1, needsRefresh: 1, unchecked: 1,
-  })
-  assert.equal(blockedReviewCount(records, review), 1)
 })
 
 test('feed and batch actions share one review partition', () => {

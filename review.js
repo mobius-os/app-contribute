@@ -5,6 +5,53 @@
 
 import { projectWorkRevision } from './source-map.js'
 
+function stableApprovalValue(value) {
+  if (Array.isArray(value)) return value.map(stableApprovalValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [
+    key, stableApprovalValue(value[key]),
+  ]))
+}
+
+// Public approval belongs to the exact durable action the owner saw, not just
+// to a record id. Keep the projection deliberately narrower than the whole UI
+// record (which may carry transient overlays), but include every fact that can
+// change the target, reviewed code, proposed public text, or action lifecycle.
+// Stable key ordering makes a server round-trip compare by value rather than by
+// object insertion order.
+export function contributionApprovalFingerprint(record) {
+  if (!record || typeof record !== 'object') return ''
+  return JSON.stringify(stableApprovalValue({
+    id: record.id,
+    type: record.type,
+    status: record.status,
+    revision: record.revision,
+    updated_at: record.updated_at,
+    repo: record.repo,
+    title: record.title,
+    summary: record.summary,
+    url: record.url,
+    number: record.number,
+    branch: record.branch,
+    head_repository: record.head_repository,
+    submission_mode: record.submission_mode,
+    relay_contribution_id: record.relay_contribution_id,
+    last_submit_push_sha: record.last_submit_push_sha,
+    last_submit_error: record.last_submit_error,
+    needs_attention: record.needs_attention === true,
+    attention: record.attention || null,
+    readying: record.readying || null,
+    last_ready_error_code: record.last_ready_error_code,
+    plan: record.plan || null,
+    quality_review: record.quality_review || null,
+  }))
+}
+
+export function contributionApprovalIsCurrent(approved, current) {
+  const approvedFingerprint = contributionApprovalFingerprint(approved)
+  return !!approvedFingerprint && approvedFingerprint === contributionApprovalFingerprint(current)
+}
+
 export function indexReviewStatus(payload) {
   const byId = {}
   const rows = Array.isArray(payload?.records) ? payload.records : []
@@ -148,7 +195,6 @@ function reviewAction(records, mode = 'review') {
 }
 
 export function reviewAllAction(records) { return reviewAction(records, 'review') }
-export function fixAndReviewAction(records) { return reviewAction(records, 'fix') }
 
 // A failed publication is not another GitHub mutation. One app-owned recovery
 // conversation refreshes the recorded branch, reconciles a response that may
@@ -236,41 +282,6 @@ export function progressReviewAction(records, reviewStatus) {
       'Do not push, publish, comment, merge, or otherwise change GitHub. Stop with every listed item either all clear on its exact head or carrying one precise blocker.',
     ].join('\n'),
   }
-}
-
-export function summarizeQualityReviews(records, reviewStatus) {
-  const prepared = (Array.isArray(records) ? records : [])
-    .filter((rec) => rec?.type === 'pr' && rec.status === 'prepared')
-  const summary = { total: prepared.length, needed: 0, reviewing: 0, changesNeeded: 0, allClear: 0 }
-  for (const rec of prepared) {
-    const state = qualityReviewFor(rec).state
-    if (state === 'reviewing' || state === 'queued') summary.reviewing += 1
-    else if (state === 'changes_needed') summary.changesNeeded += 1
-    else if (isAllClear(rec, reviewStatus)) summary.allClear += 1
-    else summary.needed += 1
-  }
-  return summary
-}
-
-export function summarizeReviewStatus(records, reviewStatus) {
-  const prepared = (Array.isArray(records) ? records : [])
-    .filter((rec) => rec?.status === 'prepared')
-  let ready = 0
-  let needsRefresh = 0
-  let unchecked = 0
-  for (const rec of prepared) {
-    const state = reviewStateFor(rec, reviewStatus)
-    if (state?.state === 'ready') ready += 1
-    else if (state?.state === 'needs_refresh') needsRefresh += 1
-    else unchecked += 1
-  }
-  return { total: prepared.length, ready, needsRefresh, unchecked }
-}
-
-export function blockedReviewCount(records, reviewStatus) {
-  return (Array.isArray(records) ? records : []).filter((rec) =>
-    rec?.status === 'prepared' &&
-    reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh').length
 }
 
 const ACTIVE_PR_STATUSES = new Set([
@@ -361,7 +372,11 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
 
   const contributionRows = contributionList.map((rec) => {
     const title = rec.plan?.title || rec.title || rec.summary || 'Untitled pull request'
-    return `- ${title} — ${rec.repo || rec.plan?.repo || 'project'} (${rec.id})`
+    const reason = rec?.attention?.message || rec?.last_submit_error || ''
+    return [
+      `- ${title} — ${rec.repo || rec.plan?.repo || 'project'} (${rec.id})`,
+      reason ? `  ${reason}` : '',
+    ].filter(Boolean).join('\n')
   })
   const projectRows = projectList.map((project) => (
     `- ${project.name || project.canonical_repo || project.key || 'Local project'}`
@@ -421,17 +436,6 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
       'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',
     ].filter(Boolean).join('\n'),
   }
-}
-
-/** One direct default for the complete Needs-you queue, including mixed work. */
-export function actionQueueDefaultAction(records, reviewStatus) {
-  const safe = Array.isArray(records) ? records : []
-  const reviewAction = progressReviewAction(safe, reviewStatus)
-  const attentionAction = addressAllAction(safe, reviewStatus)
-  if (!reviewAction) return attentionAction
-  if (!attentionAction) return reviewAction
-
-  return organizePrivateWorkAction(safe, reviewStatus, []) || reviewAction
 }
 
 const OWNER_FAILURE_CODES = new Set([

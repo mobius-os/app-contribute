@@ -6,25 +6,16 @@ import {
   STATUS_NARRATION,
   applyLiveStates,
   buildRefreshQuery,
-  historyContributionLabel,
-  repoLandability,
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
   problemHeadline,
   reconcileLedgerSnapshot,
   resolveUncertainSubmission,
-  resolveUncertainLanding,
   statusNarration,
   summarizeSubmissionResolutions,
   SETUP_COMPLETIONS_KEY,
   syncSetupCompletion,
 } from '../domain.js'
-
-test('history labels distinguish merged work from every other settled outcome', () => {
-  assert.equal(historyContributionLabel('merged'), 'Merged')
-  assert.equal(historyContributionLabel('closed'), 'Closed')
-  assert.equal(historyContributionLabel('abandoned'), 'Closed')
-})
 
 test('record updates preserve enumerated paths while replacing stale fields', () => {
   const original = [
@@ -95,101 +86,30 @@ test('a lost submit response is reconciled from the durable ledger', () => {
   assert.equal(isSubmissionResolutionSettled({ state: 'publishing' }), true)
 })
 
-test('a lost stack landing response is reconciled from the durable ledger', () => {
-  const records = [{ id: 'one' }, { id: 'two' }]
-  assert.equal(resolveUncertainLanding(records, {
-    fromCache: false,
-    records: [{ id: 'one', status: 'merged' }, { id: 'two', status: 'merged' }],
-  }).state, 'landed')
-  assert.equal(resolveUncertainLanding(records, {
-    fromCache: false,
-    records: [{ id: 'one', status: 'landing' }, { id: 'two', status: 'landing' }],
-  }).state, 'landing')
-  assert.equal(resolveUncertainLanding(records, {
-    fromCache: false,
-    records: [
-      { id: 'one', status: 'open', last_land_error: 'CI pending' },
-      { id: 'two', status: 'open', last_land_error: 'CI pending' },
-    ],
-  }).state, 'blocked')
-})
-
-test('live PR refresh carries the CI rollup used by stack landing', () => {
-  const records = [{
-    id: 'one', type: 'pr', status: 'open',
+test('live refresh reconciles a persisted landing journal without Land-only probes', () => {
+  const landing = [{
+    id: 'one', type: 'pr', status: 'landing',
     url: 'https://github.com/mobius-os/app-demo/pull/1',
   }]
-  const request = buildRefreshQuery(records)
-  assert.match(request.query, /statusCheckRollup \{ state \}/)
-  const next = applyLiveStates(records, request.aliases, {
-    r0: {
-      __typename: 'PullRequest', state: 'OPEN', isDraft: false,
-      statusCheckRollup: { state: 'SUCCESS' },
-    },
-  })
-  assert.equal(next[0].live_checks_state, 'SUCCESS')
-
-  const landing = [{ ...records[0], status: 'landing' }]
   const landingRequest = buildRefreshQuery(landing)
   assert.ok(landingRequest, 'an interrupted landing remains refreshable')
+  assert.doesNotMatch(
+    landingRequest.query,
+    /statusCheckRollup|defaultBranchRef|refUpdateRule|\.\.\. on Repository/,
+  )
+  assert.deepEqual(Object.keys(landingRequest).sort(), ['aliases', 'query'])
   const stillLanding = applyLiveStates(landing, landingRequest.aliases, {
-    r0: {
-      __typename: 'PullRequest', state: 'OPEN', isDraft: false,
-      statusCheckRollup: { state: 'SUCCESS' },
-    },
+    r0: { __typename: 'PullRequest', state: 'OPEN', isDraft: false },
   })
   assert.equal(stillLanding[0].status, 'landing', 'an OPEN lag cannot erase the journal')
+  const stillLandingFromDraft = applyLiveStates(landing, landingRequest.aliases, {
+    r0: { __typename: 'PullRequest', state: 'OPEN', isDraft: true },
+  })
+  assert.equal(stillLandingFromDraft[0].status, 'landing', 'a DRAFT lag cannot erase the journal')
   const settled = applyLiveStates(landing, landingRequest.aliases, {
     r0: { __typename: 'PullRequest', state: 'MERGED', isDraft: false },
   })
   assert.equal(settled[0].status, 'merged', 'a terminal GitHub result settles the journal')
-})
-
-test('repoLandability requires push and an unruled default branch', () => {
-  // Protected/ruled default branch (a non-null refUpdateRule) → land on GitHub.
-  assert.equal(repoLandability({
-    viewerPermission: 'ADMIN',
-    defaultBranchRef: { refUpdateRule: { viewerCanPush: true } },
-  }), false)
-  // Clean, pushable app repo → atomic land is offered.
-  assert.equal(repoLandability({
-    viewerPermission: 'WRITE',
-    defaultBranchRef: { refUpdateRule: null },
-  }), true)
-  // No push → land on GitHub regardless of protection.
-  assert.equal(repoLandability({
-    viewerPermission: 'READ',
-    defaultBranchRef: { refUpdateRule: null },
-  }), false)
-  // Missing/unreachable repo → fail-safe: not landable.
-  assert.equal(repoLandability(null), false)
-  assert.equal(repoLandability({ viewerPermission: 'ADMIN', defaultBranchRef: null }), false)
-})
-
-test('live refresh probes stack landability and stamps land_eligible per repo', () => {
-  const stackRec = {
-    id: 'one', type: 'pr', status: 'open',
-    repo: 'mobius-os/mobius',
-    url: 'https://github.com/mobius-os/mobius/pull/1',
-    plan: { repo: 'mobius-os/mobius', stack: { id: 's', position: 1, total: 2, base_branch: 'main' } },
-  }
-  const request = buildRefreshQuery([stackRec])
-  assert.match(request.query, /resource\(url: "https:\/\/github\.com\/mobius-os\/mobius"\)/)
-  assert.match(request.query, /\.\.\. on Repository \{ viewerPermission/)
-  assert.match(request.query, /refUpdateRule/)
-  assert.deepEqual(request.repoAliases, { repo0: 'mobius-os/mobius' })
-
-  const next = applyLiveStates([stackRec], request.aliases, {
-    r0: { __typename: 'PullRequest', state: 'OPEN', isDraft: false, statusCheckRollup: { state: 'SUCCESS' } },
-    repo0: { viewerPermission: 'ADMIN', defaultBranchRef: { refUpdateRule: { viewerCanPush: true } } },
-  }, request.repoAliases)
-  assert.equal(next[0].land_eligible, false, 'a ruled default branch is not atomically landable')
-  assert.equal(next[0].live_checks_state, 'SUCCESS')
-
-  // A standalone open PR (no stack) never triggers a landability probe.
-  const standalone = buildRefreshQuery([{ ...stackRec, plan: { repo: 'mobius-os/mobius' } }])
-  assert.deepEqual(standalone.repoAliases, {})
-  assert.doesNotMatch(standalone.query, /on Repository/)
 })
 
 test('submitting stays publishing until every reconciled pull request is durable', () => {

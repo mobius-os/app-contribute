@@ -53,7 +53,7 @@ name that missing capability instead of guessing with raw Git commands.
 
 ### Prepare my changes
 
-Treat **prepare my changes**, **prepare all**, and a project-level Contribute
+Treat **prepare my changes**, **prepare to submit**, and a project-level Contribute
 handoff as explicit approval for private preparation only. When the owner does
 not narrow the scope, inventory every current Contribute project source
 position, then prepare every coherent, reusable change that is safe to share.
@@ -72,7 +72,15 @@ upstream.
    existing record, preserve its original `chat_id` and CAS-add both the
    original and current chat to `chat_ids`; one review can then reconcile every
    source chat without duplicating or moving the contribution. Use a stack only
-   when the changes truly depend on one another.
+   when the changes truly depend on one another. The source chat is the parent
+   and final integrator for chat-scoped work. Ordinary preparation stays in
+   that turn. If, after inspection, genuinely independent project work can
+   proceed in parallel, use the installed Subagents app's durable background
+   Delegation path from the active source run. Give each helper one bounded
+   task, wait for every result, then let the source parent reconcile the final
+   source and write or CAS-update the records and settlements. Never replace
+   this relation with an app-owned chat whose prompt or opaque scope merely
+   mentions the source chat.
 4. For a chat-scoped request, durably settle every recorded source path that
    was intentionally excluded. Fetch that chat's current `edit-diffs` before
    classification, retain the newest `ts` actually reviewed, and after the
@@ -302,12 +310,12 @@ don't propose.
 ## The approval gate
 
 Private preparation begins only from an explicit partner request, including a
-project-level or **Prepare all** handoff from Contribute. The source chat's
+project-level or **Prepare to submit** handoff from Contribute. The source chat's
 automatic **Changes ready to organize** card is the lightweight preparation
 suggestion after coherent file edits: it only reflects already-recorded work
 and never starts an agent, reviews a diff, or inspects GitHub on its own. The
 agent must not duplicate that visible choice with another question at the end
-of the turn. Pressing **Prepare all** on the card or in Changes is an
+of the turn. Pressing **Prepare to submit** on the card or in Changes is an
 explicit private-preparation request; dismissing it only hides that revision
 of the suggestion and keeps the work in Changes and Contribute.
 
@@ -324,9 +332,11 @@ identity, and freshness checks and use the documented guarded submission path;
 chat approval changes the approval surface, not the safety preflight. If the
 owner presses the block instead, let that action own its complete batch until
 every item settles; in-flight siblings stay visibly in flight and never turn
-into a second doorway. A review handoff starts or resumes one app-owned scoped
-conversation and remains in Contribute—the agent must not draft the recovery
-prompt into the source chat.
+into a second doorway. A chat-scoped review, repair, or failed-publication
+recovery continues as a hidden turn in its source chat. Contribute may start an
+app-owned scoped conversation only for genuinely global work that has no source
+chat. Background Delegation children return evidence or independent edits to
+their parent; they do not become owner-facing contribution homes.
 
 Hard stop #1 is still the gate. In practice:
 
@@ -665,29 +675,19 @@ branch, so B's check covers A+B; PR C targets B, and so on. Mention the stack
 choice in `prior_work.summary` or the record summary when it helps the partner
 understand the review shape.
 
-### Landing a green app stack
+### Let GitHub accept a public stack
 
-Once every public layer is open and every GitHub check is green, Contribute can
-show **Land** for the complete stack. This is a second public action with its own
-explicit confirmation, which may be the Contribute control or an unambiguous
-chat approval of that exact current stack. Preparing or sending the PRs never
-authorizes landing, and any changed layer invalidates the earlier yes.
+Once the reviewed layers are public, GitHub owns their acceptance through the
+repository's ordinary review, protection, and merge-queue rules. Contribute
+observes those results and keeps the related records together; it does not
+advance a repository ref directly or bypass the repository's merge policy.
 
-Landing is deliberately narrow. The platform re-verifies every reviewed diff,
-local and upstream branch tip, PR base/head pair, and CI result; requires the
-repository's default branch to still equal layer 1's reviewed `base_sha`; proves
-the top commit is a fast-forward containing the exact chain; and then advances
-that one upstream ref with an exact-base lease. All layers are recorded merged
-only after that single push succeeds. If upstream moved, a check is pending or
-failed, a PR was retargeted, or any commit changed, nothing is overwritten and
-the records return to `open` with the blocker.
-
-Atomic landing is for **unprotected app repositories only**. Any classic branch
-protection or active repository rule stops the operation even when the connected
-owner is an administrator; use GitHub's ordinary merge or merge queue instead.
-In particular, `mobius-os/mobius` keeps its protected, strict CI flow. App
-workflows may still run once on the resulting push to `main`; that is post-landing
-validation, not a second pre-merge run of the child PR.
+Sending a stack never authorizes merging it. Any later queue or merge action is
+a separate exact approval against the current public head, performed through a
+repository-owned GitHub operation. For a dependent chain, advance parent-first
+and re-read the remaining layers after each accepted parent because their base
+or topology may have changed. Contribute then reconciles merged, closed, or
+superseded outcomes from GitHub without manufacturing a second public action.
 
 ---
 
@@ -967,7 +967,11 @@ record has reconciled. A newly created record may contain only the current
 chat. When reusing a prepared or public record from another chat, CAS-union the
 existing primary/list values with the current `$CHAT_ID`; never overwrite the
 primary id or create a duplicate merely to make the new chat's Changes view
-settle. Neither field is published to GitHub.
+settle. A background worker child is execution history, not source provenance:
+never add its chat id to `chat_ids`. If that worker performed the actual review,
+its id may be recorded in `quality_review.chat_id` for audit while the parent
+source chat still owns the final record. Neither provenance field is published
+to GitHub.
 
 Store the full diff beside it as raw text (the once-only write named above):
 

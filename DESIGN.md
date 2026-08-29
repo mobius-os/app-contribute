@@ -1,6 +1,6 @@
 ---
 name: Contribute
-description: A quiet, project-shaped collaboration workspace for moving local work into review.
+description: One quiet contribution run from local work to accepted change.
 colors:
   accent: "var(--accent)"
   accent-foreground: "var(--accent-fg)"
@@ -80,22 +80,28 @@ components:
 
 ## Overview
 
-**Creative North Star: "Four Quiet Rooms"**
+**Creative North Star: "One Quiet Run"**
 
-Contribute feels like a calm collaboration workspace, not a Git client or an administrative dashboard. Its four top-level rooms share one restrained visual language while keeping distinct jobs: Overview orients, Projects maps local work, Reviews shows the contribution pipeline, and Requests holds owner decisions.
+Contribute feels like a calm handoff between finished work and accepted change,
+not a Git client, project tracker, or administrative dashboard. There is one
+owner-facing run. It leads with the exact decisions that can move now, then
+shows private/public work already moving and a short outcome trail.
 
-The interface leads with plain-language state and the next meaningful object. Technical detail is immediate after selection but does not compete with the first viewport. Accent color is rare and functional: active location, a private next step, or one high-value decision.
+The source chat is the natural start and return point. Contribute is the wider
+snapshot for several chats and projects at once. A project name or icon gives
+orientation and can filter the run, but no one must navigate through Projects,
+Pull requests, Issues, or internal stages before acting.
 
-Overview may offer one private **Organize** action for all current work that
-still needs judgment. It must say that status and reconciliation are automatic,
-must exclude healthy public pull requests, and must reuse the same conversation
-until the represented work changes. This is an orientation shortcut, not a
-second queue or a permanent background agent.
+The interface leads with a plain-language outcome and the smallest meaningful
+action. Technical detail remains one selection away. Accent color is rare and
+functional: the current public approval or the one private action that unlocks
+the run.
 
 **Key Characteristics:**
-- Centered reading canvas with generous negative space.
-- Thin stage rails instead of boxed filter bars or overflow menus.
-- One coherent surface per task, followed by a full-width focus view.
+- Centered reading canvas with compact, intentional spacing.
+- One run header, one decision stream, and one full-width focus view.
+- A quiet progress line may summarize private, reviewed, public, and accepted
+  work, but it never becomes navigation.
 - Project icons and concise state labels carry recognition without extra chrome.
 - Public and destructive actions remain explicit and local to the selected item.
 
@@ -123,24 +129,29 @@ The palette inherits the owner's Möbius theme and uses one violet accent, muted
 - **Micro label:** 10.5px, semibold; terse file and project metadata.
 - **Mono:** 12px; source paths, commits, file names, and diff statistics only.
 
-**The One Headline Rule.** Every tab opens with one room title; nested surfaces step down rather than competing at the same size.
+**The One Headline Rule.** The run has one headline; nested surfaces step down
+rather than competing at the same size.
 
 ## Layout
 
-The shared canvas is centered at a maximum width of 760px. Overview may use the narrower 680px reading measure. Room title, stage rail, explanation, and primary surface form one vertical sequence with roughly 20–26px between major layers.
+The shared canvas is centered at a maximum width of 760px. Run header, primary
+action, decisions, work in motion, and recent outcomes form one vertical
+sequence. Selection replaces that sequence with a focused view instead of
+opening a split pane.
 
-Selection replaces the index with a focused view instead of opening a split pane. On phones, the same composition remains vertical; top-level tabs and stage rails scroll horizontally when needed, and secondary labels yield before content does.
+When several reviewed units share the same public outcome, one batch action is
+the default. Its confirmation names every standalone pull request and every
+layer of every ordered stack, states whether each opens ready or as a draft,
+and says that nothing merges. The batch dispatcher preserves stack semantics
+and partial success; completed units leave immediately while a failed unit
+remains actionable.
 
-When several rows in one review stage share an exact default, the stage intro
-may offer that action once for the complete visible set. The copy must name
-whether the action stays private or publishes to GitHub; public batches keep a
-separate confirmation that names every included pull request. Ordered stacks
-keep their own layer-and-branch confirmation instead of joining that stage
-batch. Each row retains its own compact default, while opening the row reveals
-information and secondary controls rather than becoming a prerequisite for the
-action.
+On phones, decisions stay dense enough to scan: title, project, honest state,
+and one compact action. Supporting prose yields before the action does.
 
-**The One Room Rule.** A tab may share tokens and navigation with another tab, but it must not inherit a generic page skeleton when its job is different.
+**The One Run Rule.** The same work must never be projected into competing
+owner queues. Detail views and project filters may refine the run; they may not
+reclassify it independently.
 
 ## Elevation & Depth
 
@@ -159,36 +170,38 @@ Large task surfaces use gently curved 15px corners; compact controls use 8–10p
 - Quiet actions are borderless, content-width, and muted until hover or focus.
 - Focus uses the shared two-pixel accent ring; active presses contract slightly.
 
-### Stage Navigation
-- Stages are text labels on one thin bottom rule.
-- The selected stage receives a two-pixel accent underline.
-- Counts are compact neutral pills; every stage remains visible through horizontal scrolling rather than a “More” menu.
+### Run Summary
+- A short sentence names the most important current outcome.
+- Compact counts may show reviewed, moving, and accepted work.
+- Counts are status, not tabs; the first actionable item follows immediately.
 
 ### Project Index
 - Related projects share one bordered surface and may be divided by small project-family headers.
 - Each row uses a project icon, name, plain-language next state, and a small status dot.
 - Opening a row replaces the index with one focused project surface.
 
-### Review Pipeline
-- Contributions group by project inside one contained list.
-- Each contribution row shows its title, project, named review state, and navigation affordance.
-- Review, feedback, diff, and discard controls live only in the focused record.
+### Decision Stream
+- Exact public approvals come first, followed by private review or true human attention.
+- A complete stack is one unit in the stream and expands to its exact ordered layers at approval.
+- Each row shows title, project, named state, and one direct action.
+- Review, feedback, diff, discard, and advanced publication choices live in the focused record.
 
-### Decision Inbox
-- Requests use individual, airy cards rather than a grouped pull-request table.
-- The stage begins with a softly tinted decision summary, then one card per request.
-- Discard is a quiet text action; continuation in the source conversation is the dominant choice.
+### Work in Motion
+- Healthy public work and agent-owned private work are deliberately quiet.
+- Active work uses a compact status row; human-required events move back into Decisions.
+- Recent outcomes are collapsed by default and never compete with current intent.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** show the current stage and its contents before offering action.
+- **Do** show the current run and its exact next action before supporting detail.
 - **Do** put complete diffs and technical metadata one selection away.
 - **Do** keep project and request language understandable without Git terminology.
 - **Do** preserve practical touch targets and visible focus states.
 
 ### Don't:
-- **Don't** add “More” menus for core stages; keep the stage rail horizontally scrollable.
-- **Don't** place bulk “prepare all,” “review all,” or floating run trays inside Projects, Reviews, or Requests.
-- **Don't** reuse one generic queue composition across tabs with different user journeys.
+- **Don't** make Projects, Pull requests, Issues, or lifecycle stages top-level rooms.
+- **Don't** create a second queue in chat, Contribute, or a background worker.
+- **Don't** exclude stacks from the common batch merely because they need a stronger dispatcher.
+- **Don't** turn status counts into navigation homework.
 - **Don't** use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction.

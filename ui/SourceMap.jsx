@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  prepareProjectsAction,
   projectNeedsSorting,
   projectReadyToPrepare,
   projectDetailSummary,
@@ -8,7 +7,6 @@ import {
   sourcePathRelationship,
 } from '../source-map.js'
 import { Icon } from './Icons.jsx'
-import { AgentHandoffButton } from './BatchAction.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
 
@@ -171,14 +169,14 @@ function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
   )
 }
 
-function ProjectReviews({ project, onViewReviews }) {
+function ProjectReviews({ project, onViewReview }) {
   const rows = project.contributions || []
   if (!rows.length) return null
   return (
     <section className="co-project-reviews">
-      <header><strong>Pull requests</strong><button type="button" onClick={onViewReviews}>Open pull requests <Icon name="right" size={14} /></button></header>
-      {rows.slice(0, 4).map((rec) => (
-        <button type="button" key={rec.id} onClick={onViewReviews}>
+      <header><strong>Pull requests</strong></header>
+      {rows.map((rec) => (
+        <button type="button" key={rec.id} onClick={() => onViewReview(rec, project.key)}>
           <span>{rec.plan?.title || rec.title || 'Untitled pull request'}</span>
           <small>{rec.status === 'prepared' ? 'Prepared' : rec.status === 'open' ? 'Open' : rec.status}</small>
         </button>
@@ -187,15 +185,8 @@ function ProjectReviews({ project, onViewReviews }) {
   )
 }
 
-function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onStartAgent, onViewReviews }) {
+function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onViewReview }) {
   const status = projectStatus(project)
-  const reviews = project.contributions?.length || 0
-  const prepareAction = prepareProjectsAction([project])
-  const detailAction = prepareAction && projectNeedsSorting(project)
-    ? { ...prepareAction, label: 'Sort & prepare', title: `Sort ${project.name} changes` }
-    : prepareAction
-      ? { ...prepareAction, label: 'Prepare for review' }
-      : null
   return (
     <article className="co-source-detail">
       <header className="co-source-detail-head">
@@ -204,16 +195,9 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onStartAg
       </header>
       <div className="co-project-next">
         <span><strong>{projectNextStep(project, journey)}</strong></span>
-        {detailAction ? (
-          <AgentHandoffButton action={detailAction} onStart={onStartAgent} icon="review" />
-        ) : reviews ? (
-          <button type="button" className="co-btn co-btn-primary co-btn-sm" onClick={onViewReviews}>
-            <Icon name="review" size={14} /> Open pull requests
-          </button>
-        ) : null}
       </div>
       <p className="co-source-overview-copy">{projectDetailSummary(project)}</p>
-      <ProjectReviews project={project} onViewReviews={onViewReviews} />
+      <ProjectReviews project={project} onViewReview={onViewReview} />
       <ProjectFileChanges project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
       <ProjectPosition project={project} />
       {project.kind !== 'external' && !project.available && project.state !== 'local_only' ? <div className="co-source-unavailable">No inspectable local source is available.</div> : null}
@@ -258,8 +242,8 @@ export function SourceMap({
   error,
   onRetry,
   loadProjectDiff,
-  onStartAgent,
-  onViewReviews,
+  onViewReview,
+  onBack,
 }) {
   const [filter, setFilter] = useState(() => focusKey ? 'all' : 'attention')
   const filtered = useMemo(
@@ -320,29 +304,36 @@ export function SourceMap({
         <strong>{error === 'restart' ? 'Restart to finish Projects' : 'Projects unavailable'}</strong>
         <p>{error === 'restart'
           ? 'The source review service starts after the next Möbius restart.'
-          : 'Contribute could not read local source status. Your inbox is unaffected.'}</p>
+          : 'Contribute could not read local source status. Your contribution run is unaffected.'}</p>
         <button type="button" className="co-btn co-btn-sm" onClick={onRetry}>Try again</button>
       </div>
     )
   }
 
   return (
-    <section id="co-panel-sources" className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} role="tabpanel" aria-labelledby="co-tab-sources">
+    <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Project details">
       {selectedProject ? <h2 className="co-visually-hidden">Project detail</h2> : (
         <header className="co-view-heading">
           <div>
             <h2>Projects</h2>
-            <p>Understand local and shared changes, then open a project only when you need the detail.</p>
+            <p>A secondary view of the same contribution run, grouped by source.</p>
           </div>
-          <button
-            type="button"
-            className="co-quiet-action"
-            onClick={onRetry}
-            disabled={loading}
-          >
-            <Icon name="refresh" size={15} />
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div className="co-project-view-actions">
+            {typeof onBack === 'function' ? (
+              <button type="button" className="co-quiet-action" onClick={onBack}>
+                <Icon name="left" size={15} /> Back to run
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="co-quiet-action"
+              onClick={onRetry}
+              disabled={loading}
+            >
+              <Icon name="refresh" size={15} />
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
         </header>
       )}
 
@@ -412,8 +403,7 @@ export function SourceMap({
             journey={filter}
             loadProjectDiff={loadProjectDiff}
             onRefresh={onRetry}
-            onStartAgent={onStartAgent}
-            onViewReviews={onViewReviews}
+            onViewReview={onViewReview}
           />
         </div>
       )}

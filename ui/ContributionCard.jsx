@@ -359,13 +359,51 @@ function attentionDraft(rec) {
   return bits.join(' ') + (details.length ? '\n\nContext:\n' + details.join('\n') : '')
 }
 
-function AttentionCallout({ rec, onFeedback }) {
+function recordAnchorId(rec) {
+  const identity = String(rec?.id || rec?.number || rec?.title || 'legacy')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+  return `co-record-${identity}`
+}
+
+function attentionActivity(rec) {
+  const candidates = [rec?.attention?.url, rec?.url, rec?.plan?.target_url]
+  const exact = candidates.find(value => (
+    typeof value === 'string' && value.startsWith('https://github.com/')
+  ))
+  if (exact) return { url: exact, label: 'View activity on GitHub' }
+
+  const repo = String(rec?.plan?.repo || rec?.repo || '')
+  const number = Number(rec?.number)
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !Number.isInteger(number) || number < 1) {
+    return null
+  }
+  const collection = rec?.type === 'pr' ? 'pull' : 'issues'
+  return {
+    url: `https://github.com/${repo}/${collection}/${number}`,
+    label: rec?.type === 'pr' ? 'Open pull request on GitHub' : 'Open request on GitHub',
+  }
+}
+
+function AttentionCallout({ rec, onFeedback, onInspect }) {
+  const [note, setNote] = useState('')
   const attention = rec.attention || {}
   if (!rec.needs_attention && !attention.title && !attention.message) return null
+  const activity = attentionActivity(rec)
+  const sourceChatId = [rec?.chat_id, ...(Array.isArray(rec?.chat_ids) ? rec.chat_ids : [])]
+    .find(value => typeof value === 'string' && !!value.trim())
+  const canFixInChat = !!sourceChatId && typeof onFeedback === 'function'
 
   function handleAskAgent() {
-    if (typeof onFeedback !== 'function') return
-    onFeedback(rec, { draft: attentionDraft(rec) })
+    if (!canFixInChat) return
+    const outcome = onFeedback(
+      { ...rec, chat_id: sourceChatId },
+      { draft: attentionDraft(rec) },
+    ) || {}
+    setNote(outcome.ok
+      ? ''
+      : outcome.reason === 'missing-chat'
+        ? 'This older record no longer has a usable source chat.'
+        : 'Open Contribute from inside Möbius to return to the source chat.')
   }
 
   return (
@@ -373,19 +411,28 @@ function AttentionCallout({ rec, onFeedback }) {
       <div className="co-attention-copy">
         <div className="co-attention-title">{attentionTitle(attention)}</div>
         <p className="co-attention-text">{attentionMessage(attention)}</p>
-        {typeof attention.url === 'string' &&
-          attention.url.startsWith('https://github.com/') ? (
+        {activity ? (
           <a
             className="co-review-link"
-            href={attention.url}
+            href={activity.url}
             target="_blank"
             rel="noopener noreferrer"
           >
-            View activity on GitHub
+            {activity.label}
           </a>
         ) : null}
+        {!activity && !canFixInChat ? (
+          <a
+            className="co-review-link"
+            href={`#${recordAnchorId(rec)}`}
+            onClick={onInspect}
+          >
+            Review saved details
+          </a>
+        ) : null}
+        {note ? <p className="co-review-error" role="status">{note}</p> : null}
       </div>
-      {typeof onFeedback === 'function' ? (
+      {canFixInChat ? (
         <button
           type="button"
           className="co-icon-btn co-refresh-btn is-primary"
@@ -517,7 +564,7 @@ function ReviewActions({
   const [accepted, setAccepted] = useState(false)
   const [dismissing, setDismissing] = useState(false)
   // Dismiss removes the prepared record from the active list. It is reversible
-  // from Past, but still must not fire on a stray tap.
+  // from the Run's Dismissed fold, but still must not fire on a stray tap.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
@@ -623,7 +670,7 @@ function ReviewActions({
         >
           <p id={confirmDescriptionId} className="co-confirm-text">
             Dismiss this {isPr ? 'prepared pull request' : 'draft'}? It will leave
-            your active list and can be restored from Past.
+            your active list and can be restored from Dismissed.
           </p>
           <div className="co-confirm-actions">
             <button
@@ -668,7 +715,7 @@ function ReviewActions({
                   icon="review"
                 />
               ) : null}
-              {!reviewIncomplete && !submitFailed ? (
+              {!reviewIncomplete && !submitFailed && typeof onSend === 'function' ? (
                 <button
                   type="button"
                   className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
@@ -974,7 +1021,7 @@ function WithdrawAction({ rec, onWithdraw }) {
     >
       <p id={descriptionId} className="co-confirm-text">
         Withdraw this pull request? Möbius will close it and remove its bot
-        branch. The local review stays in History; nothing will be merged.
+        branch. The local record stays intact; nothing will be merged.
       </p>
       <div className="co-confirm-actions">
         <button
@@ -1076,7 +1123,6 @@ export function ContributionCard({
   onWithdraw,
   onConnectApp,
   loadDiff,
-  reviewOnly = false,
   initialExpanded = false,
   showDecision = true,
 }) {
@@ -1122,12 +1168,8 @@ export function ContributionCard({
   const labelOutcome = contributionLabelOutcome(rec)
   const showPublishedLabelOutcome = labelOutcome.published &&
     labelOutcome.hasOutcome && !labelOutcome.empty
-  const reviewable =
-    status === 'prepared' && (
-      reviewOnly || (
-        typeof onSend === 'function' && typeof onDismiss === 'function'
-      )
-    )
+  const reviewable = status === 'prepared' &&
+    typeof onSend === 'function' && typeof onDismiss === 'function'
   const hasPlan = !!(rec.plan && typeof rec.plan === 'object' && (reviewable || initialExpanded))
   const displayTitle = hasPlan ? (rec.plan.title || title) : title
   const planSummary = hasPlan && rec.summary && rec.summary !== displayTitle
@@ -1135,7 +1177,7 @@ export function ContributionCard({
     : ''
 
   return (
-    <div className={`co-card${blocked ? ' is-blocked' : ''}${reviewOnly ? ' is-stack-layer' : ''}`}>
+    <div id={recordAnchorId(rec)} className={`co-card${blocked ? ' is-blocked' : ''}`}>
       <div className="co-card-top">
         <h3 className="co-card-heading">
           {hasLink ? (
@@ -1173,12 +1215,18 @@ export function ContributionCard({
           ))}
         </div>
       )}
-      {showDecision && !reviewOnly ? <AttentionCallout rec={rec} onFeedback={onFeedback} /> : null}
+      {showDecision ? (
+        <AttentionCallout
+          rec={rec}
+          onFeedback={onFeedback}
+          onInspect={() => setExpanded(true)}
+        />
+      ) : null}
       {status !== 'prepared' && autopilotState(rec) ? (
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
-      {showDecision && !reviewOnly ? <WithdrawAction rec={rec} onWithdraw={onWithdraw} /> : null}
-      {showDecision && !reviewOnly ? (
+      {showDecision ? <WithdrawAction rec={rec} onWithdraw={onWithdraw} /> : null}
+      {showDecision ? (
         <SubmitErrorAlert
           rec={rec}
           reviewState={reviewState}
@@ -1188,7 +1236,7 @@ export function ContributionCard({
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
-      {showDecision && !reviewOnly ? <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} /> : null}
+      {showDecision ? <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} /> : null}
       {hasPlan && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button
@@ -1200,9 +1248,9 @@ export function ContributionCard({
             <span>{expanded ? 'Hide details' : 'Details'}</span>
             <span className={expanded ? 'is-open' : ''}><Icon name="chevron" size={16} /></span>
           </button>
-          {/* Focused History/Open cards keep their reviewed plan readable, but
+          {/* Focused settled/public cards keep their reviewed plan readable, but
               active-queue actions belong only to still-prepared work. */}
-          {showDecision && !reviewOnly && reviewable && (
+          {showDecision && reviewable && (
             <ReviewActions
               rec={rec}
               reviewState={reviewState}
@@ -1214,7 +1262,7 @@ export function ContributionCard({
           )}
         </div>
       )}
-      {showDecision && reviewable && !hasPlan && !reviewOnly && (
+      {showDecision && reviewable && !hasPlan && (
         <div className="co-card-footer is-actions-only">
           <ReviewActions
             rec={rec}

@@ -5,9 +5,6 @@ import {
   preparedContributionUnits,
   publicContributionUnits,
   stackMeta,
-  stackLandable,
-  stackLandingReadiness,
-  stackProgress,
   stackReadiness,
 } from '../stack.js'
 
@@ -57,7 +54,7 @@ test('a ready child keeps its already-open parent visible in batch review', () =
   const units = preparedContributionUnits(records.slice(1), records)
   assert.equal(units.length, 1)
   assert.deepEqual(units[0].records.map((rec) => rec.status), ['open', 'prepared', 'prepared'])
-  assert.deepEqual(stackProgress(units[0]), { ready: 2, open: 1, landing: 0, merged: 0, total: 3 })
+  assert.equal(units[0].total, 3)
 })
 
 test('batch review keeps an already-public draft parent in the chain', () => {
@@ -74,7 +71,6 @@ test('reviewed existing-PR stacks are updateable only as one uniform action', ()
     plan: { ...rec.plan, action: 'pr_update' },
   }))
   assert.equal(stackReadiness(groupContributionUnits(updating)[0]).ok, true)
-
   updating[1] = { ...updating[1], plan: { ...updating[1].plan, action: 'pr' } }
   const mixed = stackReadiness(groupContributionUnits(updating)[0])
   assert.equal(mixed.ok, false)
@@ -111,45 +107,22 @@ test('malformed stack intent never falls back to a standalone send card', () => 
   assert.equal(stackReadiness(units[0]).ok, false)
 })
 
-test('public stacks stay grouped and land only after every CI rollup is green', () => {
+test('public stacks stay grouped while GitHub owns their acceptance', () => {
   const records = [layer(1, 'open'), layer(2, 'open'), layer(3, 'open')]
-    .map((rec) => ({ ...rec, live_checks_state: 'SUCCESS' }))
   const units = publicContributionUnits(records, records)
   assert.equal(units.length, 1)
   assert.equal(units[0].type, 'stack')
-  assert.equal(stackLandingReadiness(units[0]).ok, true)
-
-  records[1] = { ...records[1], live_checks_state: 'PENDING' }
-  const waiting = publicContributionUnits(records, records)[0]
-  assert.equal(stackLandingReadiness(waiting).code, 'pending')
+  assert.deepEqual(units[0].records.map((rec) => rec.id), [
+    'layer-1', 'layer-2', 'layer-3',
+  ])
 })
 
-test('a stack is landable only when every layer confirms it', () => {
-  const open = [layer(1, 'open'), layer(2, 'open'), layer(3, 'open')]
-  const unit = publicContributionUnits(open, open)[0]
-  // No landability verdict yet (pre-refresh) → not landable, so no Land button.
-  assert.equal(stackLandable(unit), false)
-  // A ruled/protected repo stamps land_eligible:false → land on GitHub.
-  const ruled = { records: open.map((rec) => ({ ...rec, land_eligible: false })) }
-  assert.equal(stackLandable(ruled), false)
-  // Only when every layer is positively landable does the Land flow appear.
-  const clean = { records: open.map((rec) => ({ ...rec, land_eligible: true })) }
-  assert.equal(stackLandable(clean), true)
-  // One unconfirmed layer is enough to withhold Land.
-  const mixed = { records: [
-    { ...open[0], land_eligible: true },
-    { ...open[1], land_eligible: true },
-    { ...open[2] },
-  ] }
-  assert.equal(stackLandable(mixed), false)
-})
-
-test('an in-flight atomic landing cannot be started twice', () => {
-  const records = [layer(1, 'open'), layer(2, 'landing'), layer(3, 'open')]
-    .map((rec) => ({ ...rec, live_checks_state: 'SUCCESS' }))
-  const unit = publicContributionUnits(records, records)[0]
-  assert.equal(stackLandingReadiness(unit).code, 'landing')
-  assert.deepEqual(stackProgress(unit), {
-    ready: 0, open: 3, landing: 1, merged: 0, total: 3,
-  })
+test('a persisted landing layer remains grouped for reconciliation', () => {
+  const records = [layer(1, 'merged'), layer(2, 'landing'), layer(3, 'open')]
+  const units = publicContributionUnits(records.slice(1), records)
+  assert.equal(units.length, 1)
+  assert.equal(units[0].type, 'stack')
+  assert.deepEqual(units[0].records.map((rec) => rec.status), [
+    'merged', 'landing', 'open',
+  ])
 })

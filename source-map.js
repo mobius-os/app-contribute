@@ -198,44 +198,6 @@ export function projectWorkRevision(project) {
   ].map((value) => String(value || '')).join('\u0000')
 }
 
-export function prepareProjectsAction(projects) {
-  const candidates = (Array.isArray(projects) ? projects : [])
-    .filter(projectNeedsPreparation)
-  if (candidates.length === 0) return null
-
-  const one = candidates.length === 1
-  const names = candidates.slice(0, 12).map((project) => project.name)
-  const remaining = candidates.length - names.length
-  const scope = one
-    ? `Scope this preparation to ${candidates[0].name} and directly required tests or documentation.`
-    : 'Scope this preparation to every current reusable local change shown in Contribute Projects.'
-  const listed = remaining > 0
-    ? `${names.join(', ')}, and ${remaining} more`
-    : names.join(', ')
-
-  return {
-    event: one ? 'prepare_project_changes' : 'prepare_all_project_changes',
-    title: one ? `Prepare ${candidates[0].name} changes` : 'Prepare project changes',
-    label: one ? 'Prepare changes' : 'Prepare all',
-    busyLabel: 'Starting…',
-    startedLabel: one ? `Preparing ${candidates[0].name}` : 'Preparing your projects',
-    startedMessage: 'Stay in Contribute. New reviews and decisions will appear here when they are ready.',
-    count: candidates.length,
-    revision: candidates.map(projectWorkRevision).sort().join('\u0001'),
-    draft: [
-      one ? `Prepare my changes for ${candidates[0].name}.` : 'Prepare my project changes.',
-      '',
-      scope,
-      `Projects currently indicating local work: ${listed}.`,
-      '',
-      'Refresh the Contribute queue and Projects/source status before deciding what is current.',
-      'Classify working drafts, reusable changes, landed work, incoming updates, conflicts, and private or local-only work.',
-      'Prepare every coherent, privacy-safe upstream contribution in scope and stage it privately in Contribute.',
-      'Do not publish anything. Finish with what was prepared and what remains deliberately local or blocked.',
-    ].join('\n'),
-  }
-}
-
 function decorateProject(project, contributions) {
   const workingFiles = nonnegativeCount(project?.working?.files)
   // Installed apps are release projections, not full development checkouts.
