@@ -23,6 +23,34 @@ function recordTime(record) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function isCanonicalRecord(record) {
+  return record?.path === `${RECORD_PREFIX}${record?.id}.json`
+}
+
+// Records prepared before the canonical-name migration may exist only as an
+// <id>.record.json file. Keep those owner-reviewed records visible, while a
+// canonical sibling always owns the lifecycle once it exists.
+function preferCanonicalLedgerRecords(records) {
+  const selected = new Map()
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!record || typeof record !== 'object' || !record.id) continue
+    const current = selected.get(record.id)
+    if (!current) {
+      selected.set(record.id, record)
+      continue
+    }
+    const currentCanonical = isCanonicalRecord(current)
+    const nextCanonical = isCanonicalRecord(record)
+    if (
+      (nextCanonical && !currentCanonical)
+      || (nextCanonical === currentCanonical && recordTime(record) > recordTime(current))
+    ) {
+      selected.set(record.id, record)
+    }
+  }
+  return [...selected.values()]
+}
+
 // The cache is the fast, bounded first screen—not a second source of truth.
 // Keep every current item plus a small recent-history window; the authoritative
 // ledger refresh follows in the background and replaces it atomically.
@@ -48,12 +76,16 @@ export async function loadCachedFeed() {
 }
 
 // A shell review handoff names one already-validated contribution id. Resolve
-// that record with one small read instead of holding the interaction behind
-// the full paged ledger scan.
+// that record with at most two small reads instead of holding the interaction
+// behind the full paged ledger scan. The legacy path preserves prepared work
+// created before the canonical-name migration.
 export function contributionRecordPaths(recordId) {
   const id = typeof recordId === 'string' ? recordId.trim() : ''
   if (!RECORD_ID_RE.test(id)) return []
-  return [`${RECORD_PREFIX}${id}.json`]
+  return [
+    `${RECORD_PREFIX}${id}.json`,
+    `${RECORD_PREFIX}${id}.record.json`,
+  ]
 }
 
 export async function loadContributionRecord(recordId) {
@@ -115,8 +147,7 @@ async function readLedger() {
   const records = []
   const omitted = []
   const jsonEntries = entries.filter((entry) =>
-    entry.type === 'file' && entry.name.endsWith('.json')
-    && !entry.name.endsWith('.record.json'))
+    entry.type === 'file' && entry.name.endsWith('.json'))
 
   for (const entry of jsonEntries) {
     const path = entry.path || RECORD_PREFIX + entry.name
@@ -129,14 +160,19 @@ async function readLedger() {
     // the actual file even if its name ever drifts from rec.id. It only
     // reaches this app's own feed cache — dismissal writes start from a
     // fresh server read, so the field never lands in the ledger files.
-    if (rec && typeof rec === 'object' && rec.id) {
+    const canonicalName = rec?.id ? `${rec.id}.json` : ''
+    const legacyName = rec?.id ? `${rec.id}.record.json` : ''
+    if (
+      rec && typeof rec === 'object' && rec.id
+      && (entry.name === canonicalName || entry.name === legacyName)
+    ) {
       records.push({ ...rec, path })
     } else {
       omitted.push(path)
     }
   }
   return {
-    records,
+    records: preferCanonicalLedgerRecords(records),
     fromCache: false,
     omitted,
   }

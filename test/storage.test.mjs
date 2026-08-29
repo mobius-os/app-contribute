@@ -122,7 +122,7 @@ test('ledger uses JSON content batched into the storage listing', async () => {
   assert.deepEqual(result.omitted, [])
 })
 
-test('legacy record mirrors stay out of the canonical ledger', async () => {
+test('a canonical record wins while a legacy-only prepared record remains visible', async () => {
   globalThis.window = {
     mobius: {
       storage: {
@@ -143,6 +143,11 @@ test('legacy record mirrors stay out of the canonical ledger', async () => {
                 id: 'legacy-only', status: 'prepared',
               },
             },
+            {
+              name: 'unrelated.json', type: 'file', content: {
+                id: 'different', status: 'prepared',
+              },
+            },
           ]
         },
       },
@@ -154,6 +159,10 @@ test('legacy record mirrors stay out of the canonical ledger', async () => {
     {
       id: 'review', status: 'abandoned',
       path: 'contributions/review.json',
+    },
+    {
+      id: 'legacy-only', status: 'prepared',
+      path: 'contributions/legacy-only.record.json',
     },
   ])
 })

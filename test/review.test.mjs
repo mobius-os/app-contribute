@@ -216,6 +216,7 @@ test('only mount and foreground freshness enumerate the complete history', () =>
 test('focused record paths are bounded and reject unsafe ids', () => {
   assert.deepEqual(contributionRecordPaths('record.1-ready'), [
     'contributions/record.1-ready.json',
+    'contributions/record.1-ready.record.json',
   ])
   assert.deepEqual(contributionRecordPaths('../escape'), [])
   assert.deepEqual(contributionRecordPaths(''), [])
