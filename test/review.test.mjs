@@ -475,6 +475,7 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
   assert.match(cardSource, /Pull request updated on GitHub/)
+  assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
 })
 
 test('submit failures lead back to private agent recovery without overstating a stale push', () => {

@@ -68,6 +68,19 @@ test('batch review keeps an already-public draft parent in the chain', () => {
   assert.equal(stackReadiness(units[0]).ok, true)
 })
 
+test('reviewed existing-PR stacks are updateable only as one uniform action', () => {
+  const updating = [layer(1), layer(2), layer(3)].map((rec) => ({
+    ...rec,
+    plan: { ...rec.plan, action: 'pr_update' },
+  }))
+  assert.equal(stackReadiness(groupContributionUnits(updating)[0]).ok, true)
+
+  updating[1] = { ...updating[1], plan: { ...updating[1].plan, action: 'pr' } }
+  const mixed = stackReadiness(groupContributionUnits(updating)[0])
+  assert.equal(mixed.ok, false)
+  assert.match(mixed.message, /same pull-request action/)
+})
+
 test('incomplete chains stay reviewable but cannot be sent', () => {
   const records = [layer(1), layer(3)]
   const unit = groupContributionUnits(records)[0]

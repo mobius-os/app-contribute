@@ -112,6 +112,12 @@ export function ContributionStack({
   const isLandingAction = action === 'land'
   const progress = stackProgress(unit)
   const ready = unit.records.filter((rec) => rec.status === 'prepared')
+  const updating = !isLandingAction && ready.length > 0 && ready.every(
+    (rec) => rec?.plan?.action === 'pr_update',
+  )
+  const sendLabel = updating
+    ? (ready.length === 1 ? 'Update PR' : 'Update PRs')
+    : (ready.length === 1 ? 'Send PR' : 'Send PRs')
   const readiness = isLandingAction
     ? stackLandingReadiness(unit)
     : stackReadiness(unit)
@@ -271,11 +277,13 @@ export function ContributionStack({
         >
           <strong>{isLandingAction
             ? `Land ${unit.records.length} green changes together?`
-            : `Send ${ready.length} related ${ready.length === 1 ? 'change' : 'changes'} for review?`}</strong>
+            : `${updating ? 'Update' : 'Send'} ${ready.length} related ${ready.length === 1 ? 'change' : 'changes'}?`}</strong>
           <p id={confirmDescriptionId}>
             {isLandingAction
               ? 'This advances the unchanged upstream branch to the top reviewed commit in one step. It stops safely if upstream moved.'
-              : <>This will open the linked pull {ready.length === 1 ? 'request' : 'requests'} on GitHub. Nothing is merged automatically.</>}
+              : updating
+                ? <>This will fast-forward the linked pull {ready.length === 1 ? 'request' : 'requests'} to the exact reviewed {ready.length === 1 ? 'head' : 'heads'}. Nothing is merged automatically.</>
+                : <>This will open the linked pull {ready.length === 1 ? 'request' : 'requests'} on GitHub. Nothing is merged automatically.</>}
           </p>
           <details className="co-stack-confirm-details">
             <summary>Technical order</summary>
@@ -303,10 +311,10 @@ export function ContributionStack({
               aria-busy={sending}
             >
               <span className="co-action-label">
-                <span>{isLandingAction ? 'Land stack' : 'Send for review'}</span>
+                <span>{isLandingAction ? 'Land stack' : sendLabel}</span>
                 {sending ? (
                   <span className="co-action-label-sweep" aria-hidden="true">
-                    {isLandingAction ? 'Land stack' : 'Send for review'}
+                    {isLandingAction ? 'Land stack' : sendLabel}
                   </span>
                 ) : null}
               </span>
@@ -327,8 +335,8 @@ export function ContributionStack({
             disabled={!canRun}
             aria-label={isLandingAction
               ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land green stack' : readiness.message)
-              : (blocked > 0 ? 'Fresh review required before sending' : 'Send related changes for review')}
-            title={isLandingAction ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land stack' : 'Not ready to land') : (blocked > 0 ? 'Fresh review required' : 'Send for review')}
+              : (blocked > 0 ? 'Fresh review required before sending' : sendLabel)}
+            title={isLandingAction ? (canRecoverLanding ? 'Check landing status' : canAct ? 'Land stack' : 'Not ready to land') : (blocked > 0 ? 'Fresh review required' : sendLabel)}
             aria-describedby={
               !canAct && (blocked > 0 || readiness.code !== 'settled')
                 ? readinessId
@@ -337,7 +345,7 @@ export function ContributionStack({
             onClick={() => canRecoverLanding ? runAction() : setConfirming(true)}
           >
             <Icon name={isLandingAction ? 'merge' : 'send'} />
-            <span>{canRecoverLanding ? 'Check' : isLandingAction ? 'Land' : 'Send'}</span>
+            <span>{canRecoverLanding ? 'Check' : isLandingAction ? 'Land' : sendLabel}</span>
           </button>
           {!isLandingAction && <button
             type="button"

@@ -623,14 +623,22 @@ export async function connectPublishedApp({ appId, token, recordId }) {
   }
 }
 
-// Batch approval path for one immutable PR stack. recordIds is the exact
+// Batch approval paths for one immutable PR stack. recordIds is the exact
 // ordered list rendered in the confirmation, so the server cannot silently
-// include a layer the partner did not review. The response always carries the
-// latest known records, including partial success after a durable retry.
-export async function submitContributionStack({ appId, token, recordIds }) {
+// include a layer the partner did not review. Publishing new PRs and updating
+// existing PRs remain distinct guarded writes even though their partial-result
+// handling is identical here.
+async function writeContributionStack({
+  appId,
+  token,
+  recordIds,
+  operation,
+}) {
+  const updating = operation === 'update'
   try {
     const r = await fetch(
-      '/api/github/contributions/' + encodeURIComponent(appId) + '/submit-stack',
+      '/api/github/contributions/' + encodeURIComponent(appId) +
+        (updating ? '/update-stack' : '/submit-stack'),
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
@@ -648,25 +656,35 @@ export async function submitContributionStack({ appId, token, recordIds }) {
       }
       return {
         ok: body.records,
-        submitted: Array.isArray(body?.submitted) ? body.submitted : [],
+        submitted: Array.isArray(updating ? body?.updated : body?.submitted)
+          ? (updating ? body.updated : body.submitted)
+          : [],
       }
     }
     const detail = body?.detail
     if (
       r.status === 409
-      && detail === 'Every PR in this stack has already been submitted.'
+      && detail === (updating
+        ? 'Every PR in this stack already has the reviewed update.'
+        : 'Every PR in this stack has already been submitted.')
     ) {
       return { alreadyHandled: true }
     }
     if (detail && typeof detail === 'object') {
       return {
-        error: detail.message || 'Could not submit this PR stack.',
+        error: detail.message || (updating
+          ? 'Could not update this PR stack.'
+          : 'Could not submit this PR stack.'),
         records: Array.isArray(detail.records) ? detail.records : [],
-        submitted: Array.isArray(detail.submitted) ? detail.submitted : [],
+        submitted: Array.isArray(updating ? detail.updated : detail.submitted)
+          ? (updating ? detail.updated : detail.submitted)
+          : [],
       }
     }
     return {
-      error: typeof detail === 'string' ? detail : 'Could not submit this PR stack.',
+      error: typeof detail === 'string' ? detail : (updating
+        ? 'Could not update this PR stack.'
+        : 'Could not submit this PR stack.'),
     }
   } catch {
     return {
@@ -674,6 +692,14 @@ export async function submitContributionStack({ appId, token, recordIds }) {
       error: 'The response was lost. Checking the saved contributions before offering a retry…',
     }
   }
+}
+
+export function submitContributionStack(args) {
+  return writeContributionStack({ ...args, operation: 'submit' })
+}
+
+export function updateContributionStack(args) {
+  return writeContributionStack({ ...args, operation: 'update' })
 }
 
 // Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
