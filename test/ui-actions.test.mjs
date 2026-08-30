@@ -93,15 +93,15 @@ test('agent handoffs start one durable project chat and open only its accepted c
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
   assert.match(sourceMapSource, /label: 'Sort & prepare'/)
-  assert.match(sourceOverviewSource, /Opening one agent conversation while you stay here\./)
+  assert.match(sourceOverviewSource, /Opening it while you stay in Contribute\./)
   assert.doesNotMatch(connectionSource, /onAskAgent/)
   assert.match(appSource, /No pull requests to review/)
   assert.match(appSource, /No issues or comments yet/)
 })
 
-test('pull requests and requests have distinct top-level rooms', () => {
-  assert.match(appSource, /id="co-tab-prs"[\s\S]*?>\s*Reviews\s*<\/button>/)
-  assert.match(appSource, /id="co-tab-issues"[\s\S]*?>\s*Requests\s*<\/button>/)
+test('pull requests and issues have distinct top-level rooms', () => {
+  assert.match(appSource, /id="co-tab-prs"[\s\S]*?>\s*Pull requests\s*<\/button>/)
+  assert.match(appSource, /id="co-tab-issues"[\s\S]*?>\s*Issues\s*<\/button>/)
   assert.match(appSource, /ISSUE_TYPES\.has\(rec\.type\)/)
   assert.match(appSource, /aria-labelledby=\{view === 'issues' \? 'co-tab-issues' : 'co-tab-prs'\}/)
   assert.match(cardSource, /!isPr && rec\.status === 'prepared'/)
@@ -109,7 +109,7 @@ test('pull requests and requests have distinct top-level rooms', () => {
   assert.match(appSource, /isEmpty \? \(\s*<EmptyState view=\{view\} \/>/)
 })
 
-test('focused Projects and Requests use the same single-heading detail pattern as Reviews', () => {
+test('focused Projects and Issues use the same single-heading detail pattern as Pull requests', () => {
   assert.match(sourceMapSource, /selectedProject \? <h2 className="co-visually-hidden">Project detail<\/h2>/)
   assert.match(feedSource, /<h2 className="co-visually-hidden">Request detail<\/h2>/)
   assert.doesNotMatch(feedSource, /<ViewHeading title="Requests"[^>]*source conversation still attached/)
@@ -123,11 +123,16 @@ test('an assigned incoming review stays recoverable until its conversation start
 })
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
-  assert.match(sourceOverviewSource, /Run contribution cycle/)
-  assert.match(sourceOverviewSource, /Nothing goes public without your approval\./)
+  assert.match(sourceOverviewSource, /Handle everything/)
+  assert.match(sourceOverviewSource, /You still approve anything public\./)
   assert.match(sourceOverviewSource, /<CycleCard/)
   assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
   assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
+  assert.match(feedSource, /role="alertdialog"/)
+  assert.match(feedSource, /Nothing will be merged\./)
+  assert.match(feedSource, /open new pull requests or update existing ones/)
+  assert.match(feedSource, /unit\.type !== 'stack'/)
+  assert.match(feedSource, /<ContributionStack[\s\S]*onSendStack=\{onSendStack\}/)
   assert.doesNotMatch(batchActionSource, /role="alertdialog"/)
   assert.doesNotMatch(batchActionSource, /Keep private/)
   assert.match(batchActionSource, /className="co-agent-handoff"/)

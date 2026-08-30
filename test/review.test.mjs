@@ -32,6 +32,8 @@ import { contributionRecordPaths } from '../storage.js'
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
+const overviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
+const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
 
 test('shell review intents name one ledger record without encoding presentation state', () => {
   assert.deepEqual(contributionReviewTargetFromIntent('review:record.1-ready'), {
@@ -153,6 +155,43 @@ test('a complete active stack can open from the fast snapshot', () => {
   assert.equal(focusedContributionReady(records.slice(0, 2), 'one'), false)
   assert.equal(focusedContributionReady([{ id: 'single' }], 'single'), true)
   assert.equal(focusedContributionReady(records, 'missing'), false)
+})
+
+test('review queues own compact defaults and one grouped action', () => {
+  assert.match(feedSource, /className=\{'co-review-default/)
+  assert.match(feedSource, /progressReviewAction\(unitRecords\(unit\), reviewStatus\)/)
+  assert.match(feedSource, /<StageDefaultAction/)
+  assert.match(feedSource, /Send all \{prepared\.length\}/)
+  assert.match(feedSource, /unit\.type !== 'stack'/)
+  assert.match(feedSource, /className="co-stage-batch-list"/)
+  assert.match(feedSource, /record\.plan\?\.action === 'pr_update' \? 'Update pull request' : 'Open pull request'/)
+  assert.doesNotMatch(feedSource, /One public approval/)
+  assert.doesNotMatch(feedSource, /One private review/)
+})
+
+test('the active cycle presents opening its conversation as a bordered action', () => {
+  assert.match(overviewSource, /className="co-btn co-btn-sm"[^>]*>Open conversation<\/button>/)
+})
+
+test('the app navigation and supporting screens follow the owner task instead of internal stages', () => {
+  assert.match(appSource, />\s*To do\s*</)
+  assert.match(appSource, />\s*Pull requests\s*</)
+  assert.match(appSource, />\s*Issues\s*</)
+  assert.match(overviewSource, /idle: 'Handle everything'/)
+  assert.match(overviewSource, /title="Needs you"/)
+  assert.doesNotMatch(overviewSource, /Review queue/)
+  assert.match(sourceMapSource, /\['attention', 'Needs attention'\]/)
+  assert.equal((sourceMapSource.match(/\['all', 'All projects'\]/g) || []).length, 1)
+  assert.doesNotMatch(sourceMapSource, /\['sorting', 'Needs sorting'\]/)
+  assert.match(feedSource, /\['history', 'Past'\]/)
+  assert.match(feedSource, /key === 'history' \? ' is-secondary'/)
+})
+
+test('focused attention is separate from the contribution information card', () => {
+  assert.match(feedSource, /<ContributionDecision[\s\S]*<ContributionCard/)
+  assert.match(feedSource, /showDecision=\{false\}/)
+  assert.match(cardSource, /export function ContributionDecision/)
+  assert.match(cardSource, /className="co-decision-surface"/)
 })
 
 test('only mount and foreground freshness enumerate the complete history', () => {
@@ -403,10 +442,23 @@ test('address all collects active local and published blockers but not history',
   assert.doesNotMatch(action.draft, /Already merged|An issue|Clean PR/)
 })
 test('the optional fork preflight is named as checks rather than an ambiguous test', () => {
-  assert.match(cardSource, />\{rec\.pre_pr_checks \? 'Check again' : 'Run checks'\}<\/span>/)
+  assert.match(cardSource, />\{rec\.pre_pr_checks \? 'Check fork again' : 'Check on fork'\}<\/span>/)
   assert.match(cardSource, /Run the full GitHub checks on your fork/)
   assert.doesNotMatch(cardSource, /<span>Test<\/span>/)
+  assert.match(cardSource, /<span>Move to history<\/span>/)
   assert.match(cardSource, /It does not\s+open a pull request/)
+})
+
+test('prepared decisions keep their private escape hatch when attention is present', () => {
+  assert.match(cardSource, /\{hasPreparedAction \? \([\s\S]*?<ReviewActions/)
+  assert.doesNotMatch(cardSource, /hasPreparedAction\s*&&\s*!hasSubmitAlert/)
+  assert.match(cardSource, /<span>Move to history<\/span>/)
+})
+
+test('compact public actions disappear only after the accepted send', () => {
+  assert.match(feedSource, /!privateAction && \(outcome\?\.ok \|\| outcome\?\.pending \|\| outcome\?\.alreadyHandled\)[\s\S]*?setAccepted\(true\)/)
+  assert.match(feedSource, /if \(accepted\) return null/)
+  assert.match(feedSource, /privateAction && outcome\?\.ok[\s\S]*?setStartedChatId/)
 })
 
 test('all clear belongs to the exact prepared head', () => {
@@ -455,10 +507,11 @@ test('one exact prepared head has one stable review conversation scope', () => {
 
 test('the card review action exposes launch progress and the started conversation', () => {
   assert.match(cardSource, /<AgentHandoffButton/)
-  assert.match(cardSource, /action=\{reviewAllAction\(\[rec\]\)\}/)
+  assert.match(cardSource, /action=\{reviewAction \|\| reviewAllAction\(\[rec\]\)\}/)
   assert.match(cardSource, /onStart=\{onReview\}/)
   assert.doesNotMatch(cardSource, /onClick=\{\(\) => onReview\(rec\)\}/)
   assert.match(feedSource, /onReview=\{onStartAgent\}/)
+  assert.match(feedSource, /reviewAction=\{progressReviewAction\(\[rec\], reviewStatus\)\}/)
 })
 
 test('a scoped review delegates exactly-once admission to chat.start', () => {
@@ -526,6 +579,19 @@ test('one queue handoff owns every visible private review job', () => {
   assert.match(action.draft, /Stale head/)
   assert.doesNotMatch(action.draft, /Already clear/)
   assert.match(action.draft, /Do not push, publish, comment, merge/)
+})
+
+test('a focused active review reuses the queue scope instead of starting a second review', () => {
+  const record = {
+    id: 'active', type: 'pr', status: 'prepared',
+    plan: { head_sha: 'd'.repeat(40) },
+    quality_review: { state: 'reviewing', reviewed_head_sha: 'd'.repeat(40) },
+  }
+  const action = progressReviewAction([record], { byId: { active: { state: 'ready' } } })
+
+  assert.equal(action.label, 'Open review')
+  assert.equal(action.scope, contributionReviewScope([record], 'progress'))
+  assert.match(cardSource, /reviewInProgress[\s\S]*'Review in progress'/)
 })
 
 test('address all handoff stays private and names every active blocker', () => {

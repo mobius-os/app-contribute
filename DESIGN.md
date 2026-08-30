@@ -125,6 +125,15 @@ The shared canvas is centered at a maximum width of 760px. Overview may use the 
 
 Selection replaces the index with a focused view instead of opening a split pane. On phones, the same composition remains vertical; top-level tabs and stage rails scroll horizontally when needed, and secondary labels yield before content does.
 
+When several rows in one review stage share an exact default, the stage intro
+may offer that action once for the complete visible set. The copy must name
+whether the action stays private or publishes to GitHub; public batches keep a
+separate confirmation that names every included pull request. Ordered stacks
+keep their own layer-and-branch confirmation instead of joining that stage
+batch. Each row retains its own compact default, while opening the row reveals
+information and secondary controls rather than becoming a prerequisite for the
+action.
+
 **The One Room Rule.** A tab may share tokens and navigation with another tab, but it must not inherit a generic page skeleton when its job is different.
 
 ## Elevation & Depth
