@@ -187,7 +187,7 @@ test('an exact approval fingerprint changes with code, public text, route, and r
   assert.notEqual(batchFingerprint([item], 'ready', 'github', 'connected'), approved)
 })
 
-test('the Run stays global while project identity remains visible', async (t) => {
+test('the Run keeps project identity without duplicating Projects navigation', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun } = await runRenderer()
   const projects = [
@@ -222,8 +222,8 @@ test('the Run stays global while project identity remains visible', async (t) =>
   assert.match(html, /owner\/two/)
   assert.match(html, /Needs you<\/h3><span>0<\/span>/)
   assert.doesNotMatch(html, /co-run-row is-private_review/)
-  assert.match(html, /2 projects represented in this snapshot/)
-  assert.match(html, /Browse projects/)
+  assert.doesNotMatch(html, /projects represented in this snapshot/)
+  assert.doesNotMatch(html, /Browse projects/)
   assert.doesNotMatch(html, /<select|Filter by project|All projects/)
   assert.doesNotMatch(html, /You’re caught up/)
 })
@@ -243,8 +243,8 @@ test('private review groups move from the one Private Run into Working while it 
   }, { cycle: { phase: 'running', runtime: { running: true } } })
 
   assert.match(html, /Preparing private work/)
-  assert.match(html, /<b>1<\/b> moving/)
-  assert.match(html, /Moving quietly<\/span><b>1<\/b>/)
+  assert.match(html, /<summary><span>Working<\/span><b>1<\/b>/)
+  assert.match(html, /Working<\/span><b>1<\/b>/)
   assert.match(html, /is-review_in_progress/)
   assert.match(html, /Private run in progress/)
   assert.match(html, /Needs you<\/h3><span>0<\/span>/)
@@ -369,6 +369,6 @@ test('dismissed work remains discoverable and focused history can restore it', a
   })
   const focusHtml = renderFocus(item)
 
-  assert.match(runHtml, /Dismissed<\/span><b>1<\/b>/)
+  assert.match(runHtml, /History<\/span><b>1<\/b>/)
   assert.match(focusHtml, />Restore</)
 })

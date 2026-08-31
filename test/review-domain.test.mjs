@@ -105,6 +105,7 @@ test('address all includes active blockers, not history or healthy public work',
 
 test('contribution cycle recovery uses its durable scope only', () => {
   assert.equal(isContributionCycleChat({ scope: 'contribute-cycle', title: 'Anything' }), true)
+  assert.equal(isContributionCycleChat({ scope: 'contribute-task:abc123' }), true)
   assert.equal(isContributionCycleChat({ title: 'Finishing the contribution cycle' }), false)
   assert.equal(isContributionCycleChat({ scope_label: 'Contribution cycle' }), false)
 })

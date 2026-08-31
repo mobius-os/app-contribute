@@ -20,9 +20,16 @@ function projectMatchesJourney(project, filter) {
     projectReadyToPrepare(project)
     || projectNeedsSorting(project)
     || project.incomingFiles > 0
-    || (project.contributions || []).some((record) => record.needs_attention)
+    || [...(project.contributions || []), ...(project.issues || [])]
+      .some((record) => record.needs_attention)
   )
   return true
+}
+
+function projectContributionCountLabel(project) {
+  const pullRequests = Number(project?.contributionCounts?.pullRequests || 0)
+  const issues = Number(project?.contributionCounts?.issues || 0)
+  return `${pullRequests} ${pullRequests === 1 ? 'PR' : 'PRs'} · ${issues} ${issues === 1 ? 'issue' : 'issues'}`
 }
 
 function localWorkLabel(project, ending) {
@@ -44,7 +51,8 @@ function projectNextStep(project, journey = 'all') {
   }
   if (project.sourceComparisonRequired) return 'Compare before preparing'
   if (project.incomingFiles > 0) return 'Shared update available'
-  if ((project.contributions?.length || 0) > 0) return `${project.contributions.length} active ${project.contributions.length === 1 ? 'review' : 'reviews'}`
+  const activeRequests = (project.contributions?.length || 0) + (project.issues?.length || 0)
+  if (activeRequests > 0) return `${activeRequests} active ${activeRequests === 1 ? 'request' : 'requests'}`
   if (project.builtHere) return 'Publish when ready'
   return 'Up to date'
 }
@@ -139,6 +147,7 @@ function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
         <UnifiedDiff
           diff={state.data?.diff}
           diffTruncated={state.data?.diff_truncated === true}
+          initiallyOpenFirst
         />
       ) : (
         <div className="co-project-file-list">
@@ -169,15 +178,14 @@ function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
   )
 }
 
-function ProjectReviews({ project, onViewReview }) {
-  const rows = project.contributions || []
+function ProjectRequests({ title, emptyLabel, rows, onViewReview, projectKey }) {
   if (!rows.length) return null
   return (
     <section className="co-project-reviews">
-      <header><strong>Pull requests</strong></header>
+      <header><strong>{title}</strong><small>{rows.length}</small></header>
       {rows.map((rec) => (
-        <button type="button" key={rec.id} onClick={() => onViewReview(rec, project.key)}>
-          <span>{rec.plan?.title || rec.title || 'Untitled pull request'}</span>
+        <button type="button" key={rec.id} onClick={() => onViewReview(rec, projectKey)}>
+          <span>{rec.plan?.title || rec.title || emptyLabel}</span>
           <small>{rec.status === 'prepared' ? 'Prepared' : rec.status === 'open' ? 'Open' : rec.status}</small>
         </button>
       ))}
@@ -197,7 +205,23 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onViewRev
         <span><strong>{projectNextStep(project, journey)}</strong></span>
       </div>
       <p className="co-source-overview-copy">{projectDetailSummary(project)}</p>
-      <ProjectReviews project={project} onViewReview={onViewReview} />
+      <div className="co-project-request-summary" aria-label="Active GitHub work">
+        <span>{projectContributionCountLabel(project)}</span>
+      </div>
+      <ProjectRequests
+        title="Pull requests"
+        emptyLabel="Untitled pull request"
+        rows={project.contributions || []}
+        onViewReview={onViewReview}
+        projectKey={project.key}
+      />
+      <ProjectRequests
+        title="Issues"
+        emptyLabel="Untitled issue"
+        rows={project.issues || []}
+        onViewReview={onViewReview}
+        projectKey={project.key}
+      />
       <ProjectFileChanges project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
       <ProjectPosition project={project} />
       {project.kind !== 'external' && !project.available && project.state !== 'local_only' ? <div className="co-source-unavailable">No inspectable local source is available.</div> : null}
@@ -212,7 +236,10 @@ function ProjectRow({ project, journey, selected, onSelect }) {
       <button type="button" className="co-source-row" onClick={() => onSelect(project.key)} aria-expanded={selected}>
         <ProjectGlyph project={project} />
         <span className="co-source-row-id"><strong>{project.name}</strong></span>
-        <span className="co-source-row-facts">{projectNextStep(project, journey)}</span>
+        <span className="co-source-row-facts">
+          <span>{projectNextStep(project, journey)}</span>
+          <small>{projectContributionCountLabel(project)}</small>
+        </span>
         <span className={'co-source-dot tone-' + status.tone} title={status.label} />
       </button>
     </div>
@@ -243,12 +270,17 @@ export function SourceMap({
   onRetry,
   loadProjectDiff,
   onViewReview,
-  onBack,
 }) {
   const [filter, setFilter] = useState(() => focusKey ? 'all' : 'attention')
+  const [query, setQuery] = useState('')
   const filtered = useMemo(
-    () => projects.filter((project) => projectMatchesJourney(project, filter)),
-    [projects, filter],
+    () => projects.filter((project) => (
+      projectMatchesJourney(project, filter)
+      && (!query.trim() || [project.name, project.key, project.canonical_repo]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(query.trim().toLowerCase())))
+    )),
+    [projects, filter, query],
   )
   const filterCounts = useMemo(
     () => Object.fromEntries(FILTERS.map(([key]) => [
@@ -257,17 +289,58 @@ export function SourceMap({
     ])),
     [projects],
   )
-  const [selected, setSelected] = useState(() => focusKey || '')
+  const [selected, setSelected] = useState('')
   const listScrollRef = useRef(0)
+  const projectNavRef = useRef(null)
+  const handledFocusRef = useRef('')
   const pageScroller = () => document.querySelector('.co-page')
 
-  function openProject(key) {
+  function showProject(key) {
     listScrollRef.current = pageScroller()?.scrollTop || 0
     setSelected(key)
     requestAnimationFrame(() => pageScroller()?.scrollTo({ top: 0, left: 0 }))
   }
 
+  async function openProject(key) {
+    if (!key || selected === key) return
+    if (!window.mobius?.nav?.open) {
+      showProject(key)
+      return
+    }
+    let handle = null
+    handle = window.mobius.nav.open('contribute-project', {
+      onBack: () => {
+        if (projectNavRef.current !== handle) return
+        projectNavRef.current = null
+        setSelected('')
+        requestAnimationFrame(() => pageScroller()?.scrollTo({
+          top: listScrollRef.current,
+          left: 0,
+        }))
+      },
+      onForward: () => {
+        projectNavRef.current = handle
+        setSelected(key)
+        requestAnimationFrame(() => pageScroller()?.scrollTo({ top: 0, left: 0 }))
+      },
+    })
+    projectNavRef.current = handle
+    const outcome = await handle.outcome
+    if (projectNavRef.current !== handle) {
+      handle.close()
+      return
+    }
+    if (!['owned', 'standalone'].includes(outcome?.status)) {
+      projectNavRef.current = null
+      return
+    }
+    showProject(key)
+  }
+
   function closeProject() {
+    const handle = projectNavRef.current
+    projectNavRef.current = null
+    try { handle?.close?.() } catch {}
     setSelected('')
     requestAnimationFrame(() => pageScroller()?.scrollTo({
       top: listScrollRef.current,
@@ -275,9 +348,22 @@ export function SourceMap({
     }))
   }
 
+  useEffect(() => () => {
+    try { projectNavRef.current?.close?.() } catch {}
+    projectNavRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!focusKey || handledFocusRef.current === focusKey) return
+    if (!projects.some((project) => project.key === focusKey)) return
+    handledFocusRef.current = focusKey
+    setFilter('all')
+    void openProject(focusKey)
+  }, [focusKey, projects])
+
   useEffect(() => {
     if (selected && !filtered.some((project) => project.key === selected)) {
-      setSelected('')
+      closeProject()
     }
   }, [filtered, selected])
 
@@ -316,14 +402,9 @@ export function SourceMap({
         <header className="co-view-heading">
           <div>
             <h2>Projects</h2>
-            <p>A secondary view of the same contribution run, grouped by source.</p>
+            <p>See what changed in each local project and what should happen next.</p>
           </div>
           <div className="co-project-view-actions">
-            {typeof onBack === 'function' ? (
-              <button type="button" className="co-quiet-action" onClick={onBack}>
-                <Icon name="left" size={15} /> Back to run
-              </button>
-            ) : null}
             <button
               type="button"
               className="co-quiet-action"
@@ -346,6 +427,19 @@ export function SourceMap({
 
       {!selectedProject ? (
         <>
+          <label className="co-project-search">
+            <span className="co-visually-hidden">Find a project</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="Find a project"
+              onChange={(event) => {
+                const value = event.target.value
+                setQuery(value)
+                if (value.trim()) setFilter('all')
+              }}
+            />
+          </label>
           <nav className="co-lens-nav" aria-label="Project views">
             {FILTERS.map(([key, label]) => (
               <button
@@ -353,7 +447,7 @@ export function SourceMap({
                 key={key}
                 className={filter === key ? 'is-active' : ''}
                 aria-pressed={filter === key}
-                onClick={() => { setFilter(key); setSelected('') }}
+                onClick={() => { setFilter(key); closeProject() }}
               >
                 <span>{label}</span><b>{filterCounts[key]}</b>
               </button>
@@ -369,9 +463,9 @@ export function SourceMap({
 
           {filtered.length === 0 ? (
             <div className="co-stage-empty">
-              <Icon name="check" size={20} />
-              <strong>Nothing here</strong>
-              <span>This project stage is clear.</span>
+              <Icon name={query.trim() ? 'review' : 'check'} size={20} />
+              <strong>{query.trim() ? 'No matching project' : 'Nothing here'}</strong>
+              <span>{query.trim() ? 'Try a project name or repository.' : 'This project stage is clear.'}</span>
             </div>
           ) : (
             <div className="co-project-index">

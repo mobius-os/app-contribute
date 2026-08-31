@@ -63,8 +63,8 @@ export function projectIconUrl(project) {
 }
 
 export function activeContribution(rec) {
-  const isPullRequest = rec?.type === 'pr' || rec?.plan?.action === 'pr'
-  return !!rec && isPullRequest && ACTIVE.has(rec.status)
+  const action = rec?.type || rec?.plan?.action
+  return !!rec && (action === 'pr' || action === 'issue') && ACTIVE.has(rec.status)
 }
 
 export function attachSourceProjects(snapshot, records) {
@@ -199,6 +199,12 @@ export function projectWorkRevision(project) {
 }
 
 function decorateProject(project, contributions) {
+  const pullRequests = contributions.filter((rec) => (
+    rec?.type === 'pr' || rec?.plan?.action === 'pr'
+  ))
+  const issues = contributions.filter((rec) => (
+    rec?.type === 'issue' || rec?.plan?.action === 'issue'
+  ))
   const workingFiles = nonnegativeCount(project?.working?.files)
   // Installed apps are release projections, not full development checkouts.
   // Their authoritative local delta is against installer-owned `upstream`;
@@ -240,7 +246,7 @@ function decorateProject(project, contributions) {
     ? reconciliation.local_only_paths
     : []
   const coveredLocalPaths = currentContributionCoverage(
-    project, contributions, localOnlyPaths,
+    project, pullRequests, localOnlyPaths,
   )
   const remainingLocalOnlyPaths = localOnlyPaths.filter(
     path => !coveredLocalPaths.has(path),
@@ -275,7 +281,7 @@ function decorateProject(project, contributions) {
     ? nonnegativeCount(reconciliation.proven_present_count ?? reconciliation.proven_present?.length ?? 0)
     : 0
   const different = localFiles > 0 || compatibleFiles > 0 || conflictFiles > 0
-  const forks = projectForks(project, contributions)
+  const forks = projectForks(project, pullRequests)
   const contributionAttention = contributions.some((rec) => rec.needs_attention)
   const builtHere = project?.kind === 'app'
     && !repoKey(project?.canonical_repo)
@@ -293,12 +299,18 @@ function decorateProject(project, contributions) {
     (sourceComparisonRequired && workingFiles > 0) ||
     contributionAttention
   )
-  const ready = contributions.filter((rec) => rec.status === 'prepared').length
-  const open = contributions.length - ready
+  const ready = pullRequests.filter((rec) => rec.status === 'prepared').length
+  const open = pullRequests.length - ready
   return {
     ...project,
-    contributions,
-    contributionCounts: { ready, open },
+    contributions: pullRequests,
+    issues,
+    contributionCounts: {
+      pullRequests: pullRequests.length,
+      issues: issues.length,
+      ready,
+      open,
+    },
     different,
     adapted: managedFiles > 0,
     authoredFiles,
@@ -421,7 +433,8 @@ export function projectStatus(project) {
       tone: 'danger',
     }
   }
-  if (project.contributions.some((rec) => rec.needs_attention)) {
+  if ([...(project.contributions || []), ...(project.issues || [])]
+    .some((rec) => rec.needs_attention)) {
     return { label: 'Needs attention', tone: 'danger' }
   }
   if (state === 'comparison_needed') return { label: 'Needs comparison', tone: 'warn' }

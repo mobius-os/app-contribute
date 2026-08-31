@@ -52,6 +52,16 @@ export function contributionApprovalIsCurrent(approved, current) {
   return !!approvedFingerprint && approvedFingerprint === contributionApprovalFingerprint(current)
 }
 
+export function contributionScopeHash(input) {
+  let hash = 0xcbf29ce484222325n
+  const value = String(input || '')
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(16).padStart(16, '0')
+}
+
 export function indexReviewStatus(payload) {
   const byId = {}
   const rows = Array.isArray(payload?.records) ? payload.records : []
@@ -99,12 +109,7 @@ export function contributionReviewScope(records, mode = 'review') {
     .sort()
   if (identities.length === 0) return ''
   const input = `${mode}\u0000${identities.join('\u0001')}`
-  let hash = 0xcbf29ce484222325n
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= BigInt(input.charCodeAt(index))
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
-  }
-  return `contribute-review:${hash.toString(16).padStart(16, '0')}`
+  return `contribute-review:${contributionScopeHash(input)}`
 }
 
 // Every app-owned private task gets an immutable problem identity. Actions
@@ -121,12 +126,7 @@ export function contributionActionScope(action) {
     .map((value) => String(value || '').trim())
     .join('\u0000')
   if (!identity.replaceAll('\u0000', '')) return ''
-  let hash = 0xcbf29ce484222325n
-  for (let index = 0; index < identity.length; index += 1) {
-    hash ^= BigInt(identity.charCodeAt(index))
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
-  }
-  return `contribute-task:${hash.toString(16).padStart(16, '0')}`
+  return `contribute-task:${contributionScopeHash(identity)}`
 }
 
 // A quality verdict belongs to one immutable prepared head. Source freshness
@@ -231,9 +231,7 @@ export function recoveryReviewAction(rec) {
 export function contributionsNeedingReviewAction(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || rec.status !== 'prepared') return false
-    return reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      qualityReviewFor(rec).state === 'changes_needed' ||
-      !isAllClear(rec, reviewStatus)
+    return !isAllClear(rec, reviewStatus)
   })
 }
 
@@ -292,7 +290,7 @@ const ACTIVE_PR_STATUSES = new Set([
   'open',
 ])
 
-function hasPublishedAttention(rec) {
+export function hasAttentionSignal(rec) {
   return rec?.needs_attention === true ||
     (typeof rec?.attention?.title === 'string' && !!rec.attention.title.trim()) ||
     (typeof rec?.attention?.message === 'string' && !!rec.attention.message.trim())
@@ -321,7 +319,7 @@ export function attentionReason(rec, reviewStatus) {
 export function contributionsNeedingAttention(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
-    return hasPublishedAttention(rec) ||
+    return hasAttentionSignal(rec) ||
       reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
   })
 }
@@ -466,7 +464,8 @@ export function contributionCyclePhase(runtime) {
 }
 
 export function isContributionCycleChat(chat) {
-  return !!chat && typeof chat === 'object' && chat.scope === 'contribute-cycle'
+  const scope = typeof chat?.scope === 'string' ? chat.scope : ''
+  return scope === 'contribute-cycle' || scope.startsWith('contribute-task:')
 }
 
 export function contributionCycleProgress(runtime) {
@@ -503,7 +502,7 @@ export function partitionReviewUnits(units, reviewStatus) {
     // permanently impossible to review or send.
     const privateRecords = records.filter((rec) => rec.status === 'prepared')
     const reviewRecords = privateRecords.length > 0 ? privateRecords : records
-    if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
+    if (reviewRecords.some((rec) => hasAttentionSignal(rec)) || reviewRecords.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
     ) || reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
       needsAttention.push(unit)

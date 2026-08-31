@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons.jsx'
+import { contributionActionScope } from '../review.js'
 
 // Mini-app frames have an opaque origin, so a frame-origin target silently
 // drops this shell command. postMessage still goes only to the direct parent;
@@ -23,10 +24,29 @@ export function AgentHandoffButton({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [started, setStarted] = useState(null)
-  const actionKey = `${action?.event || ''}:${action?.title || ''}`
+  const scope = contributionActionScope(action)
+  const actionKey = `${scope}:${action?.event || ''}:${action?.title || ''}`
   useEffect(() => {
+    let cancelled = false
     setStarted(null)
     setError('')
+    if (!scope || typeof window.mobius?.chat?.list !== 'function') {
+      return () => { cancelled = true }
+    }
+    window.mobius.chat.list({ scope }).then((chats) => {
+      if (cancelled || !Array.isArray(chats) || chats.length === 0) return
+      const chat = [...chats].sort((a, b) => (
+        String(b.activity_at || b.updated_at || '').localeCompare(
+          String(a.activity_at || a.updated_at || ''),
+        )
+      ))[0]
+      if (chat?.id) setStarted({
+        chatId: chat.id,
+        reused: true,
+        usage: chat.usage || null,
+      })
+    }).catch(() => {})
+    return () => { cancelled = true }
   }, [actionKey])
   if (!action) return null
 
@@ -57,6 +77,12 @@ export function AgentHandoffButton({
 
   if (started) {
     if (collapseOnStart) return null
+    const tokenTotal = Number(started?.usage?.totals?.total_tokens)
+    const usageLabel = Number.isFinite(tokenTotal) && tokenTotal >= 0
+      ? `${new Intl.NumberFormat(undefined, {
+          notation: 'compact', maximumFractionDigits: 1,
+        }).format(tokenTotal)} tokens used`
+      : ''
     return (
       <div className="co-agent-started" role="status" aria-live="polite">
         <span>
@@ -64,6 +90,7 @@ export function AgentHandoffButton({
             ? (action.reusedLabel || 'Review already running')
             : (action.startedLabel || 'Agent started')}</strong>
           <small>{action.startedMessage || 'Keep working here. New decisions and ready changes will appear in Contribute.'}</small>
+          {usageLabel ? <small>{usageLabel}</small> : null}
         </span>
         {window.parent !== window ? (
           <button type="button" className="co-agent-chat-link" onClick={viewConversation}>

@@ -154,6 +154,37 @@ test('a partial-public stack has one owning publish unit and no duplicate parent
   assert.deepEqual(represented, ['parent', 'child'])
 })
 
+test('one stack produces one owner decision when public and private checks flag it', () => {
+  const common = { id: 'attention-stack', name: 'Attention stack', total: 2 }
+  const parent = {
+    ...prepared('attention-parent'), status: 'open', needs_attention: true,
+    attention: { type: 'human_required', message: 'Choose the public response.' },
+    plan: {
+      ...prepared('attention-parent').plan,
+      branch: 'stack/attention-stack/1-parent',
+      stack: { ...common, position: 1, base_branch: 'main', parent_record_id: '' },
+    },
+  }
+  const child = prepared('attention-child', {
+    quality_review: { state: 'changes_needed' },
+    plan: {
+      branch: 'stack/attention-stack/2-child',
+      base_sha: HEAD,
+      stack: {
+        ...common, position: 2, base_branch: 'stack/attention-stack/1-parent',
+        parent_record_id: parent.id,
+      },
+    },
+  })
+
+  const run = buildContributionRun({ records: [parent, child] })
+
+  assert.deepEqual(run.decisions.map(item => item.kind), ['public_attention'])
+  assert.deepEqual(runUnitRecords(run.decisions[0]).map(record => record.id), [
+    parent.id, child.id,
+  ])
+})
+
 test('an active prepared stack owns every known terminal or dismissed sibling', () => {
   for (const terminalStatus of ['closed', 'superseded', 'abandoned']) {
     const common = { id: `repair-${terminalStatus}`, name: 'Repair stack', total: 2 }

@@ -7,6 +7,8 @@ import {
 } from './source-map.js'
 import { groupRecords, timeAgo } from './domain.js'
 import {
+  contributionScopeHash,
+  hasAttentionSignal,
   organizePrivateWorkAction,
   partitionReviewUnits,
   qualityReviewFor,
@@ -27,12 +29,6 @@ import {
 } from './autopilot.js'
 
 const REQUEST_TYPES = new Set(['issue', 'issue_comment', 'discussion_comment'])
-
-function hasAttentionSignal(record) {
-  return record?.needs_attention === true ||
-    (typeof record?.attention?.title === 'string' && !!record.attention.title.trim()) ||
-    (typeof record?.attention?.message === 'string' && !!record.attention.message.trim())
-}
 
 // Ownership and capability are separate. Unknown attention remains a human
 // decision, while a known agent-handleable event belongs to the one private
@@ -115,13 +111,7 @@ function decision(kind, unit, byRepo, extra = {}) {
 }
 
 function revisionHash(values) {
-  let hash = 0xcbf29ce484222325n
-  const input = values.sort().join('\u0001')
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= BigInt(input.charCodeAt(index))
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
-  }
-  return hash.toString(16).padStart(16, '0')
+  return contributionScopeHash([...values].sort().join('\u0001'))
 }
 
 function recordRevisionPart(record) {
@@ -198,7 +188,10 @@ function projectRows(projects) {
     const status = projectStatus(project)
     const incoming = Number(project?.incomingFiles || 0)
     const outgoing = Number(project?.outgoingFiles || 0)
-    const attention = (project?.contributions || []).some(record => record?.needs_attention)
+    const attention = [
+      ...(project?.contributions || []),
+      ...(project?.issues || []),
+    ].some(record => record?.needs_attention)
     let kind = 'current'
     if (projectReadyToPrepare(project)) kind = 'prepare'
     else if (projectNeedsSorting(project)) kind = 'sort'
@@ -531,9 +524,10 @@ export function buildContributionRun({
     actionableSourceProjects(safeProjects).filter(projectNeedsPreparation),
   )
 
+  const uniqueDecisions = [...new Map(decisions.map(item => [item.id, item])).values()]
   const result = {
     privateAction,
-    decisions,
+    decisions: uniqueDecisions,
     working,
     recent,
     archive,

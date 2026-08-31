@@ -91,6 +91,28 @@ test('working drafts stay visible without becoming changes or attention', () => 
   assert.deepEqual(actionableSourceProjects([notes]), [])
 })
 
+test('projects count active pull requests and issues without treating issues as source coverage', () => {
+  const [mobius] = attachSourceProjects({ platform: platform(), apps: [] }, [
+    {
+      id: 'pr-1', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+      plan: { action: 'pr', repo: 'mobius-os/mobius' },
+    },
+    {
+      id: 'issue-1', type: 'issue', repo: 'mobius-os/mobius', status: 'prepared',
+      plan: { action: 'issue', repo: 'mobius-os/mobius' },
+    },
+  ])
+
+  assert.deepEqual(mobius.contributionCounts, {
+    pullRequests: 1,
+    issues: 1,
+    ready: 0,
+    open: 1,
+  })
+  assert.deepEqual(mobius.contributions.map((record) => record.id), ['pr-1'])
+  assert.deepEqual(mobius.issues.map((record) => record.id), ['issue-1'])
+})
+
 test('a locally built app with only new files is kept as real source work', () => {
   const projects = attachSourceProjects({
     platform: platform(),

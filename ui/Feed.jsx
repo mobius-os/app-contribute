@@ -186,18 +186,18 @@ function ExactBatchAction({
 
   useEffect(() => {
     if (!approval || approval.fingerprint === fingerprint) return
-    setApproval(null)
+    setApproval({ fingerprint, items: captureBatchItems(items) })
     setBusy(false)
-    setNote('The exact set changed. Review it again before continuing.')
-  }, [approval, fingerprint])
+    setNote('The reviewed set changed. The current actions are listed now; confirm this refreshed set when you are ready.')
+  }, [approval, fingerprint, items])
 
   if (count < 1) return null
 
   async function applyAll() {
     if (busy) return
     if (!approval || approval.fingerprint !== fingerprint) {
-      setApproval(null)
-      setNote('The exact set changed. Review it again before continuing.')
+      setApproval({ fingerprint, items: captureBatchItems(items) })
+      setNote('The reviewed set changed. The current actions are listed now; confirm this refreshed set when you are ready.')
       return
     }
     const approvedItems = approval.items
@@ -320,6 +320,12 @@ function PrivateRunAction({ action, cycle, items = [], onStart, onStop, onOpen, 
   const earlier = action && cycle?.scope && currentScope && cycle.scope !== currentScope
   if (!action && !['running', 'starting', 'checking', 'stopping', 'waiting', 'paused', 'failed'].includes(phase)) return null
   const running = ['running', 'starting', 'checking', 'stopping'].includes(phase)
+  const tokenTotal = Number(cycle?.runtime?.usage?.totals?.total_tokens)
+  const tokenLabel = Number.isFinite(tokenTotal) && tokenTotal >= 0
+    ? `${new Intl.NumberFormat(undefined, {
+        notation: 'compact', maximumFractionDigits: 1,
+      }).format(tokenTotal)} tokens used`
+    : ''
   const title = running
     ? 'Preparing private work'
     : phase === 'waiting'
@@ -338,6 +344,7 @@ function PrivateRunAction({ action, cycle, items = [], onStart, onStop, onOpen, 
             ? 'One private run prepares, aligns, and reviews everything that needs judgment.'
             : 'Open the earlier run to continue.'}</p>
         {running && progress.total > 0 ? <small>{progress.completed} of {progress.total} complete</small> : null}
+        {tokenLabel ? <small>{tokenLabel}</small> : null}
         {cycle?.error ? <small className="co-run-error">{cycle.error}</small> : null}
       </div>
       <div className="co-run-private-actions">
@@ -386,14 +393,23 @@ function IncomingAction({ item, onAssign }) {
 
 const STATE_LABELS = {
   publish: 'Ready',
-  mark_ready: 'Draft',
-  ready_attention: 'Review stage',
+  mark_ready: 'Review draft',
+  ready_attention: 'Review',
   route_attention: 'Choose route',
-  public_attention: 'Needs you',
-  private_review: 'Private',
+  public_attention: 'Resolve',
+  private_review: 'Review',
   connect: 'Connect',
   incoming_review: 'Incoming',
-  request: 'Draft',
+  request: 'Review draft',
+}
+
+const DECISION_ACTION_LABELS = {
+  ready_attention: 'Review',
+  route_attention: 'Choose',
+  public_attention: 'Resolve',
+  private_review: 'Review',
+  connect: 'Connect',
+  request: 'Review',
 }
 
 function DecisionRow({
@@ -409,7 +425,6 @@ function DecisionRow({
           <strong>{item.label}</strong>
           <small>{item.detail}</small>
         </span>
-        <em>{STATE_LABELS[item.kind] || 'Needs you'}</em>
       </button>
       {item.kind === 'incoming_review' ? (
         <IncomingAction item={item.item} onAssign={onAssignIncomingReview} />
@@ -419,7 +434,7 @@ function DecisionRow({
           className="co-run-row-action"
           onClick={() => onSelect?.(item)}
         >
-          Open
+          {DECISION_ACTION_LABELS[item.kind] || 'Review'}
         </button>
       )}
     </article>
@@ -736,6 +751,7 @@ export function ContributionRun({
   const [selectedId, setSelectedId] = useState('')
   const [missingTarget, setMissingTarget] = useState(false)
   const [focusReturnProject, setFocusReturnProject] = useState('')
+  const focusNavRef = useRef(null)
   const projectedDecisions = useMemo(() => (run?.decisions || []).map((item) => {
     const problem = publicationRouteProblem(
       item, publicationPreference, githubState,
@@ -755,21 +771,70 @@ export function ContributionRun({
   ], [projectedDecisions, run?.working, run?.recent, run?.archive])
   const selected = allItems.find(item => item.id === selectedId) || null
 
+  function showFocus(itemId, returnProjectKey = '') {
+    setFocusReturnProject(String(returnProjectKey || ''))
+    setMissingTarget(false)
+    setSelectedId(itemId)
+  }
+
+  function returnFromFocus(returnProjectKey = '') {
+    setSelectedId('')
+    setMissingTarget(false)
+    setFocusReturnProject('')
+    if (returnProjectKey) onViewProject?.(returnProjectKey)
+  }
+
+  async function openFocus(itemId, returnProjectKey = '') {
+    if (!itemId) return
+    if (!window.mobius?.nav?.open) {
+      showFocus(itemId, returnProjectKey)
+      return
+    }
+    let handle = null
+    handle = window.mobius.nav.open('contribute-review', {
+      onBack: () => {
+        if (focusNavRef.current !== handle) return
+        focusNavRef.current = null
+        returnFromFocus(returnProjectKey)
+      },
+      onForward: () => {
+        focusNavRef.current = handle
+        showFocus(itemId, returnProjectKey)
+      },
+    })
+    focusNavRef.current = handle
+    const outcome = await handle.outcome
+    if (focusNavRef.current !== handle) {
+      handle.close()
+      return
+    }
+    if (!['owned', 'standalone'].includes(outcome?.status)) {
+      focusNavRef.current = null
+      return
+    }
+    showFocus(itemId, returnProjectKey)
+  }
+
+  useEffect(() => () => {
+    try { focusNavRef.current?.close?.() } catch {}
+    focusNavRef.current = null
+  }, [])
+
   useEffect(() => {
     if (!focusTarget || !focusReady) return
     if (focusTarget.queue) {
-      setSelectedId('')
-      setMissingTarget(false)
-      setFocusReturnProject('')
+      closeFocus()
       onFocusConsumed?.(focusTarget.nonce)
       return
     }
-    setFocusReturnProject(String(focusTarget.returnProjectKey || ''))
     const found = findRunItemByRecord(run, focusTarget.recordId)
     if (found) {
-      setSelectedId(found.item.id)
-      setMissingTarget(false)
+      void openFocus(found.item.id, focusTarget.returnProjectKey)
     } else {
+      const handle = focusNavRef.current
+      focusNavRef.current = null
+      try { handle?.close?.() } catch {}
+      setFocusReturnProject(String(focusTarget.returnProjectKey || ''))
       setSelectedId('')
       setMissingTarget(true)
     }
@@ -777,17 +842,20 @@ export function ContributionRun({
   }, [focusTarget, focusReady, run, onFocusConsumed])
 
   function selectRunItem(item) {
-    setFocusReturnProject('')
+    void openFocus(item.id)
+  }
+
+  function switchFocusedItem(item) {
     setMissingTarget(false)
     setSelectedId(item.id)
   }
 
   function closeFocus() {
     const returnProjectKey = focusReturnProject
-    setSelectedId('')
-    setMissingTarget(false)
-    setFocusReturnProject('')
-    if (returnProjectKey) onViewProject?.(returnProjectKey)
+    const handle = focusNavRef.current
+    focusNavRef.current = null
+    try { handle?.close?.() } catch {}
+    returnFromFocus(returnProjectKey)
   }
 
   const decisions = projectedDecisions
@@ -807,10 +875,6 @@ export function ContributionRun({
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
   const publishTotal = actionCount(publishItems)
   const readyTotal = readyCount(readyItems)
-  const acceptedRecent = recent.filter(item => (
-    runUnitRecords(item).length > 0
-    && runUnitRecords(item).every(record => record?.status === 'merged')
-  )).length
   const ownerDecisions = decisions.filter(item => ![
     'publish', 'mark_ready', 'private_review',
   ].includes(item.kind))
@@ -831,6 +895,10 @@ export function ContributionRun({
     : null
 
   if (selected || missingTarget) {
+    const focusItems = [
+      ...decisions.filter(item => item.kind !== 'private_review'),
+      ...working,
+    ]
     return (
       <section className="co-run co-run-focus">
         <button type="button" className="co-focus-back" onClick={closeFocus}>
@@ -838,6 +906,26 @@ export function ContributionRun({
             ? `Back to ${returnProject?.label || 'project'}`
             : 'Back to the run'}
         </button>
+        <div className="co-run-focus-layout">
+          <nav className="co-run-focus-list" aria-label="Current contribution run">
+            <header>
+              <strong>Current run</strong>
+              <small>{focusItems.length} active {focusItems.length === 1 ? 'item' : 'items'}</small>
+            </header>
+            {focusItems.map(item => (
+              <button
+                type="button"
+                key={item.id}
+                className={item.id === selected?.id ? 'is-active' : ''}
+                aria-current={item.id === selected?.id ? 'true' : undefined}
+                onClick={() => switchFocusedItem(item)}
+              >
+                <strong>{item.label}</strong>
+                <small>{STATE_LABELS[item.kind] || item.detail}</small>
+              </button>
+            ))}
+          </nav>
+          <div className="co-run-focus-detail">
         {missingTarget ? (
           <div className="co-run-empty">
             <Icon name="cycle" size={20} />
@@ -859,6 +947,8 @@ export function ContributionRun({
             loadDiff={loadDiff}
           />
         )}
+          </div>
+        </div>
       </section>
     )
   }
@@ -867,27 +957,9 @@ export function ContributionRun({
     <section className="co-run" aria-labelledby="co-run-title">
       <header className="co-run-head">
         <div>
-          <small>Current contribution run</small>
           <h2 id="co-run-title">{loading ? 'Checking current work…' : headline}</h2>
-          <p>Prepare privately, approve exact public actions, and follow every project from one place.</p>
         </div>
       </header>
-
-      <div className="co-run-summary" aria-label="Current run status">
-        <span><b>{publishTotal + readyTotal}</b> ready</span>
-        <span><b>{working.length}</b> moving</span>
-        <span><b>{acceptedRecent}</b> accepted recently</span>
-      </div>
-
-      <PrivateRunAction
-        action={run?.privateAction}
-        cycle={cycle}
-        items={privateCycleRunning ? [] : privateItems}
-        onStart={() => onStartCycle?.(run?.privateAction)}
-        onStop={onStopCycle}
-        onOpen={onOpenCycle}
-        onSelect={selectRunItem}
-      />
 
       <ExactBatchAction
         key={`send:${run?.revision || ''}:${publicationPreference}:${githubState}`}
@@ -899,6 +971,7 @@ export function ContributionRun({
         onSendStack={onSendStack}
         onSelect={selectRunItem}
       />
+
       <ExactBatchAction
         key={`ready:${run?.revision || ''}:${publicationPreference}:${githubState}`}
         items={readyItems}
@@ -906,6 +979,16 @@ export function ContributionRun({
         publicationPreference={publicationPreference}
         githubState={githubState}
         onMarkReady={onMarkReady}
+        onSelect={selectRunItem}
+      />
+
+      <PrivateRunAction
+        action={run?.privateAction}
+        cycle={cycle}
+        items={privateCycleRunning ? [] : privateItems}
+        onStart={() => onStartCycle?.(run?.privateAction)}
+        onStop={onStopCycle}
+        onOpen={onOpenCycle}
         onSelect={selectRunItem}
       />
 
@@ -933,32 +1016,23 @@ export function ContributionRun({
 
       {working.length > 0 ? (
         <details className="co-run-fold">
-          <summary><span>Moving quietly</span><b>{working.length}</b><Icon name="chevron" size={14} /></summary>
+          <summary><span>Working</span><b>{working.length}</b><Icon name="chevron" size={14} /></summary>
           <div>{working.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
       ) : null}
 
       {recent.length > 0 ? (
         <details className="co-run-fold is-recent">
-          <summary><span>Recent outcomes</span><b>{recent.length}</b><Icon name="chevron" size={14} /></summary>
+          <summary><span>Done recently</span><b>{recent.length}</b><Icon name="chevron" size={14} /></summary>
           <div>{recent.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
       ) : null}
 
       {archive.length > 0 ? (
         <details className="co-run-fold is-archive">
-          <summary><span>Dismissed</span><b>{archive.length}</b><Icon name="chevron" size={14} /></summary>
+          <summary><span>History</span><b>{archive.length}</b><Icon name="chevron" size={14} /></summary>
           <div>{archive.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
-      ) : null}
-
-      {(run?.projects || []).length > 0 && typeof onViewProject === 'function' ? (
-        <footer className="co-run-projects">
-          <span>{run.projects.length} projects represented in this snapshot.</span>
-          <button type="button" onClick={() => onViewProject()}>
-            Browse projects <Icon name="right" size={14} />
-          </button>
-        </footer>
       ) : null}
 
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}

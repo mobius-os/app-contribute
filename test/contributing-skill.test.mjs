@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const skill = readFileSync(new URL('../contributing.md', import.meta.url), 'utf8')
 const prose = skill.replace(/\s+/g, ' ')
+const attached = readFileSync(new URL('../attached-work.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
 
 test('explicit exact chat approval does not need a second Contribute approval', () => {
   assert.match(prose, /An explicit, unambiguous instruction in chat is a valid yes/)
@@ -25,4 +26,14 @@ test('chat classifications are durable outcomes rather than prose-only exclusion
   assert.match(prose, /newest `ts` actually reviewed/)
   assert.match(prose, /A later edit to the same path becomes Unsorted again/)
   assert.match(prose, /do not substitute a prose summary for this write/)
+})
+
+test('attached helpers use one private bounded playbook', () => {
+  assert.match(attached, /Nothing public/)
+  assert.match(attached, /agent_snapshot\.py/)
+  assert.match(attached, /--work-json/)
+  assert.match(attached, /do not enumerate/)
+  assert.match(attached, /manifest's `source_chat_id` owns provenance/)
+  assert.match(attached, /Public actions: none/)
+  assert.doesNotMatch(attached, /Read and follow .*contributing/)
 })

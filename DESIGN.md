@@ -98,8 +98,9 @@ functional: the current public approval or the one private action that unlocks
 the run.
 
 **Key Characteristics:**
-- Centered reading canvas with compact, intentional spacing.
-- One run header, one decision stream, and one full-width focus view.
+- Centered responsive canvas with compact, intentional spacing.
+- One run header and one decision stream; wide screens keep that stream beside
+  the focused review, while phones replace it with the focused view.
 - A quiet progress line may summarize private, reviewed, public, and accepted
   work, but it never becomes navigation.
 - Project icons and concise state labels carry recognition without extra chrome.
@@ -134,10 +135,12 @@ rather than competing at the same size.
 
 ## Layout
 
-The shared canvas is centered at a maximum width of 760px. Run header, primary
+The shared canvas is centered at a maximum width of 1120px. Run header, primary
 action, decisions, work in motion, and recent outcomes form one vertical
-sequence. Selection replaces that sequence with a focused view instead of
-opening a split pane.
+sequence. At wide widths, selection keeps a compact run list on the left and
+opens the review on the right so several decisions can be handled without
+losing place. On phones, selection replaces the sequence and owns a real Back
+entry.
 
 When several reviewed units share the same public outcome, one batch action is
 the default. Its confirmation names every standalone pull request and every

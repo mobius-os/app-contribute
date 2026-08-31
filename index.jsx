@@ -72,6 +72,7 @@ import {
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
+import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
@@ -129,6 +130,21 @@ function stalePublicApproval() {
   }
 }
 
+function ProjectControl({ showingProjects, count, onOpen, onBack }) {
+  return (
+    <button
+      type="button"
+      className={'co-project-control' + (showingProjects ? ' is-back' : '')}
+      onClick={showingProjects ? onBack : onOpen}
+      aria-label={showingProjects ? 'Back to current run' : `Browse ${count} projects`}
+    >
+      <Icon name={showingProjects ? 'left' : 'merge'} size={15} />
+      <span>{showingProjects ? 'Current run' : 'Projects'}</span>
+      {!showingProjects && count > 0 ? <b>{count}</b> : null}
+    </button>
+  )
+}
+
 export default function ContributeApp({ appId, token }) {
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
@@ -157,6 +173,7 @@ export default function ContributeApp({ appId, token }) {
     phase: 'idle', chatId: '', startedAt: '', runtime: null, error: '',
   })
   const pageRef = useRef(null)
+  const projectsNavRef = useRef(null)
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
   const recordsRef = useRef(records)
@@ -171,6 +188,56 @@ export default function ContributeApp({ appId, token }) {
   const ledgerReadyRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
+
+  const viewRun = useCallback(() => {
+    const handle = projectsNavRef.current
+    projectsNavRef.current = null
+    try { handle?.close?.() } catch {}
+    setProjectFocus('')
+    setShowProjects(false)
+  }, [])
+
+  const viewProjects = useCallback(async (projectKey = '') => {
+    setProjectFocus(projectKey)
+    if (projectsNavRef.current) {
+      setShowProjects(true)
+      return
+    }
+    if (!window.mobius?.nav?.open) {
+      setShowProjects(true)
+      return
+    }
+    let handle = null
+    handle = window.mobius.nav.open('contribute-projects', {
+      onBack: () => {
+        if (projectsNavRef.current !== handle) return
+        projectsNavRef.current = null
+        setProjectFocus('')
+        setShowProjects(false)
+      },
+      onForward: () => {
+        projectsNavRef.current = handle
+        setProjectFocus(projectKey)
+        setShowProjects(true)
+      },
+    })
+    projectsNavRef.current = handle
+    const outcome = await handle.outcome
+    if (projectsNavRef.current !== handle) {
+      handle.close()
+      return
+    }
+    if (!['owned', 'standalone'].includes(outcome?.status)) {
+      projectsNavRef.current = null
+      return
+    }
+    setShowProjects(true)
+  }, [])
+
+  useEffect(() => () => {
+    try { projectsNavRef.current?.close?.() } catch {}
+    projectsNavRef.current = null
+  }, [])
 
   const signalReady = useCallback((details = {}) => {
     if (readySignalRef.current) return
@@ -608,12 +675,12 @@ export default function ContributeApp({ appId, token }) {
         nonce: String(event.data.nonce ?? Date.now()),
         refreshMountedLedger: ledgerReadyRef.current,
       })
-      setShowProjects(false)
+      viewRun()
       window.mobius?.signal?.('contribution_review_opened', { id: target.recordId })
     }
     window.addEventListener('message', onReviewIntent)
     return () => window.removeEventListener('message', onReviewIntent)
-  }, [])
+  }, [viewRun])
 
   // A queue intent has no exact record to fresh-read. If it arrived after the
   // app had already mounted, join the same deduplicated foreground refresh as
@@ -749,11 +816,6 @@ export default function ContributeApp({ appId, token }) {
     focusedRecordLookup,
     records,
   )
-
-  const viewProjects = useCallback((projectKey = '') => {
-    setProjectFocus(projectKey)
-    setShowProjects(true)
-  }, [])
 
   const openProjectReview = useCallback((record, projectKey = '') => {
     if (!record?.id) return
@@ -1497,8 +1559,8 @@ export default function ContributeApp({ appId, token }) {
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
-  // One owner-facing Run. Projects remains a secondary source lens, never a
-  // top-level room or a prerequisite for acting.
+  // The current run is the workshop. Projects is a prominent lens in the same
+  // header rather than a second top-level room, and owns a real shell Back entry.
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
@@ -1508,6 +1570,12 @@ export default function ContributeApp({ appId, token }) {
           fromCache={fromCache}
           checking={checking}
         >
+          <ProjectControl
+            showingProjects={showProjects}
+            count={sourceProjects.length}
+            onOpen={() => viewProjects()}
+            onBack={viewRun}
+          />
           <ConnectionCard
             conn={conn}
             token={token}
@@ -1532,10 +1600,6 @@ export default function ContributeApp({ appId, token }) {
             onRetry={() => refreshSources()}
             loadProjectDiff={loadProjectDiff}
             onViewReview={openProjectReview}
-            onBack={() => {
-              setProjectFocus('')
-              setShowProjects(false)
-            }}
           />
         ) : (
           <div className="co-contributions-view">
