@@ -837,6 +837,12 @@ explicitly approves the exact update in chat or presses **Update PR**.
    base-to-new-head diff/hash/stat, source witness, body draft, and timestamps.
    The stored diff is the complete current PR, not only the new delta, because
    the all-clear verdict must describe exactly what maintainers will review.
+   For every `pr_update`, store the exact live values observed during
+   preparation as `plan.pr_metadata.old_title` and
+   `plan.pr_metadata.old_body`, even when the reviewed text is unchanged. Put
+   the desired public text in `plan.title` and `plan.body_draft`. Do not
+   normalize, summarize, or reconstruct the old text: those exact witnesses
+   are the compare-and-swap guard against overwriting a maintainer edit.
 3. Re-run the full private review on the new head and pin
    `quality_review.reviewed_head_sha` to it. The ordinary local review-status
    endpoint understands both `pr` and `pr_update`; a changed checkout, source
@@ -845,10 +851,16 @@ explicitly approves the exact update in chat or presses **Update PR**.
 4. Stop for explicit public approval. **Update PR** in Contribute is one
    approval surface; an explicit, unambiguous chat instruction approving this
    same record and exact new head is equally valid. Do not require both. The
-   guarded update route rechecks the live PR identity before any push and then
-   allows only the exact reviewed fast-forward. Ordinary **Send PR** continues
-   to reject a branch that already has a PR, and raw `git push` is never a
-   substitute.
+   guarded update route rechecks the live PR identity and requires the public
+   title/body to match either the exact recorded old values or the
+   already-reviewed desired values before any push. The second state is only
+   the restart-safe recovery case for an earlier ambiguous submission. The
+   route allows only the exact reviewed fast-forward and applies
+   `plan.title`/`plan.body_draft` once after the branch update. Any other live
+   metadata stops for a fresh private review instead of being overwritten; a
+   resumed ambiguous submission does not edit already-visible reviewed text a
+   second time. Ordinary **Send PR** continues to reject a branch that already
+   has a PR, and raw `git push` is never a substitute.
 5. After a successful update, the same record returns to `open`, retains its
    original submission time, records `last_updated_pr_at`, and advances an
    existing Autopilot grant to the new public head without creating, enabling,

@@ -21,6 +21,19 @@ test('chat approval stays bound to the exact current public action', () => {
   assert.match(prose, /Preparing is still private/)
 })
 
+test('existing PR metadata updates preserve exact reviewed compare-and-swap witnesses', () => {
+  assert.match(prose, /For every `pr_update`/)
+  assert.match(prose, /plan\.pr_metadata\.old_title/)
+  assert.match(prose, /plan\.pr_metadata\.old_body/)
+  assert.match(prose, /even when the reviewed text is unchanged/)
+  assert.match(prose, /plan\.title/)
+  assert.match(prose, /plan\.body_draft/)
+  assert.match(prose, /Do not normalize, summarize, or reconstruct the old text/)
+  assert.match(prose, /match either the exact recorded old values or the already-reviewed desired values before any push/)
+  assert.match(prose, /applies `plan\.title`\/`plan\.body_draft` once after the branch update/)
+  assert.match(prose, /does not edit already-visible reviewed text a second time/)
+})
+
 test('chat classifications are durable outcomes rather than prose-only exclusions', () => {
   assert.match(prose, /settle_chat_changes\.py/)
   assert.match(prose, /newest `ts` actually reviewed/)
