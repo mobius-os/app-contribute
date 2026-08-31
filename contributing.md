@@ -53,7 +53,7 @@ name that missing capability instead of guessing with raw Git commands.
 
 ### Prepare my changes
 
-Treat **prepare my changes**, **prepare all**, and a project-level Contribute
+Treat **prepare my changes**, **prepare to submit**, and a project-level Contribute
 handoff as explicit approval for private preparation only. When the owner does
 not narrow the scope, inventory every current Contribute project source
 position, then prepare every coherent, reusable change that is safe to share.
@@ -68,9 +68,38 @@ upstream.
    incoming-only work into a contribution and never publish runtime data.
 3. Group reusable work by owning repository and dependency. Deduplicate it
    against existing PRs/issues, perform the two review passes, run proportionate
-   checks, and stage exact private review records. Use a stack only when the
-   changes truly depend on one another.
-4. Stop with the prepared records in Contribute. Report what was prepared and
+   checks, and stage exact private review records. When a later chat refines an
+   existing record, preserve its original `chat_id` and CAS-add both the
+   original and current chat to `chat_ids`; one review can then reconcile every
+   source chat without duplicating or moving the contribution. Use a stack only
+   when the changes truly depend on one another. The source chat is the parent
+   and final integrator for chat-scoped work. Ordinary preparation stays in
+   that turn. If, after inspection, genuinely independent project work can
+   proceed in parallel, use the installed Subagents app's durable background
+   Delegation path from the active source run. Give each helper one bounded
+   task, wait for every result, then let the source parent reconcile the final
+   source and write or CAS-update the records and settlements. Never replace
+   this relation with an app-owned chat whose prompt or opaque scope merely
+   mentions the source chat.
+4. For a chat-scoped request, durably settle every recorded source path that
+   was intentionally excluded. Fetch that chat's current `edit-diffs` before
+   classification, retain the newest `ts` actually reviewed, and after the
+   source recheck run the app helper once per disposition/summary group:
+
+   ```bash
+   python3 /data/apps/contribute/settle_chat_changes.py \
+     --chat "$CHAT_ID" --through '<newest-reviewed-ts>' \
+     --disposition local-only --summary 'Kept local by design.' \
+     /data/platform/path/to/file /data/apps/example/path/to/file
+   ```
+
+   Use `personal`, `experimental`, `incoming-only`, or `duplicate` when that is
+   the truthful reason. The helper writes the Contribute-owned temporal
+   disposition through the platform domain route; never hand-edit its storage.
+   A later edit to the same path becomes Unsorted again. Do not settle a path
+   you did not inspect through the supplied timestamp, and do not substitute a
+   prose summary for this write—without it the same card will return.
+5. Stop with the prepared records in Contribute. Report what was prepared and
    what was intentionally left local, private, incomplete, duplicated, or
    blocked. Nothing public happens in this intent.
 
@@ -281,10 +310,14 @@ don't propose.
 ## The approval gate
 
 Private preparation begins only from an explicit partner request, including a
-project-level or **Prepare all** handoff from Contribute. Do not surface an
-unsolicited contribution question at the end of an otherwise complete chat:
-Contribute's Projects view owns discovery of local changes and lets the partner
-start preparation when they want it.
+project-level or **Prepare to submit** handoff from Contribute. The source chat's
+automatic **Changes ready to organize** card is the lightweight preparation
+suggestion after coherent file edits: it only reflects already-recorded work
+and never starts an agent, reviews a diff, or inspects GitHub on its own. The
+agent must not duplicate that visible choice with another question at the end
+of the turn. Pressing **Prepare to submit** on the card or in Changes is an
+explicit private-preparation request; dismissing it only hides that revision
+of the suggestion and keeps the work in Changes and Contribute.
 
 **One decision, no duplicate approval.** A live Contribute/prepare block is one
 owner decision surface for the exact action it represents. Never also call
@@ -299,9 +332,11 @@ identity, and freshness checks and use the documented guarded submission path;
 chat approval changes the approval surface, not the safety preflight. If the
 owner presses the block instead, let that action own its complete batch until
 every item settles; in-flight siblings stay visibly in flight and never turn
-into a second doorway. A review handoff starts or resumes one app-owned scoped
-conversation and remains in Contribute—the agent must not draft the recovery
-prompt into the source chat.
+into a second doorway. A chat-scoped review, repair, or failed-publication
+recovery continues as a hidden turn in its source chat. Contribute may start an
+app-owned scoped conversation only for genuinely global work that has no source
+chat. Background Delegation children return evidence or independent edits to
+their parent; they do not become owner-facing contribution homes.
 
 Hard stop #1 is still the gate. In practice:
 
@@ -640,29 +675,19 @@ branch, so B's check covers A+B; PR C targets B, and so on. Mention the stack
 choice in `prior_work.summary` or the record summary when it helps the partner
 understand the review shape.
 
-### Landing a green app stack
+### Let GitHub accept a public stack
 
-Once every public layer is open and every GitHub check is green, Contribute can
-show **Land** for the complete stack. This is a second public action with its own
-explicit confirmation, which may be the Contribute control or an unambiguous
-chat approval of that exact current stack. Preparing or sending the PRs never
-authorizes landing, and any changed layer invalidates the earlier yes.
+Once the reviewed layers are public, GitHub owns their acceptance through the
+repository's ordinary review, protection, and merge-queue rules. Contribute
+observes those results and keeps the related records together; it does not
+advance a repository ref directly or bypass the repository's merge policy.
 
-Landing is deliberately narrow. The platform re-verifies every reviewed diff,
-local and upstream branch tip, PR base/head pair, and CI result; requires the
-repository's default branch to still equal layer 1's reviewed `base_sha`; proves
-the top commit is a fast-forward containing the exact chain; and then advances
-that one upstream ref with an exact-base lease. All layers are recorded merged
-only after that single push succeeds. If upstream moved, a check is pending or
-failed, a PR was retargeted, or any commit changed, nothing is overwritten and
-the records return to `open` with the blocker.
-
-Atomic landing is for **unprotected app repositories only**. Any classic branch
-protection or active repository rule stops the operation even when the connected
-owner is an administrator; use GitHub's ordinary merge or merge queue instead.
-In particular, `mobius-os/mobius` keeps its protected, strict CI flow. App
-workflows may still run once on the resulting push to `main`; that is post-landing
-validation, not a second pre-merge run of the child PR.
+Sending a stack never authorizes merging it. Any later queue or merge action is
+a separate exact approval against the current public head, performed through a
+repository-owned GitHub operation. For a dependent chain, advance parent-first
+and re-read the remaining layers after each accepted parent because their base
+or topology may have changed. Contribute then reconciles merged, closed, or
+superseded outcomes from GitHub without manufacturing a second public action.
 
 ---
 
@@ -837,65 +862,17 @@ needed. Do not fall back to a duplicate PR or an unguarded branch rewrite.
 
 For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit
 `npm test`, `packager-unit`, `core-apps-unit`, `core-apps-sync` via
-`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e. The same
-suite can run before a PR exists, but preparation itself remains private and
-must NEVER push automatically.
+`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e.
 
-For a standalone prepared `mobius-os/mobius` PR, Contribute shows **Run GitHub
-checks**. Its in-card confirmation—or an explicit, unambiguous chat approval of
-the same current record—is approval for exactly these public actions: create or
-fast-forward the connected owner's personal fork when needed, enable the
-allowlisted Tests workflow there, push the exact reviewed branch, and manually
-dispatch `.github/workflows/test.yml`. It does NOT open a PR, mention a team,
-comment, or email the organization. GitHub's ordinary Actions completion
-notification is directed to the triggerer according to their personal
-notification settings. The run is recorded under the prepared record's
-top-level `pre_pr_checks` field, and Contribute refreshes it while the app is
-open.
-
-The manual trigger must already exist on upstream's default branch. The PR that
-bootstraps `workflow_dispatch` is therefore the one exception that must use the
-ordinary Send path before pre-PR checks become available for later work. For a
-branch already pushed to a personal fork, the command-line equivalent is:
-
-```bash
-gh workflow run test.yml -R <owner>/mobius --ref <reviewed-branch>
-```
-
-That command is a public GitHub action too: never run it, create/update a fork,
-or push the branch without a fresh explicit yes for those exact actions. A
-clear chat yes is sufficient; do not require a Contribute press as well. Use
-the guarded Contribute operation when available because it preserves the
-reviewed SHA, run id, and no-PR boundary as one durable operation, but the
-partner does not need to navigate to the app to make an already-explicit chat
-approval valid.
-
-When pre-PR checks fail, **Fix in chat** returns to the source chat with the run
-URL. Inspect the failed jobs and artifacts read-only, fix the owning live source,
-run the narrowest focused local checks, then re-stage the SAME record on a fresh
-private branch and checkout. Recompute its canonical diff/hash, update its
-reviewed base/head/source witness with CAS, and remove the stale `pre_pr_checks`
-and old pushed-branch evidence from the refreshed record. Do not overwrite the
-old public fork branch or dispatch another run: the owner reviews the new diff
-and gives a fresh exact chat approval or presses **Run GitHub checks** again for
-that new branch. A passing pre-PR run is evidence for the exact stored
-`head_sha`; any re-stage clears it.
+The complete upstream suite begins after the owner explicitly sends the pull
+request. Contribute has one public path for a prepared change: **Send PR**.
+Preparation and local verification stay private; there is no second fork-push
+or workflow-dispatch action to reconcile.
 
 Before staging, run the cheapest focused checks that cover the changed files.
 Classify the evidence honestly: local focused checks are fast implementation
 feedback; a lock-matched hosted run proves the exact reviewed revision in the
 full environment; the merge queue is the unconditional final gate.
-
-Recommend **Run GitHub checks** explicitly before **Send PR** when the change
-touches concurrency or ordering, persistence, auth or security, migrations,
-provider protocols, dependencies/runtime behavior, or a broad cross-cutting
-path. The same recommendation applies when the partner asks for a thorough or
-expanding-scope review and the complete environment could reveal something
-the local container cannot. This is a risk-based owner choice, never an
-automatic push: small documentation, styling, or narrowly covered changes do
-not earn a duplicate expensive run merely because the button exists. When the
-recommendation is earned, include it in the prepared handoff so the owner sees
-the early full-suite option before sending the PR.
 
 Do **not** run Playwright locally by default. The Möbius app container does not
 have Docker, so agents normally diagnose browser failures from the hosted CI
@@ -970,7 +947,8 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
   -H "If-None-Match: *" -d '{
   "id": "<record-id>", "type": "pr", "repo": "<owner>/<repo>",
   "status": "prepared", "title": "<title>", "branch": "fix/<slug>-<short>",
-  "chat_id": "'"$CHAT_ID"'", "created_at": "<ISO>", "updated_at": "<ISO>",
+  "chat_id": "'"$CHAT_ID"'", "chat_ids": ["'"$CHAT_ID"'"],
+  "created_at": "<ISO>", "updated_at": "<ISO>",
   "summary": "<one plain-language sentence about what improves for people>",
   "plan": {"action": "pr", "repo": "<owner>/<repo>", "title": "<title>",
            "body_draft": "<full PR body, word for word>",
@@ -982,6 +960,18 @@ curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.js
            "diff_stat": "<git diff --stat tail>"}
 }'
 ```
+
+`chat_id` is the immutable creation/provenance chat. `chat_ids` is private,
+additive coverage metadata for the source conversations whose edits the same
+record has reconciled. A newly created record may contain only the current
+chat. When reusing a prepared or public record from another chat, CAS-union the
+existing primary/list values with the current `$CHAT_ID`; never overwrite the
+primary id or create a duplicate merely to make the new chat's Changes view
+settle. A background worker child is execution history, not source provenance:
+never add its chat id to `chat_ids`. If that worker performed the actual review,
+its id may be recorded in `quality_review.chat_id` for audit while the parent
+source chat still owns the final record. Neither provenance field is published
+to GitHub.
 
 Store the full diff beside it as raw text (the once-only write named above):
 

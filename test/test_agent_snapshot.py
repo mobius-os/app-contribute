@@ -42,6 +42,9 @@ class AgentSnapshotTests(unittest.TestCase):
       (ledger / "legacy-only.record.json").write_text(json.dumps({
         "id": "legacy-only", "status": "prepared",
       }))
+      (ledger / "unrelated.json").write_text(json.dumps({
+        "id": "different", "status": "prepared",
+      }))
 
       self.assertEqual(
         [record["id"] for record in snapshot.load_active(ledger)],
@@ -93,6 +96,117 @@ class AgentSnapshotTests(unittest.TestCase):
       data, warning = snapshot.fetch_graphql("query ContributionSnapshot{c1:x}")
     self.assertEqual(data["c1"]["pullRequest"]["state"], "OPEN")
     self.assertEqual(warning, "one PR was not found")
+
+  def test_attached_work_returns_only_overlapping_active_records(self):
+    records = [
+      {
+        "id": "same-file", "status": "prepared", "chat_id": "older-chat",
+        "plan": {
+          "source_repo_path": "/data/platform",
+          "repo_path": "/data/contrib/same-file/worktree",
+          "files": ["backend/app/demo.py"],
+        },
+      },
+      {
+        "id": "same-chat", "status": "open", "chat_ids": ["source-chat"],
+        "plan": {
+          "source_repo_path": "/data/apps/example",
+          "files": ["index.jsx"],
+        },
+      },
+      {
+        "id": "unrelated", "status": "prepared",
+        "plan": {
+          "source_repo_path": "/data/platform",
+          "files": ["frontend/src/App.jsx"],
+        },
+      },
+    ]
+    work = {
+      "v": 1,
+      "intent": "prepare",
+      "source_chat_id": "source-chat",
+      "paths": [{
+        "path": "/data/platform/backend/app/demo.py",
+        "reviewed_through": 123,
+      }],
+      "record_ids": [],
+      "project_roots": ["/data/platform"],
+    }
+    self.assertEqual(
+      [record["id"] for record in snapshot.relevant_records(records, work)],
+      ["same-file", "same-chat"],
+    )
+
+  def test_attached_project_work_includes_same_project_without_file_overlap(self):
+    records = [{
+      "id": "project-record", "status": "prepared",
+      "plan": {
+        "source_repo_path": "/data/apps/example",
+        "files": ["other.js"],
+      },
+    }]
+    work = {
+      "v": 1,
+      "intent": "project",
+      "source_chat_id": "source-chat",
+      "paths": [],
+      "record_ids": [],
+      "project_roots": ["/data/apps/example"],
+    }
+    self.assertEqual(snapshot.relevant_records(records, work), records)
+
+  def test_attached_work_view_is_compact_and_checks_local_revision(self):
+    record = {
+      "id": "review", "type": "pr", "status": "prepared",
+      "repo": "mobius-os/mobius", "title": "Review", "summary": "Safer",
+      "chat_id": "source", "chat_ids": ["source"],
+      "plan": {
+        "action": "pr", "source_repo_path": "/data/platform",
+        "repo_path": "/data/contrib/review/worktree",
+        "files": ["backend/app/demo.py"], "branch": "fix/review",
+        "base_sha": "base", "head_sha": "head", "body_draft": "omitted",
+      },
+      "quality_review": {"state": "all_clear", "reviewed_head_sha": "head"},
+    }
+    with patch.object(snapshot, "_git", side_effect=["head", ""]):
+      view = snapshot.work_view(record, 1)
+    self.assertNotIn("body_draft", view["plan"])
+    self.assertEqual(view["local"]["revision_matches"], True)
+    self.assertEqual(view["quality_review"]["state"], "all_clear")
+
+  def test_ledger_checkout_paths_cannot_make_snapshot_read_private_data(self):
+    self.assertEqual(snapshot.safe_repo_path("/data/cli-auth/private"), "")
+    self.assertEqual(snapshot.safe_repo_path("/data/apps/80/contributions"), "")
+    self.assertEqual(
+      snapshot.safe_repo_path("/data/contrib/review/worktree"),
+      "/data/contrib/review/worktree",
+    )
+    self.assertEqual(
+      snapshot.safe_repo_path("/data/apps/contribute"),
+      "/data/apps/contribute",
+    )
+
+  def test_local_item_runs_git_only_for_a_confined_checkout(self):
+    completed = type("Completed", (), {"stdout": "head\n"})()
+    record = {
+      "id": "review", "status": "prepared", "branch": "fix/review",
+      "plan": {
+        "repo_path": "/data/contrib/review/worktree",
+        "head_sha": "head",
+      },
+    }
+    with patch.object(snapshot.subprocess, "run", return_value=completed) as run:
+      item = snapshot.local_item(record, 1)
+    self.assertEqual(item.actual_head, "head")
+    self.assertEqual(item.revision_matches, True)
+    self.assertEqual(run.call_count, 2)
+
+    record["plan"]["repo_path"] = "/data/cli-auth/private"
+    with patch.object(snapshot.subprocess, "run") as run:
+      item = snapshot.local_item(record, 1)
+    self.assertEqual(item.actual_head, "")
+    run.assert_not_called()
 
 
 if __name__ == "__main__":

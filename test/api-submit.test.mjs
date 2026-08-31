@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   connectPublishedApp,
+  markContributionReady,
   submitContribution,
   submitContributionStack,
 } from '../api.js'
@@ -42,6 +43,26 @@ test('a repeated stack send is an already-handled result, not an error', async (
 
   assert.deepEqual(result, { alreadyHandled: true })
 })
+
+for (const [description, response] of [
+  ['an empty', new Response(null, { status: 204 })],
+  ['a malformed', new Response('not json', { status: 200 })],
+]) {
+  test(`a successful Ready mutation with ${description} response is reconciled`, async () => {
+    const result = await withFetch(
+      response,
+      () => markContributionReady({
+        appId: 80,
+        token: 'token',
+        rec: { id: 'public-draft', last_submit_push_sha: 'a'.repeat(40) },
+      }),
+    )
+
+    assert.equal(result.uncertain, true)
+    assert.equal(result.failure.owner, 'automatic')
+    assert.equal(result.failure.code, 'ready_response_missing')
+  })
+}
 
 test('a publication connection posts to the exact reviewed record', async () => {
   const originalFetch = globalThis.fetch

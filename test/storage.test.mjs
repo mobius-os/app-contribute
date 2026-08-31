@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   abandonPrepared,
   buildFeedSnapshot,
+  cacheSourceSnapshot,
   loadFreshContributionRecord,
   loadFreshContributionRecords,
   loadLedger,
@@ -121,7 +122,7 @@ test('ledger uses JSON content batched into the storage listing', async () => {
   assert.deepEqual(result.omitted, [])
 })
 
-test('a canonical ledger record outranks its stale legacy mirror', async () => {
+test('a canonical record wins while a legacy-only prepared record remains visible', async () => {
   globalThis.window = {
     mobius: {
       storage: {
@@ -140,6 +141,11 @@ test('a canonical ledger record outranks its stale legacy mirror', async () => {
             {
               name: 'legacy-only.record.json', type: 'file', content: {
                 id: 'legacy-only', status: 'prepared',
+              },
+            },
+            {
+              name: 'unrelated.json', type: 'file', content: {
+                id: 'different', status: 'prepared',
               },
             },
           ]
@@ -183,31 +189,6 @@ test('ledger isolates entries without batched content without request fan-out', 
   assert.deepEqual(gets, [])
 })
 
-test('ledger keeps a bounded compatibility path for metadata-only runtimes', async () => {
-  const gets = []
-  globalThis.window = {
-    mobius: {
-      storage: {
-        async list() {
-          return [
-            { name: 'a.json', path: 'contributions/a.json', type: 'file', size: 120 },
-            { name: 'b.json', path: 'contributions/b.json', type: 'file', size: 180 },
-          ]
-        },
-        async get(path) {
-          gets.push(path)
-          return { id: path.endsWith('a.json') ? 'a' : 'b' }
-        },
-      },
-    },
-  }
-
-  const result = await loadLedger()
-  assert.deepEqual(result.records.map((record) => record.id), ['a', 'b'])
-  assert.deepEqual(result.omitted, [])
-  assert.deepEqual(gets, ['contributions/a.json', 'contributions/b.json'])
-})
-
 test('an offline empty mirror falls back to the assembled feed cache', async () => {
   globalThis.window = {
     mobius: {
@@ -216,7 +197,7 @@ test('an offline empty mirror falls back to the assembled feed cache', async () 
         async list() { return [] },
         async get(path) {
           assert.equal(path, 'feed-cache.json')
-          return [{ id: 'cached' }]
+          return { schema: 2, records: [{ id: 'cached' }] }
         },
       },
     },
@@ -359,22 +340,39 @@ test('first-load snapshot ignores malformed entries', () => {
   ])
 })
 
-test('project snapshot cache accepts wrapped and legacy snapshots', () => {
+test('project snapshot cache accepts only the current wrapped shape', () => {
   const snapshot = { platform: { dirty: true }, apps: [] }
   assert.equal(normalizeSourceSnapshotCache({ snapshot }), snapshot)
-  assert.equal(normalizeSourceSnapshotCache(snapshot), snapshot)
+  assert.equal(normalizeSourceSnapshotCache(snapshot), null)
   assert.equal(normalizeSourceSnapshotCache([]), null)
   assert.equal(normalizeSourceSnapshotCache(null), null)
+})
+
+test('project snapshot writer emits the current wrapped shape', async (t) => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const writes = []
+  globalThis.window = { mobius: { storage: {
+    set: async (path, value) => { writes.push({ path, value }) },
+  } } }
+  const snapshot = { platform: { dirty: false }, apps: [] }
+
+  assert.equal(await cacheSourceSnapshot(snapshot), true)
+  assert.equal(writes[0].path, 'source-cache.json')
+  assert.deepEqual(writes[0].value.snapshot, snapshot)
+  assert.equal(await cacheSourceSnapshot([]), false)
 })
 
 test('cycle state keeps only a bounded conversation pointer', () => {
   assert.deepEqual(normalizeCycleState({
     chat_id: ' cycle-chat ',
     started_at: '2026-08-24T00:00:00Z',
+    scope: 'contribute-task:current',
     secret: 'drop',
   }), {
     chat_id: 'cycle-chat',
     started_at: '2026-08-24T00:00:00Z',
+    scope: 'contribute-task:current',
   })
   assert.equal(normalizeCycleState({ chat_id: '  ' }), null)
 })

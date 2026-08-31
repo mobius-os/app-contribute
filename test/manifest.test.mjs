@@ -48,6 +48,12 @@ test('install manifest ships the shared batch action used by Projects and PRs', 
   assert.ok(manifest.source_files.includes('ui/BatchAction.jsx'))
 })
 
+test('install manifest ships the run model and omits retired view modules', () => {
+  assert.ok(manifest.source_files.includes('run.js'))
+  assert.ok(!manifest.source_files.includes('ui/ContributionStack.jsx'))
+  assert.ok(!manifest.source_files.includes('ui/SourceOverview.jsx'))
+})
+
 test('install manifest ships the project policy and canonical diff workspace', () => {
   for (const sourceFile of [
     'contribution-policy.js',

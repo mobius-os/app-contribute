@@ -1,22 +1,31 @@
-import assert from 'node:assert/strict'
 import test from 'node:test'
+import assert from 'node:assert/strict'
+
 import {
   actionableSourceProjects,
   attachSourceProjects,
-  prepareProjectsAction,
   projectDetailSummary,
+  projectForks,
+  projectIconUrl,
   projectMatchesFilter,
   projectNeedsPreparation,
   projectNeedsSorting,
   projectOverview,
-  projectForks,
+  projectPreparationState,
   projectReadyToPrepare,
   projectRowFacts,
   projectSourceState,
-  projectPreparationState,
   projectStatus,
+  projectWorkRevision,
   sourcePathRelationship,
 } from '../source-map.js'
+
+test('project icons reuse canonical app and platform artwork', () => {
+  assert.equal(projectIconUrl({ kind: 'platform', key: 'platform' }), '/moebius.png')
+  assert.equal(projectIconUrl({ kind: 'app', key: 'app:77' }), '/api/apps/77/icon?size=64')
+  assert.equal(projectIconUrl({ kind: 'external', key: 'external:owner/repo' }), '')
+  assert.equal(projectIconUrl({ kind: 'app', key: 'app:not-an-id' }), '')
+})
 
 const snapshot = {
   platform: {
@@ -35,17 +44,132 @@ const snapshot = {
   }],
 }
 
+function platform() {
+  return {
+    key: 'platform',
+    kind: 'platform',
+    name: 'Möbius',
+    canonical_repo: 'mobius-os/mobius',
+    available: true,
+    state: 'aligned',
+    branch: 'main',
+    working: { files: 0, paths: [] },
+    tree: { available: true, files: 0, paths: [] },
+    origin: { local_tree: { available: true, files: 0, paths: [] } },
+  }
+}
+
 function installedApp(overrides = {}) {
   return {
-    key: 'app:7', kind: 'app', name: 'Notes',
-    canonical_repo: 'mobius-apps/notes', available: true,
-    state: 'working', branch: 'main',
+    key: 'app:7',
+    kind: 'app',
+    name: 'Notes',
+    canonical_repo: 'mobius-apps/notes',
+    available: true,
+    state: 'working',
+    branch: 'main',
     working: { files: 1, paths: [{ path: 'index.jsx', group: 'untracked' }] },
     tree: { available: true, files: 0, paths: [] },
-    reconciliation: { available: true }, origin: {},
+    reconciliation: { available: true },
+    origin: {},
     ...overrides,
   }
 }
+
+test('working drafts stay visible without becoming changes or attention', () => {
+  const [mobius, notes] = attachSourceProjects(
+    { platform: platform(), apps: [installedApp()] },
+    [],
+  )
+
+  assert.equal(mobius.key, 'platform')
+  assert.equal(notes.key, 'app:7')
+  assert.equal(notes.attention, false)
+  assert.deepEqual(projectStatus(notes), { label: 'Editing', tone: 'quiet' })
+  assert.equal(projectMatchesFilter(notes, 'editing'), true)
+  assert.equal(projectMatchesFilter(notes, 'changed'), false)
+  assert.deepEqual(actionableSourceProjects([notes]), [])
+})
+
+test('projects count active pull requests and issues without treating issues as source coverage', () => {
+  const [mobius] = attachSourceProjects({ platform: platform(), apps: [] }, [
+    {
+      id: 'pr-1', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+      plan: { action: 'pr', repo: 'mobius-os/mobius' },
+    },
+    {
+      id: 'issue-1', type: 'issue', repo: 'mobius-os/mobius', status: 'prepared',
+      plan: { action: 'issue', repo: 'mobius-os/mobius' },
+    },
+  ])
+
+  assert.deepEqual(mobius.contributionCounts, {
+    pullRequests: 1,
+    issues: 1,
+    ready: 0,
+    open: 1,
+  })
+  assert.deepEqual(mobius.contributions.map((record) => record.id), ['pr-1'])
+  assert.deepEqual(mobius.issues.map((record) => record.id), ['issue-1'])
+})
+
+test('a locally built app with only new files is kept as real source work', () => {
+  const projects = attachSourceProjects({
+    platform: platform(),
+    apps: [installedApp({ canonical_repo: null })],
+  }, [])
+  const local = projects.find((project) => project.key === 'app:7')
+
+  assert.ok(local)
+  assert.equal(local.builtHere, true)
+  assert.equal(projectMatchesFilter(local, 'editing'), true)
+  assert.equal(projectMatchesFilter(local, 'changed'), false)
+})
+
+test('committed differences remain visible while another file is being edited', () => {
+  const notes = attachSourceProjects({
+    platform: platform(),
+    apps: [installedApp({
+      tree: {
+        available: true,
+        files: 1,
+        authored_files: 1,
+        paths: [{ path: 'api.js', group: 'authored' }],
+      },
+      reconciliation: {
+        available: true,
+        local_only_count: 1,
+        local_only_paths: ['api.js'],
+      },
+    })],
+  }, []).find((project) => project.key === 'app:7')
+
+  assert.deepEqual(projectStatus(notes), { label: 'Local changes', tone: 'accent' })
+  assert.deepEqual(actionableSourceProjects([notes]), [notes])
+  assert.equal(projectNeedsPreparation(notes), true)
+  assert.equal(projectMatchesFilter(notes, 'editing'), true)
+  assert.equal(projectMatchesFilter(notes, 'changed'), true)
+})
+
+test('shared changes remain decision-bearing in the inbox overview', () => {
+  const incoming = attachSourceProjects({
+    platform: platform(),
+    apps: [installedApp({
+      state: 'incoming',
+      working: { files: 0, paths: [] },
+      reconciliation: {
+        available: true,
+        new_upstream_count: 2,
+        new_upstream_paths: ['api.js', 'index.jsx'],
+      },
+    })],
+  }, []).find((project) => project.key === 'app:7')
+
+  assert.equal(incoming.attention, true)
+  assert.equal(projectMatchesFilter(incoming, 'changed'), true)
+  assert.deepEqual(actionableSourceProjects([incoming]), [incoming])
+  assert.equal(projectNeedsPreparation(incoming), false)
+})
 
 test('joins only active contribution records to their source project', () => {
   const records = [
@@ -118,7 +242,6 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(sourcePathRelationship(project, 'choice.js'), 'conflict')
   assert.equal(sourcePathRelationship(project, 'outside-preview.js'), 'changed')
   assert.equal(projectNeedsSorting(project), true)
-  assert.match(prepareProjectsAction([project]).draft, /Classify working drafts/)
 })
 
 test('semantic conflict counts outrank a stale customized state everywhere', () => {
@@ -200,7 +323,6 @@ test('incoming-only semantic paths are not offered as local contributions', () =
   assert.equal(project.different, false)
   assert.equal(projectStatus(project).label, 'Shared changes')
   assert.equal(projectNeedsPreparation(project), false)
-  assert.equal(prepareProjectsAction([project]), null)
 })
 
 test('installed apps ignore full-repository origin projections', () => {
@@ -288,7 +410,6 @@ test('a moved canonical source is compared before local work is prepared', () =>
   assert.match(projectDetailSummary(project), /Compare both versions/)
   assert.ok(projectRowFacts(project).includes('Compare shared source'))
   assert.equal(projectNeedsSorting(project), true)
-  assert.match(prepareProjectsAction([project]).draft, /Classify working drafts/)
 })
 
 test('installed apps still surface genuine local work plus a release update', () => {
@@ -320,7 +441,6 @@ test('installed apps still surface genuine local work plus a release update', ()
   assert.equal(projectStatus(demo).label, 'Both sides changed')
   assert.equal(projectOverview(demo).label, 'Both versions changed')
   assert.equal(projectNeedsSorting(demo), true)
-  assert.match(prepareProjectsAction([demo]).draft, /Classify working drafts/)
 })
 
 test('active records for an uninstalled repo stay visible', () => {
@@ -419,6 +539,85 @@ test('formats authoritative endpoint tree delta', () => {
   assert.equal(projects[1].different, false)
 })
 
+test('project work identity is stable until the represented source changes', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'first-head',
+      base_sha: 'shared-base',
+      working: { files: 1, paths: [{ path: 'index.jsx', group: 'authored' }] },
+    })],
+  }, [])
+  const same = { ...notes }
+  const changed = { ...notes, head_sha: 'second-head' }
+
+  assert.equal(projectWorkRevision(notes), projectWorkRevision(same))
+  assert.notEqual(projectWorkRevision(notes), projectWorkRevision(changed))
+})
+
+test('preparation certainty separates clear candidates from ambiguous local work', () => {
+  const projects = attachSourceProjects({
+    platform: platform(),
+    apps: [
+      installedApp({
+        name: 'Clear',
+        working: { files: 0, paths: [] },
+        tree: { available: true, files: 1, authored_files: 1, paths: [] },
+        reconciliation: { available: true, local_only_count: 1, local_only_paths: ['index.jsx'] },
+        origin: { sha: 'same' },
+        base_sha: 'same',
+      }),
+      installedApp({
+        key: 'app:8',
+        name: 'Ambiguous',
+        working: { files: 0, paths: [] },
+        tree: { available: true, files: 2, authored_files: 2, paths: [] },
+        reconciliation: { available: true, local_only_count: 2, local_only_paths: ['api.js', 'index.jsx'] },
+        origin: { sha: 'newer' },
+        base_sha: 'recorded',
+      }),
+    ],
+  }, [])
+
+  const clear = projects.find((project) => project.name === 'Clear')
+  const ambiguous = projects.find((project) => project.name === 'Ambiguous')
+  assert.equal(projectPreparationState(clear), 'candidate')
+  assert.equal(projectReadyToPrepare(clear), true)
+  assert.equal(projectNeedsSorting(clear), false)
+  assert.equal(projectPreparationState(ambiguous), 'sorting')
+  assert.equal(projectReadyToPrepare(ambiguous), false)
+  assert.equal(projectNeedsSorting(ambiguous), true)
+})
+
+test('incoming-only projects need alignment, not preparation or sorting', () => {
+  const incoming = attachSourceProjects({
+    platform: platform(),
+    apps: [installedApp({
+      state: 'incoming',
+      working: { files: 0, paths: [] },
+      reconciliation: { available: true, new_upstream_count: 1, new_upstream_paths: ['api.js'] },
+    })],
+  }, []).find((project) => project.key === 'app:7')
+
+  assert.equal(projectPreparationState(incoming), 'none')
+  assert.equal(projectReadyToPrepare(incoming), false)
+  assert.equal(projectNeedsSorting(incoming), false)
+})
+
+test('active reviews move remaining local work into sorting', () => {
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 1, authored_files: 1, paths: [] },
+      reconciliation: { available: true, local_only_count: 1, local_only_paths: ['index.jsx'] },
+      origin: { sha: 'same' },
+      base_sha: 'same',
+    })],
+  }, [{ type: 'pr', status: 'prepared', repo: 'mobius-apps/notes' }])
+
+  assert.equal(notes.contributions.length, 1)
+  assert.equal(projectPreparationState(notes), 'sorting')
+})
+
 test('opening overview includes only useful local or shared-source positions', () => {
   const projects = attachSourceProjects({
     platform: {
@@ -445,33 +644,6 @@ test('opening overview includes only useful local or shared-source positions', (
   assert.deepEqual(projects.map((project) => project.name), ['Möbius', 'Contribute', 'Notes', 'My app'])
 })
 
-test('agent actions prepare local changes and guard public app publishing', () => {
-  const changed = attachSourceProjects({
-    platform: {
-      ...snapshot.platform,
-      state: 'customized', ahead: 1, behind: 0,
-      tree: { available: true, files: 3 },
-      working: { available: true, files: 0 },
-    },
-    apps: [],
-  }, [])[0]
-  const prepare = prepareProjectsAction([changed])
-  assert.equal(prepare.label, 'Prepare changes')
-  assert.match(prepare.draft, /stage it privately in Contribute/)
-
-  const localApp = attachSourceProjects({
-    platform: null,
-    apps: [{
-      key: 'app:new', kind: 'app', name: 'My app', available: true,
-      canonical_repo: null, state: 'local_only', working: { files: 1 },
-    }],
-  }, [])[0]
-  const publish = prepareProjectsAction([localApp])
-  assert.equal(publish.label, 'Prepare changes')
-  assert.match(publish.draft, /Classify working drafts/)
-  assert.match(publish.draft, /Do not publish anything/)
-})
-
 test('active reviews turn a broad source delta into an inventory, not a mega-PR prompt', () => {
   const changed = attachSourceProjects({
     platform: {
@@ -487,10 +659,7 @@ test('active reviews turn a broad source delta into an inventory, not a mega-PR 
 
   assert.equal(projectOverview(changed).label, 'Committed version differs')
   assert.equal(projectOverview(changed).detail, '264 files remain local after shared work')
-  const action = prepareProjectsAction([changed])
   assert.equal(projectNeedsSorting(changed), true)
-  assert.match(action.draft, /Classify working drafts/)
-  assert.match(action.draft, /Do not publish anything/)
   assert.equal(projectReadyToPrepare(changed), false)
 })
 
@@ -514,13 +683,11 @@ test('working-only projects with active reviews describe the edits instead of ze
     id: 'open', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
   }])[0]
 
-  const action = prepareProjectsAction([changed])
   assert.equal(projectNeedsSorting(changed), true)
-  assert.equal(action.label, 'Prepare changes')
   assert.match(projectRowFacts(changed).join(' · '), /Being edited/)
 })
 
-test('prepare all batches only projects with eligible local contribution changes', () => {
+test('preparation candidates exclude incoming-only projects', () => {
   const projects = attachSourceProjects({
     platform: {
       ...snapshot.platform,
@@ -544,12 +711,6 @@ test('prepare all batches only projects with eligible local contribution changes
 
   const candidates = projects.filter(projectNeedsPreparation)
   assert.deepEqual(candidates.map((project) => project.name), ['Möbius', 'Contribute'])
-  const action = prepareProjectsAction(projects)
-  assert.equal(action.label, 'Prepare all')
-  assert.equal(action.event, 'prepare_all_project_changes')
-  assert.match(action.draft, /Möbius, Contribute/)
-  assert.doesNotMatch(action.draft, /Incoming/)
-  assert.match(action.draft, /Do not publish anything/)
 })
 
 test('an exact current contribution covers its prepared local paths', () => {

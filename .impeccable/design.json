@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-23T23:58:00Z",
+  "generatedAt": "2026-08-29T01:45:00Z",
   "title": "Design System: Contribute",
   "extensions": {
     "colorMeta": {
@@ -8,9 +8,9 @@
       "caution": { "role": "tertiary", "displayName": "Quiet Amber", "canonical": "#cf9526", "tonalRamp": ["oklch(22% 0.06 75)", "oklch(32% 0.08 75)", "oklch(42% 0.10 75)", "oklch(52% 0.12 75)", "oklch(62% 0.12 75)", "oklch(72% 0.10 75)", "oklch(84% 0.06 75)", "oklch(95% 0.02 75)"] }
     },
     "typographyMeta": {
-      "headline": { "displayName": "Room Headline", "purpose": "Names the active contribution room once." },
+      "headline": { "displayName": "Run Headline", "purpose": "Names the current contribution run and its clearest next state once." },
       "body": { "displayName": "Quiet Explanation", "purpose": "Explains state and consequence without competing with the task." },
-      "label": { "displayName": "Working Label", "purpose": "Names stages, compact actions, and visible state." },
+      "label": { "displayName": "Working Label", "purpose": "Names compact actions and visible states without inventing workflow stages." },
       "micro-label": { "displayName": "Micro Label", "purpose": "Terse file and project metadata." },
       "mono": { "displayName": "Source Mono", "purpose": "Source paths, commits, file names, and diff statistics only." }
     },
@@ -44,11 +44,11 @@
       "css": ".ds-quiet { min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:6px 2px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:650 11.5px var(--font); cursor:pointer; } .ds-quiet svg { width:15px; fill:none; stroke:currentColor; stroke-width:2; } .ds-quiet:hover { color:var(--text); } .ds-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
-      "name": "Stage Rail",
-      "kind": "nav",
-      "description": "All core workflow stages remain visible without an overflow menu.",
-      "html": "<nav class=\"ds-stage\"><button class=\"is-active\">Needs action <b>6</b></button><button>In review <b>0</b></button><button>All clear <b>0</b></button></nav>",
-      "css": ".ds-stage { display:flex; gap:22px; overflow-x:auto; border-bottom:1px solid var(--border); } .ds-stage button { position:relative; min-height:43px; padding:5px 0 10px; border:0; background:transparent; color:var(--muted); font:650 11.5px var(--font); white-space:nowrap; } .ds-stage button.is-active { color:var(--text); } .ds-stage button.is-active::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--accent); } .ds-stage b { margin-left:5px; padding:2px 5px; border-radius:999px; background:var(--surface2,var(--surface)); font-size:9.5px; } .ds-stage button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "name": "Run Summary",
+      "kind": "custom",
+      "description": "One calm snapshot of what is ready, moving, and recently accepted, with no workflow rooms to navigate.",
+      "html": "<section class=\"ds-run\"><small>Current contribution run</small><h2>3 reviewed changes are ready</h2><div><span><b>3</b> ready</span><span><b>2</b> moving</span><span><b>5</b> accepted recently</span></div></section>",
+      "css": ".ds-run { display:grid; gap:9px; padding:3px 0 18px; border-bottom:1px solid var(--border); } .ds-run > small { color:var(--muted); font:650 10px var(--font); letter-spacing:.04em; text-transform:uppercase; } .ds-run h2 { margin:0; color:var(--text); font:700 22px/1.15 var(--font); letter-spacing:-.025em; } .ds-run div { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font:500 11px var(--font); } .ds-run span { display:inline-flex; align-items:baseline; gap:4px; } .ds-run b { color:var(--text); font-size:12px; }"
     },
     {
       "name": "Project Row",
@@ -61,21 +61,21 @@
       "name": "Decision Card",
       "kind": "card",
       "refersTo": "content-surface",
-      "description": "An airy owner-decision object used only in Requests.",
+      "description": "An airy owner-decision object used only when the current run genuinely needs a choice.",
       "html": "<button class=\"ds-request\"><span class=\"ds-request-icon\">?</span><span><small>Issue · Möbius</small><strong>Review a prepared request</strong><em>Source conversation stays attached.</em></span><b>›</b></button>",
       "css": ".ds-request { width:100%; min-height:88px; display:grid; grid-template-columns:38px minmax(0,1fr) 15px; align-items:center; gap:12px; padding:14px; border:1px solid var(--border); border-radius:15px; background:var(--surface); color:var(--text); text-align:left; transition:border-color .14s ease,transform .12s ease; } .ds-request-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:11px; background:color-mix(in srgb,var(--accent) 12%,transparent); color:var(--accent); } .ds-request span:nth-child(2) { display:flex; flex-direction:column; gap:4px; min-width:0; } .ds-request small,.ds-request em { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font:400 10px var(--font); } .ds-request strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:650 13px var(--font); } .ds-request:hover { border-color:color-mix(in srgb,var(--accent) 34%,var(--border)); transform:translateY(-1px); } .ds-request:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     }
   ],
   "narrative": {
-    "northStar": "Four Quiet Rooms",
-    "overview": "Contribute feels like a calm collaboration workspace, not a Git client or an administrative dashboard. Its four top-level rooms share one restrained visual language while keeping distinct jobs. The interface leads with plain-language state and the next meaningful object; technical detail is immediate after selection but does not compete with the first viewport.",
-    "keyCharacteristics": ["Centered reading canvas with generous negative space.", "Thin stage rails instead of boxed filter bars or overflow menus.", "One coherent surface per task, followed by a full-width focus view.", "Project icons and concise state labels carry recognition without extra chrome.", "Public and destructive actions remain explicit and local to the selected item."],
+    "northStar": "One Quiet Run",
+    "overview": "Contribute feels like a calm collaboration run, not a Git client or an administrative dashboard. One current snapshot gathers related work across projects, keeps private preparation agent-owned, and asks the owner only for exact public decisions. Projects is a secondary lens into that same run; technical detail stays one selection away without competing with the first viewport.",
+    "keyCharacteristics": ["Centered reading canvas with generous negative space.", "One decision stream instead of rooms, queues, or workflow stages.", "Exact grouped approvals name every public effect before it happens.", "Projects refines the same run without creating another owner or hidden scope.", "Public and destructive actions remain explicit, truthful, and bound to the reviewed snapshot."],
     "rules": [
       { "name": "Rare Accent", "body": "Accent identifies current location or the single next decision; it does not decorate every card.", "section": "colors" },
-      { "name": "One Room", "body": "A tab may share tokens and navigation with another tab, but it must not inherit a generic page skeleton when its job is different.", "section": "layout" },
+      { "name": "One Run", "body": "Every changed-work item has one visible owner and one place in the current run; filters and project detail refine that snapshot rather than creating competing queues.", "section": "layout" },
       { "name": "Flat by Default", "body": "Persistent content surfaces use borders and tone, not floating trays or ambient dashboard shadows.", "section": "elevation" }
     ],
-    "dos": ["Do show the current stage and its contents before offering action.", "Do put complete diffs and technical metadata one selection away.", "Do keep project and request language understandable without Git terminology.", "Do preserve practical touch targets and visible focus states."],
-    "donts": ["Don't add More menus for core stages; keep the stage rail horizontally scrollable.", "Don't add floating bulk trays or mix stages in one batch; a grouped action belongs to the exact stage whose rows share that default.", "Don't reuse one generic queue composition across tabs with different user journeys.", "Don't use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction."]
+    "dos": ["Do summarize the current run before offering an exact action.", "Do put complete diffs and technical metadata one selection away.", "Do keep project and request language understandable without Git terminology.", "Do bind every grouped approval to the exact reviewed records and effects.", "Do preserve practical touch targets and visible focus states."],
+    "donts": ["Don't make the owner navigate stages or rooms before acting.", "Don't duplicate one item across a batch, row action, project action, and focused view.", "Don't let filters silently widen an action beyond what is visible.", "Don't turn private helper work into another owner-facing queue.", "Don't use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction."]
   }
 }

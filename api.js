@@ -298,7 +298,13 @@ export function disconnect(token, { signal, timeoutMs = 60000 } = {}) {
 // GitHub, and writes the URL back to the record. The token stays server-side;
 // this app receives only the updated ledger record or an actionable error plus
 // the rolled-back record when available.
-export async function submitContribution({ appId, token, rec, autopilot = true }) {
+export async function submitContribution({
+  appId,
+  token,
+  rec,
+  autopilot = true,
+  publicationStage = 'ready',
+}) {
   try {
     const r = await fetch(
       '/api/github/contributions/' +
@@ -311,7 +317,10 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
         // The one-click grant: a successful submit authorizes the background
         // review-response loop for this PR (see review-followup.md). The owner
         // can flip the global default off in the app's Autopilot setting.
-        body: JSON.stringify({ autopilot: !!autopilot }),
+        body: JSON.stringify({
+          autopilot: !!autopilot,
+          publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
+        }),
       }
     )
     let body = null
@@ -325,6 +334,7 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
         return {
           uncertain: true,
           error: 'We could not confirm the result. Checking the saved contribution now…',
+          failure: { owner: 'automatic' },
         }
       }
       return {
@@ -343,15 +353,18 @@ export async function submitContribution({ appId, token, rec, autopilot = true }
       return {
         error: detail.message || 'Could not submit this PR.',
         record: detail.record || null,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : 'Could not submit this PR.',
+      failure: { status: r.status, code: '' },
     }
   } catch (err) {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -387,21 +400,25 @@ export async function updateContribution({ appId, token, rec }) {
       return {
         unsupported: true,
         error: 'Restart Möbius to load the reviewed PR update action.',
+        failure: { owner: 'owner', status: r.status },
       }
     }
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not update this PR.',
         record: detail.record || null,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : 'Could not update this PR.',
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -446,6 +463,7 @@ export async function submitContributionViaMobius({ appId, token, rec }) {
         error: detail.message || 'Could not submit this draft through Möbius.',
         record: detail.record || null,
         viaMobius: true,
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
@@ -453,12 +471,14 @@ export async function submitContributionViaMobius({ appId, token, rec }) {
         ? detail
         : 'Could not submit this draft through Möbius.',
       viaMobius: true,
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contribution before offering a retry…',
       viaMobius: true,
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -516,77 +536,6 @@ export async function withdrawMobiusContribution({ appId, token, rec }) {
   }
 }
 
-// Explicit pre-PR test action. The backend rechecks the reviewed diff, pushes
-// only that branch to the owner's fork, and dispatches the allowlisted Tests
-// workflow without opening a pull request. Like Send, a lost response is
-// ambiguous because the public push/dispatch may already have completed; the
-// caller must reconcile from the ledger before offering another try.
-export async function runPrePrChecks({ appId, token, rec }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) + '/' +
-        encodeURIComponent(rec.id) +
-        '/pre-pr-checks',
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-      },
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok && body?.record) {
-      return { ok: body.record }
-    }
-    const detail = body?.detail
-    if (detail && typeof detail === 'object') {
-      return {
-        error: detail.message || 'Could not start GitHub checks.',
-        record: detail.record || null,
-      }
-    }
-    return {
-      unsupported: r.status === 404,
-      error: typeof detail === 'string'
-        ? detail
-        : 'Could not start GitHub checks.',
-    }
-  } catch {
-    return {
-      uncertain: true,
-      error: 'The response was lost. Checking the saved run before offering another try…',
-    }
-  }
-}
-
-// Read-only GitHub status refresh plus a local ledger write. The endpoint
-// returns full updated records so the app can repaint without a second storage
-// scan. It is safe to repeat while a run is queued or in progress.
-export async function refreshPrePrChecks(token, appId) {
-  try {
-    const r = await fetchRead(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) +
-        '/pre-pr-checks/refresh',
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-      },
-      20000,
-    )
-    if (!r.ok) {
-      return { ok: false, unsupported: r.status === 404, status: r.status }
-    }
-    const body = await r.json()
-    return {
-      ok: true,
-      records: Array.isArray(body?.refreshed) ? body.refreshed : [],
-    }
-  } catch {
-    return { ok: false, offline: true, status: 0 }
-  }
-}
-
 // Complete the reviewed publication handoff after GitHub merges an app PR.
 // The platform re-verifies the PR and immutable merged source/permissions before it
 // attaches that public identity to the original local app row. The endpoint is
@@ -633,6 +582,7 @@ async function writeContributionStack({
   token,
   recordIds,
   operation,
+  publicationStage = 'ready',
 }) {
   const updating = operation === 'update'
   try {
@@ -642,7 +592,12 @@ async function writeContributionStack({
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record_ids: recordIds }),
+        body: JSON.stringify({
+          record_ids: recordIds,
+          ...(updating ? {} : {
+            publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
+          }),
+        }),
       }
     )
     let body = null
@@ -652,6 +607,7 @@ async function writeContributionStack({
         return {
           uncertain: true,
           error: 'We could not confirm the result. Checking the saved contributions now…',
+          failure: { owner: 'automatic' },
         }
       }
       return {
@@ -679,17 +635,20 @@ async function writeContributionStack({
         submitted: Array.isArray(updating ? detail.updated : detail.submitted)
           ? (updating ? detail.updated : detail.submitted)
           : [],
+        failure: { status: r.status, code: detail.code || '' },
       }
     }
     return {
       error: typeof detail === 'string' ? detail : (updating
         ? 'Could not update this PR stack.'
         : 'Could not submit this PR stack.'),
+      failure: { status: r.status, code: '' },
     }
   } catch {
     return {
       uncertain: true,
       error: 'The response was lost. Checking the saved contributions before offering a retry…',
+      failure: { owner: 'automatic' },
     }
   }
 }
@@ -700,6 +659,59 @@ export function submitContributionStack(args) {
 
 export function updateContributionStack(args) {
   return writeContributionStack({ ...args, operation: 'update' })
+}
+
+// Move one exact personal-GitHub draft into review. The platform journals the
+// approved repo/PR/head before the mutation and turns a repeated call after a
+// lost response into read-only reconciliation, so the client may safely call
+// this once more only when the first response is explicitly uncertain.
+export async function markContributionReady({ appId, token, rec }) {
+  try {
+    const response = await fetch(
+      '/api/github/contributions/' +
+        encodeURIComponent(appId) + '/' +
+        encodeURIComponent(rec.id) + '/ready',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_head_sha: rec.last_submit_push_sha || '',
+        }),
+      },
+    )
+    const body = await response.json().catch(() => null)
+    if (response.ok) {
+      if (body?.record) {
+        return { ok: body.record, url: body.url || body.record.url || '' }
+      }
+      return {
+        uncertain: true,
+        error: 'GitHub may have accepted the review request. Checking the saved action before offering another try…',
+        failure: { owner: 'automatic', status: response.status, code: 'ready_response_missing' },
+      }
+    }
+    const detail = body?.detail
+    if (detail && typeof detail === 'object') {
+      return {
+        uncertain: response.status === 503 && detail.code === 'ready_unconfirmed',
+        error: detail.message || 'Could not request review for this pull request.',
+        record: detail.record || null,
+        failure: { status: response.status, code: detail.code || '' },
+      }
+    }
+    return {
+      error: typeof detail === 'string'
+        ? detail
+        : 'Could not request review for this pull request.',
+      failure: { status: response.status, code: '' },
+    }
+  } catch {
+    return {
+      uncertain: true,
+      error: 'The response was lost. Checking the saved public action before offering another try…',
+      failure: { owner: 'automatic' },
+    }
+  }
 }
 
 // Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
@@ -725,53 +737,5 @@ export async function setAutopilot({ appId, token, recordId, enabled }) {
     return { error: body?.detail || 'Could not update autopilot.' }
   } catch {
     return { error: 'The response was lost. Try again in a moment.' }
-  }
-}
-
-// One explicit landing confirmation advances an unchanged app repository from
-// the stack's reviewed base to its green top commit. The server owns every
-// invariant and returns all durable records so a partial/lost response can be
-// reconciled without guessing or blindly retrying a public action.
-export async function landContributionStack({ appId, token, recordIds }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' + encodeURIComponent(appId) + '/land-stack',
-      {
-        method: 'POST',
-        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record_ids: recordIds }),
-      }
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok) {
-      if (!Array.isArray(body?.records) || body.records.length === 0) {
-        return {
-          uncertain: true,
-          error: 'We could not confirm the landing. Checking the saved contributions now…',
-        }
-      }
-      return {
-        ok: body.records,
-        targetBranch: body.target_branch || '',
-        landedSha: body.landed_sha || '',
-      }
-    }
-    const detail = body?.detail
-    if (detail && typeof detail === 'object') {
-      return {
-        uncertain: detail.code === 'landing_unconfirmed',
-        error: detail.message || 'Could not land this PR stack.',
-        records: Array.isArray(detail.records) ? detail.records : [],
-      }
-    }
-    return {
-      error: typeof detail === 'string' ? detail : 'Could not land this PR stack.',
-    }
-  } catch {
-    return {
-      uncertain: true,
-      error: 'The response was lost. Checking the saved stack before offering a retry…',
-    }
   }
 }

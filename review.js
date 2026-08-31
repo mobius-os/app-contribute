@@ -3,6 +3,65 @@
 // own authoritative validation; this layer makes invalidated work visible
 // before the user attempts to submit it.
 
+import { projectWorkRevision } from './source-map.js'
+
+function stableApprovalValue(value) {
+  if (Array.isArray(value)) return value.map(stableApprovalValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [
+    key, stableApprovalValue(value[key]),
+  ]))
+}
+
+// Public approval belongs to the exact durable action the owner saw, not just
+// to a record id. Keep the projection deliberately narrower than the whole UI
+// record (which may carry transient overlays), but include every fact that can
+// change the target, reviewed code, proposed public text, or action lifecycle.
+// Stable key ordering makes a server round-trip compare by value rather than by
+// object insertion order.
+export function contributionApprovalFingerprint(record) {
+  if (!record || typeof record !== 'object') return ''
+  return JSON.stringify(stableApprovalValue({
+    id: record.id,
+    type: record.type,
+    status: record.status,
+    revision: record.revision,
+    updated_at: record.updated_at,
+    repo: record.repo,
+    title: record.title,
+    summary: record.summary,
+    url: record.url,
+    number: record.number,
+    branch: record.branch,
+    head_repository: record.head_repository,
+    submission_mode: record.submission_mode,
+    relay_contribution_id: record.relay_contribution_id,
+    last_submit_push_sha: record.last_submit_push_sha,
+    last_submit_error: record.last_submit_error,
+    needs_attention: record.needs_attention === true,
+    attention: record.attention || null,
+    readying: record.readying || null,
+    last_ready_error_code: record.last_ready_error_code,
+    plan: record.plan || null,
+    quality_review: record.quality_review || null,
+  }))
+}
+
+export function contributionApprovalIsCurrent(approved, current) {
+  const approvedFingerprint = contributionApprovalFingerprint(approved)
+  return !!approvedFingerprint && approvedFingerprint === contributionApprovalFingerprint(current)
+}
+
+export function contributionScopeHash(input) {
+  let hash = 0xcbf29ce484222325n
+  const value = String(input || '')
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(16).padStart(16, '0')
+}
+
 export function indexReviewStatus(payload) {
   const byId = {}
   const rows = Array.isArray(payload?.records) ? payload.records : []
@@ -50,12 +109,24 @@ export function contributionReviewScope(records, mode = 'review') {
     .sort()
   if (identities.length === 0) return ''
   const input = `${mode}\u0000${identities.join('\u0001')}`
-  let hash = 0xcbf29ce484222325n
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= BigInt(input.charCodeAt(index))
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  return `contribute-review:${contributionScopeHash(input)}`
+}
+
+// Every app-owned private task gets an immutable problem identity. Actions
+// that already carry a narrower record/head scope keep it; project and mixed
+// work use the complete task draft, so a repeated tap reuses the same running
+// conversation while changed source or ledger facts naturally start a fresh
+// one. This is deliberately not a permanent "Contribute agent" scope: the
+// platform's scoped-start primitive is exactly-once for its whole lifetime.
+export function contributionActionScope(action) {
+  if (typeof action?.scope === 'string' && action.scope.trim()) {
+    return action.scope.trim()
   }
-  return `contribute-review:${hash.toString(16).padStart(16, '0')}`
+  const identity = [action?.event, action?.title, action?.revision, action?.draft]
+    .map((value) => String(value || '').trim())
+    .join('\u0000')
+  if (!identity.replaceAll('\u0000', '')) return ''
+  return `contribute-task:${contributionScopeHash(identity)}`
 }
 
 // A quality verdict belongs to one immutable prepared head. Source freshness
@@ -97,7 +168,9 @@ function reviewAction(records, mode = 'review') {
   return {
     event: fixing ? 'fix_and_review_contributions' : 'review_contributions',
     title: fixing ? 'Fix and review contributions' : 'Review contributions',
-    label: fixing ? 'Fix & review again' : `Review ${candidates.length === 1 ? 'now' : 'all'}`,
+    label: fixing
+      ? (candidates.length === 1 ? 'Fix' : 'Fix all')
+      : (candidates.length === 1 ? 'Review' : 'Review all'),
     busyLabel: 'Starting…',
     startedLabel: fixing ? 'Fixing and reviewing' : 'Reviewing contributions',
     startedMessage: 'Stay in Contribute. Review verdicts will update here.',
@@ -122,7 +195,6 @@ function reviewAction(records, mode = 'review') {
 }
 
 export function reviewAllAction(records) { return reviewAction(records, 'review') }
-export function fixAndReviewAction(records) { return reviewAction(records, 'fix') }
 
 // A failed publication is not another GitHub mutation. One app-owned recovery
 // conversation refreshes the recorded branch, reconciles a response that may
@@ -134,7 +206,7 @@ export function recoveryReviewAction(rec) {
   return {
     event: 'recover_contribution_review',
     title: `Fix and review ${rec.title || 'contribution'}`,
-    label: 'Fix and review',
+    label: 'Fix in chat',
     busyLabel: 'Starting…',
     startedLabel: 'Fixing and reviewing',
     reusedLabel: 'Review already running',
@@ -159,10 +231,7 @@ export function recoveryReviewAction(rec) {
 export function contributionsNeedingReviewAction(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || rec.status !== 'prepared') return false
-    return reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      prePrCheckPhase(rec) === 'failed' ||
-      qualityReviewFor(rec).state === 'changes_needed' ||
-      !isAllClear(rec, reviewStatus)
+    return !isAllClear(rec, reviewStatus)
   })
 }
 
@@ -176,28 +245,24 @@ export function progressReviewAction(records, reviewStatus) {
     const state = reviewStateFor(rec, reviewStatus)?.state
     const step = state === 'needs_refresh'
       ? 'refresh the prepared head'
-      : prePrCheckPhase(rec) === 'failed'
-        ? 'fix the failed checks'
-        : quality === 'changes_needed'
-          ? 'fix findings and review again'
-          : 'complete the quality review'
+      : quality === 'changes_needed'
+        ? 'fix findings and review again'
+        : 'complete the quality review'
     return `- ${title} — ${repo} — ${step} (${rec.id})`
   })
   const first = candidates[0]
   const firstQuality = qualityReviewFor(first).state
   const singleLabel = reviewStateFor(first, reviewStatus)?.state === 'needs_refresh'
-    ? 'Refresh'
-    : prePrCheckPhase(first) === 'failed'
-      ? 'Fix checks'
-      : firstQuality === 'changes_needed'
-        ? 'Fix & review again'
-        : firstQuality === 'reviewing' || firstQuality === 'queued'
-          ? 'Open review'
-          : 'Review now'
+    ? 'Fix in chat'
+    : firstQuality === 'changes_needed'
+      ? 'Fix'
+      : firstQuality === 'reviewing' || firstQuality === 'queued'
+        ? 'Open chat'
+        : 'Review'
   return {
     event: 'progress_contribution_reviews',
     title: 'Work through contribution reviews',
-    label: candidates.length === 1 ? singleLabel : `Work through ${candidates.length}`,
+    label: candidates.length === 1 ? singleLabel : 'Review all',
     busyLabel: 'Starting…',
     startedLabel: 'Working through reviews',
     startedMessage: 'Stay in Contribute. Each item will move as its current head is resolved and reviewed.',
@@ -209,74 +274,12 @@ export function progressReviewAction(records, reviewStatus) {
       '',
       ...list,
       '',
-      'Refresh every record first. Resolve stale prepared heads and failed private checks, then thoroughly review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
+      'Refresh every record first. Resolve stale prepared heads, then thoroughly review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
       'For owner-authored work, fix every sound finding privately and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.',
       'CAS-update quality_review throughout the loop. Mark all_clear only when reviewed_head_sha exactly matches the current plan.head_sha.',
       'Do not push, publish, comment, merge, or otherwise change GitHub. Stop with every listed item either all clear on its exact head or carrying one precise blocker.',
     ].join('\n'),
   }
-}
-
-export function summarizeQualityReviews(records, reviewStatus) {
-  const prepared = (Array.isArray(records) ? records : [])
-    .filter((rec) => rec?.type === 'pr' && rec.status === 'prepared')
-  const summary = { total: prepared.length, needed: 0, reviewing: 0, changesNeeded: 0, allClear: 0 }
-  for (const rec of prepared) {
-    const state = qualityReviewFor(rec).state
-    if (state === 'reviewing' || state === 'queued') summary.reviewing += 1
-    else if (state === 'changes_needed') summary.changesNeeded += 1
-    else if (isAllClear(rec, reviewStatus)) summary.allClear += 1
-    else summary.needed += 1
-  }
-  return summary
-}
-
-const PRE_PR_CHECK_ACTIVE = new Set([
-  'dispatching', 'uncertain', 'queued', 'in_progress',
-])
-const PRE_PR_CHECK_SUCCESS = new Set(['success', 'neutral', 'skipped'])
-
-export function canRunPrePrChecks(rec) {
-  const plan = rec?.plan || {}
-  return !!(
-    rec?.status === 'prepared' &&
-    rec?.type === 'pr' &&
-    plan.action === 'pr' &&
-    !plan.stack &&
-    (plan.repo || rec.repo) === 'mobius-os/mobius'
-  )
-}
-
-export function prePrCheckPhase(rec) {
-  const checks = rec?.pre_pr_checks
-  if (!checks || typeof checks !== 'object') return 'idle'
-  if (PRE_PR_CHECK_ACTIVE.has(checks.state)) return 'running'
-  if (checks.state === 'error') return 'failed'
-  if (checks.state !== 'completed') return 'idle'
-  return PRE_PR_CHECK_SUCCESS.has(String(checks.conclusion || '').toLowerCase())
-    ? 'passed'
-    : 'failed'
-}
-
-export function summarizeReviewStatus(records, reviewStatus) {
-  const prepared = (Array.isArray(records) ? records : [])
-    .filter((rec) => rec?.status === 'prepared')
-  let ready = 0
-  let needsRefresh = 0
-  let unchecked = 0
-  for (const rec of prepared) {
-    const state = reviewStateFor(rec, reviewStatus)
-    if (state?.state === 'ready') ready += 1
-    else if (state?.state === 'needs_refresh') needsRefresh += 1
-    else unchecked += 1
-  }
-  return { total: prepared.length, ready, needsRefresh, unchecked }
-}
-
-export function blockedReviewCount(records, reviewStatus) {
-  return (Array.isArray(records) ? records : []).filter((rec) =>
-    rec?.status === 'prepared' &&
-    reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh').length
 }
 
 const ACTIVE_PR_STATUSES = new Set([
@@ -287,7 +290,7 @@ const ACTIVE_PR_STATUSES = new Set([
   'open',
 ])
 
-function hasPublishedAttention(rec) {
+export function hasAttentionSignal(rec) {
   return rec?.needs_attention === true ||
     (typeof rec?.attention?.title === 'string' && !!rec.attention.title.trim()) ||
     (typeof rec?.attention?.message === 'string' && !!rec.attention.message.trim())
@@ -304,10 +307,6 @@ export function attentionReason(rec, reviewStatus) {
   if (review?.state === 'needs_refresh') {
     return review.message || 'This changed after it was reviewed and needs to be refreshed.'
   }
-  if (prePrCheckPhase(rec) === 'failed') {
-    return rec.pre_pr_checks?.message ||
-      'The pre-PR GitHub checks need a fix before this is sent.'
-  }
   if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
     return rec.last_submit_error.trim()
   }
@@ -320,9 +319,8 @@ export function attentionReason(rec, reviewStatus) {
 export function contributionsNeedingAttention(records, reviewStatus) {
   return (Array.isArray(records) ? records : []).filter((rec) => {
     if (rec?.type !== 'pr' || !ACTIVE_PR_STATUSES.has(rec.status)) return false
-    return hasPublishedAttention(rec) ||
-      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh' ||
-      prePrCheckPhase(rec) === 'failed'
+    return hasAttentionSignal(rec) ||
+      reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
   })
 }
 
@@ -342,7 +340,7 @@ export function addressAllAction(records, reviewStatus) {
   return {
     event: 'address_all_contributions',
     title: 'Address contribution follow-up',
-    label: `Address all ${attentionRecords.length}`,
+    label: attentionRecords.length === 1 ? 'Fix' : `Address all ${attentionRecords.length}`,
     busyLabel: 'Starting…',
     startedLabel: 'Agent is handling follow-up',
     startedMessage: 'Stay in Contribute. Refreshed reviews and any decisions will appear here.',
@@ -359,48 +357,101 @@ export function addressAllAction(records, reviewStatus) {
   }
 }
 
-export function finishContributionCycleAction(records, reviewStatus, projectCount = 0) {
-  const active = (Array.isArray(records) ? records : []).filter((rec) =>
-    rec?.type === 'pr' && ACTIVE_PR_STATUSES.has(rec.status))
-  const localProjects = Number.isFinite(Number(projectCount))
-    ? Math.max(0, Math.floor(Number(projectCount)))
-    : 0
-  if (active.length === 0 && localProjects === 0) return null
+export function organizePrivateWorkAction(records, reviewStatus, projects = []) {
+  const safe = Array.isArray(records) ? records : []
+  const projectList = Array.isArray(projects) ? projects : []
+  const candidates = new Map()
+  for (const rec of [
+    ...contributionsNeedingReviewAction(safe, reviewStatus),
+    ...contributionsNeedingAttention(safe, reviewStatus),
+  ]) candidates.set(rec.id, rec)
+  const contributionList = [...candidates.values()]
+  if (contributionList.length === 0 && projectList.length === 0) return null
 
-  const prepared = active.filter((rec) => rec.status === 'prepared').length
-  const publicCount = active.length - prepared
-  const attention = contributionsNeedingAttention(active, reviewStatus).length
-  const facts = [
-    prepared ? `${prepared} privately prepared` : '',
-    publicCount ? `${publicCount} public or publishing` : '',
-    attention ? `${attention} needing attention` : '',
-    localProjects ? `${localProjects} projects needing reconciliation` : '',
-  ].filter(Boolean).join(' · ')
-
+  const contributionRows = contributionList.map((rec) => {
+    const title = rec.plan?.title || rec.title || rec.summary || 'Untitled pull request'
+    const reason = rec?.attention?.message || rec?.last_submit_error || ''
+    return [
+      `- ${title} — ${rec.repo || rec.plan?.repo || 'project'} (${rec.id})`,
+      reason ? `  ${reason}` : '',
+    ].filter(Boolean).join('\n')
+  })
+  const projectRows = projectList.map((project) => (
+    `- ${project.name || project.canonical_repo || project.key || 'Local project'}`
+  ))
+  const count = contributionList.length + projectList.length
+  const includesPublicAttention = contributionList.some((rec) => rec.status !== 'prepared')
+  const includesAttention = contributionsNeedingAttention(
+    contributionList, reviewStatus,
+  ).length > 0
+  const singleReview = contributionList.length === 1
+    ? progressReviewAction(contributionList, reviewStatus)
+    : null
+  const label = projectList.length > 0
+    ? (count === 1 ? 'Organize' : 'Organize all')
+    : contributionList.length === 1
+      ? (includesAttention && singleReview
+          ? 'Fix and review'
+          : singleReview?.label || 'Fix')
+      : includesPublicAttention ? 'Organize all' : 'Review all'
+  const contributionRevision = contributionList.map((rec) => {
+    const review = reviewStateFor(rec, reviewStatus) || {}
+    return [
+      rec.id,
+      rec.status,
+      rec.plan?.head_sha,
+      rec.updated_at,
+      rec.attention?.key,
+      rec.attention?.message,
+      review.state,
+      review.code,
+    ].map((value) => String(value || '')).join('\u0000')
+  })
+  const projectRevision = projectList.map(projectWorkRevision)
   return {
-    event: 'finish_contribution_cycle',
-    title: 'Finish contribution cycle',
-    label: 'Run full cycle',
+    event: 'organize_private_contributions',
+    title: 'Organize private contribution work',
+    label,
     busyLabel: 'Starting…',
-    startedLabel: 'Working through the contribution cycle',
-    startedMessage: 'Stay in Contribute. The agent will bring back ready work and decisions as the cycle moves.',
-    count: active.length + localProjects,
+    startedLabel: 'Private work is running',
+    reusedLabel: 'This private work is already running',
+    startedMessage: 'Keep working here. Reviews and approval buttons update in Contribute.',
+    count,
+    scopeLabel: 'Private contribution work',
+    revision: [...contributionRevision, ...projectRevision].sort().join('\u0001'),
     draft: [
-      'Finish the contribution cycle for these projects.',
+      'Organize the current private contribution work listed below.',
       '',
-      `The current Contribute view indicates: ${facts}.`,
-      'Refresh the complete queue and Projects/source status before acting; these counts are only a handoff.',
+      projectRows.length ? 'Projects with local work:' : '',
+      ...projectRows,
+      contributionRows.length ? 'Contributions needing judgment or repair:' : '',
+      ...contributionRows,
       '',
-      'Privately prepare reusable local changes, then thoroughly review every prepared PR for correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
-      'Fix sound findings in owner-authored work and repeat the review on every changed head until each item is all clear; prepare suggestions rather than changing someone else’s branch.',
-      'CAS-update each record’s quality_review throughout the loop. All clear is valid only when reviewed_head_sha exactly matches plan.head_sha.',
-      'Stop at one Contribute checkpoint that enumerates the exact all-clear set. Do not push, publish, comment, merge, or otherwise change GitHub before that approval.',
-      'Follow approved work through CI, review, merge, closure, or supersession using durable waits whenever the chat promises to resume later.',
-      'Then reconcile each local project with accepted upstream work through its reviewed project update flow.',
-      'Preserve private and local-only work, route overlaps through the project’s existing resolver, and keep any activation or restart separately confirmed.',
-      'Finish by classifying every remaining local difference and reporting prepared, sent, merged, blocked, aligned, and deliberately local outcomes.',
-    ].join('\n'),
+      'Start with Contribute’s current snapshot and deterministic reconciliation helpers. Accept their proven status, landing, duplicate, and lost-response outcomes instead of recreating that work by hand.',
+      'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
+      'Privately prepare every worthwhile change in scope and thoroughly review each exact head. CAS-update quality_review throughout; all_clear is valid only when reviewed_head_sha equals plan.head_sha.',
+      'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',
+      'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',
+    ].filter(Boolean).join('\n'),
   }
+}
+
+const OWNER_FAILURE_CODES = new Set([
+  'github_not_connected', 'missing_github_token', 'forbidden',
+  'insufficient_permission', 'permission_denied',
+])
+
+// A public-action failure should summon private repair only when code or review
+// work can help. Connection/permission choices stay with the owner; ambiguous
+// responses stay on the deterministic ledger-refresh path instead of paying
+// for an agent that can learn nothing new.
+export function contributionFailureOwner(outcome) {
+  const failure = outcome?.failure || {}
+  if (failure.owner === 'owner' || failure.owner === 'automatic') return failure.owner
+  const status = Number(failure.status)
+  const code = String(failure.code || '').toLowerCase()
+  if (status === 401 || status === 403 || OWNER_FAILURE_CODES.has(code)) return 'owner'
+  return 'agent'
 }
 
 export function contributionCyclePhase(runtime) {
@@ -413,13 +464,8 @@ export function contributionCyclePhase(runtime) {
 }
 
 export function isContributionCycleChat(chat) {
-  if (!chat || typeof chat !== 'object') return false
-  if (chat.scope === 'contribute-cycle') return true
-  const legacyLabel = [chat.scope_label, chat.title]
-    .filter((value) => typeof value === 'string')
-    .join(' ')
-    .toLowerCase()
-  return legacyLabel.includes('contribution cycle')
+  const scope = typeof chat?.scope === 'string' ? chat.scope : ''
+  return scope === 'contribute-cycle' || scope.startsWith('contribute-task:')
 }
 
 export function contributionCycleProgress(runtime) {
@@ -445,7 +491,6 @@ export function contributionCycleProgress(runtime) {
 
 export function partitionReviewUnits(units, reviewStatus) {
   const needsAttention = []
-  const checking = []
   const readyToSend = []
   const needsReview = []
   const reviewing = []
@@ -457,12 +502,9 @@ export function partitionReviewUnits(units, reviewStatus) {
     // permanently impossible to review or send.
     const privateRecords = records.filter((rec) => rec.status === 'prepared')
     const reviewRecords = privateRecords.length > 0 ? privateRecords : records
-    if (reviewRecords.some((rec) => prePrCheckPhase(rec) === 'running')) {
-      checking.push(unit)
-    } else if (reviewRecords.some((rec) => hasPublishedAttention(rec)) || reviewRecords.some(
+    if (reviewRecords.some((rec) => hasAttentionSignal(rec)) || reviewRecords.some(
       (rec) => reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh',
-    ) || reviewRecords.some((rec) => prePrCheckPhase(rec) === 'failed') ||
-      reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
+    ) || reviewRecords.some((rec) => qualityReviewFor(rec).state === 'changes_needed')) {
       needsAttention.push(unit)
     } else if (reviewRecords.some((rec) => ['queued', 'reviewing'].includes(qualityReviewFor(rec).state))) {
       reviewing.push(unit)
@@ -472,7 +514,7 @@ export function partitionReviewUnits(units, reviewStatus) {
       readyToSend.push(unit)
     }
   }
-  return { needsAttention, checking, needsReview, reviewing, readyToSend }
+  return { needsAttention, needsReview, reviewing, readyToSend }
 }
 
 const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/

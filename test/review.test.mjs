@@ -1,30 +1,27 @@
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import test from 'node:test'
+
 import {
   addressAllAction,
-  canRunPrePrChecks,
-  contributionReviewScope,
+  contributionActionScope,
+  contributionApprovalFingerprint,
+  contributionApprovalIsCurrent,
+  contributionFailureOwner,
   contributionReviewTargetFromIntent,
-  contributionsNeedingAttention,
-  finishContributionCycleAction,
+  contributionReviewScope,
   focusedContributionNavigationReady,
   focusedContributionReady,
   contributionCyclePhase,
   contributionCycleProgress,
-  isContributionCycleChat,
   isAllClear,
   locateContributionReview,
+  organizePrivateWorkAction,
+  partitionReviewUnits,
   progressReviewAction,
   qualityReviewFor,
   recoveryReviewAction,
   reviewAllAction,
-  prePrCheckPhase,
-  blockedReviewCount,
-  indexReviewStatus,
-  partitionReviewUnits,
-  reviewStateFor,
-  summarizeReviewStatus,
 } from '../review.js'
 import { upsertRecord } from '../domain.js'
 import { contributionRecordPaths } from '../storage.js'
@@ -32,8 +29,53 @@ import { contributionRecordPaths } from '../storage.js'
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
-const overviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
+const batchSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
+const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
+
+test('public approval fingerprints bind reviewed code, target, text, labels, and revision', () => {
+  const approved = {
+    id: 'exact', type: 'pr', status: 'prepared', repo: 'owner/project',
+    title: 'Reviewed title', updated_at: '2026-08-29T00:00:00Z', revision: 7,
+    quality_review: { state: 'all_clear', reviewed_head_sha: 'b'.repeat(40) },
+    plan: {
+      action: 'pr', repo: 'owner/project', branch: 'fix/exact',
+      base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40),
+      diff_sha256: 'c'.repeat(64), title: 'Reviewed title',
+      body_draft: 'Reviewed body', labels: ['bug', 'area: ui'],
+    },
+  }
+  const reordered = {
+    ...approved,
+    plan: Object.fromEntries(Object.entries(approved.plan).reverse()),
+  }
+  assert.equal(
+    contributionApprovalFingerprint(reordered),
+    contributionApprovalFingerprint(approved),
+  )
+  assert.equal(contributionApprovalIsCurrent(approved, reordered), true)
+
+  const changes = [
+    { ...approved, revision: 8 },
+    { ...approved, plan: { ...approved.plan, base_sha: 'd'.repeat(40) } },
+    { ...approved, plan: { ...approved.plan, head_sha: 'd'.repeat(40) } },
+    { ...approved, plan: { ...approved.plan, diff_sha256: 'd'.repeat(64) } },
+    { ...approved, plan: { ...approved.plan, title: 'Changed title' } },
+    { ...approved, plan: { ...approved.plan, body_draft: 'Changed body' } },
+    { ...approved, plan: { ...approved.plan, labels: ['bug'] } },
+  ]
+  for (const current of changes) {
+    assert.equal(contributionApprovalIsCurrent(approved, current), false)
+  }
+})
+
+test('every public batch path rejects a fresh record that differs from the approval', () => {
+  assert.match(feedSource, /contributionApprovalFingerprint\(record\)/)
+  assert.match(appSource, /const refreshed[\s\S]*?contributionApprovalIsCurrent\(rec, refreshed\)/)
+  assert.match(appSource, /const current[\s\S]*?contributionApprovalIsCurrent\(rec, current\)/)
+  assert.match(appSource, /loadFreshContributionRecords\([\s\S]*?contributionApprovalIsCurrent\(approved, currentRecords\[index\]\)/)
+  assert.match(appSource, /code: 'approval_changed'/)
+})
 
 test('shell review intents name one ledger record without encoding presentation state', () => {
   assert.deepEqual(contributionReviewTargetFromIntent('review:record.1-ready'), {
@@ -73,7 +115,7 @@ test('the app resolves trusted focused intents without waiting for the full ledg
   assert.match(appSource, /event\.origin !== window\.location\.origin/)
   assert.match(appSource, /event\.source !== window\.parent/)
   assert.match(appSource, /contributionReviewTargetFromIntent\(event\.data\.intent\)/)
-  assert.match(appSource, /setView\('prs'\)/)
+  assert.match(appSource, /setShowProjects\(false\)/)
   assert.match(appSource, /loadContributionRecord\(recordId\)/)
   assert.match(appSource, /upsertRecord\(recordsRef\.current, record\)/)
   assert.match(appSource, /focusedContributionReady\(next, recordId\)/)
@@ -82,11 +124,10 @@ test('the app resolves trusted focused intents without waiting for the full ledg
   assert.match(appSource, /loading \|\| !focusedReviewReady/)
   assert.match(feedSource, /if \(!focusTarget \|\| !focusReady\) return/)
   assert.match(feedSource, /if \(focusTarget\.queue\)/)
-  assert.match(feedSource, /locateContributionReview\(phaseUnits, focusTarget\.recordId\)/)
-  assert.match(feedSource, /setSelectedKey\(unitKey\(located\.unit\)\)/)
-  assert.match(feedSource, /Review no longer available/)
-  assert.match(feedSource, /<h2 className="co-visually-hidden">Contribution review<\/h2>/)
-  assert.doesNotMatch(feedSource, /<ViewHeading title="Reviews" description="Inspect the complete change before you act\."/)
+  assert.match(feedSource, /findRunItemByRecord\(run, focusTarget\.recordId\)/)
+  assert.match(feedSource, /if \(focusTarget\.queue\) \{[\s\S]*closeFocus\(\)/)
+  assert.match(feedSource, /openFocus\(found\.item\.id, focusTarget\.returnProjectKey\)/)
+  assert.match(feedSource, /This contribution moved/)
 })
 
 test('a focused review waits for its exact refresh instead of trusting a stale ledger', () => {
@@ -144,6 +185,74 @@ test('mount-time live state reconciles with newer focused and action results', (
   assert.match(appSource, /slower startup work cannot overwrite it/)
 })
 
+test('the Run owns one exact grouped action across standalone and stacked work', () => {
+  assert.match(feedSource, /function ExactBatchAction/)
+  assert.match(feedSource, /<ExactActionList[\s\S]*?items=\{activeItems\}/)
+  assert.match(feedSource, /sortStackRecords\(runUnitRecords\(item\)\)/)
+  assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
+  assert.match(feedSource, /Send all \$\{count\}/)
+  assert.match(feedSource, /Personal pull requests open ready for review/)
+  assert.match(feedSource, /Nothing merges\./)
+  assert.doesNotMatch(feedSource, /unit\.type !== 'stack'/)
+  assert.match(runSource, /decisions\.push\(decision\('publish'/)
+})
+
+test('the Run keeps one private owner while focused work remains inspectable', () => {
+  assert.match(cardSource, /\{hasPreparedAction \? \([\s\S]*?<ReviewActions/)
+  assert.doesNotMatch(cardSource, /hasPreparedAction\s*&&\s*!hasSubmitAlert/)
+  assert.match(feedSource, /function BatchOwnedFocus/)
+  assert.match(feedSource, /\['publish', 'mark_ready', 'private_review'\]\.includes\(item\.kind\)/)
+  assert.match(feedSource, /<PrivateRunAction/)
+  assert.match(feedSource, /onStart=\{\(\) => onStartCycle\?\.\(run\?\.privateAction\)\}/)
+  assert.doesNotMatch(feedSource, /<AgentHandoffButton/)
+})
+
+test('batch recovery releases confirmation and returns durable failures to projection', () => {
+  assert.doesNotMatch(feedSource, /fixAndReviewAction\(agentRecords\)/)
+  assert.doesNotMatch(feedSource, /onStartAgent/)
+  assert.match(feedSource, /setBusy\(false\)[\s\S]*?setApproval\(null\)[\s\S]*?setNote\(failures\[0\]/)
+  assert.match(feedSource, /approval\.fingerprint !== fingerprint/)
+  assert.match(feedSource, /The reviewed set changed\. The current actions are listed now/)
+  assert.match(feedSource, /key=\{`send:\$\{run\?\.revision/)
+})
+
+test('the active private Run exposes its paused conversation without starting another', () => {
+  assert.match(feedSource, /cycle\?\.chatId && \['waiting', 'paused', 'failed'\]\.includes\(phase\)/)
+  assert.match(feedSource, /className="co-btn co-btn-sm" onClick=\{onOpen\}>Open<\/button>/)
+})
+
+test('the app has one contribution Run with Projects as a prominent searchable lens', () => {
+  assert.match(appSource, /<ContributionRun/)
+  assert.match(appSource, /showProjects \? \(/)
+  assert.match(appSource, /<ProjectControl/)
+  assert.match(appSource, /Browse \$\{count\} projects/)
+  assert.doesNotMatch(appSource, /className="co-primary-nav"/)
+  assert.doesNotMatch(appSource, />\s*To do\s*</)
+  assert.doesNotMatch(appSource, />\s*Pull requests\s*<\/button>/)
+  assert.doesNotMatch(appSource, />\s*Issues\s*<\/button>/)
+  assert.doesNotMatch(feedSource, /One workshop for every project/)
+  assert.match(feedSource, /<summary><span>Working<\/span><b>\{working\.length\}<\/b>/)
+  assert.match(feedSource, /<h3 id="co-run-decisions">Needs you<\/h3><span>\{ownerDecisions\.length\}<\/span>/)
+  assert.match(feedSource, />Done recently</)
+  assert.doesNotMatch(feedSource, /Browse projects/)
+  assert.doesNotMatch(appSource, /runProjectFilter/)
+  assert.doesNotMatch(feedSource, /projectFilter|Filter by project|All projects/)
+  assert.match(feedSource, /className="co-run-focus-layout"/)
+  assert.match(feedSource, /DECISION_ACTION_LABELS/)
+  assert.match(sourceMapSource, /See what changed in each local project/)
+  assert.match(sourceMapSource, /placeholder="Find a project"/)
+  assert.match(sourceMapSource, /\['attention', 'Needs attention'\]/)
+  assert.equal((sourceMapSource.match(/\['all', 'All projects'\]/g) || []).length, 1)
+  assert.doesNotMatch(sourceMapSource, /\['sorting', 'Needs sorting'\]/)
+})
+
+test('focused attention is separate from the contribution information card', () => {
+  assert.match(feedSource, /<ContributionDecision[\s\S]*<ContributionCard/)
+  assert.match(feedSource, /showDecision=\{false\}/)
+  assert.match(cardSource, /export function ContributionDecision/)
+  assert.match(cardSource, /className="co-decision-surface"/)
+})
+
 test('a complete active stack can open from the fast snapshot', () => {
   const stack = (id, position, total = 3) => ({
     id,
@@ -155,43 +264,6 @@ test('a complete active stack can open from the fast snapshot', () => {
   assert.equal(focusedContributionReady(records.slice(0, 2), 'one'), false)
   assert.equal(focusedContributionReady([{ id: 'single' }], 'single'), true)
   assert.equal(focusedContributionReady(records, 'missing'), false)
-})
-
-test('review queues own compact defaults and one grouped action', () => {
-  assert.match(feedSource, /className=\{'co-review-default/)
-  assert.match(feedSource, /progressReviewAction\(unitRecords\(unit\), reviewStatus\)/)
-  assert.match(feedSource, /<StageDefaultAction/)
-  assert.match(feedSource, /Send all \{prepared\.length\}/)
-  assert.match(feedSource, /unit\.type !== 'stack'/)
-  assert.match(feedSource, /className="co-stage-batch-list"/)
-  assert.match(feedSource, /record\.plan\?\.action === 'pr_update' \? 'Update pull request' : 'Open pull request'/)
-  assert.doesNotMatch(feedSource, /One public approval/)
-  assert.doesNotMatch(feedSource, /One private review/)
-})
-
-test('the active cycle presents opening its conversation as a bordered action', () => {
-  assert.match(overviewSource, /className="co-btn co-btn-sm"[^>]*>Open conversation<\/button>/)
-})
-
-test('the app navigation and supporting screens follow the owner task instead of internal stages', () => {
-  assert.match(appSource, />\s*To do\s*</)
-  assert.match(appSource, />\s*Pull requests\s*</)
-  assert.match(appSource, />\s*Issues\s*</)
-  assert.match(overviewSource, /idle: 'Handle everything'/)
-  assert.match(overviewSource, /title="Needs you"/)
-  assert.doesNotMatch(overviewSource, /Review queue/)
-  assert.match(sourceMapSource, /\['attention', 'Needs attention'\]/)
-  assert.equal((sourceMapSource.match(/\['all', 'All projects'\]/g) || []).length, 1)
-  assert.doesNotMatch(sourceMapSource, /\['sorting', 'Needs sorting'\]/)
-  assert.match(feedSource, /\['history', 'Past'\]/)
-  assert.match(feedSource, /key === 'history' \? ' is-secondary'/)
-})
-
-test('focused attention is separate from the contribution information card', () => {
-  assert.match(feedSource, /<ContributionDecision[\s\S]*<ContributionCard/)
-  assert.match(feedSource, /showDecision=\{false\}/)
-  assert.match(cardSource, /export function ContributionDecision/)
-  assert.match(cardSource, /className="co-decision-surface"/)
 })
 
 test('only mount and foreground freshness enumerate the complete history', () => {
@@ -216,249 +288,21 @@ test('a focused record is inserted or refreshed without losing its storage path'
     id: 'focus', path: 'contributions/focus.json', status: 'prepared',
   }).map((record) => record.id), ['focus', 'other'])
   assert.deepEqual(upsertRecord([{
-    id: 'focus', path: 'contributions/focus.record.json', status: 'prepared',
+    id: 'focus', path: 'contributions/focus.json', status: 'prepared',
   }], {
     id: 'focus', status: 'open',
   }), [{
-    id: 'focus', path: 'contributions/focus.record.json', status: 'open',
+    id: 'focus', path: 'contributions/focus.json', status: 'open',
   }])
 })
 
-test('indexes only recognized review verdicts', () => {
-  const indexed = indexReviewStatus({
-    generated_at: '2026-07-15T02:00:00Z',
-    records: [
-      { id: 'good', state: 'ready', code: 'ready', message: 'Exact.' },
-      { id: 'stale', state: 'needs_refresh', code: 'branch_moved', message: 'Moved.' },
-      { id: 'future', state: 'maybe' },
-      null,
-    ],
-  })
-  assert.deepEqual(Object.keys(indexed.byId), ['good', 'stale'])
-  assert.equal(indexed.checkedAt, '2026-07-15T02:00:00Z')
-})
-
-test('an unchecked retryable failure does not bounce a review into attention', () => {
-  const state = reviewStateFor({
-    id: 'old', status: 'prepared', last_submit_error: 'Branch changed.',
-  }, { state: 'unavailable', byId: {} })
-  assert.equal(state, null)
-})
-
-test('the failure message never overrides the verdict the platform gave', () => {
-  // The platform reports upstream_conflict itself now, recomputed from the
-  // branch. A message left by an earlier attempt describes a branch that may
-  // already have been refreshed, so it must not outrank a fresh verdict.
-  const ready = { state: 'ready', code: 'ready', message: 'Local checkout matches.' }
-  const state = reviewStateFor({
-    id: 'stale',
-    status: 'prepared',
-    last_submit_error: 'This PR no longer merges cleanly with upstream main.',
-  }, { state: 'ready', byId: { stale: ready } })
-  assert.deepEqual(state, ready)
-})
-
-test('a conflict the platform reports is passed through untouched', () => {
-  const blocked = {
-    state: 'needs_refresh',
-    code: 'upstream_conflict',
-    message: 'This no longer merges cleanly with the branch it targets.',
-  }
-  const state = reviewStateFor(
-    { id: 'conflicted', status: 'prepared' },
-    { state: 'ready', byId: { conflicted: blocked } },
-  )
-  assert.deepEqual(state, blocked)
-})
-
-test('a fresh ready verdict wins over retryable persisted submit failures', () => {
-  for (const lastSubmitError of [
-    'Could not inspect fork state. Try Send again.',
-    'Could not submit this PR (500). Try Send again.',
-  ]) {
-    const ready = { state: 'ready', code: 'ready', message: 'Local checkout matches.' }
-    const state = reviewStateFor({
-      id: 'retryable', status: 'prepared', last_submit_error: lastSubmitError,
-    }, { state: 'ready', byId: { retryable: ready } })
-    assert.deepEqual(state, ready)
-  }
-})
-
-test('summarizes ready, blocked, and unchecked reviews', () => {
-  const records = [
-    { id: 'a', status: 'prepared' },
-    { id: 'b', status: 'prepared' },
-    { id: 'c', status: 'prepared' },
-    { id: 'open', status: 'open' },
-  ]
-  const review = indexReviewStatus({ records: [
-    { id: 'a', state: 'ready' },
-    { id: 'b', state: 'needs_refresh', message: 'Moved.' },
-  ] })
-  assert.deepEqual(summarizeReviewStatus(records, review), {
-    total: 3, ready: 1, needsRefresh: 1, unchecked: 1,
-  })
-  assert.equal(blockedReviewCount(records, review), 1)
-})
-
-test('batch and feed share the same needs-attention partition', () => {
-  const clear = (id) => ({
-    id, status: 'prepared', plan: { head_sha: `${id}-head` },
-    quality_review: { state: 'all_clear', reviewed_head_sha: `${id}-head` },
-  })
-  const units = [
-    {
-      type: 'record', id: 'ready',
-      record: clear('ready'),
-      records: [clear('ready')],
-    },
-    {
-      type: 'record', id: 'blocked',
-      record: { id: 'blocked', status: 'prepared' },
-      records: [{ id: 'blocked', status: 'prepared' }],
-    },
-    {
-      type: 'record', id: 'attention',
-      record: { ...clear('attention'), needs_attention: true },
-      records: [{ ...clear('attention'), needs_attention: true }],
-    },
-    {
-      type: 'stack', id: 'stack',
-      records: [
-        { id: 'stack-1', status: 'open' },
-        clear('stack-2'),
-      ],
-    },
-  ]
-  const partition = partitionReviewUnits(units, {
-    byId: {
-      ready: { state: 'ready' },
-      blocked: { state: 'needs_refresh' },
-      attention: { state: 'ready' },
-      'stack-2': { state: 'ready' },
-    },
-  })
-  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['blocked', 'attention'])
-  assert.deepEqual(partition.checking, [])
-  assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['ready', 'stack'])
-})
-
-test('prepared platform checks have explicit active, pass, and failure states', () => {
-  const base = {
-    id: 'platform', type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
-    plan: { action: 'pr', repo: 'mobius-os/mobius' },
-  }
-  assert.equal(canRunPrePrChecks(base), true)
-  assert.equal(canRunPrePrChecks({ ...base, plan: { ...base.plan, stack: {} } }), false)
-  assert.equal(canRunPrePrChecks({ ...base, repo: 'mobius-os/app-demo', plan: {
-    action: 'pr', repo: 'mobius-os/app-demo',
-  } }), false)
-
-  assert.equal(prePrCheckPhase({
-    ...base, pre_pr_checks: { state: 'in_progress' },
-  }), 'running')
-  assert.equal(prePrCheckPhase({
-    ...base, pre_pr_checks: { state: 'completed', conclusion: 'success' },
-  }), 'passed')
-  assert.equal(prePrCheckPhase({
-    ...base, pre_pr_checks: { state: 'completed', conclusion: 'failure' },
-  }), 'failed')
-  assert.equal(prePrCheckPhase({
-    ...base, pre_pr_checks: { state: 'error', message: 'Could not start.' },
-  }), 'failed')
-})
-
-test('running pre-PR checks leave the send batch and failures enter follow-up', () => {
-  const record = (id, pre_pr_checks) => ({
-    id, type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
-    plan: {
-      action: 'pr', repo: 'mobius-os/mobius', title: id,
-      head_sha: `${id}-head`,
-    },
-    quality_review: { state: 'all_clear', reviewed_head_sha: `${id}-head` },
-    pre_pr_checks,
-  })
-  const units = [
-    { type: 'record', id: 'running', record: record('running', { state: 'queued' }), records: [record('running', { state: 'queued' })] },
-    { type: 'record', id: 'failed', record: record('failed', { state: 'completed', conclusion: 'failure' }), records: [record('failed', { state: 'completed', conclusion: 'failure' })] },
-    { type: 'record', id: 'passed', record: record('passed', { state: 'completed', conclusion: 'success' }), records: [record('passed', { state: 'completed', conclusion: 'success' })] },
-  ]
-  const partition = partitionReviewUnits(units, { byId: {
-    running: { state: 'ready' },
-    failed: { state: 'ready' },
-    passed: { state: 'ready' },
-  } })
-  assert.deepEqual(partition.checking.map((unit) => unit.id), ['running'])
-  assert.deepEqual(partition.needsAttention.map((unit) => unit.id), ['failed'])
-  assert.deepEqual(partition.readyToSend.map((unit) => unit.id), ['passed'])
-
-  const action = addressAllAction(units.flatMap((unit) => unit.records), { byId: {} })
-  assert.equal(action.count, 1)
-  assert.match(action.draft, /failed/)
-  assert.match(action.draft, /pre-PR GitHub checks need a fix/i)
-})
-
-test('address all collects active local and published blockers but not history', () => {
-  const records = [
-    {
-      id: 'local', type: 'pr', status: 'prepared', repo: 'mobius-os/app-local',
-      plan: { title: 'Refresh local change' },
-    },
-    {
-      id: 'live', type: 'pr', status: 'open', repo: 'mobius-os/app-live',
-      title: 'Fix live checks', url: 'https://github.com/mobius-os/app-live/pull/8',
-      needs_attention: true,
-      attention: { title: 'Checks failed', message: 'One test is red.' },
-    },
-    {
-      id: 'history', type: 'pr', status: 'merged', title: 'Already merged',
-      needs_attention: true,
-    },
-    {
-      id: 'issue', type: 'issue', status: 'open', title: 'An issue',
-      needs_attention: true,
-    },
-    { id: 'clean', type: 'pr', status: 'open', title: 'Clean PR' },
-  ]
-  const review = {
-    byId: {
-      local: {
-        state: 'needs_refresh',
-        message: 'The source branch moved.',
-      },
-    },
-  }
-
-  assert.deepEqual(
-    contributionsNeedingAttention(records, review).map((rec) => rec.id),
-    ['local', 'live'],
-  )
-  const action = addressAllAction(records, review)
-  assert.equal(action.count, 2)
-  assert.match(action.draft, /Refresh local change — mobius-os\/app-local/)
-  assert.match(action.draft, /The source branch moved\./)
-  assert.match(action.draft, /Checks failed — One test is red\./)
-  assert.match(action.draft, /Do not push, reply, publish, merge/)
-  assert.doesNotMatch(action.draft, /Already merged|An issue|Clean PR/)
-})
-test('the optional fork preflight is named as checks rather than an ambiguous test', () => {
-  assert.match(cardSource, />\{rec\.pre_pr_checks \? 'Check fork again' : 'Check on fork'\}<\/span>/)
-  assert.match(cardSource, /Run the full GitHub checks on your fork/)
-  assert.doesNotMatch(cardSource, /<span>Test<\/span>/)
-  assert.match(cardSource, /<span>Move to history<\/span>/)
-  assert.match(cardSource, /It does not\s+open a pull request/)
-})
-
-test('prepared decisions keep their private escape hatch when attention is present', () => {
-  assert.match(cardSource, /\{hasPreparedAction \? \([\s\S]*?<ReviewActions/)
-  assert.doesNotMatch(cardSource, /hasPreparedAction\s*&&\s*!hasSubmitAlert/)
-  assert.match(cardSource, /<span>Move to history<\/span>/)
-})
-
-test('compact public actions disappear only after the accepted send', () => {
-  assert.match(feedSource, /!privateAction && \(outcome\?\.ok \|\| outcome\?\.pending \|\| outcome\?\.alreadyHandled\)[\s\S]*?setAccepted\(true\)/)
-  assert.match(feedSource, /if \(accepted\) return null/)
-  assert.match(feedSource, /privateAction && outcome\?\.ok[\s\S]*?setStartedChatId/)
+test('prepared card actions use one small, plain-language vocabulary', () => {
+  assert.doesNotMatch(cardSource, /Run the full GitHub checks on your fork/)
+  assert.doesNotMatch(cardSource, /Check on fork/)
+  assert.match(cardSource, /<span>Chat<\/span>/)
+  assert.match(cardSource, /<span>Dismiss<\/span>/)
+  assert.match(cardSource, /can be restored from Dismissed/)
+  assert.doesNotMatch(cardSource, /Move to History/)
 })
 
 test('all clear belongs to the exact prepared head', () => {
@@ -488,7 +332,6 @@ test('prepared work stays out of send until a thorough review is all clear', () 
   assert.deepEqual(parts.readyToSend.map((unit) => unit.id), ['clear'])
   assert.match(reviewAllAction([needed]).draft, /correctness, maintainability, simplicity/)
   assert.match(reviewAllAction([needed]).draft, /Do not push, publish, comment, merge/)
-  assert.equal(reviewAllAction([needed]).scope, contributionReviewScope([needed]))
 })
 
 test('one exact prepared head has one stable review conversation scope', () => {
@@ -505,20 +348,31 @@ test('one exact prepared head has one stable review conversation scope', () => {
   assert.notEqual(contributionReviewScope([first, second], 'fix'), scope)
 })
 
-test('the card review action exposes launch progress and the started conversation', () => {
+test('legacy cards can report launch progress but the Run does not start a second review', () => {
   assert.match(cardSource, /<AgentHandoffButton/)
   assert.match(cardSource, /action=\{reviewAction \|\| reviewAllAction\(\[rec\]\)\}/)
   assert.match(cardSource, /onStart=\{onReview\}/)
   assert.doesNotMatch(cardSource, /onClick=\{\(\) => onReview\(rec\)\}/)
-  assert.match(feedSource, /onReview=\{onStartAgent\}/)
-  assert.match(feedSource, /reviewAction=\{progressReviewAction\(\[rec\], reviewStatus\)\}/)
+  assert.doesNotMatch(feedSource, /onReview=\{onStartAgent\}/)
+  assert.match(feedSource, /Owned by the private Run/)
+  assert.match(feedSource, /showDecision=\{false\}/)
 })
 
 test('a scoped review delegates exactly-once admission to chat.start', () => {
   assert.doesNotMatch(appSource, /chat\.list\(\{ scope: action\.scope \}\)/)
-  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: action\.scope/)
+  assert.match(appSource, /window\.mobius\.chat\.start\(\{[\s\S]*scope: contributionActionScope\(action\)/)
   assert.match(appSource, /reused: started\.reused === true/)
   assert.match(appSource, /outcome: started\.outcome/)
+})
+
+test('all private handoffs use changed-work scopes instead of permanent one-shot chats', () => {
+  const action = { event: 'prepare', title: 'Prepare work', draft: 'Current source A' }
+  const scope = contributionActionScope(action)
+  assert.match(scope, /^contribute-task:[0-9a-f]{16}$/)
+  assert.equal(contributionActionScope({ ...action }), scope)
+  assert.notEqual(contributionActionScope({ ...action, draft: 'Current source B' }), scope)
+  assert.equal(contributionActionScope({ ...action, scope: 'exact-head' }), 'exact-head')
+  assert.doesNotMatch(appSource, /scope: 'contribute-cycle'/)
 })
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
@@ -526,9 +380,29 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
-  assert.match(cardSource, /isUpdate \? 'Update PR' : 'Open PR'/)
-  assert.match(cardSource, /Pull request updated on GitHub/)
+  assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
   assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
+})
+
+test('existing pull-request stacks use the Run\'s one exact update route', () => {
+  assert.match(appSource, /const updating = currentRecords\.every/)
+  assert.match(appSource, /rec\?\.plan\?\.action === 'pr_update'/)
+  assert.match(appSource, /updating\s*\? updateContributionStack\s*: submitContributionStack/)
+})
+
+test('sending a pull request stays concise instead of repeating publication narration', () => {
+  assert.match(cardSource, /sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)/)
+  assert.doesNotMatch(cardSource, /Opening pull request/)
+  assert.doesNotMatch(cardSource, /Pull request opened on GitHub for review/)
+  assert.doesNotMatch(cardSource, /sendElapsed/)
+  assert.match(cardSource, /setAccepted\(true\)[\s\S]*await onSend\(rec\)/)
+  assert.match(cardSource, /if \(accepted\) return null/)
+  assert.match(cardSource, /await onReview\?\.\(recoveryReviewAction\(rec\)\)/)
+  assert.match(feedSource, /await onSend\?\.\(runPrimaryRecord\(item\)\)/)
+  assert.match(feedSource, /outcome\?\.pending/)
+  assert.match(batchSource, /collapseOnStart = true/)
+  assert.match(batchSource, /if \(collapseOnStart\) return null/)
+  assert.doesNotMatch(feedSource, /fixAndReviewAction/)
 })
 
 test('submit failures lead back to private agent recovery without overstating a stale push', () => {
@@ -572,13 +446,31 @@ test('one queue handoff owns every visible private review job', () => {
   } }
   const action = progressReviewAction(records, source)
   assert.equal(action.count, 3)
-  assert.equal(action.scope, contributionReviewScope(records.slice(0, 3), 'progress'))
-  assert.equal(action.label, 'Work through 3')
+  assert.equal(action.label, 'Review all')
   assert.match(action.draft, /Fresh review/)
   assert.match(action.draft, /Needs a fix/)
   assert.match(action.draft, /Stale head/)
   assert.doesNotMatch(action.draft, /Already clear/)
   assert.match(action.draft, /Do not push, publish, comment, merge/)
+})
+
+test('one private Run owns mixed private review and public attention', () => {
+  const records = [
+    { id: 'review', type: 'pr', status: 'prepared', title: 'Review me' },
+    { id: 'attention', type: 'pr', status: 'open', title: 'Fix checks', needs_attention: true },
+  ]
+  const action = organizePrivateWorkAction(records, { byId: {} }, [])
+  assert.equal(action.label, 'Organize all')
+  assert.equal(action.count, 2)
+  assert.match(action.draft, /Do not push, publish, update a pull request, comment, merge/)
+  assert.match(runSource, /organizePrivateWorkAction\(\s*privateRecords/)
+  assert.doesNotMatch(feedSource, /privateAction\.count === 1 \? 'Review'/)
+  assert.doesNotMatch(feedSource, /<AgentHandoffButton/)
+  assert.equal(organizePrivateWorkAction([records[0]], { byId: {} }, []).label, 'Review')
+  assert.equal(organizePrivateWorkAction([records[1]], { byId: {} }, []).label, 'Fix')
+  assert.equal(organizePrivateWorkAction([{
+    ...records[0], needs_attention: true,
+  }], { byId: {} }, []).label, 'Fix and review')
 })
 
 test('a focused active review reuses the queue scope instead of starting a second review', () => {
@@ -589,7 +481,7 @@ test('a focused active review reuses the queue scope instead of starting a secon
   }
   const action = progressReviewAction([record], { byId: { active: { state: 'ready' } } })
 
-  assert.equal(action.label, 'Open review')
+  assert.equal(action.label, 'Open chat')
   assert.equal(action.scope, contributionReviewScope([record], 'progress'))
   assert.match(cardSource, /reviewInProgress[\s\S]*'Review in progress'/)
 })
@@ -629,29 +521,57 @@ test('address all handoff stays private and names every active blocker', () => {
   assert.match(action.draft, /Do not push, reply, publish, merge/)
 })
 
-test('finish cycle handoff spans review, durable waiting, and local alignment', () => {
-  const action = finishContributionCycleAction([
+test('private work excludes healthy public PRs and delegates only judgment', () => {
+  const action = organizePrivateWorkAction([
     { id: 'one', type: 'pr', status: 'prepared' },
     { id: 'two', type: 'pr', status: 'open', needs_attention: true },
+    { id: 'healthy', type: 'pr', status: 'open' },
     { id: 'old', type: 'pr', status: 'merged' },
-  ], { byId: {} }, 3)
+  ], { byId: {} }, [{ name: 'Notes' }, { name: 'Voice' }])
 
-  assert.equal(action.label, 'Run full cycle')
-  assert.equal(action.count, 5)
-  assert.match(action.draft, /^Finish the contribution cycle for these projects\./)
-  assert.match(action.draft, /1 privately prepared/)
-  assert.match(action.draft, /1 public or publishing/)
-  assert.match(action.draft, /3 projects needing reconciliation/)
-  assert.match(action.draft, /durable waits/)
-  assert.match(action.draft, /reconcile each local project/)
-  assert.match(action.draft, /activation or restart separately confirmed/)
-  assert.match(action.startedMessage, /Stay in Contribute/)
+  assert.equal(action.label, 'Organize all')
+  assert.equal(action.count, 4)
+  assert.match(action.draft, /^Organize the current private contribution work/)
+  assert.match(action.draft, /Notes/)
+  assert.match(action.draft, /Voice/)
+  assert.match(action.draft, /deterministic reconciliation helpers/)
+  assert.match(action.draft, /Use agent judgment only where it is actually required/)
+  assert.doesNotMatch(action.draft, /healthy/)
+  assert.doesNotMatch(action.draft, /durable waits/)
+  assert.match(action.startedMessage, /approval buttons update/)
 })
 
-test('finish cycle handoff is absent when there is no active work', () => {
-  assert.equal(finishContributionCycleAction([
+test('private work starts a fresh scoped task only when represented work changes', () => {
+  const first = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'first' } },
+  ], { byId: {} }, [])
+  const same = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'first' } },
+  ], { byId: {} }, [])
+  const changed = organizePrivateWorkAction([
+    { id: 'one', type: 'pr', status: 'prepared', plan: { head_sha: 'second' } },
+  ], { byId: {} }, [])
+
+  assert.equal(contributionActionScope(first), contributionActionScope(same))
+  assert.notEqual(contributionActionScope(first), contributionActionScope(changed))
+})
+
+test('healthy public work stays automatic instead of creating an agent task', () => {
+  assert.equal(organizePrivateWorkAction([
+    { id: 'open', type: 'pr', status: 'open' },
     { id: 'old', type: 'pr', status: 'merged' },
-  ], { byId: {} }, 0), null)
+  ], { byId: {} }, []), null)
+})
+
+test('public action failures have one truthful owner', () => {
+  assert.equal(contributionFailureOwner({ failure: { owner: 'automatic' } }), 'automatic')
+  assert.equal(contributionFailureOwner({ failure: { status: 403 } }), 'owner')
+  assert.equal(contributionFailureOwner({ failure: { code: 'github_not_connected' } }), 'owner')
+  assert.equal(contributionFailureOwner({ failure: { code: 'review_refresh_needed' } }), 'agent')
+  assert.match(cardSource, /contributionFailureOwner\(outcome\) === 'agent'/)
+  assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
+  assert.doesNotMatch(feedSource, /await onStartAgent/)
+  assert.match(appSource, /Related PR stacks use Personal GitHub; the Möbius relay supports standalone drafts only\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
 })
 
 test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {
@@ -659,13 +579,6 @@ test('cycle lifecycle distinguishes running, waiting, paused, and settled work',
   assert.equal(contributionCyclePhase({ running: false, pending_question_id: 'q1' }), 'waiting')
   assert.equal(contributionCyclePhase({ running: false, goal: { status: 'paused' } }), 'paused')
   assert.equal(contributionCyclePhase({ running: false, goal: { status: 'completed' } }), 'complete')
-})
-
-test('cycle recovery survives an auto-renamed legacy conversation', () => {
-  assert.equal(isContributionCycleChat({ scope: 'contribute-cycle', title: 'Anything' }), true)
-  assert.equal(isContributionCycleChat({ title: 'Finishing the contribution cycle' }), true)
-  assert.equal(isContributionCycleChat({ scope_label: 'Contribution cycle' }), true)
-  assert.equal(isContributionCycleChat({ title: 'Review Contribute changes' }), false)
 })
 
 test('cycle progress uses the durable plan and current task', () => {

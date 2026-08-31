@@ -1,59 +1,49 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
-const stackSource = readFileSync(new URL('../ui/ContributionStack.jsx', import.meta.url), 'utf8')
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../api.js', import.meta.url), 'utf8')
 const connectionSource = readFileSync(new URL('../ui/ConnectionCard.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
-const sourceOverviewSource = readFileSync(new URL('../ui/SourceOverview.jsx', import.meta.url), 'utf8')
 const batchActionSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
+const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
-  assert.match(
-    stackSource,
-    /<span>\{isLandingAction \? 'Land stack' : sendLabel\}<\/span>/,
-  )
-  assert.match(
-    stackSource,
-    /<span>\{canRecoverLanding \? 'Check' : isLandingAction \? 'Land' : sendLabel\}<\/span>/,
-  )
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(feedSource, /count === 1 \? 'Send' : `Send all \$\{count\}`/)
 })
 
 test('focused review actions keep one strong primary and compact phone-safe secondary controls', () => {
   assert.match(cardSource, /className="co-icon-btn co-review-btn is-primary"/)
   assert.match(themeSource, /\.co-icon-btn\.co-review-btn\.is-primary \{[\s\S]*?background: var\(--accent\); color: var\(--accent-fg\)/)
-  assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: 44px;[\s\S]*?background: transparent/)
+  assert.match(themeSource, /\.co-focus-view \.co-review-actions \{[\s\S]*?grid-template-columns: minmax\(112px, 1fr\) auto auto/)
+  assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: auto;[\s\S]*?padding-inline: 11px/)
   assert.match(themeSource, /\.co-technical-summary \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
   assert.match(themeSource, /\.co-review-changes-head span \{[\s\S]*?white-space: nowrap;[\s\S]*?border-radius: 999px/)
   assert.match(themeSource, /\.co-pr-metadata \{[^}]*align-self: stretch;[^}]*width: 100%/)
 })
 
-test('prepared platform checks stay a separate confirmed no-PR action', () => {
-  assert.match(cardSource, /Run GitHub checks/)
-  assert.match(cardSource, /Run on my fork/)
-  assert.match(cardSource, /does not[\s\S]*open a pull request or email the organization/)
-  assert.match(apiSource, /\/pre-pr-checks/)
-  assert.match(apiSource, /\/pre-pr-checks\/refresh/)
-  assert.match(appSource, /pre_pr_checks_started/)
+test('prepared work has no parallel fork-check workflow', () => {
+  for (const source of [cardSource, apiSource, appSource]) {
+    assert.doesNotMatch(source, /pre[_-]pr[_-]checks|pre-pr-checks|Run GitHub checks/)
+  }
 })
 
-test('single and stacked sends expose elapsed progress to assistive technology', () => {
-  for (const source of [cardSource, stackSource]) {
-    assert.match(source, /role="status" aria-live="polite"/)
-    assert.match(source, /sendElapsed/)
-  }
+test('single and grouped sends leave the active action from durable results', () => {
+  assert.match(cardSource, /setAccepted\(true\)/)
+  assert.match(cardSource, /if \(accepted\) return null/)
+  assert.doesNotMatch(cardSource, /sendElapsed/)
+  assert.match(feedSource, /outcome = await onSendStack\?\.\(runUnitRecords\(item\)\)/)
+  assert.match(appSource, /if \(updates\.length > 0\) \{\s*applyRecordUpdates\(updates\)/)
 })
 
 test('sending uses the shell-style label sweep instead of a rotating action spinner', () => {
   assert.doesNotMatch(cardSource, /co-action-spinner/)
   assert.match(cardSource, /co-action-label-sweep/)
-  assert.match(stackSource, /co-action-label-sweep/)
   assert.match(themeSource, /@keyframes co-action-sweep/)
   assert.match(themeSource, /prefers-reduced-motion: no-preference/)
 })
@@ -81,9 +71,9 @@ test('review details show reviewed labels and truthful published outcomes', () =
   assert.match(cardSource, /<PlanLabels rec=\{rec\}/)
 })
 
-test('agent handoffs start one durable project chat and open only its accepted conversation', () => {
+test('global app handoffs stay durable while source-linked work returns to its chat', () => {
   assert.match(appSource, /window\.mobius\?\.chat\?\.start/)
-  assert.match(appSource, /scope: action\.scope/)
+  assert.match(appSource, /scope: contributionActionScope\(action\)/)
   assert.match(batchActionSource, /function openAgentConversation\(chatId\)/)
   assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId,[\s\S]*}, '\*'\)/)
   assert.match(batchActionSource, /openAgentConversation\(started\?\.chatId\)/)
@@ -91,28 +81,41 @@ test('agent handoffs start one durable project chat and open only its accepted c
   assert.doesNotMatch(batchActionSource, /postMessage\([\s\S]*window\.location\.origin/)
   assert.doesNotMatch(appSource, /type: 'moebius:new-chat'/)
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
-  assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(sourceMapSource, /label: 'Sort & prepare'/)
-  assert.match(sourceOverviewSource, /Opening it while you stay in Contribute\./)
+  assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
+  assert.match(sourceMapSource, /onViewReview\(rec, projectKey\)/)
+  assert.match(feedSource, /function SourceChatChoices/)
+  assert.match(feedSource, /Private work can be handled together/)
+  assert.match(appSource, /const onFeedback = useCallback/)
+  assert.match(appSource, /type: 'moebius:open-chat', chatId: rec\.chat_id, draft \},[\s\S]{0,20}'\*'\)/)
+  assert.doesNotMatch(appSource, /moebius:open-chat[\s\S]{0,200}window\.location\.origin/)
   assert.doesNotMatch(connectionSource, /onAskAgent/)
-  assert.match(appSource, /No pull requests to review/)
-  assert.match(appSource, /No issues or comments yet/)
 })
 
-test('pull requests and issues have distinct top-level rooms', () => {
-  assert.match(appSource, /id="co-tab-prs"[\s\S]*?>\s*Pull requests\s*<\/button>/)
-  assert.match(appSource, /id="co-tab-issues"[\s\S]*?>\s*Issues\s*<\/button>/)
-  assert.match(appSource, /ISSUE_TYPES\.has\(rec\.type\)/)
-  assert.match(appSource, /aria-labelledby=\{view === 'issues' \? 'co-tab-issues' : 'co-tab-prs'\}/)
+test('pull requests and requests share one decision-first Run', () => {
+  assert.doesNotMatch(appSource, /id="co-tab-prs"/)
+  assert.doesNotMatch(appSource, /id="co-tab-issues"/)
+  assert.match(appSource, /<ContributionRun/)
+  assert.match(runSource, /REQUEST_TYPES = new Set\(\['issue', 'issue_comment', 'discussion_comment'\]\)/)
+  assert.match(runSource, /decisions\.push\(decision\('request'/)
   assert.match(cardSource, /!isPr && rec\.status === 'prepared'/)
-  assert.match(feedSource, /STATUS_LABELS\[rec\?\.status\] \|\| 'Settled'/)
-  assert.match(appSource, /isEmpty \? \(\s*<EmptyState view=\{view\} \/>/)
+  assert.match(feedSource, /STATE_LABELS/)
 })
 
-test('focused Projects and Issues use the same single-heading detail pattern as Pull requests', () => {
+test('project and review drill-downs own real shell Back entries', () => {
   assert.match(sourceMapSource, /selectedProject \? <h2 className="co-visually-hidden">Project detail<\/h2>/)
-  assert.match(feedSource, /<h2 className="co-visually-hidden">Request detail<\/h2>/)
-  assert.doesNotMatch(feedSource, /<ViewHeading title="Requests"[^>]*source conversation still attached/)
+  assert.match(feedSource, /Back to the run/)
+  assert.match(appSource, /returnProjectKey: projectKey/)
+  assert.match(feedSource, /setFocusReturnProject\(String\(focusTarget\.returnProjectKey \|\| ''\)\)/)
+  assert.match(feedSource, /if \(returnProjectKey\) onViewProject\?\.\(returnProjectKey\)/)
+  assert.match(appSource, /window\.mobius\.nav\.open\('contribute-projects'/)
+  assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-project'/)
+  assert.match(feedSource, /window\.mobius\.nav\.open\('contribute-review'/)
+  assert.match(sourceMapSource, /onBack:[\s\S]*?setSelected\(''\)/)
+  assert.match(sourceMapSource, /onForward:[\s\S]*?setSelected\(key\)/)
+  assert.match(sourceMapSource, /function closeProject\(\) \{[\s\S]*?handle\?\.close\?\.\(\)[\s\S]*?setSelected\(''\)/)
+  assert.match(sourceMapSource, /rows\.map\(\(rec\)/)
+  assert.doesNotMatch(sourceMapSource, /Open pull requests/)
+  assert.doesNotMatch(feedSource, /<ViewHeading/)
 })
 
 test('an assigned incoming review stays recoverable until its conversation starts', () => {
@@ -123,16 +126,17 @@ test('an assigned incoming review stays recoverable until its conversation start
 })
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
-  assert.match(sourceOverviewSource, /Handle everything/)
-  assert.match(sourceOverviewSource, /You still approve anything public\./)
-  assert.match(sourceOverviewSource, /<CycleCard/)
-  assert.match(sourceMapSource, /<AgentHandoffButton action=\{detailAction\}/)
-  assert.match(cardSource, /<span>\{checksActive \? 'Checking' : \(isUpdate \? 'Update PR' : 'Open PR'\)\}<\/span>/)
+  assert.match(feedSource, /function PrivateRunAction/)
+  assert.match(feedSource, /Private work can be handled together/)
+  assert.match(feedSource, /Earlier private work paused/)
+  assert.match(feedSource, /<PrivateRunAction/)
+  assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
-  assert.match(feedSource, /Nothing will be merged\./)
-  assert.match(feedSource, /open new pull requests or update existing ones/)
-  assert.match(feedSource, /unit\.type !== 'stack'/)
-  assert.match(feedSource, /<ContributionStack[\s\S]*onSendStack=\{onSendStack\}/)
+  assert.match(feedSource, /Nothing merges\./)
+  assert.match(feedSource, /Personal pull requests open ready for review/)
+  assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
+  assert.match(feedSource, /outcome = await onSendStack\?\.\(runUnitRecords\(item\)\)/)
   assert.doesNotMatch(batchActionSource, /role="alertdialog"/)
   assert.doesNotMatch(batchActionSource, /Keep private/)
   assert.match(batchActionSource, /className="co-agent-handoff"/)
@@ -152,7 +156,6 @@ test('blocked contributions have one calm recovery action', () => {
   assert.match(cardSource, /This review needs a quick check before it can continue\./)
   assert.match(cardSource, /The reviewed branch reached GitHub/)
   assert.match(cardSource, /co-alert' \+ \(blocked \? ' is-follow-up'/)
-  assert.match(themeSource, /\.co-section\.is-follow-up/)
   assert.match(themeSource, /\.co-alert\.is-follow-up/)
   assert.doesNotMatch(cardSource, /Sending is paused until/)
 })
@@ -184,31 +187,35 @@ test('Möbius-bot withdrawal keeps the destructive action behind confirmation', 
 test('lost single and stacked submit responses reconcile durable state', () => {
   assert.match(apiSource, /uncertain: true/g)
   assert.match(appSource, /resolveUncertainSubmission/)
-  assert.match(appSource, /resolveUncertainLanding/)
-  assert.match(apiSource, /landContributionStack/)
-  assert.match(apiSource, /detail\.code === 'landing_unconfirmed'/)
-  assert.match(stackSource, /Check landing status/)
-  assert.match(stackSource, /canRecoverLanding \? 'Check'/)
+  assert.match(apiSource, /markContributionReady/)
+  assert.match(apiSource, /detail\.code === 'ready_unconfirmed'/)
+  assert.match(appSource, /fresh\?\.readying/)
+  assert.match(appSource, /Repeating this route is read-only reconciliation/)
   assert.match(appSource, /return \{ pending: true, record: next, viaMobius \}/)
   assert.match(appSource, /summary\.state === 'publishing'/)
-  assert.match(cardSource, /Publishing is still in progress/)
-  assert.match(stackSource, /Publishing is still in progress for this chain/)
+  assert.match(cardSource, /if \(accepted\) return null/)
   assert.doesNotMatch(apiSource, /return \{ error: String\(\(err && err\.message\)/)
 })
 
-test('existing pull-request stacks expose one exact update action', () => {
-  assert.match(stackSource, /rec\?\.plan\?\.action === 'pr_update'/)
-  assert.match(stackSource, /ready\.length === 1 \? 'Update PR' : 'Update PRs'/)
-  assert.match(stackSource, /fast-forward the linked pull/)
+test('the retired raw-ref Land path has no reachable client action', () => {
+  assert.equal(existsSync(new URL('../ui/ContributionStack.jsx', import.meta.url)), false)
+  assert.equal(existsSync(new URL('../ui/SourceOverview.jsx', import.meta.url)), false)
+  assert.doesNotMatch(
+    appSource,
+    /\blandContributionStack\b|\bonLandStack\b|ui\/ContributionStack|SourceOverview/,
+  )
+  assert.doesNotMatch(apiSource, /landContributionStack|\/land-stack/)
+  assert.doesNotMatch(feedSource, /Land stack|>\s*Land\s*</)
 })
 
 test('wide collection and review views share centered guides on one continuous canvas', () => {
-  assert.match(themeSource, /\.co-page \{[\s\S]*?width: min\(100%, 1120px\)/)
-  assert.match(themeSource, /\.co-tabs,\s*\.co-contributions-view \{\s*width: min\(100%, 760px\); margin-inline: auto/)
-  assert.match(themeSource, /\.co-header \{[^}]*width: min\(100%, 760px\); margin-inline: auto/)
+  assert.match(themeSource, /\.co-page \{[\s\S]*?width: min\(100%, 1400px\)/)
+  assert.match(themeSource, /\.co-contributions-view \{\s*width: min\(100%, 1120px\); margin-inline: auto/)
+  assert.match(themeSource, /\.co-header \{[^}]*width: min\(100%, 1120px\); margin-inline: auto/)
+  assert.match(themeSource, /\.co-github-menu \{[^}]*max-width: 520px/)
   assert.doesNotMatch(themeSource, /radial-gradient|linear-gradient\(var\(--bg\), var\(--bg\)\)/)
   assert.doesNotMatch(themeSource, /\.co-root::before/)
-  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 760px\); margin-inline: auto/)
+  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 1120px\); margin-inline: auto/)
   assert.match(themeSource, /\.co-header-shell \{\s*flex: 0 0 auto; width: 100%; background: var\(--bg\);\s*\}/)
   assert.match(appSource, /<div className="co-header-shell">[\s\S]*?<\/div>\s*<main/)
   assert.doesNotMatch(themeSource, /\.co-page\.is-sources \{\s*width:/)
@@ -303,7 +310,8 @@ test('GitHub connection failures stay visible and recoverable', () => {
 
 test('the Projects summary reserves its row while source checks refresh', () => {
   assert.match(appSource, /loading=\{sourceLoading\}/)
-  assert.match(sourceOverviewSource, /className="co-workspace-loading" role="status" aria-live="polite"/)
-  assert.match(sourceOverviewSource, /Checking projects…/)
-  assert.match(sourceOverviewSource, /No local changes/)
+  assert.match(sourceMapSource, /function LoadingState\(\)/)
+  assert.match(sourceMapSource, /className="co-source-loading" role="status"/)
+  assert.match(sourceMapSource, /Checking projects…/)
+  assert.match(sourceMapSource, /Nothing here/)
 })

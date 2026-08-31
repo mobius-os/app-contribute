@@ -9,7 +9,7 @@ const cardRenderer = () => renderModule(`
   export function renderCard(rec) {
     return renderToStaticMarkup(React.createElement(ContributionCard, {
       rec, onSend: () => {}, onDismiss: () => {},
-      onRunPrePrChecks: () => {}, onFeedback: () => ({ ok: true }),
+      onFeedback: () => ({ ok: true }),
       onConnectApp: () => {}, onWithdraw: () => ({ ok: true }),
     }))
   }
@@ -82,7 +82,7 @@ test('request details do not render an empty pull-request changes section', asyn
   assert.doesNotMatch(html, /co-diff/)
 })
 
-test('prepared platform cards offer a confirmed pre-PR check action', async (t) => {
+test('prepared platform cards keep one explicit public action', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
     return
@@ -97,10 +97,9 @@ test('prepared platform cards offer a confirmed pre-PR check action', async (t) 
     },
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
-  assert.match(html, /aria-label="Run GitHub checks on my fork"/)
-  assert.match(html, /title="Run the full GitHub checks on your fork"/)
-  assert.match(html, />Check on fork</)
-  assert.match(html, /Open pull request for review/)
+  assert.doesNotMatch(html, /Check on fork|Run GitHub checks/)
+  assert.match(html, /aria-label="Send pull request"/)
+  assert.match(html, />Send PR</)
 })
 
 test('a settled update target blocks another public action and leads to recovery', async (t) => {
@@ -112,7 +111,7 @@ test('a settled update target blocks another public action and leads to recovery
   const html = renderCard({
     id: 'settled-update', type: 'pr', status: 'prepared',
     repo: 'mobius-os/app-contribute', title: 'Preserve the follow-up',
-    number: 59, needs_attention: true,
+    number: 59, chat_id: 'source-chat', needs_attention: true,
     attention: {
       type: 'review_target_settled',
       title: 'Pull request #59 already merged',
@@ -125,8 +124,45 @@ test('a settled update target blocks another public action and leads to recovery
     quality_review: { state: 'all_clear', reviewed_head_sha: 'reviewed-head' },
   })
   assert.match(html, /Pull request #59 already merged/)
-  assert.match(html, /Refresh/)
+  assert.match(html, /Fix in chat/)
   assert.doesNotMatch(html, /Update pull request|>Update PR</)
+})
+
+test('attention actions never offer a source chat that the record cannot open', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderCard } = await cardRenderer()
+
+  const github = renderCard({
+    id: 'public-attention', type: 'pr', status: 'open',
+    title: 'Resolve the review', repo: 'mobius-os/app-demo', number: 42,
+    needs_attention: true,
+    attention: { type: 'human_required', message: 'Choose how to respond.' },
+  })
+  assert.match(github, /Open pull request on GitHub/)
+  assert.doesNotMatch(github, /Fix in chat|Review saved details/)
+
+  const legacy = renderCard({
+    id: 'legacy-attention', type: 'pr', status: 'open',
+    title: 'Older follow-up', repo: 'mobius-os/app-demo',
+    needs_attention: true,
+    attention: { message: 'This older record needs inspection.' },
+    plan: { action: 'pr', title: 'Older follow-up', body_draft: 'Saved context.' },
+  })
+  assert.match(legacy, /href="#co-record-legacy-attention"/)
+  assert.match(legacy, /Review saved details/)
+  assert.doesNotMatch(legacy, /Fix in chat/)
+
+  const sourceLinked = renderCard({
+    id: 'source-attention', type: 'pr', status: 'open',
+    title: 'Source-linked follow-up', repo: 'mobius-os/app-demo',
+    chat_ids: ['source-chat'], needs_attention: true,
+    attention: { message: 'Return to the source conversation.' },
+  })
+  assert.match(sourceLinked, /Fix in chat/)
+  assert.doesNotMatch(sourceLinked, /Review saved details/)
 })
 
 test('withdrawal is offered only for a published Möbius-bot contribution', async (t) => {
@@ -152,47 +188,6 @@ test('withdrawal is offered only for a published Möbius-bot contribution', asyn
   ]) {
     assert.doesNotMatch(renderCard(rec), />Withdraw PR</)
   }
-})
-
-test('prepared cards narrate running, failed, and passing pre-PR checks', async (t) => {
-  if (!frontendModules) {
-    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
-    return
-  }
-  const { renderCard } = await cardRenderer()
-  const base = {
-    id: 'platform-check', type: 'pr', status: 'prepared',
-    repo: 'mobius-os/mobius', title: 'Test before sending',
-    plan: { action: 'pr', repo: 'mobius-os/mobius', title: 'Test before sending' },
-  }
-  const running = renderCard({
-    ...base,
-    pre_pr_checks: {
-      state: 'in_progress',
-      url: 'https://github.com/owner/mobius/actions/runs/7',
-    },
-  })
-  assert.match(running, /GitHub checks running/)
-  assert.match(running, /No pull request is open/)
-  assert.match(running, /View run on GitHub/)
-
-  const failed = renderCard({
-    ...base,
-    pre_pr_checks: {
-      state: 'completed', conclusion: 'failure',
-      url: 'https://github.com/owner/mobius/actions/runs/8',
-    },
-  })
-  assert.match(failed, /GitHub checks need a fix/)
-  assert.match(failed, /Fix in chat/)
-  assert.match(failed, /Run GitHub checks on my fork again/)
-
-  const passed = renderCard({
-    ...base,
-    pre_pr_checks: { state: 'completed', conclusion: 'success' },
-  })
-  assert.match(passed, /GitHub checks passed/)
-  assert.match(passed, /exact reviewed branch passed/)
 })
 
 test('fully applied published labels stay compact', async (t) => {

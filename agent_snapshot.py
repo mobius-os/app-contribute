@@ -21,6 +21,9 @@ from typing import Any
 
 ACTIVE = {"prepared", "submitting", "draft", "open", "landing"}
 DB_PATH = Path("/data/db/ultimate.db")
+ALLOWED_REVIEW_ROOTS = (
+  Path("/data/platform"), Path("/data/contrib"), Path("/data/contributions"),
+)
 
 
 @dataclass
@@ -68,6 +71,8 @@ def load_active(ledger: Path, limit: int = 100) -> list[dict[str, Any]]:
     if not isinstance(record, dict) or not record.get("id"):
       continue
     record_id = str(record["id"])
+    if path.name not in {f"{record_id}.json", f"{record_id}.record.json"}:
+      continue
     current = selected.get(record_id)
     if current is None or _candidate_owns_record(current, (path, record)):
       selected[record_id] = (path, record)
@@ -77,6 +82,110 @@ def load_active(ledger: Path, limit: int = 100) -> list[dict[str, Any]]:
   ]
   records.sort(key=_dependency_key)
   return records[:limit]
+
+
+def _source_file_path(source_root: str, value: object) -> str:
+  if not isinstance(value, str) or not value.strip():
+    return ""
+  path = Path(value.strip())
+  if path.is_absolute():
+    return str(path)
+  if not source_root:
+    return ""
+  return str(Path(source_root) / path)
+
+
+def relevant_records(
+  records: list[dict[str, Any]], work: dict[str, Any],
+) -> list[dict[str, Any]]:
+  """Return the small active-ledger slice that can overlap attached work."""
+  source_chat_id = str(work.get("source_chat_id") or "")
+  intent = str(work.get("intent") or "")
+  requested_ids = {
+    str(value) for value in work.get("record_ids") or [] if value
+  }
+  roots = {
+    str(value).rstrip("/") for value in work.get("project_roots") or []
+    if isinstance(value, str) and value.strip()
+  }
+  scoped_paths = {
+    str(item.get("path")) for item in work.get("paths") or []
+    if isinstance(item, dict) and isinstance(item.get("path"), str)
+  }
+  selected = []
+  for record in records:
+    plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+    record_id = str(record.get("id") or "")
+    source_root = str(plan.get("source_repo_path") or "").rstrip("/")
+    files = {
+      path for value in plan.get("files") or []
+      if (path := _source_file_path(source_root, value))
+    }
+    chat_ids = {
+      str(value) for value in record.get("chat_ids") or [] if value
+    }
+    if record.get("chat_id"):
+      chat_ids.add(str(record["chat_id"]))
+    selected_by_id = record_id in requested_ids
+    selected_by_chat = bool(source_chat_id and source_chat_id in chat_ids)
+    selected_by_path = bool(scoped_paths & files)
+    selected_by_project = bool(
+      intent == "project" and source_root and source_root in roots
+    )
+    if selected_by_id or selected_by_chat or selected_by_path or selected_by_project:
+      selected.append(record)
+  return selected
+
+
+def work_view(record: dict[str, Any], order: int) -> dict[str, Any]:
+  """Project one record into the fields private preparation actually needs."""
+  plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+  quality = (
+    record.get("quality_review")
+    if isinstance(record.get("quality_review"), dict)
+    else {}
+  )
+  local = local_item(record, order)
+  return {
+    "id": local.id,
+    "type": local.kind,
+    "status": local.status,
+    "repo": local.repo,
+    "title": str(record.get("title") or ""),
+    "summary": str(record.get("summary") or ""),
+    "chat_id": str(record.get("chat_id") or ""),
+    "chat_ids": [str(value) for value in record.get("chat_ids") or [] if value],
+    "plan": {
+      key: plan.get(key) for key in (
+        "action", "source_repo_path", "repo_path", "files", "branch",
+        "base_sha", "head_sha", "stack",
+      ) if plan.get(key) not in (None, "", [], {})
+    },
+    "quality_review": {
+      key: quality.get(key) for key in ("state", "reviewed_head_sha")
+      if quality.get(key) not in (None, "")
+    },
+    "local": {
+      "actual_head": local.actual_head,
+      "revision_matches": local.revision_matches,
+      "worktree_clean": local.worktree_clean,
+    },
+  }
+
+
+def parse_work(raw: str) -> dict[str, Any]:
+  try:
+    work = json.loads(raw)
+  except json.JSONDecodeError as exc:
+    raise ValueError(f"work manifest is not valid JSON: {exc}") from exc
+  if not isinstance(work, dict) or work.get("v") != 1:
+    raise ValueError("work manifest must be a version 1 object")
+  if not isinstance(work.get("source_chat_id"), str):
+    raise ValueError("work manifest needs source_chat_id")
+  for key in ("paths", "record_ids", "project_roots"):
+    if not isinstance(work.get(key), list):
+      raise ValueError(f"work manifest needs a {key} array")
+  return work
 
 
 def _candidate_owns_record(
@@ -132,10 +241,28 @@ def _git(repo: str, *args: str) -> str:
     return ""
 
 
+def safe_repo_path(value: object) -> str:
+  """Confine ledger-authored checkout paths before any Git process reads them."""
+  if not isinstance(value, str) or not value.strip() or "\x00" in value:
+    return ""
+  try:
+    path = Path(value.strip()).resolve(strict=False)
+  except (OSError, RuntimeError):
+    return ""
+  if any(path == root or root in path.parents for root in ALLOWED_REVIEW_ROOTS):
+    return str(path)
+  apps = Path("/data/apps")
+  try:
+    relative = path.relative_to(apps)
+  except ValueError:
+    return ""
+  return str(path) if relative.parts and not relative.parts[0].isdigit() else ""
+
+
 def local_item(record: dict[str, Any], order: int) -> Item:
   plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
   stack = plan.get("stack") if isinstance(plan.get("stack"), dict) else {}
-  repo_path = str(plan.get("repo_path") or "")
+  repo_path = safe_repo_path(plan.get("repo_path"))
   branch = str(plan.get("branch") or record.get("branch") or "")
   expected = str(plan.get("head_sha") or "")
   actual = _git(repo_path, "rev-parse", "--verify", f"{branch}^{{commit}}") if branch else ""
@@ -272,13 +399,31 @@ def main() -> int:
   parser.add_argument("--limit", type=int, default=100)
   parser.add_argument("--json", action="store_true")
   parser.add_argument("--offline", action="store_true", help="skip the one GitHub batch")
+  parser.add_argument(
+    "--work-json",
+    help="return only records relevant to one attached contribution-work manifest",
+  )
   args = parser.parse_args()
   try:
+    work = parse_work(args.work_json) if args.work_json is not None else None
     ledger = args.ledger_dir or find_ledger(args.db)
-    records = load_active(ledger, max(1, min(args.limit, 500)))
-  except (OSError, sqlite3.Error, RuntimeError) as exc:
+    limit = 500 if work is not None else max(1, min(args.limit, 500))
+    records = load_active(ledger, limit)
+  except (OSError, sqlite3.Error, RuntimeError, ValueError) as exc:
     print(f"agent_snapshot: {exc}", file=sys.stderr)
     return 1
+  if work is not None:
+    matches = relevant_records(records, work)
+    print(json.dumps({
+      "schema": 2,
+      "source_chat_id": work["source_chat_id"],
+      "active_total": len(records),
+      "matching": len(matches),
+      "records": [
+        work_view(record, index) for index, record in enumerate(matches, 1)
+      ],
+    }, indent=2, sort_keys=True))
+    return 0
   items = [local_item(record, index) for index, record in enumerate(records, 1)]
   query, aliases = build_graphql(items)
   data, warning = ({}, "") if args.offline else fetch_graphql(query)
