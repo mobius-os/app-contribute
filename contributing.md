@@ -834,15 +834,15 @@ explicitly approves the exact update in chat or presses **Update PR**.
 2. Keep the same record id, PR URL, number, branch, `head_repository`, original
    `submitted_at`, and original PR base. Set the record back to `prepared` and
    set `plan.action` to `pr_update`; update `plan.head_sha`, the complete
-   base-to-new-head diff/hash/stat, source witness, body draft, and timestamps.
+   base-to-new-head diff/hash/stat, source witness, and timestamps.
    The stored diff is the complete current PR, not only the new delta, because
    the all-clear verdict must describe exactly what maintainers will review.
    For every `pr_update`, store the exact live values observed during
    preparation as `plan.pr_metadata.old_title` and
-   `plan.pr_metadata.old_body`, even when the reviewed text is unchanged. Put
-   the desired public text in `plan.title` and `plan.body_draft`. Do not
-   normalize, summarize, or reconstruct the old text: those exact witnesses
-   are the compare-and-swap guard against overwriting a maintainer edit.
+   `plan.pr_metadata.old_body`, and copy those same exact bytes into the
+   reviewed `plan.title` and `plan.body_draft`. Do not normalize, summarize, or
+   reconstruct the text. For an existing PR update, this equality is a
+   publication precondition rather than a request to edit public metadata.
 3. Re-run the full private review on the new head and pin
    `quality_review.reviewed_head_sha` to it. The ordinary local review-status
    endpoint understands both `pr` and `pr_update`; a changed checkout, source
@@ -852,15 +852,15 @@ explicitly approves the exact update in chat or presses **Update PR**.
    approval surface; an explicit, unambiguous chat instruction approving this
    same record and exact new head is equally valid. Do not require both. The
    guarded update route rechecks the live PR identity and requires the public
-   title/body to match either the exact recorded old values or the
-   already-reviewed desired values before any push. The second state is only
-   the restart-safe recovery case for an earlier ambiguous submission. The
-   route allows only the exact reviewed fast-forward and applies
-   `plan.title`/`plan.body_draft` once after the branch update. Any other live
-   metadata stops for a fresh private review instead of being overwritten; a
-   resumed ambiguous submission does not edit already-visible reviewed text a
-   second time. Ordinary **Send PR** continues to reject a branch that already
-   has a PR, and raw `git push` is never a substitute.
+   title and body to exactly match `plan.title` and `plan.body_draft` before any
+   branch mutation. It does not PATCH the pull request's title or body: GitHub
+   does not expose an expected-version guard for that unsafe metadata update,
+   so treating previously observed text as overwrite authority could erase a
+   maintainer edit. Any mismatch stops for a fresh private review. The route
+   allows only the exact reviewed fast-forward, and a restarted attempt must
+   prove the same metadata precondition again. Ordinary **Send PR** continues
+   to reject a branch that already has a PR, and raw `git push` is never a
+   substitute.
 5. After a successful update, the same record returns to `open`, retains its
    original submission time, records `last_updated_pr_at`, and advances an
    existing Autopilot grant to the new public head without creating, enabling,
