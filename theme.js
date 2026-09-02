@@ -485,6 +485,7 @@ export const CSS = `
   min-height: 44px; margin: 0; padding: 7px 8px; cursor: default;
 }
 .co-conn-settings .co-autopilot-setting > label { color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; }
+.co-setting-help { position: relative; width: 44px; height: 44px; }
 .co-setting-info {
   width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
   padding: 0; border: 0; border-radius: 9px; background: transparent;
@@ -492,9 +493,19 @@ export const CSS = `
 }
 .co-setting-info:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (hover: hover) { .co-setting-info:hover { color: var(--text); background: var(--surface2, var(--bg)); } }
-.co-autopilot-help {
-  grid-column: 1 / -1; margin: -1px 0 4px; padding-right: 4px;
-  color: var(--muted); font-size: 10.5px; line-height: 1.45; text-wrap: pretty;
+.co-setting-popover {
+  position: absolute; z-index: 2; top: calc(100% + 5px); right: -36px;
+  width: min(248px, calc(100vw - 48px)); margin: 0; padding: 10px 11px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--muted);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 24%, transparent);
+  font-size: 10.5px; line-height: 1.5; text-wrap: pretty;
+}
+.co-setting-popover::before {
+  content: ''; position: absolute; top: -5px; right: 53px;
+  width: 8px; height: 8px; transform: rotate(45deg);
+  border-top: 1px solid var(--border); border-left: 1px solid var(--border);
+  background: var(--surface);
 }
 .co-setting-switch { position: relative; flex: 0 0 auto; width: 34px; height: 20px; display: block !important; }
 .co-setting-switch input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0 !important; opacity: 0; cursor: pointer; }

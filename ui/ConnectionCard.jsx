@@ -246,6 +246,8 @@ export function ConnectionCard({
   const pollGenRef = useRef(0)
   const connectedTimerRef = useRef(null)
   const keepConnectedRef = useRef(null)
+  const autopilotHelpRef = useRef(null)
+  const autopilotInfoRef = useRef(null)
   const transport = useMemo(
     () => deviceTransport || createGithubDeviceTransport(token),
     [deviceTransport, token],
@@ -559,6 +561,28 @@ export function ConnectionCard({
     }
   }, [statusRetrying, onRetry, onChanged])
 
+  useEffect(() => {
+    if (!autopilotHelpOpen) return undefined
+
+    const dismissOutside = (event) => {
+      if (!autopilotHelpRef.current?.contains(event.target)) {
+        setAutopilotHelpOpen(false)
+      }
+    }
+    const dismissWithEscape = (event) => {
+      if (event.key !== 'Escape') return
+      setAutopilotHelpOpen(false)
+      autopilotInfoRef.current?.focus()
+    }
+
+    document.addEventListener('pointerdown', dismissOutside)
+    document.addEventListener('keydown', dismissWithEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside)
+      document.removeEventListener('keydown', dismissWithEscape)
+    }
+  }, [autopilotHelpOpen])
+
   const state = conn?.state
 
   if (state === 'checking') return null
@@ -683,17 +707,30 @@ export function ConnectionCard({
               typeof onToggleAutopilotDefault === 'function' && (
               <div className="co-autopilot-setting">
                 <label htmlFor="co-follow-sent-prs">Follow sent PRs</label>
-                <button
-                  type="button"
-                  className="co-setting-info"
-                  aria-label="What Follow sent PRs does"
-                  aria-expanded={autopilotHelpOpen}
-                  aria-controls="co-follow-sent-prs-help"
-                  title="What Follow sent PRs does"
-                  onClick={() => setAutopilotHelpOpen((open) => !open)}
-                >
-                  <Icon name="info" size={15} />
-                </button>
+                <div className="co-setting-help" ref={autopilotHelpRef}>
+                  <button
+                    ref={autopilotInfoRef}
+                    type="button"
+                    className="co-setting-info"
+                    aria-label="What Follow sent PRs does"
+                    aria-expanded={autopilotHelpOpen}
+                    aria-controls="co-follow-sent-prs-help"
+                    aria-describedby={autopilotHelpOpen ? 'co-follow-sent-prs-help' : undefined}
+                    title="What Follow sent PRs does"
+                    onClick={() => setAutopilotHelpOpen((open) => !open)}
+                  >
+                    <Icon name="info" size={15} />
+                  </button>
+                  {autopilotHelpOpen ? (
+                    <p
+                      id="co-follow-sent-prs-help"
+                      className="co-setting-popover"
+                      role="tooltip"
+                    >
+                      Follows sent PRs through checks and review, addresses comments automatically, and asks when it needs you.
+                    </p>
+                  ) : null}
+                </div>
                 <span className="co-setting-switch">
                   <input
                     id="co-follow-sent-prs"
@@ -705,11 +742,6 @@ export function ConnectionCard({
                   />
                   <i aria-hidden="true" />
                 </span>
-                {autopilotHelpOpen ? (
-                  <p id="co-follow-sent-prs-help" className="co-autopilot-help">
-                    Follows sent PRs through checks and review, addresses comments automatically, and asks when it needs you.
-                  </p>
-                ) : null}
               </div>
             )}
             {typeof onChooseSubmissionMethod === 'function' && (
