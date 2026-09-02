@@ -278,6 +278,18 @@ test('Contribute settings live in the app toolbar', () => {
   assert.match(themeSource, /\.co-conn-settings \{[\s\S]*?position: absolute/)
 })
 
+test('Follow sent PRs help opens as an anchored dismissible popover', () => {
+  assert.match(connectionSource, /className="co-setting-help" ref=\{autopilotHelpRef\}/)
+  assert.match(connectionSource, /role="tooltip"/)
+  assert.match(connectionSource, /aria-describedby=\{autopilotHelpOpen/)
+  assert.match(connectionSource, /document\.addEventListener\('pointerdown', dismissOutside\)/)
+  assert.match(connectionSource, /event\.key !== 'Escape'/)
+  assert.match(connectionSource, /autopilotInfoRef\.current\?\.focus\(\)/)
+  assert.match(themeSource, /\.co-setting-help \{ position: relative/)
+  assert.match(themeSource, /\.co-setting-popover \{[\s\S]*?position: absolute/)
+  assert.doesNotMatch(connectionSource, /className="co-autopilot-help"/)
+})
+
 test('background checks have one shared accessible toolbar indicator', () => {
   assert.match(appSource, /const checking = loading && records\.length === 0 && !sourceSnapshot/)
   assert.match(appSource, /useState\(\{ state: 'checking' \}\)/)
