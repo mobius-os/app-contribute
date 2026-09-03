@@ -3,7 +3,7 @@
 // React and I/O stay in ui/SourceMap.jsx + api.js so these rules are cheap to
 // exercise under node:test.
 
-const ACTIVE = new Set(['prepared', 'submitting', 'draft', 'open'])
+const ACTIVE = new Set(['prepared', 'submitting', 'landing', 'draft', 'open'])
 
 function nonnegativeCount(value) {
   const count = typeof value === 'number' ? value : Number.NaN
@@ -12,6 +12,43 @@ function nonnegativeCount(value) {
 
 function repoKey(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function declaredContributionPaths(rec) {
+  const result = new Set()
+  for (const rows of [rec?.files, rec?.plan?.files]) {
+    if (!Array.isArray(rows)) continue
+    for (const row of rows) {
+      const path = typeof row === 'string' ? row : row?.path
+      if (typeof path === 'string' && path.trim()) result.add(path.trim())
+    }
+  }
+  return result
+}
+
+function currentContributionCoverage(project, contributions, localPaths) {
+  const currentSha = typeof project?.head_sha === 'string' ? project.head_sha : ''
+  if (!currentSha || localPaths.length === 0) return new Set()
+  const known = new Set(localPaths)
+  const covered = new Set()
+  for (const rec of contributions) {
+    if (String(rec?.plan?.source_sha || '') !== currentSha) continue
+    for (const path of declaredContributionPaths(rec)) {
+      if (known.has(path)) covered.add(path)
+    }
+    // Legacy records predate the explicit files field. Git's diff-stat still
+    // gives exact paths for ordinary rows; intersect only exact known paths so
+    // an abbreviated `.../file` can never cover unrelated work by guesswork.
+    const stat = rec?.diff_stat || rec?.plan?.diff_stat
+    if (typeof stat !== 'string') continue
+    for (const line of stat.split('\n')) {
+      const separator = line.search(/\s+\|\s+/)
+      if (separator < 0) continue
+      const path = line.slice(0, separator).trim()
+      if (known.has(path)) covered.add(path)
+    }
+  }
+  return covered
 }
 
 // Project identity is already present in the source-status key, so the UI can
@@ -26,8 +63,8 @@ export function projectIconUrl(project) {
 }
 
 export function activeContribution(rec) {
-  const isPullRequest = rec?.type === 'pr' || rec?.plan?.action === 'pr'
-  return !!rec && isPullRequest && ACTIVE.has(rec.status)
+  const action = rec?.type || rec?.plan?.action
+  return !!rec && (action === 'pr' || action === 'issue') && ACTIVE.has(rec.status)
 }
 
 export function attachSourceProjects(snapshot, records) {
@@ -137,44 +174,37 @@ export function projectNeedsSorting(project) {
   return projectPreparationState(project) === 'sorting'
 }
 
-export function prepareProjectsAction(projects) {
-  const candidates = (Array.isArray(projects) ? projects : [])
-    .filter(projectNeedsPreparation)
-  if (candidates.length === 0) return null
-
-  const one = candidates.length === 1
-  const names = candidates.slice(0, 12).map((project) => project.name)
-  const remaining = candidates.length - names.length
-  const scope = one
-    ? `Scope this preparation to ${candidates[0].name} and directly required tests or documentation.`
-    : 'Scope this preparation to every current reusable local change shown in Contribute Projects.'
-  const listed = remaining > 0
-    ? `${names.join(', ')}, and ${remaining} more`
-    : names.join(', ')
-
-  return {
-    event: one ? 'prepare_project_changes' : 'prepare_all_project_changes',
-    title: one ? `Prepare ${candidates[0].name} changes` : 'Prepare project changes',
-    label: one ? 'Prepare changes' : 'Prepare all',
-    busyLabel: 'Starting…',
-    startedLabel: one ? `Preparing ${candidates[0].name}` : 'Preparing your projects',
-    startedMessage: 'Stay in Contribute. New reviews and decisions will appear here when they are ready.',
-    count: candidates.length,
-    draft: [
-      one ? `Prepare my changes for ${candidates[0].name}.` : 'Prepare my project changes.',
-      '',
-      scope,
-      `Projects currently indicating local work: ${listed}.`,
-      '',
-      'Refresh the Contribute queue and Projects/source status before deciding what is current.',
-      'Classify working drafts, reusable changes, landed work, incoming updates, conflicts, and private or local-only work.',
-      'Prepare every coherent, privacy-safe upstream contribution in scope and stage it privately in Contribute.',
-      'Do not publish anything. Finish with what was prepared and what remains deliberately local or blocked.',
-    ].join('\n'),
-  }
+// The app-owned task scope must move when the represented source moves. Keep
+// this projection deliberately smaller than the full source-status payload:
+// identities, accepted commits, and exact path sets are the facts that change
+// the work, while labels and counts are presentation.
+export function projectWorkRevision(project) {
+  const paths = [
+    ...(project?.working?.paths || []).map((row) => (
+      typeof row === 'string' ? row : `${row?.path || ''}:${row?.group || ''}`
+    )),
+    ...(project?.localOnlyPaths || []),
+    ...(project?.incomingPaths || []),
+    ...(project?.compatiblePaths || []),
+    ...(project?.conflictPaths || []),
+  ].filter(Boolean).sort()
+  return [
+    project?.key,
+    project?.head_sha,
+    project?.base_sha,
+    project?.comparison_sha,
+    project?.origin?.sha,
+    ...paths,
+  ].map((value) => String(value || '')).join('\u0000')
 }
 
 function decorateProject(project, contributions) {
+  const pullRequests = contributions.filter((rec) => (
+    rec?.type === 'pr' || rec?.plan?.action === 'pr'
+  ))
+  const issues = contributions.filter((rec) => (
+    rec?.type === 'issue' || rec?.plan?.action === 'issue'
+  ))
   const workingFiles = nonnegativeCount(project?.working?.files)
   // Installed apps are release projections, not full development checkouts.
   // Their authoritative local delta is against installer-owned `upstream`;
@@ -215,6 +245,12 @@ function decorateProject(project, contributions) {
   const localOnlyPaths = Array.isArray(reconciliation.local_only_paths)
     ? reconciliation.local_only_paths
     : []
+  const coveredLocalPaths = currentContributionCoverage(
+    project, pullRequests, localOnlyPaths,
+  )
+  const remainingLocalOnlyPaths = localOnlyPaths.filter(
+    path => !coveredLocalPaths.has(path),
+  )
   const incomingPaths = Array.isArray(reconciliation.new_upstream_paths)
     ? reconciliation.new_upstream_paths
     : []
@@ -225,7 +261,12 @@ function decorateProject(project, contributions) {
     ? reconciliation.unresolved_conflict_paths
     : []
   const localFiles = semanticAvailable
-    ? nonnegativeCount(reconciliation.local_only_count ?? localOnlyPaths.length)
+    ? Math.max(
+        0,
+        nonnegativeCount(
+          reconciliation.local_only_count ?? localOnlyPaths.length,
+        ) - coveredLocalPaths.size,
+      )
     : authoredFiles
   const incomingFiles = semanticAvailable
     ? nonnegativeCount(reconciliation.new_upstream_count ?? incomingPaths.length)
@@ -240,7 +281,7 @@ function decorateProject(project, contributions) {
     ? nonnegativeCount(reconciliation.proven_present_count ?? reconciliation.proven_present?.length ?? 0)
     : 0
   const different = localFiles > 0 || compatibleFiles > 0 || conflictFiles > 0
-  const forks = projectForks(project, contributions)
+  const forks = projectForks(project, pullRequests)
   const contributionAttention = contributions.some((rec) => rec.needs_attention)
   const builtHere = project?.kind === 'app'
     && !repoKey(project?.canonical_repo)
@@ -258,12 +299,18 @@ function decorateProject(project, contributions) {
     (sourceComparisonRequired && workingFiles > 0) ||
     contributionAttention
   )
-  const ready = contributions.filter((rec) => rec.status === 'prepared').length
-  const open = contributions.length - ready
+  const ready = pullRequests.filter((rec) => rec.status === 'prepared').length
+  const open = pullRequests.length - ready
   return {
     ...project,
-    contributions,
-    contributionCounts: { ready, open },
+    contributions: pullRequests,
+    issues,
+    contributionCounts: {
+      pullRequests: pullRequests.length,
+      issues: issues.length,
+      ready,
+      open,
+    },
     different,
     adapted: managedFiles > 0,
     authoredFiles,
@@ -271,7 +318,9 @@ function decorateProject(project, contributions) {
     reconciliation,
     semanticAvailable,
     sourceComparisonRequired,
-    localOnlyPaths,
+    localOnlyPaths: remainingLocalOnlyPaths,
+    coveredLocalPaths: [...coveredLocalPaths],
+    coveredLocalFiles: coveredLocalPaths.size,
     incomingPaths,
     compatiblePaths,
     conflictPaths,
@@ -384,7 +433,8 @@ export function projectStatus(project) {
       tone: 'danger',
     }
   }
-  if (project.contributions.some((rec) => rec.needs_attention)) {
+  if ([...(project.contributions || []), ...(project.issues || [])]
+    .some((rec) => rec.needs_attention)) {
     return { label: 'Needs attention', tone: 'danger' }
   }
   if (state === 'comparison_needed') return { label: 'Needs comparison', tone: 'warn' }

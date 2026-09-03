@@ -3,9 +3,11 @@
 #
 # First reconcile prepared PR records whose reviewed work already reached the
 # target repository's main by another path. Strong commit, reviewed-diff,
-# merged-branch, or distinctive-identifier evidence settles the record with a
-# landing reference; partial identifier evidence only adds a dismissible hint.
-# That pass is independently CAS-safe and never sends a notification.
+# merged-branch, or distinctive-identifier evidence settles an ordinary PR
+# with a landing reference; partial identifier evidence only adds a dismissible
+# hint. A PR update whose target settled first stays prepared but gains one
+# recovery handoff so its remaining private work cannot be mistaken for
+# sendable. That pass is independently CAS-safe and never sends a notification.
 #
 # Reconcile disposable staging checkouts for terminal records before the
 # GitHub-dependent work. This is deliberately retryable: a checkout remains on
@@ -26,20 +28,20 @@
 # of weakening the update to a blind write. On a lost race (412), it is left
 # for the app's live refresh and the next scheduled run to reconcile.
 #
-# Cron runs this as `mobius` with an EMPTY environment and passes the app's
-# numeric id as $1, so the script sets its own SERVICE_TOKEN + API_BASE_URL and
-# pins gh's config/HOME/PATH — without those, gh can't find the credential store
-# and would look "not logged in" even on a connected instance. gh resolves auth
-# from /data/cli-auth/gh (the boot symlink target), which the backend populates
-# only when the owner connects GitHub from the Contribute app.
+# The supervised app-job runner passes the numeric app id as $1 and mints a
+# short-lived APP_TOKEN scoped to this installed app. The job keeps the runner's
+# API base and pins gh's config/HOME/PATH — without those, gh can't find the
+# credential store and would look "not logged in" even on a connected instance.
+# gh resolves auth from /data/cli-auth/gh (the boot symlink target), which the
+# backend populates only when the owner connects GitHub from Contribute.
 #
 # Exits 0 quietly when gh is missing, unauthenticated, or there is nothing to
 # refresh — an un-connected instance is a normal state, not an error.
 set -u
 
 APP_ID="${1:-}"
-API_BASE_URL="http://localhost:8000"
-SERVICE_TOKEN="$(cat /data/service-token.txt 2>/dev/null || true)"
+API_BASE_URL="${API_BASE_URL:-http://localhost:8000}"
+APP_TOKEN="${APP_TOKEN:-}"
 
 # gh's auth store lives under its config dir; point straight at it so the lookup
 # never depends on cron providing HOME or the ~/.config/gh symlink. Set both
@@ -48,10 +50,10 @@ SERVICE_TOKEN="$(cat /data/service-token.txt 2>/dev/null || true)"
 export HOME="${HOME:-/home/mobius}"
 export GH_CONFIG_DIR="${GH_CONFIG_DIR:-/data/cli-auth/gh}"
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
-export API_BASE_URL SERVICE_TOKEN APP_ID
+export API_BASE_URL APP_TOKEN APP_ID
 
-if [ -z "$APP_ID" ] || [ -z "$SERVICE_TOKEN" ]; then
-  # No app id (a malformed cron line) or no service token — nothing safe to do.
+if [ -z "$APP_ID" ] || [ -z "$APP_TOKEN" ]; then
+  # No app id or scoped credential means the supervisor contract is missing.
   exit 0
 fi
 
@@ -78,7 +80,7 @@ import urllib.parse
 import urllib.request
 
 API = os.environ["API_BASE_URL"].rstrip("/")
-TOKEN = os.environ["SERVICE_TOKEN"]
+TOKEN = os.environ["APP_TOKEN"]
 APP_ID = os.environ["APP_ID"]
 PREFIX = "contributions/"
 DEFAULT_BRANCH_BY_REPO = {}

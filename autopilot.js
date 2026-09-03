@@ -40,16 +40,23 @@ export function isAutopilotResponding(rec) {
   return !!(block && block.enabled && block.state === 'responding')
 }
 
-// Whether autopilot would act on this record's current attention. Used by the
-// UI to decide whether to show "autopilot will handle this" vs a manual
-// callout; job.sh makes the same decision server-side to route to /respond.
-export function isActionableAttention(rec) {
-  const block = autopilotState(rec)
-  if (!block || !block.enabled) return false
+// Whether this kind of attention is work an agent can handle. This capability
+// is deliberately independent from the current autopilot grant: an ungranted
+// record still belongs to Contribute's one private run rather than becoming a
+// misleading human decision.
+export function canAgentHandleAttention(rec) {
   const attention = rec && rec.attention
   const type = attention && attention.type
   if (type === HUMAN_REQUIRED) return false
   return typeof type === 'string' && ACTIONABLE_ATTENTION.has(type)
+}
+
+// Whether autopilot owns this record's current attention right now. Used by
+// the UI to decide whether to show "autopilot will handle this" vs private-run
+// work; job.sh makes the same decision server-side to route to /respond.
+export function isActionableAttention(rec) {
+  const block = autopilotState(rec)
+  return !!(block && block.enabled && canAgentHandleAttention(rec))
 }
 
 // True when the record is waiting on the human (escalated). Leads the card with

@@ -59,6 +59,7 @@ export function FileDiffList({ rec, loadDiff }) {
         diff={state.diff}
         summaryOverrides={statRows(totals)}
         diffTruncated={false}
+        initiallyOpenFirst
       />
       {state.phase === 'fallback' ? (
         <p className="co-files-note">The full diff is no longer available; file totals remain.</p>

@@ -19,24 +19,32 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CSS } from './theme.js'
 import {
-  actionableSourceProjects,
   attachSourceProjects,
 } from './source-map.js'
 import {
   applyLiveStates,
   buildRefreshQuery,
-  groupRecords,
   isSubmissionResolutionSettled,
   mergeRecordUpdates,
   reconcileLedgerSnapshot,
-  resolveUncertainLanding,
   resolveUncertainSubmission,
   summarizeSubmissionResolutions,
   syncSetupCompletion,
+  upsertRecord,
 } from './domain.js'
-import { contributionReviewTargetFromIntent, contributionsNeedingAttention, contributionCyclePhase, finishContributionCycleAction, isContributionCycleChat, prePrCheckPhase, indexReviewStatus, partitionReviewUnits, summarizeQualityReviews } from './review.js'
-import { preparedContributionUnits } from './stack.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
+import {
+  contributionActionScope,
+  contributionApprovalIsCurrent,
+  contributionCyclePhase,
+  contributionReviewTargetFromIntent,
+  focusedContributionNavigationReady,
+  focusedContributionReady,
+  indexReviewStatus,
+  isContributionCycleChat,
+  qualityReviewFor,
+} from './review.js'
+import { buildContributionRun } from './run.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
   contributionPathDecision,
@@ -52,37 +60,20 @@ import {
   fetchReviewStatus,
   fetchSourceDiff,
   fetchSourceStatus,
-  landContributionStack,
-  refreshPrePrChecks,
-  runPrePrChecks,
+  markContributionReady,
   setAutopilot,
   submitContribution,
   submitContributionViaMobius,
   submitContributionStack,
   updateContribution,
+  updateContributionStack,
+  withdrawMobiusContribution,
 } from './api.js'
 import { ConnectionCard } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
-import { Feed } from './ui/Feed.jsx'
+import { ContributionRun } from './ui/Feed.jsx'
+import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
-import { ContributionOverview } from './ui/SourceOverview.jsx'
-
-// The one icon that isn't chrome: the empty-state mark. A branch merging up
-// into a trunk — the same motif as the app icon, so the two read as kin.
-const MERGE_MARK = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-       style={{ width: 30, height: 30 }}>
-    <circle cx="6" cy="18" r="2.6" />
-    <circle cx="6" cy="6" r="2.6" />
-    <circle cx="18" cy="9" r="2.6" />
-    <path d="M6 8.6v6.8" />
-    <path d="M18 11.6c0 3.2-3 4.4-6 4.4" />
-  </svg>
-)
-
-const CONTRIBUTION_VIEWS = ['overview', 'sources', 'prs', 'issues']
-const ISSUE_TYPES = new Set(['issue', 'issue_comment', 'discussion_comment'])
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -123,33 +114,34 @@ function Header({ appId, fromCache, checking, children }) {
   )
 }
 
-// Sells the loop when the ledger is empty. Deliberately connection-agnostic:
-// the ConnectionCard directly above already says whether GitHub is wired up, so
-// this stays focused on the review task rather than implying that contributions
-// can be created from this app.
-function EmptyState({ view }) {
-  const issues = view === 'issues'
+function RunLoadingState() {
   return (
-    <div className="co-empty">
-      <div className="co-empty-mark">{MERGE_MARK}</div>
-      <h2 className="co-empty-title">
-        {issues ? 'No issues or comments yet' : 'No pull requests to review'}
-      </h2>
-      <p className="co-empty-text">
-        {issues
-          ? 'Issue drafts and follow-up comments prepared for review will appear here.'
-          : 'Pull requests prepared for upstream review will appear here. You can inspect each change before anything is shared publicly.'}
-      </p>
+    <div className="co-feed-loading" role="status" aria-live="polite">
+      <span className="ma-spinner is-compact" aria-hidden="true" />
+      <span>Building the current contribution run…</span>
     </div>
   )
 }
 
-function FeedLoadingState({ view }) {
+function stalePublicApproval() {
+  return {
+    error: 'This exact public action changed after you opened it. Nothing was sent; review the refreshed details and approve again.',
+    failure: { owner: 'owner', code: 'approval_changed' },
+  }
+}
+
+function ProjectControl({ showingProjects, count, onOpen, onBack }) {
   return (
-    <div className="co-feed-loading" role="status" aria-live="polite">
-      <span className="ma-spinner is-compact" aria-hidden="true" />
-      <span>Loading {view === 'issues' ? 'requests' : 'reviews'}…</span>
-    </div>
+    <button
+      type="button"
+      className={'co-project-control' + (showingProjects ? ' is-back' : '')}
+      onClick={showingProjects ? onBack : onOpen}
+      aria-label={showingProjects ? 'Back to current run' : `Browse ${count} projects`}
+    >
+      <Icon name={showingProjects ? 'left' : 'merge'} size={15} />
+      <span>{showingProjects ? 'Current run' : 'Projects'}</span>
+      {!showingProjects && count > 0 ? <b>{count}</b> : null}
+    </button>
   )
 }
 
@@ -160,13 +152,7 @@ export default function ContributeApp({ appId, token }) {
   const [loading, setLoading] = useState(true)
   const [ledgerReady, setLedgerReady] = useState(false)
   const [omittedCount, setOmittedCount] = useState(0)
-  const [view, setViewState] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('contribute-view-v3')
-      return CONTRIBUTION_VIEWS.includes(saved) ? saved : 'overview'
-    }
-    catch { return 'overview' }
-  })
+  const [showProjects, setShowProjects] = useState(false)
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [projectFocus, setProjectFocus] = useState('')
   const [sourceLoading, setSourceLoading] = useState(true)
@@ -175,6 +161,9 @@ export default function ContributeApp({ appId, token }) {
     state: 'loading', byId: {}, checkedAt: '',
   })
   const [reviewFocus, setReviewFocus] = useState(null)
+  const [focusedRecordLookup, setFocusedRecordLookup] = useState({
+    nonce: '', recordId: '', ready: false,
+  })
   const [incomingReviews, setIncomingReviews] = useState([])
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
@@ -184,18 +173,71 @@ export default function ContributeApp({ appId, token }) {
     phase: 'idle', chatId: '', startedAt: '', runtime: null, error: '',
   })
   const pageRef = useRef(null)
-  const tabRefs = useRef({})
+  const projectsNavRef = useRef(null)
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
   const recordsRef = useRef(records)
   useEffect(() => { recordsRef.current = records }, [records])
   const connRef = useRef(conn)
   const connectionRequestRef = useRef(0)
+  const reviewStatusRequestRef = useRef(0)
+  const incomingReviewsRequestRef = useRef(0)
   const agentStartRef = useRef(false)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
+  const ledgerReadyRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
+
+  const viewRun = useCallback(() => {
+    const handle = projectsNavRef.current
+    projectsNavRef.current = null
+    try { handle?.close?.() } catch {}
+    setProjectFocus('')
+    setShowProjects(false)
+  }, [])
+
+  const viewProjects = useCallback(async (projectKey = '') => {
+    setProjectFocus(projectKey)
+    if (projectsNavRef.current) {
+      setShowProjects(true)
+      return
+    }
+    if (!window.mobius?.nav?.open) {
+      setShowProjects(true)
+      return
+    }
+    let handle = null
+    handle = window.mobius.nav.open('contribute-projects', {
+      onBack: () => {
+        if (projectsNavRef.current !== handle) return
+        projectsNavRef.current = null
+        setProjectFocus('')
+        setShowProjects(false)
+      },
+      onForward: () => {
+        projectsNavRef.current = handle
+        setProjectFocus(projectKey)
+        setShowProjects(true)
+      },
+    })
+    projectsNavRef.current = handle
+    const outcome = await handle.outcome
+    if (projectsNavRef.current !== handle) {
+      handle.close()
+      return
+    }
+    if (!['owned', 'standalone'].includes(outcome?.status)) {
+      projectsNavRef.current = null
+      return
+    }
+    setShowProjects(true)
+  }, [])
+
+  useEffect(() => () => {
+    try { projectsNavRef.current?.close?.() } catch {}
+    projectsNavRef.current = null
+  }, [])
 
   const signalReady = useCallback((details = {}) => {
     if (readySignalRef.current) return
@@ -203,11 +245,10 @@ export default function ContributeApp({ appId, token }) {
     window.mobius?.signal?.('app_ready', details)
   }, [])
 
-  // Every app-owned agent handoff uses the durable first-turn primitive. It
-  // creates one visible chat and waits until the first request is accepted,
-  // while Contribute stays in front. The button exposes an optional link to
-  // that conversation after the start succeeds. A single in-flight guard prevents two rapid taps
-  // from creating duplicate contribution cycles.
+  // Every app-owned agent handoff uses the durable first-turn primitive. A
+  // scoped handoff is admitted atomically by the platform, so two panes or a
+  // remounted frame resolve to one exact conversation without a read/create
+  // race. The local guard exists only for immediate button feedback.
   const startAgentTask = useCallback(async (action) => {
     if (!action?.title || !action?.draft) {
       return { ok: false, error: 'This agent handoff is incomplete.' }
@@ -223,14 +264,20 @@ export default function ContributeApp({ appId, token }) {
       const started = await window.mobius.chat.start({
         title: action.title,
         draft: action.draft,
-        scope: action.scope,
+        scope: contributionActionScope(action),
         scopeLabel: action.scopeLabel,
       })
       if (!started?.chatId) throw new Error('Missing chat id')
       window.mobius?.signal?.(action.event || 'contribute_agent_handoff', {
         item_count: Number(action.count || 0),
+        outcome: started.outcome || (started.reused ? 'reused' : 'started'),
       })
-      return { ok: true, chatId: started.chatId }
+      return {
+        ok: true,
+        chatId: started.chatId,
+        reused: started.reused === true,
+        outcome: started.outcome || (started.reused ? 'reused' : 'started'),
+      }
     } catch {
       return { ok: false, error: 'Could not start the agent. Try again.' }
     } finally {
@@ -249,6 +296,7 @@ export default function ContributeApp({ appId, token }) {
             phase,
             chatId,
             startedAt: startedAt || current.startedAt,
+            scope: current.scope,
             runtime,
             error: '',
           })
@@ -273,10 +321,7 @@ export default function ContributeApp({ appId, token }) {
       let saved = await loadCycleState()
       if (!saved && typeof window.mobius?.chat?.list === 'function') {
         try {
-          let chats = await window.mobius.chat.list({ scope: 'contribute-cycle' })
-          if (!chats.length) {
-            chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
-          }
+          const chats = (await window.mobius.chat.list()).filter(isContributionCycleChat)
           chats.sort((a, b) => String(b.activity_at || b.updated_at || '').localeCompare(
             String(a.activity_at || a.updated_at || ''),
           ))
@@ -287,6 +332,7 @@ export default function ContributeApp({ appId, token }) {
               saved = {
                 chat_id: String(chat.id),
                 started_at: chat.created_at || chat.updated_at || '',
+                scope: typeof chat.scope === 'string' ? chat.scope : '',
               }
               await saveCycleState(saved)
               if (!cancelled) {
@@ -294,6 +340,7 @@ export default function ContributeApp({ appId, token }) {
                   phase,
                   chatId: saved.chat_id,
                   startedAt: saved.started_at,
+                  scope: saved.scope,
                   runtime,
                   error: '',
                 })
@@ -308,6 +355,7 @@ export default function ContributeApp({ appId, token }) {
         phase: 'checking',
         chatId: saved.chat_id,
         startedAt: saved.started_at,
+        scope: saved.scope,
         runtime: null,
         error: '',
       })
@@ -370,7 +418,7 @@ export default function ContributeApp({ appId, token }) {
     const refresh = buildRefreshQuery(recs)
     if (!refresh) return recs
     const data = await fetchLiveStates(token, refresh.query)
-    return applyLiveStates(recs, refresh.aliases, data, refresh.repoAliases)
+    return applyLiveStates(recs, refresh.aliases, data)
   }, [token])
 
   // Refresh in place: apply the fresh states to both React state and the
@@ -385,8 +433,11 @@ export default function ContributeApp({ appId, token }) {
   }, [fetchRefreshed, replaceFeed])
 
   const refreshReviewStatus = useCallback(async () => {
+    const requestId = reviewStatusRequestRef.current + 1
+    reviewStatusRequestRef.current = requestId
     setReviewStatus((current) => ({ ...current, state: 'loading' }))
     const outcome = await fetchReviewStatus(token, appId)
+    if (requestId !== reviewStatusRequestRef.current) return null
     if (outcome.ok) {
       const indexed = indexReviewStatus(outcome.data)
       setReviewStatus(indexed)
@@ -400,15 +451,6 @@ export default function ContributeApp({ appId, token }) {
     setReviewStatus(next)
     return next
   }, [token, appId])
-
-  const refreshPrePrChecksState = useCallback(async () => {
-    if (connRef.current.state !== 'connected') return { ok: false }
-    const outcome = await refreshPrePrChecks(token, appId)
-    if (outcome.ok && outcome.records.length > 0) {
-      applyRecordUpdates(outcome.records)
-    }
-    return outcome
-  }, [token, appId, applyRecordUpdates])
 
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
@@ -462,30 +504,34 @@ export default function ContributeApp({ appId, token }) {
     setConn(status)
     if (status.state === 'connected' && !fromCache) {
       runLiveRefresh(recordsRef.current)
-      refreshPrePrChecksState()
     }
     return status
-  }, [token, fromCache, runLiveRefresh, refreshPrePrChecksState])
+  }, [token, fromCache, runLiveRefresh])
 
   const refreshIncomingReviews = useCallback(async () => {
+    const requestId = incomingReviewsRequestRef.current + 1
+    incomingReviewsRequestRef.current = requestId
     if (connRef.current.state !== 'connected') {
       setIncomingReviews([])
       return []
     }
     const rows = await fetchIncomingReviews(token)
+    if (
+      requestId !== incomingReviewsRequestRef.current
+      || connRef.current.state !== 'connected'
+    ) return []
     setIncomingReviews(rows)
     return rows
   }, [token])
 
   useEffect(() => {
-    if (conn.state === 'connected') refreshIncomingReviews()
-    else setIncomingReviews([])
+    refreshIncomingReviews()
   }, [conn.state, refreshIncomingReviews])
 
-  // Mount: read the ledger and the connection status together, then run the
-  // live refresh only when GitHub is reachable and connected AND we enumerated
-  // the real ledger (fromCache means list() failed — we're offline, so skip
-  // both the refresh and the cache write).
+  // Mount: the cached first screen, GitHub status, and app preferences are all
+  // small independent reads. Publish them without holding those controls
+  // behind the much larger ledger enumeration. The live refresh still waits
+  // for both GitHub and the authoritative ledger.
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -506,8 +552,7 @@ export default function ContributeApp({ appId, token }) {
           source: 'snapshot',
         })
       }
-      const [ledger, status, appSettings] = await Promise.all([
-        ledgerPromise,
+      const [status, appSettings] = await Promise.all([
         statusPromise,
         settingsPromise,
       ])
@@ -521,32 +566,41 @@ export default function ContributeApp({ appId, token }) {
           ? savedMethod
           : (status.state === 'connected' ? 'github' : 'mobius'),
       )
+      connRef.current = status
+      setConn(status)
+
+      const ledger = await ledgerPromise
+      if (cancelled) return
       const recs = ledger.records
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
       setRecords(recs)
       setFromCache(ledger.fromCache)
-      setConn(status)
       setLoading(false)
+      ledgerReadyRef.current = true
       setLedgerReady(true)
       signalReady({ item_count: recs.length })
 
       if (ledger.fromCache) return
       let toCache = recs
+      let feedReplaced = false
       if (status.state === 'connected') {
         const next = await fetchRefreshed(recs)
         if (cancelled) return
         if (next !== recs) {
-          recordsRef.current = next
-          setRecords(next)
-          toCache = next
+          // A public action or focused exact read may have advanced one row
+          // while the mount-time GitHub overlay was in flight. Reconcile at
+          // settlement so that slower startup work cannot overwrite it.
+          toCache = replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
+          feedReplaced = true
         }
       }
-      cacheFeed(toCache)
+      if (!feedReplaced) cacheFeed(toCache)
     }
     load().catch((err) => {
       if (cancelled) return
       setLoading(false)
+      ledgerReadyRef.current = true
       setLedgerReady(true)
       signalReady({ item_count: recordsRef.current.length })
       window.mobius?.signal?.('error', {
@@ -555,7 +609,7 @@ export default function ContributeApp({ appId, token }) {
       })
     })
     return () => { cancelled = true }
-  }, [token, fetchRefreshed, signalReady])
+  }, [token, fetchRefreshed, replaceFeed, signalReady])
 
   // Event-driven liveness: refresh when the app becomes actionable again.
   // Focus + visibility can fire together, and an online transition can land
@@ -565,9 +619,9 @@ export default function ContributeApp({ appId, token }) {
   const refreshWorkRef = useRef(null)
   const runRefreshWork = useCallback(async () => {
     if (document.visibilityState !== 'visible') return
-    if (connRef.current.state === 'connected') {
-      await refreshPrePrChecksState()
-    }
+    // Mount already owns the first authoritative scan. Startup focus and
+    // visibility events must not queue another full pass behind it.
+    if (!ledgerReadyRef.current) return
     const [ledger] = await Promise.all([
       loadLedger(),
       refreshReviewStatus(),
@@ -581,7 +635,7 @@ export default function ContributeApp({ appId, token }) {
       replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
       setFromCache(false)
     }
-  }, [fetchRefreshed, refreshPrePrChecksState, refreshReviewStatus, replaceFeed])
+  }, [fetchRefreshed, refreshReviewStatus, replaceFeed])
   refreshWorkRef.current = runRefreshWork
   const refreshCoordinatorRef = useRef(null)
   if (!refreshCoordinatorRef.current) {
@@ -607,33 +661,9 @@ export default function ContributeApp({ appId, token }) {
     }
   }, [])
 
-  const hasActivePrePrChecks = records.some(
-    (rec) => prePrCheckPhase(rec) === 'running',
-  )
-  useEffect(() => {
-    if (!hasActivePrePrChecks || conn.state !== 'connected') return undefined
-    let cancelled = false
-    let timer = null
-    const poll = async () => {
-      await refreshPrePrChecksState()
-      if (!cancelled) timer = window.setTimeout(poll, 15000)
-    }
-    timer = window.setTimeout(poll, 2500)
-    return () => {
-      cancelled = true
-      if (timer) window.clearTimeout(timer)
-    }
-  }, [hasActivePrePrChecks, conn.state, refreshPrePrChecksState])
-
-  const setView = useCallback((next) => {
-    if (!CONTRIBUTION_VIEWS.includes(next)) next = 'overview'
-    setViewState(next)
-    try { sessionStorage.setItem('contribute-view-v3', next) } catch { /* optional */ }
-  }, [])
-
   // Shell review cards use the platform's one-shot app-intent rail. The card
   // names only the ledger record; this app resolves the record's current stage
-  // and enclosing stack after the authoritative ledger arrives.
+  // and enclosing stack from authoritative storage.
   useEffect(() => {
     function onReviewIntent(event) {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
@@ -643,36 +673,161 @@ export default function ContributeApp({ appId, token }) {
       setReviewFocus({
         ...target,
         nonce: String(event.data.nonce ?? Date.now()),
+        refreshMountedLedger: ledgerReadyRef.current,
       })
-      setView('prs')
+      viewRun()
       window.mobius?.signal?.('contribution_review_opened', { id: target.recordId })
     }
     window.addEventListener('message', onReviewIntent)
     return () => window.removeEventListener('message', onReviewIntent)
-  }, [setView])
+  }, [viewRun])
+
+  // A queue intent has no exact record to fresh-read. If it arrived after the
+  // app had already mounted, join the same deduplicated foreground refresh as
+  // focus/visibility events before exposing the queue. An intent that arrived
+  // during the initial authoritative scan can use that scan when it settles.
+  useEffect(() => {
+    const nonce = reviewFocus?.nonce
+    if (!reviewFocus?.queue || !nonce) return undefined
+    let cancelled = false
+    let resolving = false
+    setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: false })
+
+    const resolveFocusedQueue = async () => {
+      if (cancelled || resolving || !ledgerReadyRef.current) return
+      if (!reviewFocus.refreshMountedLedger) {
+        setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: true })
+        return
+      }
+      if (document.visibilityState !== 'visible') return
+      resolving = true
+      try {
+        await refreshCoordinatorRef.current()
+        if (!cancelled) {
+          setFocusedRecordLookup({ nonce, recordId: '', queue: true, ready: true })
+        }
+      } finally {
+        resolving = false
+      }
+    }
+
+    resolveFocusedQueue()
+    document.addEventListener('visibilitychange', resolveFocusedQueue)
+    window.addEventListener('focus', resolveFocusedQueue)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', resolveFocusedQueue)
+      window.removeEventListener('focus', resolveFocusedQueue)
+    }
+  }, [reviewFocus?.queue, reviewFocus?.nonce, reviewFocus?.refreshMountedLedger, ledgerReady])
+
+  // The full contribution history is intentionally loaded in the background,
+  // but it can span hundreds of records. Fetch the exact focused row directly,
+  // then render as soon as the active snapshot contains either that standalone
+  // record or every layer in its stack. Public actions still fresh-read their
+  // exact records, so this fast path changes navigation latency, not authority.
+  useEffect(() => {
+    const recordId = reviewFocus?.recordId
+    const nonce = reviewFocus?.nonce
+    if (reviewFocus?.queue || !recordId || !nonce) return undefined
+    let cancelled = false
+    let resolvingStack = false
+    let needsStackRefresh = false
+    setFocusedRecordLookup({ nonce, recordId, ready: false })
+
+    const resolveIncompleteStack = async () => {
+      if (
+        cancelled
+        || resolvingStack
+        || !needsStackRefresh
+        || !ledgerReadyRef.current
+        || window.mobius?.online === false
+        || document.visibilityState !== 'visible'
+      ) return
+      resolvingStack = true
+      try {
+        await refreshCoordinatorRef.current()
+        if (!cancelled) setFocusedRecordLookup({ nonce, recordId, ready: true })
+      } finally {
+        resolvingStack = false
+      }
+    }
+
+    async function resolveFocusedReview() {
+      const record = await loadContributionRecord(recordId)
+      if (cancelled) return
+      if (!record) {
+        if (window.mobius?.online === false) {
+          // An absent offline cache entry is not proof that the review was
+          // deleted. A complete cached unit may still open safely; otherwise
+          // keep waiting for a real foreground read.
+          if (focusedContributionReady(recordsRef.current, recordId)) {
+            setFocusedRecordLookup({ nonce, recordId, ready: true })
+          } else {
+            needsStackRefresh = true
+          }
+          return
+        }
+        // Both canonical and legacy exact reads settled without a record. This
+        // is the only focused path that may truthfully report disappearance
+        // without waiting for the larger ledger scan.
+        setFocusedRecordLookup({ nonce, recordId, ready: true })
+        return
+      }
+
+      const next = upsertRecord(recordsRef.current, record)
+      recordsRef.current = next
+      setRecords(next)
+      setLoading(false)
+      if (focusedContributionReady(next, recordId)) {
+        setFocusedRecordLookup({ nonce, recordId, ready: true })
+        return
+      }
+
+      // A focused stack record does not name every sibling. If the mounted
+      // app's prior ledger predates this stack, join the existing deduplicated
+      // foreground refresh rather than creating a third full-history reader.
+      // Mount already owns the same scan while the first ledger is loading.
+      needsStackRefresh = true
+      await resolveIncompleteStack()
+    }
+    document.addEventListener('visibilitychange', resolveIncompleteStack)
+    window.addEventListener('focus', resolveIncompleteStack)
+    window.addEventListener('online', resolveIncompleteStack)
+    resolveFocusedReview().catch(() => {
+      // A failed direct read is not proof that the review disappeared. Keep
+      // waiting for any foreground ledger refresh instead.
+      if (!cancelled) setFocusedRecordLookup({ nonce, recordId, ready: false })
+    })
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', resolveIncompleteStack)
+      window.removeEventListener('focus', resolveIncompleteStack)
+      window.removeEventListener('online', resolveIncompleteStack)
+    }
+  }, [reviewFocus?.recordId, reviewFocus?.nonce, ledgerReady])
 
   const consumeReviewFocus = useCallback((nonce) => {
     setReviewFocus((current) => current?.nonce === nonce ? null : current)
   }, [])
 
-  const viewProjects = useCallback((projectKey = '') => {
-    setProjectFocus(projectKey)
-    setView('sources')
-  }, [setView])
+  const focusedReviewReady = focusedContributionNavigationReady(
+    reviewFocus,
+    focusedRecordLookup,
+    records,
+  )
 
-  const onTabKeyDown = useCallback((event) => {
-    const current = CONTRIBUTION_VIEWS.indexOf(event.currentTarget.dataset.view)
-    let index = current
-    if (event.key === 'ArrowRight') index = (current + 1) % CONTRIBUTION_VIEWS.length
-    else if (event.key === 'ArrowLeft') index = (current - 1 + CONTRIBUTION_VIEWS.length) % CONTRIBUTION_VIEWS.length
-    else if (event.key === 'Home') index = 0
-    else if (event.key === 'End') index = CONTRIBUTION_VIEWS.length - 1
-    else return
-    event.preventDefault()
-    const next = CONTRIBUTION_VIEWS[index]
-    setView(next)
-    requestAnimationFrame(() => tabRefs.current[next]?.focus())
-  }, [setView])
+  const openProjectReview = useCallback((record, projectKey = '') => {
+    if (!record?.id) return
+    setProjectFocus(projectKey)
+    setShowProjects(false)
+    setReviewFocus({
+      recordId: record.id,
+      returnProjectKey: projectKey,
+      nonce: `project:${record.id}:${Date.now()}`,
+      refreshMountedLedger: ledgerReadyRef.current,
+    })
+  }, [])
 
   const loadProjectDiff = useCallback(
     (project) => fetchSourceDiff(token, project),
@@ -684,35 +839,68 @@ export default function ContributeApp({ appId, token }) {
   // feed position never shifts the map header or couples the two scroll modes.
   useEffect(() => {
     pageRef.current?.scrollTo({ top: 0, left: 0 })
-  }, [view])
+  }, [showProjects])
 
   // New PRs use the owner's selected publication path. An existing-PR update
   // stays on the personal GitHub identity that owns its public branch. Both
   // actions consume one exact reviewed record and remain explicit clicks.
   const onSend = useCallback(async (rec) => {
-    const updating = rec.plan?.action === 'pr_update'
+    let canonical = null
+    try {
+      canonical = await loadFreshContributionRecord(rec.id)
+    } catch { /* handled by the safe refresh error below */ }
+    if (!canonical) {
+      return {
+        error: 'Contribute could not refresh the saved review. Nothing was sent; try again once it reconnects.',
+        failure: { owner: 'automatic' },
+      }
+    }
+    const refreshed = { ...canonical, path: canonical.path || rec.path }
+    applyRecordUpdates(refreshed)
+    if (!contributionApprovalIsCurrent(rec, refreshed)) {
+      return stalePublicApproval()
+    }
+    if (
+      refreshed.status === 'prepared' &&
+      qualityReviewFor(refreshed).state !== 'all_clear'
+    ) {
+      return {
+        reviewNeeded: true,
+        record: refreshed,
+        error: 'Review this exact version first. The Review action is ready on this card.',
+        failure: { owner: 'agent' },
+      }
+    }
+    const updating = refreshed.plan?.action === 'pr_update'
     let viaMobius = false
     let outcome
     if (updating) {
       if (connRef.current.state !== 'connected') {
-        return { error: 'Connect GitHub before updating this pull request.' }
+        return {
+          error: 'Connect GitHub before updating this pull request.',
+          failure: { owner: 'owner', code: 'github_not_connected' },
+        }
       }
-      outcome = await updateContribution({ appId, token, rec })
+      outcome = await updateContribution({ appId, token, rec: refreshed })
     } else {
       const decision = contributionPathDecision(
-        rec,
+        refreshed,
         submissionMethod,
         connRef.current.state,
       )
-      if (decision.error) return { error: decision.error }
+      if (decision.error) return {
+        error: decision.error,
+        failure: { owner: 'owner' },
+      }
       viaMobius = decision.method === 'mobius'
       outcome = viaMobius
-        ? await submitContributionViaMobius({ appId, token, rec })
+        ? await submitContributionViaMobius({ appId, token, rec: refreshed })
         : await submitContribution({
             appId,
             token,
-            rec,
+            rec: refreshed,
             autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
+            publicationStage: 'ready',
           })
     }
     if (outcome.ok) {
@@ -739,8 +927,7 @@ export default function ContributeApp({ appId, token }) {
     }
     if (outcome.alreadyHandled) {
       try {
-        const ledger = await loadLedger()
-        const fresh = ledger.records.find((item) => item.id === rec.id)
+        const fresh = await loadFreshContributionRecord(rec.id)
         if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
       } catch { /* the ordinary refresh below remains authoritative */ }
       refreshReviewStatus()
@@ -761,7 +948,11 @@ export default function ContributeApp({ appId, token }) {
           await new Promise((resolve) => window.setTimeout(resolve, 450))
         }
         try {
-          resolution = resolveUncertainSubmission(rec, await loadLedger())
+          const fresh = await loadFreshContributionRecord(rec.id)
+          resolution = resolveUncertainSubmission(rec, {
+            records: fresh ? [fresh] : [],
+            fromCache: window.mobius.online === false,
+          })
         } catch {
           resolution = { state: 'unconfirmed', record: null }
         }
@@ -791,16 +982,23 @@ export default function ContributeApp({ appId, token }) {
         }
         if (resolution.state === 'blocked') {
           refreshReviewStatus()
-          return { error: 'Nothing was sent. This contribution needs an update before you try again.' }
+          return {
+            error: 'Nothing was sent. This contribution needs an update before you try again.',
+            failure: { owner: 'agent', code: 'review_refresh_needed' },
+          }
         }
       }
       refreshReviewStatus()
       return {
         error: 'We could not confirm the result. Reopen Contribute to check before trying again; a retry will not create a duplicate.',
+        failure: { owner: 'automatic' },
       }
     }
     refreshReviewStatus()
-    return { error: outcome.error || 'Could not submit this PR.' }
+    return {
+      error: outcome.error || 'Could not submit this PR.',
+      failure: outcome.failure,
+    }
   }, [
     appId,
     token,
@@ -809,6 +1007,86 @@ export default function ContributeApp({ appId, token }) {
     applyRecordUpdates,
     refreshReviewStatus,
   ])
+
+  const onMarkReady = useCallback(async (rec) => {
+    let canonical = null
+    try {
+      canonical = await loadFreshContributionRecord(rec.id)
+    } catch { /* handled by the safe error below */ }
+    if (!canonical) {
+      return {
+        error: 'Contribute could not refresh this draft. Nothing changed; try again once it reconnects.',
+        failure: { owner: 'automatic' },
+      }
+    }
+    const current = { ...canonical, path: canonical.path || rec.path }
+    applyRecordUpdates(current)
+    if (!contributionApprovalIsCurrent(rec, current)) {
+      return stalePublicApproval()
+    }
+    if (current.status === 'open') return { alreadyHandled: true, record: current }
+    if (current.status !== 'draft' || current.submission_mode === 'mobius-bot') {
+      return {
+        error: current.submission_mode === 'mobius-bot'
+          ? 'Möbius relay drafts cannot request review from this connection yet.'
+          : 'This pull request is no longer a personal draft.',
+        failure: { owner: 'owner', code: 'ready_not_available' },
+      }
+    }
+
+    let outcome = await markContributionReady({ appId, token, rec: current })
+    if (outcome.record) {
+      applyRecordUpdates({ ...outcome.record, path: current.path })
+    }
+    if (outcome.ok) {
+      const next = { ...outcome.ok, path: current.path }
+      applyRecordUpdates(next)
+      refreshReviewStatus()
+      window.mobius?.signal?.('contribution_ready_for_review', {
+        id: next.id,
+        url: outcome.url || next.url || '',
+      })
+      return { ok: true, record: next }
+    }
+
+    if (outcome.uncertain) {
+      let fresh = null
+      try { fresh = await loadFreshContributionRecord(rec.id) } catch { /* keep uncertain */ }
+      if (fresh?.status === 'open') {
+        const next = { ...fresh, path: current.path }
+        applyRecordUpdates(next)
+        refreshReviewStatus()
+        return { ok: true, record: next }
+      }
+      if (fresh?.readying) {
+        // The durable claim proves the earlier owner approval reached Möbius.
+        // Repeating this route is read-only reconciliation; it cannot issue a
+        // second GitHub mutation.
+        outcome = await markContributionReady({ appId, token, rec: fresh })
+        if (outcome.record) {
+          applyRecordUpdates({ ...outcome.record, path: current.path })
+        }
+        if (outcome.ok) {
+          const next = { ...outcome.ok, path: current.path }
+          applyRecordUpdates(next)
+          refreshReviewStatus()
+          return { ok: true, record: next }
+        }
+      }
+      refreshReviewStatus()
+      return {
+        pending: Boolean(fresh?.readying || outcome.record?.readying),
+        error: outcome.error || 'Review-stage confirmation is still being reconciled.',
+        failure: outcome.failure || { owner: 'automatic' },
+      }
+    }
+
+    refreshReviewStatus()
+    return {
+      error: outcome.error || 'Could not request review for this pull request.',
+      failure: outcome.failure,
+    }
+  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
   const relaySubmittingIds = useMemo(() => records
     .filter((rec) => (
@@ -846,52 +1124,36 @@ export default function ContributeApp({ appId, token }) {
           }
         }
       }
-      if (!cancelled) timer = window.setTimeout(poll, 2500)
+      if (!cancelled) timer = window.setTimeout(poll, 30000)
     }
-    timer = window.setTimeout(poll, 800)
+    timer = window.setTimeout(poll, 1200)
     return () => {
       cancelled = true
       if (timer) window.clearTimeout(timer)
     }
   }, [relaySubmittingIds, appId, token, applyRecordUpdates])
 
-  const onRunPrePrChecks = useCallback(async (rec) => {
-    const outcome = await runPrePrChecks({ appId, token, rec })
+  const onWithdraw = useCallback(async (rec) => {
+    const outcome = await withdrawMobiusContribution({ appId, token, rec })
     if (outcome.ok) {
       const next = { ...outcome.ok, path: rec.path }
       applyRecordUpdates(next)
-      window.mobius?.signal?.('pre_pr_checks_started', {
-        id: rec.id,
-        url: next.pre_pr_checks?.url || '',
-      })
-      return { ok: true, record: next }
-    }
-    if (outcome.record) {
-      applyRecordUpdates({ ...outcome.record, path: rec.path })
+      window.mobius?.signal?.('contribution_withdrawn', { id: rec.id })
+      refreshReviewStatus()
+      return { ok: next }
     }
     if (outcome.uncertain) {
       try {
-        const ledger = await loadLedger()
-        const fresh = ledger.records.find((item) => item.id === rec.id)
-        if (fresh) {
-          applyRecordUpdates({ ...fresh, path: rec.path })
-          const phase = prePrCheckPhase(fresh)
-          if (phase === 'running') {
-            return { pending: true, record: fresh }
-          }
-          if (phase === 'passed') return { ok: true, record: fresh }
-          if (phase === 'failed') {
-            return { error: fresh.pre_pr_checks?.message || outcome.error }
-          }
+        const fresh = await loadFreshContributionRecord(rec.id)
+        if (fresh?.status === 'closed') {
+          const next = { ...fresh, path: rec.path }
+          applyRecordUpdates(next)
+          return { ok: next }
         }
-      } catch { /* the visibility refresh remains authoritative */ }
-      return { pending: true }
+      } catch { /* keep the explicit uncertain result */ }
     }
-    return {
-      error: outcome.error || 'Could not start GitHub checks.',
-      unsupported: outcome.unsupported,
-    }
-  }, [appId, token, applyRecordUpdates])
+    return outcome
+  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
   // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
   // write); on success we re-read that record so the mirrored autopilot block
@@ -902,8 +1164,7 @@ export default function ContributeApp({ appId, token }) {
     })
     if (outcome.ok) {
       try {
-        const ledger = await loadLedger()
-        const fresh = ledger.records.find((r) => r.id === rec.id)
+        const fresh = await loadFreshContributionRecord(rec.id)
         if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
       } catch { /* the next refresh reconciles */ }
       return { ok: true }
@@ -976,6 +1237,10 @@ export default function ContributeApp({ appId, token }) {
         error: 'Assigned on GitHub, but the review conversation did not start. Try again to resume it.',
       }
     }
+    // The assignment settled after any earlier incoming-review request began.
+    // Invalidate that request before hiding this row so its stale response
+    // cannot put the just-assigned review back into the queue.
+    incomingReviewsRequestRef.current += 1
     setIncomingReviews((current) => current.filter((row) => row.url !== item.url))
     return { ok: true }
   }, [appId, token, startAgentTask])
@@ -985,68 +1250,119 @@ export default function ContributeApp({ appId, token }) {
   // child creation bounced), so merge every returned ledger record rather
   // than treating the stack as all-or-nothing after public work has begun.
   const onSendStack = useCallback(async (stackRecords) => {
-    const decision = contributionStackDecision(
-      stackRecords,
-      submissionMethod,
-      connRef.current.state,
-    )
-    if (decision.error) return { error: decision.error }
-    if (decision.method === 'mobius') {
+    let freshRecords = []
+    try {
+      freshRecords = await loadFreshContributionRecords(
+        stackRecords.map((rec) => rec.id),
+      )
+    } catch { /* handled by the complete-set check below */ }
+    const freshById = new Map(freshRecords.map((rec) => [rec.id, rec]))
+    const currentRecords = stackRecords.flatMap((approved) => {
+      const current = freshById.get(approved.id)
+      return current ? [{ ...current, path: current.path || approved.path }] : []
+    })
+    if (currentRecords.length !== stackRecords.length) {
       return {
-        error: 'Related PR stacks still use your personal GitHub connection. Connect GitHub and choose Personal GitHub, or prepare these as independent changes.',
+        error: 'Contribute could not refresh the complete reviewed chain. Nothing was sent; try again once it reconnects.',
+        failure: { owner: 'automatic' },
       }
     }
-    const outcome = await submitContributionStack({
+    applyRecordUpdates(currentRecords)
+    if (stackRecords.some((approved, index) => (
+      !contributionApprovalIsCurrent(approved, currentRecords[index])
+    ))) {
+      return stalePublicApproval()
+    }
+
+    const updating = currentRecords.every(
+      (rec) => rec?.plan?.action === 'pr_update',
+    )
+    if (updating && connRef.current.state !== 'connected') {
+      return {
+        error: 'Connect Personal GitHub before updating these pull requests.',
+        failure: { owner: 'owner', code: 'github_not_connected' },
+      }
+    }
+    if (!updating) {
+      const decision = contributionStackDecision(
+        currentRecords,
+        submissionMethod,
+        connRef.current.state,
+      )
+      if (decision.error) return {
+        error: decision.error,
+        failure: { owner: 'owner' },
+      }
+      if (decision.method === 'mobius') {
+        return {
+          error: 'Related PR stacks use Personal GitHub; the Möbius relay supports standalone drafts only.',
+          failure: { owner: 'owner', code: 'github_not_connected' },
+        }
+      }
+    }
+    const writeStack = updating
+      ? updateContributionStack
+      : submitContributionStack
+    const outcome = await writeStack({
       appId,
       token,
-      recordIds: stackRecords.map((rec) => rec.id),
+      recordIds: currentRecords.map((rec) => rec.id),
+      publicationStage: 'ready',
     })
     const updates = outcome.ok || outcome.records || []
     if (updates.length > 0) {
       applyRecordUpdates(updates)
     }
     if (outcome.ok) {
-      window.mobius?.signal?.('contribution_stack_submitted', {
-        stack_id: stackRecords[0]?.plan?.stack?.id || '',
-        item_count: outcome.submitted?.length || 0,
-      })
+      window.mobius?.signal?.(
+        updating ? 'contribution_stack_updated' : 'contribution_stack_submitted',
+        {
+          stack_id: currentRecords[0]?.plan?.stack?.id || '',
+          item_count: outcome.submitted?.length || 0,
+        },
+      )
       refreshReviewStatus()
       return { ok: true, submitted: outcome.submitted?.length || 0 }
     }
     if (outcome.alreadyHandled) {
       try {
-        const ledger = await loadLedger()
-        const wanted = new Set(stackRecords.map((rec) => rec.id))
-        const fresh = ledger.records
+        const wanted = new Set(currentRecords.map((rec) => rec.id))
+        const fresh = (await loadFreshContributionRecords([...wanted]))
           .filter((rec) => wanted.has(rec.id))
-          .map((rec) => ({ ...rec, path: stackRecords.find((item) => item.id === rec.id)?.path }))
+          .map((rec) => ({ ...rec, path: currentRecords.find((item) => item.id === rec.id)?.path }))
         if (fresh.length > 0) applyRecordUpdates(fresh)
       } catch { /* the ordinary refresh below remains authoritative */ }
       refreshReviewStatus()
       return { alreadyHandled: true }
     }
     if (outcome.uncertain) {
-      let resolutions = stackRecords.map(() => ({ state: 'unconfirmed', record: null }))
+      let resolutions = currentRecords.map(() => ({ state: 'unconfirmed', record: null }))
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (attempt > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, 450))
         }
         try {
-          const ledger = await loadLedger()
-          resolutions = stackRecords.map((rec) => resolveUncertainSubmission(rec, ledger))
+          const records = await loadFreshContributionRecords(
+            currentRecords.map((rec) => rec.id),
+          )
+          const ledger = {
+            records,
+            fromCache: window.mobius.online === false,
+          }
+          resolutions = currentRecords.map((rec) => resolveUncertainSubmission(rec, ledger))
         } catch {
-          resolutions = stackRecords.map(() => ({ state: 'unconfirmed', record: null }))
+          resolutions = currentRecords.map(() => ({ state: 'unconfirmed', record: null }))
         }
         if (resolutions.every(isSubmissionResolutionSettled)) break
       }
       const durable = resolutions.flatMap((item, index) => item.record
-        ? [{ ...item.record, path: stackRecords[index].path }]
+        ? [{ ...item.record, path: currentRecords[index].path }]
         : [])
       if (durable.length > 0) applyRecordUpdates(durable)
       const summary = summarizeSubmissionResolutions(resolutions)
       if (summary.state === 'published') {
         window.mobius?.signal?.('contribution_stack_submitted', {
-          stack_id: stackRecords[0]?.plan?.stack?.id || '',
+          stack_id: currentRecords[0]?.plan?.stack?.id || '',
           item_count: summary.published,
           reconciled: true,
         })
@@ -1067,14 +1383,19 @@ export default function ContributeApp({ appId, token }) {
           error: summary.published > 0
             ? 'Saved progress was restored. The remaining changes show what needs updating.'
             : 'Nothing was sent. These changes need an update before you try again.',
+          failure: { owner: 'agent', code: 'review_refresh_needed' },
         }
       }
       return {
         error: 'We could not confirm the result. Reopen Contribute to check before trying again; a retry will not create duplicates.',
+        failure: { owner: 'automatic' },
       }
     }
     refreshReviewStatus()
-    return { error: outcome.error || 'Could not submit this PR stack.' }
+    return {
+      error: outcome.error || 'Could not submit this PR stack.',
+      failure: outcome.failure,
+    }
   }, [
     appId,
     token,
@@ -1082,82 +1403,6 @@ export default function ContributeApp({ appId, token }) {
     applyRecordUpdates,
     refreshReviewStatus,
   ])
-
-  // Landing is a second public action with its own explicit confirmation. The
-  // platform advances only an unchanged, unprotected app branch after proving
-  // the exact reviewed chain and every PR's CI result. As with Send, a lost
-  // browser response is reconciled from the durable ledger before any retry.
-  const onLandStack = useCallback(async (stackRecords) => {
-    const outcome = await landContributionStack({
-      appId,
-      token,
-      recordIds: stackRecords.map((rec) => rec.id),
-    })
-    const updates = outcome.ok || outcome.records || []
-    if (updates.length > 0) applyRecordUpdates(updates)
-    if (outcome.ok) {
-      window.mobius?.signal?.('contribution_stack_landed', {
-        stack_id: stackRecords[0]?.plan?.stack?.id || '',
-        item_count: outcome.ok.length,
-        target_branch: outcome.targetBranch || '',
-      })
-      refreshReviewStatus()
-      return { ok: true, landed: outcome.ok.length }
-    }
-    if (outcome.uncertain) {
-      let resolution = { state: 'unconfirmed', records: [] }
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (attempt > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, 450))
-        }
-        try {
-          resolution = resolveUncertainLanding(stackRecords, await loadLedger())
-        } catch {
-          resolution = { state: 'unconfirmed', records: [] }
-        }
-        if (resolution.state !== 'unconfirmed') break
-      }
-      if (resolution.records.length > 0) {
-        applyRecordUpdates(resolution.records.map((rec, index) => ({
-          ...rec,
-          path: stackRecords.find((item) => item.id === rec.id)?.path ||
-            stackRecords[index]?.path,
-        })))
-      }
-      if (resolution.state === 'landed') {
-        refreshReviewStatus()
-        return { ok: true, landed: resolution.records.length }
-      }
-      if (resolution.state === 'landing') {
-        // The durable `landing` journal is explicit prior approval. Repeating
-        // the same endpoint cannot push again: the platform takes the source
-        // lock, reads the exact upstream ref, and only settles the saved result.
-        const recovered = await landContributionStack({
-          appId,
-          token,
-          recordIds: stackRecords.map((rec) => rec.id),
-        })
-        const recoveredUpdates = recovered.ok || recovered.records || []
-        if (recoveredUpdates.length > 0) applyRecordUpdates(recoveredUpdates)
-        refreshReviewStatus()
-        if (recovered.ok) return { ok: true, landed: recovered.ok.length }
-        return {
-          pending: recovered.uncertain,
-          error: recovered.error || 'Landing is still being reconciled from its saved journal.',
-        }
-      }
-      if (resolution.state === 'blocked') {
-        refreshReviewStatus()
-        return { error: resolution.records.find((rec) => rec.last_land_error)?.last_land_error || 'Nothing was changed.' }
-      }
-      refreshReviewStatus()
-      return {
-        error: 'We could not confirm the landing. Reopen Contribute before trying again.',
-      }
-    }
-    refreshReviewStatus()
-    return { error: outcome.error || 'Could not land this PR stack.' }
-  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
   // Feedback = return to the chat that created the contribution, with a small
   // draft already pointing at the exact record. Attention follow-ups can pass
@@ -1175,15 +1420,18 @@ export default function ContributeApp({ appId, token }) {
       'Feedback on contribution ' + rec.id +
       ' ("' + (rec.title || 'untitled') + '"): '
     )
+    // App frames have an opaque origin, so `*` is required for this one hop to
+    // the direct parent. AppCanvas accepts it only from the exact mounted live
+    // contentWindow and narrows the message before the shell sees chat metadata.
     window.parent.postMessage(
       { type: 'moebius:open-chat', chatId: rec.chat_id, draft },
-      window.location.origin)
+      '*')
     window.mobius?.signal?.('contribution_feedback_opened', { id: rec.id })
     return { ok: true }
   }, [])
 
   // Dismiss = CAS flip to abandoned (storage.js owns the If-Match dance). On
-  // success the record moves to History in place; on a conflict the feed is
+  // success the record moves to the Run's Dismissed fold in place; on a conflict the feed is
   // reloaded so the card shows whatever actually happened to it.
   const onDismiss = useCallback(async (rec) => {
     const outcome = await abandonPrepared({ appId, token, rec })
@@ -1194,17 +1442,19 @@ export default function ContributeApp({ appId, token }) {
       applyRecordUpdates(flipped)
       refreshReviewStatus()
       window.mobius?.signal?.('contribution_dismissed', { id: rec.id })
-    } else if (outcome.conflict !== undefined || outcome.gone) {
-      const ledger = await loadLedger()
-      if (!ledger.fromCache) {
-        replaceFeed(ledger.records)
-      }
+    } else if (outcome.conflict) {
+      applyRecordUpdates({ ...outcome.conflict, path: rec.path })
+    } else if (outcome.gone) {
+      replaceFeed(recordsRef.current.filter((item) => item.id !== rec.id))
+    } else if (outcome.conflict === null) {
+      const fresh = await loadFreshContributionRecord(rec.id)
+      if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
     }
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   // Restore = CAS flip an archived record back to `prepared`. Mirrors onDismiss:
-  // on success it moves from History back to Ready for review in place; on a
+  // on success it moves from Dismissed back to the current Run in place; on a
   // conflict/gone the feed reloads so the card reflects reality.
   const onRestore = useCallback(async (rec) => {
     const outcome = await restoreAbandoned({ appId, token, rec })
@@ -1213,62 +1463,37 @@ export default function ContributeApp({ appId, token }) {
       applyRecordUpdates(flipped)
       refreshReviewStatus()
       window.mobius?.signal?.('contribution_restored', { id: rec.id })
-    } else if (outcome.conflict !== undefined || outcome.gone) {
-      const ledger = await loadLedger()
-      if (!ledger.fromCache) {
-        replaceFeed(ledger.records)
-      }
+    } else if (outcome.conflict) {
+      applyRecordUpdates({ ...outcome.conflict, path: rec.path })
+    } else if (outcome.gone) {
+      replaceFeed(recordsRef.current.filter((item) => item.id !== rec.id))
+    } else if (outcome.conflict === null) {
+      const fresh = await loadFreshContributionRecord(rec.id)
+      if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
     }
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
-  const prRecords = useMemo(
-    () => records.filter((rec) => rec.type === 'pr'),
-    [records],
-  )
-  const issueRecords = useMemo(
-    () => records.filter((rec) => ISSUE_TYPES.has(rec.type)),
-    [records],
-  )
-  const visibleRecords = view === 'issues' ? issueRecords : prRecords
-  const prGroups = useMemo(() => groupRecords(prRecords), [prRecords])
-  const issueGroups = useMemo(() => groupRecords(issueRecords), [issueRecords])
-  const groups = view === 'issues' ? issueGroups : prGroups
-  const readyPrUnits = useMemo(() => {
-    const units = preparedContributionUnits(prGroups.ready, prRecords)
-    return partitionReviewUnits(units, reviewStatus).readyToSend
-  }, [prGroups.ready, prRecords, reviewStatus])
-  const readyPrCount = readyPrUnits.reduce(
-    (total, unit) => total + unit.records.filter(
-      (rec) => rec.status === 'prepared',
-    ).length,
-    0,
-  )
   const sourceProjects = useMemo(
     () => attachSourceProjects(sourceSnapshot, records),
     [sourceSnapshot, records],
   )
-  const actionableProjects = useMemo(
-    () => actionableSourceProjects(sourceProjects),
-    [sourceProjects],
-  )
-  const cycleAction = useMemo(
-    () => finishContributionCycleAction(
-      prRecords,
-      reviewStatus,
-      actionableProjects.length,
-    ),
-    [prRecords, reviewStatus, actionableProjects.length],
-  )
-  const onStartCycle = useCallback(async () => {
-    if (!cycleAction) return
+  const contributionRun = useMemo(() => buildContributionRun({
+    records,
+    reviewStatus,
+    projects: sourceProjects,
+    incomingReviews,
+  }), [records, reviewStatus, sourceProjects, incomingReviews])
+  const cycleAction = contributionRun.privateAction
+  const onStartCycle = useCallback(async (requestedAction = cycleAction) => {
+    if (!requestedAction) return
+    const scope = contributionActionScope(requestedAction)
     setCycle({
-      phase: 'starting', chatId: '', startedAt: '', runtime: null, error: '',
+      phase: 'starting', chatId: '', startedAt: '', scope, runtime: null, error: '',
     })
     const outcome = await startAgentTask({
-      ...cycleAction,
-      scope: 'contribute-cycle',
-      scopeLabel: 'Contribution cycle',
+      ...requestedAction,
+      scopeLabel: 'Private contribution work',
     })
     if (!outcome.ok) {
       setCycle({
@@ -1278,10 +1503,11 @@ export default function ContributeApp({ appId, token }) {
       return
     }
     const startedAt = new Date().toISOString()
-    const saved = { chat_id: outcome.chatId, started_at: startedAt }
+    const saved = { chat_id: outcome.chatId, started_at: startedAt, scope }
     await saveCycleState(saved)
     setCycle({
       phase: 'running', chatId: outcome.chatId, startedAt,
+      scope,
       runtime: { running: true }, error: '',
     })
     await refreshCycle(outcome.chatId, startedAt)
@@ -1327,29 +1553,16 @@ export default function ContributeApp({ appId, token }) {
   const onOpenCycle = useCallback(() => {
     openAgentConversation(cycle.chatId)
   }, [cycle.chatId])
-  const qualitySummary = useMemo(
-    () => summarizeQualityReviews(prRecords, reviewStatus),
-    [prRecords, reviewStatus],
-  )
-  const attentionPrCount = useMemo(
-    () => contributionsNeedingAttention(prRecords, reviewStatus).length,
-    [prRecords, reviewStatus],
-  )
-  const runningCheckCount = useMemo(
-    () => prRecords.filter((rec) => prePrCheckPhase(rec) === 'running').length,
-    [prRecords],
-  )
-  const activePublicPrCount = prGroups.open.length
-  const isEmpty = visibleRecords.length === 0
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
-  // Design world: four distinct rooms, one quiet collaboration language.
+  // The current run is the workshop. Projects is a prominent lens in the same
+  // header rather than a second top-level room, and owns a real shell Back entry.
   return (
-    <div className="co-root" data-design-seed="1c15eb06">
+    <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       <div className="co-header-shell">
         <Header
@@ -1357,6 +1570,12 @@ export default function ContributeApp({ appId, token }) {
           fromCache={fromCache}
           checking={checking}
         >
+          <ProjectControl
+            showingProjects={showProjects}
+            count={sourceProjects.length}
+            onOpen={() => viewProjects()}
+            onBack={viewRun}
+          />
           <ConnectionCard
             conn={conn}
             token={token}
@@ -1369,88 +1588,8 @@ export default function ContributeApp({ appId, token }) {
           />
         </Header>
       </div>
-      <main ref={pageRef} className={'co-page' + (view === 'sources' ? ' is-sources' : '')}>
-        <nav className="co-tabs" role="tablist" aria-label="Contribute views">
-          <button
-            type="button"
-            role="tab"
-            id="co-tab-overview"
-            aria-controls="co-panel-overview"
-            aria-selected={view === 'overview'}
-            tabIndex={view === 'overview' ? 0 : -1}
-            data-view="overview"
-            ref={(node) => { tabRefs.current.overview = node }}
-            className={view === 'overview' ? 'is-active' : ''}
-            onClick={() => setView('overview')}
-            onKeyDown={onTabKeyDown}
-          >
-            Overview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="co-tab-sources"
-            aria-controls="co-panel-sources"
-            aria-selected={view === 'sources'}
-            tabIndex={view === 'sources' ? 0 : -1}
-            data-view="sources"
-            ref={(node) => { tabRefs.current.sources = node }}
-            className={view === 'sources' ? 'is-active' : ''}
-            onClick={() => setView('sources')}
-            onKeyDown={onTabKeyDown}
-          >
-            Projects
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="co-tab-prs"
-            aria-controls="co-panel-prs"
-            aria-selected={view === 'prs'}
-            tabIndex={view === 'prs' ? 0 : -1}
-            data-view="prs"
-            ref={(node) => { tabRefs.current.prs = node }}
-            className={view === 'prs' ? 'is-active' : ''}
-            onClick={() => setView('prs')}
-            onKeyDown={onTabKeyDown}
-          >
-            Reviews
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="co-tab-issues"
-            aria-controls="co-panel-issues"
-            aria-selected={view === 'issues'}
-            tabIndex={view === 'issues' ? 0 : -1}
-            data-view="issues"
-            ref={(node) => { tabRefs.current.issues = node }}
-            className={view === 'issues' ? 'is-active' : ''}
-            onClick={() => setView('issues')}
-            onKeyDown={onTabKeyDown}
-          >
-            Requests
-          </button>
-        </nav>
-
-        {view === 'overview' ? (
-          <ContributionOverview
-            projects={sourceProjects}
-            loading={sourceLoading && !sourceSnapshot}
-            reviewSummary={qualitySummary}
-            incomingReviews={incomingReviews}
-            onAssignIncomingReview={onAssignIncomingReview}
-            onViewProjects={() => viewProjects()}
-            onViewProject={viewProjects}
-            onViewReviews={() => setView('prs')}
-            cycleAction={cycleAction}
-            cycle={cycle}
-            omittedCount={fromCache ? 0 : omittedCount}
-            onStartCycle={onStartCycle}
-            onStopCycle={onStopCycle}
-            onOpenCycle={onOpenCycle}
-          />
-        ) : view === 'sources' ? (
+      <main ref={pageRef} className={'co-page' + (showProjects ? ' is-sources' : '')}>
+        {showProjects ? (
           <SourceMap
             snapshot={sourceSnapshot}
             projects={sourceProjects}
@@ -1460,16 +1599,10 @@ export default function ContributeApp({ appId, token }) {
             error={sourceError}
             onRetry={() => refreshSources()}
             loadProjectDiff={loadProjectDiff}
-            onStartAgent={startAgentTask}
-            onViewReviews={() => setView('prs')}
+            onViewReview={openProjectReview}
           />
         ) : (
-          <div
-            id={view === 'issues' ? 'co-panel-issues' : 'co-panel-prs'}
-            className="co-contributions-view"
-            role="tabpanel"
-            aria-labelledby={view === 'issues' ? 'co-tab-issues' : 'co-tab-prs'}
-          >
+          <div className="co-contributions-view">
             <ConnectionCard
               conn={conn}
               token={token}
@@ -1479,31 +1612,32 @@ export default function ContributeApp({ appId, token }) {
               submissionMethod={submissionMethod}
               onChooseSubmissionMethod={onChooseSubmissionMethod}
             />
-            {/* Name the cold-load state without flashing an inaccurate empty
-                inbox before the authoritative ledger arrives. */}
-            {loading || (reviewFocus && !ledgerReady) ? <FeedLoadingState view={view} /> : isEmpty ? (
-              <EmptyState view={view} />
-            ) : (
-              <Feed
-                groups={groups}
-                records={visibleRecords}
-                projects={sourceProjects}
+            {loading || !focusedReviewReady ? <RunLoadingState /> : (
+              <ContributionRun
+                run={contributionRun}
+                loading={sourceLoading && !sourceSnapshot}
+                omittedCount={fromCache ? 0 : omittedCount}
+                publicationPreference={submissionMethod}
+                githubState={conn.state}
                 reviewStatus={reviewStatus}
+                cycle={cycle}
+                onStartCycle={onStartCycle}
+                onStopCycle={onStopCycle}
+                onOpenCycle={onOpenCycle}
                 onSend={onSend}
-                onRunPrePrChecks={submissionMethod === 'github'
-                  ? onRunPrePrChecks
-                  : null}
                 onSendStack={onSendStack}
-                onLandStack={onLandStack}
+                onMarkReady={onMarkReady}
                 onFeedback={onFeedback}
                 onDismiss={onDismiss}
                 onRestore={onRestore}
                 onSetAutopilot={onSetAutopilot}
+                onWithdraw={onWithdraw}
                 onConnectApp={onConnectApp}
-                onStartAgent={startAgentTask}
+                onAssignIncomingReview={onAssignIncomingReview}
+                onViewProject={viewProjects}
                 loadDiff={loadFullDiff}
                 focusTarget={reviewFocus}
-                focusReady={ledgerReady}
+                focusReady={focusedReviewReady}
                 onFocusConsumed={consumeReviewFocus}
               />
             )}

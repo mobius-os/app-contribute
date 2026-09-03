@@ -11,9 +11,10 @@ import {
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
 import {
-  canRunPrePrChecks,
-  prePrCheckPhase,
+  contributionFailureOwner,
   qualityReviewFor,
+  recoveryReviewAction,
+  reviewAllAction,
 } from '../review.js'
 import {
   autopilotState,
@@ -25,6 +26,7 @@ import {
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
+import { AgentHandoffButton } from './BatchAction.jsx'
 
 // One ledger row. Cards deliberately expose explicit targets only — the title
 // is the link on a linked PR/issue card, and prepared cards use their
@@ -41,8 +43,8 @@ import { Icon } from './Icons.jsx'
 //     expands the exact markdown body and an on-demand structured diff.
 //   - without one (a record staged by a v1-skill agent), the card keeps the
 //     plain fallback and Send returns a re-stage error from the platform.
-// Send calls the platform submit endpoint directly for PR plans; Feedback
-// returns to the source chat; Move to History CAS-flips to abandoned via storage.js.
+// Send calls the platform submit endpoint directly for PR plans; Chat returns
+// to the source conversation; Dismiss CAS-flips to abandoned via storage.js.
 
 const ACTION_LABELS = {
   pr: 'Pull request',
@@ -278,7 +280,7 @@ function LabelOutcomeRow({ label, labels, tone = '' }) {
 // A persisted submit failure, shown as a real alert strip (not stray red text)
 // on the prepared card in both the collapsed and expanded states, so the reason
 // a Send bounced stays visible while the partner fixes it.
-function SubmitErrorAlert({ rec, reviewState }) {
+function SubmitErrorAlert({ rec, reviewState, onReview }) {
   const blocked = reviewState?.state === 'needs_refresh'
   if (!blocked && !rec.last_submit_error) return null
   const message = blocked
@@ -290,27 +292,28 @@ function SubmitErrorAlert({ rec, reviewState }) {
   // returns '' and the raw message becomes the headline (lenient fallback).
   const code = reviewState?.code || (rec.last_submit_error ? 'previous_submit_failure' : '')
   const headline = problemHeadline(code)
+  const displayHeadline = headline || (blocked ? 'Fresh review needed' : 'Review needs refreshing')
+  const reviewedHead = String(rec.plan?.head_sha || '')
   const branchWasPushed = (
+    rec.last_submit_stage === 'pushed' &&
+    reviewedHead &&
+    String(rec.last_submit_push_sha || '') === reviewedHead &&
     typeof rec.last_pushed_branch_url === 'string' &&
     rec.last_pushed_branch_url.startsWith('https://github.com/')
   )
 
   return (
     <div className={'co-alert' + (blocked ? ' is-follow-up' : '')} role="status">
-      <strong>{headline || (blocked ? 'Fresh review needed' : 'Could not send')}</strong>
+      <strong>{displayHeadline}</strong>
       <p className="co-alert-reassurance">
         {branchWasPushed
-          ? 'The reviewed branch was pushed, but Contribute could not confirm a new pull request.'
-          : 'Nothing was published. Your agent can update it safely.'}
+          ? 'The reviewed branch reached GitHub, but Contribute could not confirm the pull request.'
+          : 'This review needs a quick check before it can continue.'}
       </p>
-      {headline ? (
-        <details className="co-alert-details">
-          <summary>Technical details</summary>
-          <p className="co-alert-text">{message}</p>
-        </details>
-      ) : (
+      <details className="co-alert-details">
+        <summary>Technical details</summary>
         <p className="co-alert-text">{message}</p>
-      )}
+      </details>
       {branchWasPushed ? (
         <a
           className="co-review-link"
@@ -321,73 +324,14 @@ function SubmitErrorAlert({ rec, reviewState }) {
           View pushed branch
         </a>
       ) : null}
-    </div>
-  )
-}
-
-function PrePrChecksPanel({ rec, onFeedback }) {
-  const checks = rec.pre_pr_checks
-  const [note, setNote] = useState('')
-  if (!checks || typeof checks !== 'object') return null
-
-  const phase = prePrCheckPhase(rec)
-  const active = phase === 'running'
-  const failed = phase === 'failed'
-  const passed = phase === 'passed'
-  const url = typeof checks.url === 'string' &&
-    checks.url.startsWith('https://github.com/') ? checks.url : ''
-  const label = active
-    ? 'GitHub checks running'
-    : passed
-      ? 'GitHub checks passed'
-      : failed
-        ? 'GitHub checks need a fix'
-        : 'GitHub checks'
-  const detail = active
-    ? 'The reviewed branch is being tested on your personal fork. No pull request is open.'
-    : passed
-      ? 'The exact reviewed branch passed before a pull request was opened.'
-      : checks.message || 'Open the run, fix the failure privately, then prepare a fresh review.'
-  const tone = active ? ' is-follow-up' : passed ? ' is-passed' : ''
-
-  function fixInChat() {
-    const draft = [
-      `Fix prepared contribution ${rec.id} ("${rec.title || 'untitled'}") before it is sent.`,
-      `Pre-PR GitHub checks ${failed ? 'need attention' : 'have completed'}.`,
-      url ? `Run: ${url}` : null,
-      '',
-      'Inspect the failing jobs and artifacts, make the smallest durable fix in the live source, run focused local checks, and prepare a fresh reviewed contribution.',
-      'Do not push, open a pull request, or otherwise change GitHub without the approval required for that exact public action.',
-    ].filter((line) => line !== null).join('\n')
-    const outcome = (typeof onFeedback === 'function' && onFeedback(
-      rec, { draft },
-    )) || {}
-    if (!outcome.ok) {
-      setNote(outcome.reason === 'missing-chat'
-        ? 'This older record does not know which chat created it.'
-        : 'Open Contribute inside Möbius to return to the source chat.')
-    }
-  }
-
-  return (
-    <div className={`co-alert${tone}`} role="status">
-      <strong>{label}</strong>
-      <p className="co-alert-reassurance">{detail}</p>
-      {url ? (
-        <a className="co-review-link" href={url} target="_blank" rel="noopener noreferrer">
-          View run on GitHub
-        </a>
-      ) : null}
-      {failed && typeof onFeedback === 'function' ? (
-        <button
-          type="button"
+      {typeof onReview === 'function' ? (
+        <AgentHandoffButton
+          action={recoveryReviewAction(rec)}
+          onStart={onReview}
           className="co-btn co-btn-sm co-btn-primary"
-          onClick={fixInChat}
-        >
-          Fix in chat
-        </button>
+          icon="review"
+        />
       ) : null}
-      {note ? <p className="co-review-error">{note}</p> : null}
     </div>
   )
 }
@@ -415,13 +359,51 @@ function attentionDraft(rec) {
   return bits.join(' ') + (details.length ? '\n\nContext:\n' + details.join('\n') : '')
 }
 
-function AttentionCallout({ rec, onFeedback }) {
+function recordAnchorId(rec) {
+  const identity = String(rec?.id || rec?.number || rec?.title || 'legacy')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+  return `co-record-${identity}`
+}
+
+function attentionActivity(rec) {
+  const candidates = [rec?.attention?.url, rec?.url, rec?.plan?.target_url]
+  const exact = candidates.find(value => (
+    typeof value === 'string' && value.startsWith('https://github.com/')
+  ))
+  if (exact) return { url: exact, label: 'View activity on GitHub' }
+
+  const repo = String(rec?.plan?.repo || rec?.repo || '')
+  const number = Number(rec?.number)
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !Number.isInteger(number) || number < 1) {
+    return null
+  }
+  const collection = rec?.type === 'pr' ? 'pull' : 'issues'
+  return {
+    url: `https://github.com/${repo}/${collection}/${number}`,
+    label: rec?.type === 'pr' ? 'Open pull request on GitHub' : 'Open request on GitHub',
+  }
+}
+
+function AttentionCallout({ rec, onFeedback, onInspect }) {
+  const [note, setNote] = useState('')
   const attention = rec.attention || {}
   if (!rec.needs_attention && !attention.title && !attention.message) return null
+  const activity = attentionActivity(rec)
+  const sourceChatId = [rec?.chat_id, ...(Array.isArray(rec?.chat_ids) ? rec.chat_ids : [])]
+    .find(value => typeof value === 'string' && !!value.trim())
+  const canFixInChat = !!sourceChatId && typeof onFeedback === 'function'
 
   function handleAskAgent() {
-    if (typeof onFeedback !== 'function') return
-    onFeedback(rec, { draft: attentionDraft(rec) })
+    if (!canFixInChat) return
+    const outcome = onFeedback(
+      { ...rec, chat_id: sourceChatId },
+      { draft: attentionDraft(rec) },
+    ) || {}
+    setNote(outcome.ok
+      ? ''
+      : outcome.reason === 'missing-chat'
+        ? 'This older record no longer has a usable source chat.'
+        : 'Open Contribute from inside Möbius to return to the source chat.')
   }
 
   return (
@@ -429,28 +411,37 @@ function AttentionCallout({ rec, onFeedback }) {
       <div className="co-attention-copy">
         <div className="co-attention-title">{attentionTitle(attention)}</div>
         <p className="co-attention-text">{attentionMessage(attention)}</p>
-        {typeof attention.url === 'string' &&
-          attention.url.startsWith('https://github.com/') ? (
+        {activity ? (
           <a
             className="co-review-link"
-            href={attention.url}
+            href={activity.url}
             target="_blank"
             rel="noopener noreferrer"
           >
-            View activity on GitHub
+            {activity.label}
           </a>
         ) : null}
+        {!activity && !canFixInChat ? (
+          <a
+            className="co-review-link"
+            href={`#${recordAnchorId(rec)}`}
+            onClick={onInspect}
+          >
+            Review saved details
+          </a>
+        ) : null}
+        {note ? <p className="co-review-error" role="status">{note}</p> : null}
       </div>
-      {typeof onFeedback === 'function' ? (
+      {canFixInChat ? (
         <button
           type="button"
           className="co-icon-btn co-refresh-btn is-primary"
-          aria-label="Refresh contribution in chat"
-          title="Refresh in chat"
+          aria-label="Fix this contribution in chat"
+          title="Fix in chat"
           onClick={handleAskAgent}
         >
           <Icon name="feedback" />
-          <span>Refresh</span>
+          <span>Fix in chat</span>
         </button>
       ) : null}
     </div>
@@ -566,30 +557,28 @@ export function ReviewPlan({ rec, loadDiff }) {
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
 // review and the plan-less v1 fallback.
 function ReviewActions({
-  rec, reviewState, onSend, onRunPrePrChecks, onReview, onFeedback, onDismiss,
+  rec, reviewState, reviewAction, onSend, onReview, onFeedback, onDismiss,
 }) {
   const [sendNote, setSendNote] = useState(null)
   const [sending, setSending] = useState(false)
-  const [sendElapsed, setSendElapsed] = useState(0)
+  const [accepted, setAccepted] = useState(false)
   const [dismissing, setDismissing] = useState(false)
-  // Dismiss moves the prepared record to History. It is reversible there, but
-  // still must not fire on a stray tap because it leaves the active queue.
+  // Dismiss removes the prepared record from the active list. It is reversible
+  // from the Run's Dismissed fold, but still must not fire on a stray tap.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
-  const [confirmingChecks, setConfirmingChecks] = useState(false)
-  const [startingChecks, setStartingChecks] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
   const blocked = reviewState?.state === 'needs_refresh'
+  const attentionBlocked = rec.needs_attention === true
+  // A failed publication needs the source-aware agent recovery above this
+  // action row. Do not offer the same blind GitHub mutation again while its
+  // cause is unresolved.
+  const submitFailed = Boolean(rec.last_submit_error) || attentionBlocked
   const quality = qualityReviewFor(rec)
   const reviewIncomplete = isPr && quality.state !== 'all_clear'
-  const checksActive = prePrCheckPhase(rec) === 'running'
-  const mayRunChecks = canRunPrePrChecks(rec) &&
-    typeof onRunPrePrChecks === 'function' && !checksActive
   const keepButtonRef = useRef(null)
-  const cancelChecksRef = useRef(null)
   const confirmDescriptionId = useId()
-  const checkConfirmDescriptionId = useId()
 
   // The confirm replaces the action row. Move focus to the safe choice so
   // keyboard and switch users never land on the state-changing action by default.
@@ -597,68 +586,32 @@ function ReviewActions({
     if (confirmingDismiss) keepButtonRef.current?.focus()
   }, [confirmingDismiss])
 
-  useEffect(() => {
-    if (confirmingChecks) cancelChecksRef.current?.focus()
-  }, [confirmingChecks])
-
-  useEffect(() => {
-    if (!sending) {
-      setSendElapsed(0)
-      return undefined
-    }
-    const startedAt = Date.now()
-    const update = () => setSendElapsed(Math.floor((Date.now() - startedAt) / 1000))
-    update()
-    const timer = window.setInterval(update, 1000)
-    return () => window.clearInterval(timer)
-  }, [sending])
-
   async function send() {
-    if (!isPr || blocked || reviewIncomplete || checksActive) return
+    if (!isPr || blocked || submitFailed || reviewIncomplete) return
     setSending(true)
+    setAccepted(true)
     setSendNote(null)
     setNote(null)
     try {
       const outcome = (await onSend(rec)) || {}
-      if (outcome.ok) {
-        setSendNote(outcome.updated
-          ? 'Pull request updated on GitHub.'
-          : outcome.viaMobius
-            ? 'Draft pull request opened through Möbius.'
-            : 'Pull request opened on GitHub for review.')
-      } else if (outcome.pending) {
-        setSendNote(outcome.viaMobius
-          ? 'Möbius accepted the reviewed change and is opening the draft. This card will update automatically.'
-          : 'Publishing is still in progress. Contribute will update this card when GitHub finishes.')
-      } else {
-        setNote(outcome.error || (isUpdate
-          ? 'Could not update this pull request.'
-          : 'Could not submit this contribution.'))
+      // Success and pending states already move the record out of this action
+      // state. Only failures need a second line of explanation.
+      if (!outcome.ok && !outcome.pending) {
+        const recovery = contributionFailureOwner(outcome) === 'agent'
+          ? await onReview?.(recoveryReviewAction(rec))
+          : null
+        if (!recovery?.ok) {
+          setAccepted(false)
+          setNote(outcome.error || recovery?.error || (isUpdate
+            ? 'Could not update this pull request.'
+            : 'Could not submit this contribution.'))
+        }
       }
+    } catch {
+      setAccepted(false)
+      setNote('The result could not be confirmed. Refresh before trying again.')
     } finally {
       setSending(false)
-    }
-  }
-
-  async function runChecks() {
-    if (!mayRunChecks) return
-    setStartingChecks(true)
-    setSendNote(null)
-    setNote(null)
-    try {
-      const outcome = (await onRunPrePrChecks(rec)) || {}
-      if (outcome.ok) {
-        setSendNote('The reviewed branch is on your fork and GitHub checks are starting.')
-      } else if (outcome.pending) {
-        setSendNote('The branch was handled, but the run is still being reconciled. Contribute will update this card before another try.')
-      } else {
-        setNote(outcome.unsupported
-          ? 'Restart Möbius to load the companion GitHub checks service.'
-          : outcome.error || 'Could not start GitHub checks.')
-      }
-    } finally {
-      setStartingChecks(false)
-      setConfirmingChecks(false)
     }
   }
 
@@ -698,6 +651,8 @@ function ReviewActions({
     }
   }
 
+  if (accepted) return null
+
   return (
     <div className="co-action-block">
       {!confirmingDismiss ? (
@@ -710,12 +665,12 @@ function ReviewActions({
         <div
           className="co-confirm"
           role="alertdialog"
-          aria-label="Confirm move to History"
+          aria-label="Confirm dismissal"
           aria-describedby={confirmDescriptionId}
         >
           <p id={confirmDescriptionId} className="co-confirm-text">
-            Move this {isPr ? 'prepared contribution' : 'draft'} to History? You
-            can restore it there anytime.
+            Dismiss this {isPr ? 'prepared pull request' : 'draft'}? It will leave
+            your active list and can be restored from Dismissed.
           </p>
           <div className="co-confirm-actions">
             <button
@@ -725,7 +680,7 @@ function ReviewActions({
               disabled={dismissing}
               onClick={() => setConfirmingDismiss(false)}
             >
-              Cancel
+              Keep
             </button>
             <button
               type="button"
@@ -733,39 +688,7 @@ function ReviewActions({
               disabled={dismissing}
               onClick={dismiss}
             >
-              {dismissing ? 'Moving…' : 'Move to History'}
-            </button>
-          </div>
-        </div>
-      ) : confirmingChecks ? (
-        <div
-          className="co-confirm is-safe"
-          role="alertdialog"
-          aria-label="Confirm GitHub checks"
-          aria-describedby={checkConfirmDescriptionId}
-        >
-          <p id={checkConfirmDescriptionId} className="co-confirm-text">
-            This updates your personal fork if needed, pushes only the exact
-            reviewed branch, and starts the full GitHub test suite. It does not
-            open a pull request or email the organization.
-          </p>
-          <div className="co-confirm-actions">
-            <button
-              type="button"
-              ref={cancelChecksRef}
-              className="co-btn co-btn-sm"
-              disabled={startingChecks}
-              onClick={() => setConfirmingChecks(false)}
-            >
-              Not now
-            </button>
-            <button
-              type="button"
-              className="co-btn co-btn-sm co-btn-primary"
-              disabled={startingChecks}
-              onClick={runChecks}
-            >
-              {startingChecks ? 'Starting…' : 'Run on my fork'}
+              {dismissing ? 'Dismissing…' : 'Dismiss'}
             </button>
           </div>
         </div>
@@ -775,61 +698,41 @@ function ReviewActions({
             <button
               type="button"
               className="co-icon-btn co-refresh-btn is-primary"
-              aria-label="Refresh contribution in chat"
-              title="Refresh in chat"
+              aria-label="Fix this contribution in chat"
+              title="Fix in chat"
               onClick={feedback}
             >
               <Icon name="feedback" />
-              <span>Refresh</span>
+              <span>Fix in chat</span>
             </button>
           ) : isPr ? (
             <>
               {reviewIncomplete && typeof onReview === 'function' ? (
-                <button
-                  type="button"
+                <AgentHandoffButton
+                  action={reviewAction || reviewAllAction([rec])}
+                  onStart={onReview}
                   className="co-icon-btn co-review-btn is-primary"
-                  onClick={() => onReview(rec)}
-                  aria-label="Review this contribution"
-                  title="Review this contribution"
-                >
-                  <Icon name="review" />
-                  <span>Review</span>
-                </button>
+                  icon="review"
+                />
               ) : null}
-              {mayRunChecks ? (
-                <button
-                  type="button"
-                  className="co-icon-btn co-check-btn"
-                  onClick={() => setConfirmingChecks(true)}
-                  aria-label={rec.pre_pr_checks ? 'Run GitHub checks again' : 'Run GitHub checks'}
-                  title={rec.pre_pr_checks
-                    ? 'Run the full GitHub checks again on your fork'
-                    : 'Run the full GitHub checks on your fork'}
-                >
-                  <Icon name={rec.pre_pr_checks ? 'refresh' : 'check'} />
-                  <span>{rec.pre_pr_checks ? 'Check again' : 'Run checks'}</span>
-                </button>
-              ) : null}
-              {!reviewIncomplete ? (
+              {!reviewIncomplete && !submitFailed && typeof onSend === 'function' ? (
                 <button
                   type="button"
                   className={'co-icon-btn co-send-btn is-primary' + (sending ? ' is-sending' : '')}
-                  disabled={sending || checksActive}
+                  disabled={sending}
                   onClick={send}
                   aria-busy={sending}
-                  aria-label={checksActive
-                    ? 'GitHub checks are still running'
-                    : sending
-                      ? (isUpdate ? 'Updating pull request' : 'Opening pull request')
-                      : (isUpdate ? 'Update pull request' : 'Open pull request for review')}
-                  title={checksActive ? 'Wait for checks' : (isUpdate ? 'Update pull request' : 'Open pull request')}
+                  aria-label={sending
+                    ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
+                    : (isUpdate ? 'Send pull request update' : 'Send pull request')}
+                  title={isUpdate ? 'Send update' : 'Send PR'}
                 >
                   <Icon name="send" />
                   <span className="co-action-label">
-                    <span>{checksActive ? 'Checking' : (isUpdate ? 'Update PR' : 'Open PR')}</span>
+                    <span>{sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
                     {sending ? (
                       <span className="co-action-label-sweep" aria-hidden="true">
-                        {isUpdate ? 'Update PR' : 'Open PR'}
+                        Sending…
                       </span>
                     ) : null}
                   </span>
@@ -845,29 +748,29 @@ function ReviewActions({
               title="Open source conversation"
             >
               <Icon name="feedback" />
-              <span>Open chat</span>
+              <span>Chat</span>
             </button>
           ) : null}
-          {!blocked && isPr ? (
+          {!blocked && !attentionBlocked && isPr ? (
             <button
               type="button"
               className="co-icon-btn co-secondary-action"
               onClick={feedback}
-              aria-label="Give feedback"
-              title="Give feedback"
+              aria-label="Open source chat"
+              title="Open source chat"
             >
               <Icon name="feedback" />
-              <span>Feedback</span>
+              <span>Chat</span>
             </button>
           ) : null}
           <button
             type="button"
-            className={isPr ? 'co-icon-btn co-secondary-action' : 'co-request-history'}
+            className={isPr ? 'co-icon-btn co-secondary-action co-history-action' : 'co-request-history'}
             onClick={() => setConfirmingDismiss(true)}
-            aria-label={isPr ? 'Move contribution to History' : 'Move request draft to History'}
-            title="Move to History"
+            aria-label={isPr ? 'Dismiss prepared pull request' : 'Dismiss request draft'}
+            title="Dismiss"
           >
-            {isPr ? <><Icon name="cycle" /><span>History</span></> : 'Move to History'}
+            {isPr ? <span>Dismiss</span> : 'Dismiss'}
           </button>
         </div>
       )}
@@ -876,19 +779,6 @@ function ReviewActions({
           Requests stay connected to their source conversation, where you can refine or publish them with the full context intact.
         </p>
       ) : null}
-      {sending && (
-        <p className="co-review-note" role="status" aria-live="polite">
-          {isUpdate
-            ? 'Checking the reviewed source and updating the pull request'
-            : 'Checking the reviewed source and publishing it to GitHub'}
-          {sendElapsed >= 5 ? ` · ${sendElapsed}s elapsed` : '…'}
-        </p>
-      )}
-      {startingChecks && (
-        <p className="co-review-note" role="status" aria-live="polite">
-          Verifying the reviewed branch, updating your fork, and starting GitHub checks…
-        </p>
-      )}
       {sendNote && (
         <p className="co-review-note" role="status" aria-live="polite">{sendNote}</p>
       )}
@@ -1076,24 +966,171 @@ function AutopilotPanel({ rec, onSetAutopilot }) {
   )
 }
 
+function WithdrawAction({ rec, onWithdraw }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const keepRef = useRef(null)
+  const descriptionId = useId()
+  const eligible = rec.submission_mode === 'mobius-bot' &&
+    ['draft', 'open'].includes(rec.status) &&
+    typeof rec.relay_contribution_id === 'string' &&
+    typeof onWithdraw === 'function'
+
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus()
+  }, [confirming])
+
+  if (!eligible) return null
+
+  async function withdraw() {
+    setBusy(true)
+    setNote('')
+    try {
+      const outcome = (await onWithdraw(rec)) || {}
+      if (!outcome.ok) {
+        setNote(outcome.error || 'Could not withdraw this contribution.')
+      }
+    } finally {
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <div className="co-published-action">
+        <button
+          type="button"
+          className="co-btn co-btn-sm"
+          onClick={() => { setNote(''); setConfirming(true) }}
+        >
+          Withdraw PR
+        </button>
+        {note ? <p className="co-review-error" role="status">{note}</p> : null}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="co-confirm"
+      role="alertdialog"
+      aria-label="Confirm contribution withdrawal"
+      aria-describedby={descriptionId}
+    >
+      <p id={descriptionId} className="co-confirm-text">
+        Withdraw this pull request? Möbius will close it and remove its bot
+        branch. The local record stays intact; nothing will be merged.
+      </p>
+      <div className="co-confirm-actions">
+        <button
+          type="button"
+          ref={keepRef}
+          className="co-btn co-btn-sm"
+          disabled={busy}
+          onClick={() => setConfirming(false)}
+        >
+          Keep open
+        </button>
+        <button
+          type="button"
+          className="co-btn co-btn-sm co-btn-caution"
+          disabled={busy}
+          onClick={withdraw}
+        >
+          {busy ? 'Withdrawing…' : 'Withdraw PR'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Action and attention live beside the record, not inside it. The focused
+// review page can now answer two separate questions at a glance: what needs a
+// decision (this tray), and what the pull request contains (ContributionCard).
+export function ContributionDecision({
+  rec,
+  reviewState,
+  reviewAction,
+  onSend,
+  onReview,
+  onFeedback,
+  onDismiss,
+  onRestore,
+  onWithdraw,
+  onConnectApp,
+}) {
+  const status = rec?.status || 'prepared'
+  const isPr = rec?.plan?.action === 'pr' || rec?.type === 'pr'
+  const hasAttention = rec?.needs_attention === true || !!rec?.attention?.title || !!rec?.attention?.message
+  const hasSubmitAlert = reviewState?.state === 'needs_refresh' || !!rec?.last_submit_error
+  const hasPreparedAction = status === 'prepared' && typeof onDismiss === 'function'
+  const hasRestore = status === 'abandoned' && typeof onRestore === 'function'
+  const hasWithdraw = rec?.submission_mode === 'mobius-bot' &&
+    ['draft', 'open'].includes(status) &&
+    typeof rec?.relay_contribution_id === 'string' &&
+    typeof onWithdraw === 'function'
+  const hasConnection = status === 'merged' && !!publicationHandoff(rec)
+  const quality = qualityReviewFor(rec)
+  const reviewInProgress = quality.state === 'reviewing' || quality.state === 'queued'
+  const hasDecision = hasAttention || hasSubmitAlert ||
+    hasPreparedAction || hasRestore || hasWithdraw || hasConnection
+  if (!hasDecision) return null
+
+  const title = hasSubmitAlert || hasAttention
+    ? 'Needs attention'
+    : reviewInProgress
+      ? 'Review in progress'
+      : status === 'prepared'
+        ? 'Ready for your decision'
+        : 'Follow-up'
+
+  return (
+    <section className="co-decision-surface" aria-label={title}>
+      <AttentionCallout rec={rec} onFeedback={onFeedback} />
+      <SubmitErrorAlert rec={rec} reviewState={reviewState} onReview={onReview} />
+      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
+      <WithdrawAction rec={rec} onWithdraw={onWithdraw} />
+      {hasPreparedAction ? (
+        <ReviewActions
+          rec={rec}
+          reviewState={reviewState}
+          reviewAction={reviewAction}
+          onSend={onSend}
+          onReview={onReview}
+          onFeedback={onFeedback}
+          onDismiss={onDismiss}
+        />
+      ) : null}
+      {hasRestore ? <RestoreAction rec={rec} onRestore={onRestore} /> : null}
+      {!isPr && status === 'prepared' && typeof onFeedback !== 'function' ? (
+        <p className="co-review-note">Open the source conversation to continue this request.</p>
+      ) : null}
+    </section>
+  )
+}
+
 export function ContributionCard({
   rec,
   reviewState,
   onSend,
-  onRunPrePrChecks,
   onReview,
   onFeedback,
   onDismiss,
   onRestore,
   onSetAutopilot,
+  onWithdraw,
   onConnectApp,
   loadDiff,
-  reviewOnly = false,
   initialExpanded = false,
+  showDecision = true,
 }) {
   const status = rec.status || 'prepared'
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
-  const blocked = status === 'prepared' && reviewState?.state === 'needs_refresh'
+  const blocked = status === 'prepared' && (
+    reviewState?.state === 'needs_refresh' || rec.needs_attention === true
+  )
   const qualityState = qualityReviewFor(rec)
   const statusLabel = blocked
     ? 'Needs update'
@@ -1131,12 +1168,8 @@ export function ContributionCard({
   const labelOutcome = contributionLabelOutcome(rec)
   const showPublishedLabelOutcome = labelOutcome.published &&
     labelOutcome.hasOutcome && !labelOutcome.empty
-  const reviewable =
-    status === 'prepared' && (
-      reviewOnly || (
-        typeof onSend === 'function' && typeof onDismiss === 'function'
-      )
-    )
+  const reviewable = status === 'prepared' &&
+    typeof onSend === 'function' && typeof onDismiss === 'function'
   const hasPlan = !!(rec.plan && typeof rec.plan === 'object' && (reviewable || initialExpanded))
   const displayTitle = hasPlan ? (rec.plan.title || title) : title
   const planSummary = hasPlan && rec.summary && rec.summary !== displayTitle
@@ -1144,7 +1177,7 @@ export function ContributionCard({
     : ''
 
   return (
-    <div className={`co-card${blocked ? ' is-blocked' : ''}${reviewOnly ? ' is-stack-layer' : ''}`}>
+    <div id={recordAnchorId(rec)} className={`co-card${blocked ? ' is-blocked' : ''}`}>
       <div className="co-card-top">
         <h3 className="co-card-heading">
           {hasLink ? (
@@ -1182,16 +1215,28 @@ export function ContributionCard({
           ))}
         </div>
       )}
-      <AttentionCallout rec={rec} onFeedback={onFeedback} />
+      {showDecision ? (
+        <AttentionCallout
+          rec={rec}
+          onFeedback={onFeedback}
+          onInspect={() => setExpanded(true)}
+        />
+      ) : null}
       {status !== 'prepared' && autopilotState(rec) ? (
         <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} />
       ) : null}
-      <SubmitErrorAlert rec={rec} reviewState={reviewState} />
-      <PrePrChecksPanel rec={rec} onFeedback={onFeedback} />
+      {showDecision ? <WithdrawAction rec={rec} onWithdraw={onWithdraw} /> : null}
+      {showDecision ? (
+        <SubmitErrorAlert
+          rec={rec}
+          reviewState={reviewState}
+          onReview={onReview}
+        />
+      ) : null}
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
-      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
+      {showDecision ? <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} /> : null}
       {hasPlan && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button
@@ -1203,14 +1248,13 @@ export function ContributionCard({
             <span>{expanded ? 'Hide details' : 'Details'}</span>
             <span className={expanded ? 'is-open' : ''}><Icon name="chevron" size={16} /></span>
           </button>
-          {/* Focused History/Open cards keep their reviewed plan readable, but
+          {/* Focused settled/public cards keep their reviewed plan readable, but
               active-queue actions belong only to still-prepared work. */}
-          {!reviewOnly && reviewable && (
+          {showDecision && reviewable && (
             <ReviewActions
               rec={rec}
               reviewState={reviewState}
               onSend={onSend}
-              onRunPrePrChecks={onRunPrePrChecks}
               onReview={onReview}
               onFeedback={onFeedback}
               onDismiss={onDismiss}
@@ -1218,13 +1262,12 @@ export function ContributionCard({
           )}
         </div>
       )}
-      {reviewable && !hasPlan && !reviewOnly && (
+      {showDecision && reviewable && !hasPlan && (
         <div className="co-card-footer is-actions-only">
           <ReviewActions
             rec={rec}
             reviewState={reviewState}
             onSend={onSend}
-            onRunPrePrChecks={onRunPrePrChecks}
             onReview={onReview}
             onFeedback={onFeedback}
             onDismiss={onDismiss}
@@ -1237,7 +1280,7 @@ export function ContributionCard({
           <ReviewPlan rec={rec} loadDiff={loadDiff} />
         </div>
       )}
-      {status === 'abandoned' && typeof onRestore === 'function' && (
+      {showDecision && status === 'abandoned' && typeof onRestore === 'function' && (
         <RestoreAction rec={rec} onRestore={onRestore} />
       )}
     </div>
