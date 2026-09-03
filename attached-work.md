@@ -41,6 +41,10 @@ sidecars, or unrelated project trees.
    bounded status/diff. Classify it as reusable local work, working draft,
    already-covered/duplicate, incoming-only, experimental, personal, or
    intentionally local. Do not scan other project trees to look for work.
+   Before comparing or staging a repository with a canonical remote, fetch that
+   upstream read-only. Never pull, rebase, reset, switch branches, or otherwise
+   move the shared live checkout. Treat fetched upstream commits as incoming,
+   not as work authored by this chat.
 3. Prefer an existing matching record when it covers the same coherent change.
    Never duplicate an active contribution. Preserve its original `chat_id` and
    CAS-union the source `source_chat_id` into `chat_ids` when the current work
@@ -72,12 +76,31 @@ proportionate to the changed behavior. Search existing public work only when a
 new record truly needs deduplication, and keep those GitHub reads bounded and
 read-only.
 
+For platform checks, use the staged checkout's `scripts/wt-pytest.sh` and
+`scripts/wt-npm.sh`. They reuse the shared Python runtime and temporarily
+borrow frontend dependencies only under an exact `package-lock.json` match.
+Do not run a direct `npm ci` or create a checkout-local `.venv` when those
+wrappers cover the check. A genuinely new dependency graph may be installed
+only as temporary verification state and must be removed before this helper
+finishes, including after a failed check.
+
+Inspect untracked and generated-looking paths before staging. If a path is
+clearly repository-wide generated state, add the smallest reusable pattern to
+the owning `.gitignore`, treat that ignore change as ordinary reviewed source,
+and settle the generated path locally through the exact chat timestamp. Never
+silently ignore an ambiguous file or a path that may contain deliberate work;
+return one concrete owner decision instead.
+
 For an app or platform checkout with a real upstream/base branch:
 
 1. Choose a privacy-safe record id and branch. Keep the live source on its
    current branch. Create the durable review checkout at
-   `/data/contrib/<record-id>/worktree` from the accepted base and apply only
-   the reviewed source diff there.
+   `/data/contrib/<record-id>/worktree` from the freshly fetched accepted base.
+   Replay only attributable local commits and the reviewed working diff there,
+   using a three-way application when upstream moved. Never copy the older live
+   tree wholesale over newer upstream files. Resolve an overlap privately only
+   when the intended result is unambiguous; otherwise return the exact conflict
+   as the blocker.
 2. Commit as the configured owner when that identity exists, with this exact
    trailer:
 
@@ -148,6 +171,11 @@ one precise blocker. Do not improvise a publication path and do not load the
 large general workflow as a fallback.
 
 ## Finish
+
+Before returning, verify that no dependency install, virtual environment,
+build output, browser profile, or scratch clone created by this helper remains.
+The durable prepared checkout, record, diff, receipts, and provenance are the
+handoff; test machinery is not.
 
 Return only:
 
