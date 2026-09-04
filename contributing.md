@@ -834,9 +834,15 @@ explicitly approves the exact update in chat or presses **Update PR**.
 2. Keep the same record id, PR URL, number, branch, `head_repository`, original
    `submitted_at`, and original PR base. Set the record back to `prepared` and
    set `plan.action` to `pr_update`; update `plan.head_sha`, the complete
-   base-to-new-head diff/hash/stat, source witness, body draft, and timestamps.
+   base-to-new-head diff/hash/stat, source witness, and timestamps.
    The stored diff is the complete current PR, not only the new delta, because
    the all-clear verdict must describe exactly what maintainers will review.
+   For every `pr_update`, store the exact live values observed during
+   preparation as `plan.pr_metadata.old_title` and
+   `plan.pr_metadata.old_body`, and copy those same exact bytes into the
+   reviewed `plan.title` and `plan.body_draft`. Do not normalize, summarize, or
+   reconstruct the text. For an existing PR update, this equality is a
+   publication precondition rather than a request to edit public metadata.
 3. Re-run the full private review on the new head and pin
    `quality_review.reviewed_head_sha` to it. The ordinary local review-status
    endpoint understands both `pr` and `pr_update`; a changed checkout, source
@@ -845,8 +851,14 @@ explicitly approves the exact update in chat or presses **Update PR**.
 4. Stop for explicit public approval. **Update PR** in Contribute is one
    approval surface; an explicit, unambiguous chat instruction approving this
    same record and exact new head is equally valid. Do not require both. The
-   guarded update route rechecks the live PR identity before any push and then
-   allows only the exact reviewed fast-forward. Ordinary **Send PR** continues
+   guarded update route rechecks the live PR identity and requires the public
+   title and body to exactly match `plan.title` and `plan.body_draft` before any
+   branch mutation. It does not PATCH the pull request's title or body: GitHub
+   does not expose an expected-version guard for that unsafe metadata update,
+   so treating previously observed text as overwrite authority could erase a
+   maintainer edit. Any mismatch stops for a fresh private review. The route
+   allows only the exact reviewed fast-forward, and a restarted attempt must
+   prove the same metadata precondition again. Ordinary **Send PR** continues
    to reject a branch that already has a PR, and raw `git push` is never a
    substitute.
 5. After a successful update, the same record returns to `open`, retains its

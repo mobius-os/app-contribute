@@ -21,6 +21,24 @@ test('chat approval stays bound to the exact current public action', () => {
   assert.match(prose, /Preparing is still private/)
 })
 
+test('existing PR updates require exact public metadata without mutating it', () => {
+  assert.match(prose, /For every `pr_update`/)
+  assert.match(prose, /plan\.pr_metadata\.old_title/)
+  assert.match(prose, /plan\.pr_metadata\.old_body/)
+  assert.match(prose, /copy those same exact bytes/)
+  assert.match(prose, /plan\.title/)
+  assert.match(prose, /plan\.body_draft/)
+  assert.match(prose, /Do not normalize, summarize, or reconstruct the text/)
+  assert.match(prose, /publication precondition rather than a request to edit public metadata/)
+  assert.match(prose, /exactly match `plan\.title` and `plan\.body_draft` before any branch mutation/)
+  assert.match(prose, /does not PATCH the pull request's title or body/)
+  assert.match(prose, /GitHub does not expose an expected-version guard/)
+  assert.match(prose, /Any mismatch stops for a fresh private review/)
+  assert.match(prose, /a restarted attempt must prove the same metadata precondition again/)
+  assert.doesNotMatch(prose, /match either the exact recorded old values or the already-reviewed desired values/)
+  assert.doesNotMatch(prose, /applies `plan\.title`\/`plan\.body_draft` once after the branch update/)
+})
+
 test('chat classifications are durable outcomes rather than prose-only exclusions', () => {
   assert.match(prose, /settle_chat_changes\.py/)
   assert.match(prose, /newest `ts` actually reviewed/)
