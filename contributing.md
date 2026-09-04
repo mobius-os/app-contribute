@@ -117,9 +117,11 @@ change, unless the owner names a narrower repository or project. This intent
 almost always earns a Goal because it crosses review, external waits, and local
 reconciliation.
 
-1. Refresh the complete queue and Projects status. Re-read live record states;
-   prepared records may have become public or merged since the handoff was
-   created.
+1. Refresh the complete queue and Projects status, then fetch canonical
+   upstream read-only for every in-scope repository. Re-read live record
+   states; prepared records may have become public or merged since the handoff
+   was created. Never pull, rebase, reset, or switch the shared live checkout:
+   upstream alignment for contribution review happens in an isolated checkout.
 2. Privately repair stale reviews, failed checks, merge conflicts, and sound
    review feedback. Prepare newly discovered reusable changes. Leave genuine
    owner choices, unsafe work, and unrelated refactors explicitly blocked.
@@ -142,12 +144,48 @@ reconciliation.
 6. Refresh Projects one final time. Completion means the accepted upstream work
    is present locally and every remaining difference is classified as
    intentional local work, private data, an active draft, unavailable source,
-   or a named blocker. Report prepared, sent, merged/superseded, blocked,
-   aligned, and deliberately local outcomes in one concise handoff.
+   or a named blocker. Release the disposable staging checkout for every
+   terminal record through its platform cleanup endpoint; do not report the
+   cycle complete while a merged, closed, superseded, commented, or abandoned
+   record still owns a checkout. Report prepared, sent, merged/superseded,
+   blocked, aligned, cleaned, and deliberately local outcomes in one concise
+   handoff.
 
 Do not replace these stages with a blind reset or a one-click destructive
 shortcut. The streamlining is that the owner names the outcome once; exact
 publication, update review, conflicts, and restart retain their existing gates.
+
+### Cleanup ownership
+
+Resource cleanup is part of the work, not an unrelated maintenance favor.
+
+- The agent that creates a temporary clone, worktree, dependency install,
+  browser profile, build output, or test environment owns it through success,
+  failure, cancellation, and interruption. Preserve the reviewed source,
+  durable record, exact diff, receipts, and provenance; release regenerable
+  artifacts as soon as their check or handoff is complete.
+- The contributing/integrating agent inherits ownership of the durable staging
+  checkout while a contribution is prepared, open, or awaiting reconciliation.
+  Once the record is terminal, call its `cleanup-staging` endpoint and verify
+  the checkout is gone. A pushed or merged change is not a complete handoff if
+  its disposable local copy remains behind.
+- A nonterminal record may need its source checkout for safe review or repair,
+  but it does not need copied `node_modules`, virtual environments, caches, or
+  build output while idle. Remove those after verification when no process is
+  using them; record an owner and expiry for any exceptional long-lived
+  artifact.
+- For platform checks, use `scripts/wt-pytest.sh` and `scripts/wt-npm.sh` from
+  the staged checkout. The Python wrapper uses the shared test runtime, and the
+  npm wrapper temporarily borrows the primary checkout's dependency tree only
+  when `package-lock.json` matches exactly. Do not run a direct `npm ci` or
+  create a checkout-local `.venv` when either wrapper can supply the exact
+  environment. If a dependency change genuinely requires a new install, make
+  that install temporary and remove it in the same turn on success, failure,
+  cancellation, or interruption.
+- The Contribute scheduled job retries missed terminal cleanup. Reflection may
+  identify ambiguous residue and produce a bounded housekeeping plan. Both are
+  repair backstops, never substitutes for the lifecycle owner and never grounds
+  for deleting an unmatched or dirty checkout blindly.
 
 ### Thoroughly review prepared work
 
@@ -590,10 +628,13 @@ merge.
 ### After an app PR merges: connect the same local app
 
 A merged record with a reviewed `after_merge.action: connect_app` shows
-**Connect app** in Contribute History. The owner may press it or explicitly,
-unambiguously approve that exact current handoff in chat. After chat approval,
-the agent may call the same guarded endpoint; without either form of approval,
-do not simulate the action.
+**Link app** in Contribute History. Several compatible handoffs may appear as
+one exact **Link N apps** action. Pressing the named item or that exact current
+batch is the owner's approval for only those handoffs. The owner may instead
+explicitly, unambiguously approve the same handoff in chat. Without either form
+of approval, do not simulate the action.
+After chat approval, the agent may call the same guarded endpoint; do not make
+the owner repeat that approval in Contribute.
 
 The platform then checks GitHub's actual merge commit, the stored reviewed diff,
 the durable landed witness, the immutable merged source and permission digests,
@@ -630,14 +671,24 @@ operation.
 ### The green light for a PR stack
 
 When 2–12 prepared PR records carry one complete `plan.stack` chain,
-Contribute groups them into one visual review and shows **Send N-PR stack**.
-The second, explicit confirmation lists every title and `base → branch` pair;
-that click approves exactly those enumerated pushes and PR creations. An
-explicit, unambiguous chat instruction accepting the same current list is
-equally valid; do not require both approval surfaces.
+Contribute groups them into one visual review and shows the current **Update
+stack** or **Send stack** action.
+The second, explicit confirmation lists every title and `base → branch` pair
+in the current public phase; that click approves exactly those enumerated
+pushes and PR creations. An explicit, unambiguous chat instruction accepting
+the same current list is equally valid; do not require both approval surfaces.
 Any record carrying `plan.stack` is stack-only: malformed or incomplete chains
 stay visible for feedback, but neither the app nor the platform may fall back
 to sending one layer through the standalone PR path.
+
+A reviewed chain may start with existing pull requests whose branches need an
+update and end with new unpublished children. Keep that as one stack, but use
+two exact public phases: first confirm and update the consecutive `pr_update`
+prefix; after a fresh ledger read proves those updates settled, separately
+confirm and open the `pr` suffix. The confirmation enumerates only the current
+phase, while the full chain remains visible and is revalidated on both calls.
+Never place an existing-PR update after a new private layer, and never let one
+phase claim, hide, or inherit approval for the deferred phase.
 
 Before the first public push, the platform rechecks every record, every stored
 diff, every parent SHA, the full branch topology, commit attribution, and the
@@ -695,6 +746,22 @@ superseded outcomes from GitHub without manufacturing a second public action.
 
 Run these during preparation, after the partner agrees to stage a PR for review.
 Do not fork, push, or create a PR here.
+
+### Refresh upstream before review
+
+Fetch the canonical default branch immediately before constructing the review
+checkout. Base the isolated review on that freshly fetched commit, then replay
+only the attributable local commits and working diff. Use three-way application
+where upstream moved; never copy an older complete tree over newer upstream
+source, and never move the branch or worktree currently served to the partner.
+If the replay conflicts and the combined intent is not unambiguous, stop with
+the exact overlap instead of guessing. Run the same tests after replay that the
+change would have run on the older base.
+
+Before staging, inspect untracked and generated-looking paths. A clearly
+repository-wide generated path earns the smallest reusable `.gitignore` rule;
+review that rule as source and settle the generated path locally. Ambiguous
+files remain an owner decision—do not grow a hidden ignore mechanism.
 
 ### Keep exploration out of durable staging
 
@@ -770,6 +837,8 @@ git -C "$SOURCE" -c core.quotePath=false diff --no-ext-diff --no-color \
   --binary --full-index --src-prefix=a/ --dst-prefix=b/ \
   "$BASE_SHA..main" > /tmp/<record-id>.diff
 git -C "$SOURCE" worktree add -b fix/<slug>-<short> "$WORKTREE" "$BASE_SHA"
+git -C "$SOURCE" worktree lock \
+  --reason "Contribute review <record-id>" "$WORKTREE"
 cd "$WORKTREE"
 git apply --index --binary /tmp/<record-id>.diff
 git_email="$(git config --global --get user.email || true)"
@@ -796,6 +865,10 @@ Two invariants: the
 visible Möbius mark on GitHub — partner stays author, Möbius co-author), and the
 **live source repo remains on `main`** — only the separate review worktree stays
 on `fix/…`, so watcher edits and store updates cannot land on the review branch.
+Lock every linked review immediately after creation, before applying or
+committing its diff. The record-specific lock keeps an unrelated
+`git worktree prune` from stranding reviewed owner work; terminal contribution
+cleanup verifies the reciprocal Git pointer and releases that exact lock.
 
 ### An app with no origin, or platform/shell
 
@@ -812,8 +885,10 @@ cleaners leave it intact. Use the worktree as `repo_path`.
 
 **Platform/shell**: only when `/data/platform` has a real origin — create the
 review branch with `git -C /data/platform worktree add -b fix/…
-/data/contrib/<record-id>/worktree <base-sha>`, apply only the reviewed source
-diff there, and record that worktree path with `repo: "mobius-os/mobius"`.
+/data/contrib/<record-id>/worktree <base-sha>`, then immediately lock it with
+`git -C /data/platform worktree lock --reason "Contribute review <record-id>"
+/data/contrib/<record-id>/worktree`. Apply only the reviewed source diff there,
+and record that worktree path with `repo: "mobius-os/mobius"`.
 Capture `SOURCE_SHA="$(git -C /data/platform rev-parse HEAD)"` before creating
 the review worktree and store `source_repo_path: "/data/platform"` beside
 `plan.source_sha`; `/data/platform` itself remains on its current live branch.

@@ -428,6 +428,8 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
       ...contributionRows,
       '',
       'Start with Contribute’s current snapshot and deterministic reconciliation helpers. Accept their proven status, landing, duplicate, and lost-response outcomes instead of recreating that work by hand.',
+      'Before preparing any branch, fetch its canonical upstream read-only. Never pull, rebase, reset, switch, or otherwise move a shared live checkout. Build the review checkout from the freshly fetched accepted base, then replay only the attributable local commits and working diff in isolation. Do not copy an older whole tree over newer upstream changes. If a three-way replay is ambiguous, stop with the exact conflict.',
+      'Inspect untracked and generated-looking paths before staging. When a path is clearly repository-wide generated state, add the smallest reusable ignore rule to the owning .gitignore and settle the generated path locally. Do not silently ignore ambiguous files; leave one concrete owner decision instead.',
       'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
       'Privately prepare every worthwhile change in scope and thoroughly review each exact head. CAS-update quality_review throughout; all_clear is valid only when reviewed_head_sha equals plan.head_sha.',
       'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',

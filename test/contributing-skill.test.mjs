@@ -46,6 +46,33 @@ test('chat classifications are durable outcomes rather than prose-only exclusion
   assert.match(prose, /do not substitute a prose summary for this write/)
 })
 
+test('linked private reviews are locked until verified terminal cleanup', () => {
+  assert.match(prose, /worktree lock/)
+  assert.match(prose, /Contribute review <record-id>/)
+  assert.match(prose, /Lock every linked review immediately after creation/)
+  assert.match(prose, /`git worktree prune` from stranding reviewed owner work/)
+  assert.match(prose, /cleanup verifies the reciprocal Git pointer and releases that exact lock/)
+})
+
+test('verification reuses exact environments and owns exceptional installs', () => {
+  for (const text of [prose, attached]) {
+    assert.match(text, /scripts\.wt-pytest\.sh|scripts\/wt-pytest\.sh/)
+    assert.match(text, /scripts\.wt-npm\.sh|scripts\/wt-npm\.sh/)
+    assert.match(text, /exact `package-lock\.json` match|`package-lock\.json` matches exactly/)
+    assert.match(text, /Do not run a direct `npm ci`/)
+    assert.match(text, /checkout-local `\.venv`/)
+  }
+  assert.match(attached, /test machinery is not/)
+})
+
+test('mixed-action stacks advance through separately approved public phases', () => {
+  assert.match(prose, /existing pull requests whose branches need an update/)
+  assert.match(prose, /first confirm and update the consecutive `pr_update` prefix/)
+  assert.match(prose, /separately confirm and open the `pr` suffix/)
+  assert.match(prose, /full chain remains visible and is revalidated on both calls/)
+  assert.match(prose, /never let one phase claim, hide, or inherit approval for the deferred phase/i)
+})
+
 test('attached helpers use one private bounded playbook', () => {
   assert.match(attached, /Nothing public/)
   assert.match(attached, /agent_snapshot\.py/)
