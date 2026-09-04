@@ -56,7 +56,7 @@ export const CSS = `
 /* /mobius-ui:ReducedMotion */
 
 .co-page {
-  flex: 1; min-height: 0; width: min(100%, 1400px); margin: 0 auto;
+  flex: 1; min-height: 0; width: min(100%, 1040px); margin: 0 auto;
   padding: 0 20px max(56px, calc(28px + env(safe-area-inset-bottom)));
   overflow-y: auto; overflow-x: hidden;
   overscroll-behavior: contain;
@@ -65,7 +65,7 @@ export const CSS = `
 /* The contribution Run keeps a focused reading measure while Projects uses
    the wider canvas. */
 .co-contributions-view {
-  width: min(100%, 1120px); margin-inline: auto;
+  width: 100%; margin-inline: auto;
 }
 
 .co-header-shell {
@@ -74,7 +74,7 @@ export const CSS = `
 .co-header {
   position: relative; display: grid;
   grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 16px;
-  width: min(100%, 1120px); margin-inline: auto;
+  width: min(100%, 1040px); margin-inline: auto;
   padding: max(18px, env(safe-area-inset-top)) 20px 12px;
 }
 .co-header-main { min-width: 0; display: flex; align-items: center; gap: 12px; }
@@ -123,7 +123,7 @@ export const CSS = `
 /* Projects uses the wide page canvas as a secondary lens over the Run. */
 .co-page.is-sources {
   padding-bottom: 12px;
-  display: flex; flex-direction: column; overflow: hidden;
+  display: block; overflow-y: auto; overflow-x: hidden;
 }
 .co-project-icon {
   display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
@@ -142,7 +142,7 @@ export const CSS = `
 /* Projects is a local-work index: a quiet lens rail, one contextual action,
    and a single coherent list rather than a dashboard or split pane. */
 .co-projects-view {
-  width: min(100%, 1120px); margin-inline: auto; padding: 4px 0 32px;
+  width: 100%; margin-inline: auto; padding: 4px 0 32px;
 }
 .co-view-heading {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -175,7 +175,7 @@ export const CSS = `
   width: 100%; min-height: 46px; padding: 10px 13px;
   border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); color: var(--text); caret-color: var(--accent);
-  font: inherit; font-size: 12.5px;
+  font: inherit; font-size: 16px;
 }
 .co-project-search input::placeholder { color: var(--muted); }
 .co-project-search input:focus-visible {
@@ -247,6 +247,7 @@ export const CSS = `
   grid-template-rows: auto auto; align-items: center; gap: 3px 11px;
   width: 100%; min-height: 68px; padding: 11px 14px; border: 0;
   background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition: background .14s ease, box-shadow .14s ease;
 }
 .co-source-glyph {
   grid-column: 1; grid-row: 1 / 3; width: 36px; height: 36px;
@@ -259,12 +260,20 @@ export const CSS = `
 .co-source-row-facts { grid-column: 2; grid-row: 2; min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; color: var(--muted); font-size: 10.5px; }
 .co-source-row-facts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .co-source-row-facts > small { flex: none; color: var(--muted); font-size: 9.5px; font-variant-numeric: tabular-nums; }
-.co-source-dot { grid-column: 3; grid-row: 1 / 3; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.co-source-dot.tone-accent { background: var(--accent); }
-.co-source-dot.tone-ok { background: var(--green); }
-.co-source-dot.tone-warn { background: var(--co-warn); }
-.co-source-dot.tone-danger { background: var(--danger); }
-.co-focus-view { width: min(100%, 1120px); margin-inline: auto; }
+.co-source-row-cue {
+  grid-column: 3; grid-row: 1 / 3; display: inline-flex; align-items: center;
+  justify-content: flex-end; gap: 8px; color: var(--muted);
+}
+.co-source-row-cue small {
+  max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 9.5px; font-weight: 680;
+}
+.co-source-row-cue small.tone-accent { color: var(--accent); }
+.co-source-row-cue small.tone-ok { color: var(--green); }
+.co-source-row-cue small.tone-warn { color: var(--co-warn); }
+.co-source-row-cue small.tone-danger { color: var(--danger); }
+.co-source-row-cue .co-icon { transition: transform .14s ease; }
+.co-focus-view { width: 100%; margin-inline: auto; }
 .co-focus-back { margin: 5px 0 14px; color: var(--accent); }
 .co-source-error,
 .co-source-unavailable {
@@ -281,7 +290,8 @@ export const CSS = `
 @media (hover: hover) {
   .co-quiet-action:hover { color: var(--text); background: var(--surface2, var(--surface)); }
   .co-lens-nav button:hover { color: var(--text); }
-  .co-source-row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .co-source-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+  .co-source-row:hover .co-source-row-cue .co-icon { transform: translateX(2px); }
 }
 
 .co-source-status {
@@ -311,6 +321,17 @@ export const CSS = `
 }
 .co-project-next > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .co-project-next strong { font-size: 13px; line-height: 1.4; text-wrap: pretty; }
+.co-project-next-action {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 14px;
+  margin-top: 12px; padding: 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+.co-project-next-action > div { min-width: 0; }
+.co-project-next-action strong { display: block; font-size: 12px; line-height: 1.4; text-wrap: pretty; }
+.co-project-next-action p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; text-wrap: pretty; }
+.co-project-next-action > small { grid-column: 1 / -1; color: var(--muted); font-size: 9.5px; line-height: 1.4; }
+.co-project-next-action > small[role="alert"] { color: var(--danger); }
 .co-project-reviews { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .co-project-reviews > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; background: var(--surface2, var(--bg)); }
 .co-project-reviews > header strong { font-size: 11.5px; }
@@ -1295,6 +1316,7 @@ export const CSS = `
 .co-run-private p { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .co-run-private small { display: block; margin-top: 3px; color: var(--muted); font-size: 9.5px; }
 .co-run-private-actions { display: flex; align-items: center; gap: 5px; }
+.co-run-private-actions .co-btn { min-width: 68px; }
 .co-run-private-items {
   grid-column: 2 / -1; min-width: 0; overflow: hidden;
   border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
@@ -1411,7 +1433,7 @@ export const CSS = `
 .co-run-row + .co-run-row { border-top: 1px solid var(--border); }
 .co-run-row-main {
   min-width: 0; min-height: 48px; display: grid;
-  grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px;
+  grid-template-columns: 32px minmax(0, 1fr) 14px; align-items: center; gap: 9px;
   padding: 0; border: 0; background: transparent; color: inherit; font: inherit;
   text-align: left; cursor: pointer;
 }
@@ -1425,6 +1447,7 @@ export const CSS = `
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font-size: 9.5px;
 }
+.co-run-row-main > .co-icon { color: var(--muted); transition: transform .14s ease; }
 .co-run-row-main em {
   padding: 4px 6px; border-radius: 999px; background: var(--surface2, var(--bg));
   color: var(--muted); font-size: 8px; font-style: normal; font-weight: 700; white-space: nowrap;
@@ -1479,7 +1502,7 @@ export const CSS = `
 }
 .co-run-quiet-row + .co-run-quiet-row { border-top: 1px solid var(--border); }
 .co-run-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--muted); opacity: .55; }
-.co-run-dot.is-review_in_progress, .co-run-dot.is-publishing, .co-run-dot.is-autopilot { background: var(--accent); opacity: .85; }
+.co-run-dot.is-review_in_progress, .co-run-dot.is-publishing, .co-run-dot.is-autopilot, .co-run-dot.is-connecting { background: var(--accent); opacity: .85; }
 .co-run-dot.is-recent { background: var(--green); opacity: .8; }
 .co-run-quiet-row > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .co-run-quiet-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
@@ -1552,14 +1575,15 @@ export const CSS = `
 
 @media (hover: hover) {
   .co-run-row:hover, .co-run-quiet-row:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .co-run-row-main:hover > .co-icon { transform: translateX(2px); }
   .co-run-row-action:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); }
   .co-run-projects button:hover { color: var(--text); }
   .co-run-focus-list > button:hover { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 }
 
 /* Legacy detail components remain shared by the focused Run. */
-.co-contributions-view { width: min(100%, 1120px); }
-.co-run.co-run-focus { width: min(100%, 1120px); }
+.co-contributions-view { width: 100%; }
+.co-run.co-run-focus { width: 100%; }
 .co-review-project + .co-review-project { border-top: 1px solid var(--border); }
 .co-review-project > header {
   min-height: 40px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto;
@@ -1683,7 +1707,7 @@ export const CSS = `
 @media (max-width: 760px) {
   .co-run-focus-layout { display: block; }
   .co-run-focus-list { display: none; }
-  .co-page.is-sources { display: block; overflow-y: auto; padding-bottom: 32px; }
+  .co-page.is-sources { padding-bottom: 32px; }
   .co-projects-view { padding-top: 2px; }
   .co-lens-nav { margin-inline: -2px; }
   .co-source-detail { padding: 15px; }
@@ -1710,6 +1734,7 @@ export const CSS = `
   .co-run-private { grid-template-columns: 32px minmax(0, 1fr); align-items: start; padding: 10px; }
   .co-run-private > span { width: 32px; height: 32px; }
   .co-run-private-actions { grid-column: 1 / -1; padding-left: 42px; }
+  .co-run-private-actions .co-btn { flex: 1 1 0; min-width: 0; }
   .co-run-private-items { grid-column: 1 / -1; }
   .co-run-primary {
     grid-template-columns: 36px minmax(0, 1fr); align-items: start;
@@ -1725,7 +1750,7 @@ export const CSS = `
   .co-run-approval-actions { display: grid; grid-template-columns: 1fr 1fr; padding: 10px 12px; }
   .co-run-approval-actions .co-btn { min-width: 0; }
   .co-run-row { min-height: 69px; padding: 8px; }
-  .co-run-row-main { grid-template-columns: 30px minmax(0, 1fr); gap: 8px; }
+  .co-run-row-main { grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; }
   .co-run-row-icon { width: 30px; height: 30px; }
   .co-run-row-main em { grid-column: 2; width: max-content; }
   .co-run-row-main strong {
@@ -1751,10 +1776,19 @@ export const CSS = `
   .co-stage-intro p { font-size: 10.5px; }
   .co-project-index, .co-review-list { border-radius: 13px; }
   .co-source-group-label { padding-inline: 11px; }
-  .co-source-row { min-height: 62px; padding: 9px 11px; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 2px 9px; }
+  .co-source-row { min-height: 68px; padding: 9px 11px; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 2px 9px; }
   .co-source-glyph { width: 34px; height: 34px; }
+  .co-source-row-facts { align-items: flex-start; white-space: normal; line-height: 1.35; }
+  .co-source-row-facts > span {
+    display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere;
+  }
+  .co-source-row-facts > small { display: none; }
+  .co-source-row-cue small { display: none; }
   .co-source-detail { padding: 13px 11px 14px; border-radius: 13px; }
   .co-project-next, .co-project-handoff { align-items: stretch; flex-direction: column; }
+  .co-project-next-action { grid-template-columns: minmax(0, 1fr); }
+  .co-project-next-action > .co-btn { width: 100%; margin-top: 6px; }
   .co-project-next .co-agent-handoff .co-btn,
   .co-project-handoff .co-agent-handoff .co-btn { width: 100%; }
   .co-project-handoff .co-agent-handoff-error { max-width: none; text-align: left; }
@@ -1816,7 +1850,7 @@ export const CSS = `
 
 /* mobius-ui:CenteredRail v1 */
 @media (min-width: 900px) {
-  .co-header-shell { width: min(100%, 1120px); margin-inline: auto; }
+  .co-header-shell { width: min(100%, 1040px); margin-inline: auto; }
 }
 /* /mobius-ui:CenteredRail */
 `

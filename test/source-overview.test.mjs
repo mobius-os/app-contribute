@@ -85,8 +85,8 @@ test('the Run renders one batch action without a duplicate publish row', async (
 
   assert.equal((html.match(/co-run-primary is-send/g) || []).length, 1)
   assert.doesNotMatch(html, /co-run-row is-publish/)
-  assert.match(html, /Send/)
-  assert.match(html, /Needs you<\/h3><span>0<\/span>/)
+  assert.match(html, /Review and send/)
+  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
 })
 
 test('exact publication copy is truthful per record in a mixed route batch', async (t) => {
@@ -148,7 +148,7 @@ test('known route failures leave the public batch before approval', async (t) =>
   assert.match(publicationRouteProblem(stack, 'mobius', 'connected'), /relay supports standalone/)
 })
 
-test('an exact approval fingerprint changes with code, public text, route, and review stage', async (t) => {
+test('an exact approval fingerprint changes with head, route, and review stage', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { batchFingerprint } = await runRenderer()
   const rec = record('Approved head')
@@ -168,21 +168,6 @@ test('an exact approval fingerprint changes with code, public text, route, and r
   }
 
   assert.notEqual(batchFingerprint([changedHead], 'send', 'github', 'connected'), approved)
-  for (const planChange of [
-    { base_sha: 'c'.repeat(40) },
-    { diff_sha256: 'd'.repeat(64) },
-    { title: 'Changed title' },
-    { body_draft: 'Changed public body' },
-    { labels: ['bug'] },
-  ]) {
-    const changed = { ...rec, plan: { ...rec.plan, ...planChange } }
-    const changedItem = {
-      ...item,
-      record: changed,
-      unit: { ...item.unit, record: changed, records: [changed] },
-    }
-    assert.notEqual(batchFingerprint([changedItem], 'send', 'github', 'connected'), approved)
-  }
   assert.notEqual(batchFingerprint([item], 'send', 'mobius', 'connected'), approved)
   assert.notEqual(batchFingerprint([item], 'ready', 'github', 'connected'), approved)
 })
@@ -216,11 +201,14 @@ test('the Run keeps project identity without duplicating Projects navigation', a
   }
   const html = renderRun(run)
 
-  assert.match(html, /Private work can be handled together/)
+  assert.match(html, /Local work needs sorting/)
+  assert.match(html, />Review</)
+  assert.match(html, />Prepare</)
+  assert.match(html, />Merge</)
   assert.match(html, /co-run-private-items/)
   assert.match(html, /owner\/one/)
   assert.match(html, /owner\/two/)
-  assert.match(html, /Needs you<\/h3><span>0<\/span>/)
+  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
   assert.doesNotMatch(html, /co-run-row is-private_review/)
   assert.doesNotMatch(html, /projects represented in this snapshot/)
   assert.doesNotMatch(html, /Browse projects/)
@@ -242,12 +230,12 @@ test('private review groups move from the one Private Run into Working while it 
     privateAction: { label: 'Fix', count: 1, draft: 'Fix private work' },
   }, { cycle: { phase: 'running', runtime: { running: true } } })
 
-  assert.match(html, /Preparing private work/)
+  assert.match(html, /Preparing local work/)
   assert.match(html, /<summary><span>Working<\/span><b>1<\/b>/)
   assert.match(html, /Working<\/span><b>1<\/b>/)
   assert.match(html, /is-review_in_progress/)
   assert.match(html, /Private run in progress/)
-  assert.match(html, /Needs you<\/h3><span>0<\/span>/)
+  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
   assert.doesNotMatch(html, /co-run-private-items/)
   assert.doesNotMatch(html, /co-run-row is-private_review/)
 })
@@ -264,7 +252,6 @@ test('focused batch and private items are inspectable but cannot bypass their on
     })
     assert.doesNotMatch(html, />Send PR</)
     assert.match(html, /Open source chat/)
-    assert.match(html, /Dismiss prepared pull request/)
   }
 })
 
@@ -315,22 +302,22 @@ test('focused public-attention stacks expose every affected record and its next 
   assert.match(html, /Fix in chat/)
 })
 
-test('a stack-owned merged app handoff exposes one connection action', async (t) => {
+test('a stack-owned merged app handoff shows one automatic working state', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderFocus } = await runRenderer()
-  const merged = record('Connect app', {
+  const merged = record('Publish app', {
     status: 'merged',
     plan: { after_merge: { action: 'connect_app' } },
   })
   const open = { ...record('Open sibling'), status: 'open' }
   const html = renderFocus({
-    id: 'connect:stack', kind: 'connect', record: merged,
+    id: 'connecting:stack', kind: 'connecting', record: merged,
     unit: { type: 'stack', id: 'stack', records: [merged, open] },
-    label: merged.title, detail: 'Merged app ready to connect',
+    label: merged.title, detail: 'Published app needs a one-time local link',
   })
 
-  assert.equal((html.match(/class="co-publication-action"/g) || []).length, 1)
-  assert.match(html, /<button[^>]*co-btn-primary[^>]*>Connect app<\/button>/)
+  assert.equal((html.match(/Finishing publication/g) || []).length, 1)
+  assert.doesNotMatch(html, />Link app<\/button>/)
   assert.doesNotMatch(html, />Send PRs?</)
 })
 

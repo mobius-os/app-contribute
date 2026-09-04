@@ -7,6 +7,7 @@ const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../api.js', import.meta.url), 'utf8')
 const connectionSource = readFileSync(new URL('../ui/ConnectionCard.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
+const fileDiffListSource = readFileSync(new URL('../ui/FileDiffList.jsx', import.meta.url), 'utf8')
 const batchActionSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
@@ -14,7 +15,9 @@ const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
-  assert.match(feedSource, /count === 1 \? 'Send' : `Send all \$\{count\}`/)
+  assert.match(feedSource, /count === 1 \? 'Review and send' : `Review and send \$\{count\}`/)
+  assert.match(feedSource, /count === 1 \? 'Send to GitHub' : `Send \$\{count\} to GitHub`/)
+  assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
 })
 
 test('focused review actions keep one strong primary and compact phone-safe secondary controls', () => {
@@ -84,7 +87,8 @@ test('global app handoffs stay durable while source-linked work returns to its c
   assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
   assert.match(sourceMapSource, /onViewReview\(rec, projectKey\)/)
   assert.match(feedSource, /function SourceChatChoices/)
-  assert.match(feedSource, /Private work can be handled together/)
+  assert.match(feedSource, /Local work needs sorting/)
+  assert.match(feedSource, /Preparation chat total:/)
   assert.match(appSource, /const onFeedback = useCallback/)
   assert.match(appSource, /type: 'moebius:open-chat', chatId: rec\.chat_id, draft \},[\s\S]{0,20}'\*'\)/)
   assert.doesNotMatch(appSource, /moebius:open-chat[\s\S]{0,200}window\.location\.origin/)
@@ -127,8 +131,12 @@ test('an assigned incoming review stays recoverable until its conversation start
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
   assert.match(feedSource, /function PrivateRunAction/)
-  assert.match(feedSource, /Private work can be handled together/)
-  assert.match(feedSource, /Earlier private work paused/)
+  assert.match(feedSource, /Local work needs sorting/)
+  assert.match(feedSource, /Local work changed since the last preparation/)
+  assert.match(feedSource, />\s*Review\s*</)
+  assert.match(feedSource, />\s*Prepare\s*</)
+  assert.match(feedSource, />\s*Merge\s*</)
+  assert.match(feedSource, /contributionOutcomeAction\(action, 'merge'\)/)
   assert.match(feedSource, /<PrivateRunAction/)
   assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
@@ -144,6 +152,11 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(batchActionSource, /'Starting…'/)
   assert.match(batchActionSource, /aria-busy=\{busy\}/)
   assert.match(appSource, /resolveUncertainSubmission/)
+})
+
+test('diffs stay collapsed until the owner opens a file', () => {
+  assert.doesNotMatch(sourceMapSource, /initiallyOpenFirst/)
+  assert.doesNotMatch(fileDiffListSource, /initiallyOpenFirst/)
 })
 
 test('blocked contributions have one calm recovery action', () => {
@@ -209,16 +222,47 @@ test('the retired raw-ref Land path has no reachable client action', () => {
 })
 
 test('wide collection and review views share centered guides on one continuous canvas', () => {
-  assert.match(themeSource, /\.co-page \{[\s\S]*?width: min\(100%, 1400px\)/)
-  assert.match(themeSource, /\.co-contributions-view \{\s*width: min\(100%, 1120px\); margin-inline: auto/)
-  assert.match(themeSource, /\.co-header \{[^}]*width: min\(100%, 1120px\); margin-inline: auto/)
+  assert.match(themeSource, /\.co-page \{[\s\S]*?width: min\(100%, 1040px\)/)
+  assert.match(themeSource, /\.co-contributions-view \{\s*width: 100%; margin-inline: auto/)
+  assert.match(themeSource, /\.co-header \{[^}]*width: min\(100%, 1040px\); margin-inline: auto/)
   assert.match(themeSource, /\.co-github-menu \{[^}]*max-width: 520px/)
   assert.doesNotMatch(themeSource, /radial-gradient|linear-gradient\(var\(--bg\), var\(--bg\)\)/)
   assert.doesNotMatch(themeSource, /\.co-root::before/)
-  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 1120px\); margin-inline: auto/)
+  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 1040px\); margin-inline: auto/)
   assert.match(themeSource, /\.co-header-shell \{\s*flex: 0 0 auto; width: 100%; background: var\(--bg\);\s*\}/)
   assert.match(appSource, /<div className="co-header-shell">[\s\S]*?<\/div>\s*<main/)
   assert.doesNotMatch(themeSource, /\.co-page\.is-sources \{\s*width:/)
+})
+
+test('Projects owns vertical scrolling and makes every row visibly navigable', () => {
+  assert.match(themeSource, /\.co-page\.is-sources \{[\s\S]*?overflow-y: auto/)
+  assert.match(sourceMapSource, /aria-label=\{`Open \$\{project\.name\}: \$\{next\}`\}/)
+  assert.match(sourceMapSource, /className="co-source-row-cue"/)
+  assert.match(sourceMapSource, /<Icon name="right" size=\{15\}/)
+  assert.match(themeSource, /\.co-source-row \{[\s\S]*?cursor: pointer/)
+  assert.match(themeSource, /\.co-source-row-facts > small \{ display: none; \}/)
+  assert.match(themeSource, /\.co-source-row-facts > span \{[\s\S]*?-webkit-line-clamp: 2/)
+})
+
+test('a selected project with local work offers preparation in place', () => {
+  assert.match(sourceMapSource, /function ProjectPreparationAction/)
+  assert.match(sourceMapSource, /Resolve and prepare/)
+  assert.match(sourceMapSource, /Your local version stays in place/)
+  assert.match(sourceMapSource, /onPrepareProject\(project\)/)
+  assert.match(appSource, /event: 'prepare_source_project'/)
+  assert.match(appSource, /Keep Contribute as the owner-facing surface/)
+  assert.match(themeSource, /\.co-project-next-action \{/)
+  assert.doesNotMatch(sourceMapSource, /if \(project\.sourceComparisonRequired\) return 'Compare before preparing'/)
+})
+
+test('published-app handoffs finish automatically without a second owner action', () => {
+  assert.doesNotMatch(feedSource, /function PublishedAppLinks/)
+  assert.match(feedSource, /Finishing publication/)
+  assert.doesNotMatch(feedSource, /Connect app|ready to connect|Link \$\{items\.length\} apps/)
+  assert.doesNotMatch(themeSource, /co-published-links/)
+  assert.match(cardSource, /Attaching the published identity to this local app/)
+  assert.doesNotMatch(cardSource, />Link app</)
+  assert.match(runSource, /decision\('connecting'/)
 })
 
 test('cards use explicit links and detail buttons instead of a clickable container', () => {

@@ -144,10 +144,12 @@ entry.
 
 When several reviewed units share the same public outcome, one batch action is
 the default. Its confirmation names every standalone pull request and every
-layer of every ordered stack, states whether each opens ready or as a draft,
-and says that nothing merges. The batch dispatcher preserves stack semantics
-and partial success; completed units leave immediately while a failed unit
-remains actionable.
+layer in the ordered stack's current public phase, states whether each opens
+ready or as a draft or updates an existing pull request, and says that nothing
+merges. An existing-PR update prefix and new unpublished suffix remain one
+reviewed stack but require separate confirmations. The batch dispatcher
+preserves stack semantics and partial success; completed units leave
+immediately while a failed unit remains actionable.
 
 On phones, decisions stay dense enough to scan: title, project, honest state,
 and one compact action. Supporting prose yields before the action does.

@@ -481,10 +481,10 @@ function PublicationReviewNote({ rec }) {
     <section className="co-publication-review" aria-label="Reviewed after-merge action">
       <span>After merge</span>
       <div>
-        <strong>Connect this local app in place</strong>
+        <strong>Link this local app to its published version</strong>
         <p>
-          Contribute will offer one verified handoff to the merged App Store
-          version. The app stays the same in your workspace, with its saved data.
+          After merge, Contribute verifies the published source and offers one
+          local link. The app and its saved data stay in place.
         </p>
       </div>
     </section>
@@ -833,11 +833,9 @@ function RestoreAction({ rec, onRestore }) {
   )
 }
 
-function PublicationConnectionAction({ rec, onConnectApp }) {
+function PublicationConnectionAction({ rec }) {
   const handoff = publicationHandoff(rec)
   const connection = rec.publication_connection
-  const [connecting, setConnecting] = useState(false)
-  const [note, setNote] = useState('')
   if (!handoff || rec.status !== 'merged') return null
 
   if (
@@ -850,11 +848,11 @@ function PublicationConnectionAction({ rec, onConnectApp }) {
         className={`co-publication-action is-connected${conflicted ? ' has-conflicts' : ''}`}
         role="status"
       >
-        <span>{conflicted ? 'Connected with follow-up' : 'App connected'}</span>
+        <span>{conflicted ? 'Linked with follow-up' : 'App linked'}</span>
         <strong>
           {conflicted
-            ? 'Your app is linked, but its source changes need review.'
-            : 'This installed app now follows its App Store version.'}
+            ? 'The local app is linked, but its source changes need review.'
+            : 'This local app now follows its published version.'}
         </strong>
         <p>
           {conflicted
@@ -865,41 +863,14 @@ function PublicationConnectionAction({ rec, onConnectApp }) {
     )
   }
 
-  async function connect() {
-    if (typeof onConnectApp !== 'function') return
-    setConnecting(true)
-    setNote('')
-    try {
-      const outcome = (await onConnectApp(rec)) || {}
-      if (!outcome.ok) {
-        setNote(outcome.error || 'Could not connect this published app.')
-      }
-    } finally {
-      setConnecting(false)
-    }
-  }
-
   return (
-    <div className="co-publication-action">
-      <span>App ready to connect</span>
-      <strong>Keep the local app and its published version together</strong>
+    <div className="co-publication-action" role="status">
+      <span>Finishing publication</span>
+      <strong>Attaching the published identity to this local app</strong>
       <p>
-        Contribute will verify the exact merged source and permissions, then
-        connect them to this same installed app. Saved app data stays in place.
+        Contribute completes this automatically after the reviewed change
+        merges. Saved app data and newer local work stay in place.
       </p>
-      {typeof onConnectApp === 'function' ? (
-        <button
-          type="button"
-          className="co-btn co-btn-sm co-btn-primary"
-          disabled={connecting}
-          onClick={connect}
-        >
-          {connecting ? 'Connecting…' : 'Connect app'}
-        </button>
-      ) : null}
-      {note ? (
-        <p className="co-review-error" role="status" aria-live="polite">{note}</p>
-      ) : null}
     </div>
   )
 }
@@ -1059,7 +1030,6 @@ export function ContributionDecision({
   onDismiss,
   onRestore,
   onWithdraw,
-  onConnectApp,
 }) {
   const status = rec?.status || 'prepared'
   const isPr = rec?.plan?.action === 'pr' || rec?.type === 'pr'
@@ -1090,7 +1060,7 @@ export function ContributionDecision({
     <section className="co-decision-surface" aria-label={title}>
       <AttentionCallout rec={rec} onFeedback={onFeedback} />
       <SubmitErrorAlert rec={rec} reviewState={reviewState} onReview={onReview} />
-      <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} />
+      <PublicationConnectionAction rec={rec} />
       <WithdrawAction rec={rec} onWithdraw={onWithdraw} />
       {hasPreparedAction ? (
         <ReviewActions
@@ -1121,7 +1091,6 @@ export function ContributionCard({
   onRestore,
   onSetAutopilot,
   onWithdraw,
-  onConnectApp,
   loadDiff,
   initialExpanded = false,
   showDecision = true,
@@ -1236,7 +1205,7 @@ export function ContributionCard({
       {showPublishedLabelOutcome ? (
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
-      {showDecision ? <PublicationConnectionAction rec={rec} onConnectApp={onConnectApp} /> : null}
+      {showDecision ? <PublicationConnectionAction rec={rec} /> : null}
       {hasPlan && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button

@@ -162,16 +162,16 @@ export function stackReadiness(unit) {
     return fail('invalid', 'This chain has duplicate, missing, or mismatched layer positions.')
   }
   const repo = records[0]?.plan?.repo || records[0]?.repo || ''
-  const action = records[0]?.plan?.action
-  if (!['pr', 'pr_update'].includes(action)) {
-    return fail('invalid', 'Every layer must use one supported pull-request action.')
-  }
   for (let index = 0; index < records.length; index += 1) {
     const rec = records[index]
     const meta = metas[index]
     const recRepo = rec?.plan?.repo || rec?.repo || ''
-    if (rec.type !== 'pr' || rec?.plan?.action !== action || recRepo !== repo) {
-      return fail('invalid', 'Every layer must use the same pull-request action and repository.')
+    if (
+      rec.type !== 'pr'
+      || !['pr', 'pr_update'].includes(rec?.plan?.action)
+      || recRepo !== repo
+    ) {
+      return fail('invalid', 'Every layer must use a supported pull-request action and the same repository.')
     }
     if (!['prepared', 'draft', 'open', 'merged'].includes(rec.status)) {
       return fail('invalid', 'One layer is not in a publishable stack state.')
@@ -206,5 +206,41 @@ export function stackReadiness(unit) {
   if (ready.length === 0) {
     return fail('settled', 'Every layer in this chain is already public or merged.')
   }
-  return { ok: true, code: 'ready', message: '', ready }
+  let sawCreate = false
+  for (const rec of ready) {
+    if (rec?.plan?.action === 'pr') sawCreate = true
+    else if (sawCreate) {
+      return fail(
+        'invalid',
+        'An existing pull-request update cannot follow a new private layer.',
+      )
+    }
+  }
+  const action = ready[0]?.plan?.action
+  const phaseReady = ready.filter((rec) => rec?.plan?.action === action)
+  return {
+    ok: true,
+    code: 'ready',
+    message: '',
+    ready: phaseReady,
+    deferred: ready.slice(phaseReady.length),
+    action,
+    updating: action === 'pr_update',
+  }
+}
+
+// A stack can have a reviewed existing-PR prefix followed by unpublished
+// children. Keep it one visible chain, but expose only the next safe public
+// phase: update the existing prefix first, then offer the new suffix after the
+// ledger refresh proves those parent updates settled.
+export function stackPublicationRecords(unit) {
+  const prepared = sortStackRecords(unit?.records || []).filter(
+    (record) => record?.status === 'prepared',
+  )
+  const action = prepared[0]?.plan?.action
+  if (!['pr', 'pr_update'].includes(action)) return []
+  const boundary = prepared.findIndex(
+    (record) => record?.plan?.action !== action,
+  )
+  return boundary === -1 ? prepared : prepared.slice(0, boundary)
 }

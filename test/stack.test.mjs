@@ -5,6 +5,7 @@ import {
   preparedContributionUnits,
   publicContributionUnits,
   stackMeta,
+  stackPublicationRecords,
   stackReadiness,
 } from '../stack.js'
 
@@ -65,16 +66,38 @@ test('batch review keeps an already-public draft parent in the chain', () => {
   assert.equal(stackReadiness(units[0]).ok, true)
 })
 
-test('reviewed existing-PR stacks are updateable only as one uniform action', () => {
+test('reviewed existing-PR prefixes advance before unpublished stack children', () => {
   const updating = [layer(1), layer(2), layer(3)].map((rec) => ({
     ...rec,
     plan: { ...rec.plan, action: 'pr_update' },
   }))
   assert.equal(stackReadiness(groupContributionUnits(updating)[0]).ok, true)
-  updating[1] = { ...updating[1], plan: { ...updating[1].plan, action: 'pr' } }
+  updating[2] = { ...updating[2], plan: { ...updating[2].plan, action: 'pr' } }
   const mixed = stackReadiness(groupContributionUnits(updating)[0])
-  assert.equal(mixed.ok, false)
-  assert.match(mixed.message, /same pull-request action/)
+  assert.equal(mixed.ok, true)
+  assert.equal(mixed.updating, true)
+  assert.deepEqual(mixed.ready.map((record) => record.id), ['layer-1', 'layer-2'])
+  assert.deepEqual(mixed.deferred.map((record) => record.id), ['layer-3'])
+  assert.deepEqual(
+    stackPublicationRecords(groupContributionUnits(updating)[0])
+      .map((record) => record.id),
+    ['layer-1', 'layer-2'],
+  )
+
+  const afterUpdate = [
+    { ...updating[0], status: 'open' },
+    { ...updating[1], status: 'open' },
+    updating[2],
+  ]
+  const createPhase = stackReadiness(groupContributionUnits(afterUpdate)[0])
+  assert.equal(createPhase.ok, true)
+  assert.equal(createPhase.updating, false)
+  assert.deepEqual(createPhase.ready.map((record) => record.id), ['layer-3'])
+
+  updating[0] = { ...updating[0], plan: { ...updating[0].plan, action: 'pr' } }
+  const reversed = stackReadiness(groupContributionUnits(updating)[0])
+  assert.equal(reversed.ok, false)
+  assert.match(reversed.message, /cannot follow a new private layer/)
 })
 
 test('incomplete chains stay reviewable but cannot be sent', () => {
