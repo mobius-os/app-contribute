@@ -14,11 +14,8 @@ function stableApprovalValue(value) {
 }
 
 // Public approval belongs to the exact durable action the owner saw, not just
-// to a record id. Keep the projection deliberately narrower than the whole UI
-// record (which may carry transient overlays), but include every fact that can
-// change the target, reviewed code, proposed public text, or action lifecycle.
-// Stable key ordering makes a server round-trip compare by value rather than by
-// object insertion order.
+// to a record id. Keep the projection narrower than transient UI state, but
+// include every fact that can change the target, code, public text, or action.
 export function contributionApprovalFingerprint(record) {
   if (!record || typeof record !== 'object') return ''
   return JSON.stringify(stableApprovalValue({
@@ -50,6 +47,16 @@ export function contributionApprovalFingerprint(record) {
 export function contributionApprovalIsCurrent(approved, current) {
   const approvedFingerprint = contributionApprovalFingerprint(approved)
   return !!approvedFingerprint && approvedFingerprint === contributionApprovalFingerprint(current)
+}
+
+export function contributionPhaseApprovalIsCurrent(approvedRecords, currentRecords) {
+  if (!Array.isArray(approvedRecords) || !Array.isArray(currentRecords)) return false
+  return approvedRecords.length > 0
+    && approvedRecords.length === currentRecords.length
+    && currentRecords.every((current, index) => (
+      current?.id === approvedRecords[index]?.id
+      && contributionApprovalIsCurrent(approvedRecords[index], current)
+    ))
 }
 
 export function contributionScopeHash(input) {
@@ -127,6 +134,31 @@ export function contributionActionScope(action) {
     .join('\u0000')
   if (!identity.replaceAll('\u0000', '')) return ''
   return `contribute-task:${contributionScopeHash(identity)}`
+}
+
+// Review and Prepare are two views of the same private work. Merge is the
+// owner's desired end state, not a wider GitHub grant: it gets a distinct
+// helper scope so a completed preparation can be resumed as one full-cycle
+// workflow, while the exact publication and final merge approvals stay on the
+// existing guarded surfaces.
+export function contributionOutcomeAction(action, outcome = 'prepare') {
+  if (!action || outcome !== 'merge') return action || null
+  const sourceScope = contributionActionScope(action)
+  return {
+    ...action,
+    event: 'prepare_contribution_merge_cycle',
+    title: 'Prepare the full merge cycle',
+    label: 'Merge',
+    scope: `contribute-merge:${contributionScopeHash(`${sourceScope}\u0000${action.revision || ''}`)}`,
+    scopeLabel: 'Prepare the full merge cycle',
+    draft: [
+      action.draft,
+      '',
+      'The owner chose Merge as the desired outcome for this exact scope. Carry the private alignment, grouping, and review through to the existing approval checkpoints instead of inventing a parallel queue.',
+      'After preparation, leave the exact reviewed publication controls ready. Every push, pull-request creation or update, comment, and final merge still requires its own current explicit approval; this choice does not pre-authorize any public action.',
+      'Once approved public work exists, keep it attached to its source chats and Contribute records so checks, review feedback, final merge approval, and local reconciliation remain one visible cycle.',
+    ].join('\n'),
+  }
 }
 
 // A quality verdict belongs to one immutable prepared head. Source freshness

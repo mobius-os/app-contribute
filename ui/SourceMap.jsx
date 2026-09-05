@@ -11,17 +11,14 @@ import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
 
 const FILTERS = [
-  ['attention', 'Needs attention'],
+  ['local', 'Local work'],
   ['all', 'All projects'],
 ]
 
 function projectMatchesJourney(project, filter) {
-  if (filter === 'attention') return !!(
+  if (filter === 'local') return !!(
     projectReadyToPrepare(project)
     || projectNeedsSorting(project)
-    || project.incomingFiles > 0
-    || [...(project.contributions || []), ...(project.issues || [])]
-      .some((record) => record.needs_attention)
   )
   return true
 }
@@ -29,7 +26,7 @@ function projectMatchesJourney(project, filter) {
 function projectContributionCountLabel(project) {
   const pullRequests = Number(project?.contributionCounts?.pullRequests || 0)
   const issues = Number(project?.contributionCounts?.issues || 0)
-  return `${pullRequests} ${pullRequests === 1 ? 'PR' : 'PRs'} · ${issues} ${issues === 1 ? 'issue' : 'issues'}`
+  return `${pullRequests} ${pullRequests === 1 ? 'pull request' : 'pull requests'} · ${issues} ${issues === 1 ? 'issue' : 'issues'}`
 }
 
 function localWorkLabel(project, ending) {
@@ -39,21 +36,18 @@ function localWorkLabel(project, ending) {
 }
 
 function projectNextStep(project, journey = 'all') {
-  if (journey === 'attention') {
-    if (projectReadyToPrepare(project)) return localWorkLabel(project, 'to prepare')
-    if (projectNeedsSorting(project)) return 'Review local and shared changes'
-  }
+  if (project.builtHere) return 'Local app · no upstream repository'
+  if (projectReadyToPrepare(project)) return localWorkLabel(project, 'ready to prepare')
+  if (projectNeedsSorting(project)) return localWorkLabel(project, 'need sorting')
   if (project.conflictFiles > 0) return `${project.conflictFiles} need a choice`
   if (project.workingFiles > 0) return `${project.workingFiles} being edited`
   if (project.localFiles > 0 || project.compatibleFiles > 0) {
     const total = project.localFiles + project.compatibleFiles
     return `${total} ${total === 1 ? 'change' : 'changes'} to prepare`
   }
-  if (project.sourceComparisonRequired) return 'Compare before preparing'
   if (project.incomingFiles > 0) return 'Shared update available'
   const activeRequests = (project.contributions?.length || 0) + (project.issues?.length || 0)
   if (activeRequests > 0) return `${activeRequests} active ${activeRequests === 1 ? 'request' : 'requests'}`
-  if (project.builtHere) return 'Publish when ready'
   return 'Up to date'
 }
 
@@ -147,7 +141,6 @@ function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
         <UnifiedDiff
           diff={state.data?.diff}
           diffTruncated={state.data?.diff_truncated === true}
-          initiallyOpenFirst
         />
       ) : (
         <div className="co-project-file-list">
@@ -193,7 +186,72 @@ function ProjectRequests({ title, emptyLabel, rows, onViewReview, projectKey }) 
   )
 }
 
-function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onViewReview }) {
+function ProjectPreparationAction({ project, onPrepareProject }) {
+  const [state, setState] = useState({ phase: 'idle', message: '' })
+  const needsSorting = projectNeedsSorting(project)
+  const ready = projectReadyToPrepare(project)
+  if ((!needsSorting && !ready) || typeof onPrepareProject !== 'function') return null
+
+  const hasOverlap = project.conflictFiles > 0 || project.compatibleFiles > 0
+  const title = hasOverlap
+    ? 'Resolve the overlap and prepare what remains'
+    : needsSorting
+      ? 'Compare and prepare this work'
+      : 'Prepare these changes'
+  const detail = hasOverlap
+    ? 'Your local version stays in place while both versions are compared. Only the changes you keep move into review.'
+    : needsSorting
+      ? 'Contribute will classify the local and shared work, then bring back one reviewed proposal.'
+      : 'Contribute can prepare this local work for private review now.'
+  const label = hasOverlap
+    ? 'Resolve and prepare'
+    : needsSorting
+      ? 'Compare and prepare'
+      : 'Prepare changes'
+
+  async function prepare() {
+    if (state.phase === 'starting' || state.phase === 'started') return
+    setState({ phase: 'starting', message: '' })
+    const outcome = await onPrepareProject(project)
+    if (outcome?.ok) {
+      setState({
+        phase: 'started',
+        message: 'Working here in the background. This project will refresh when its reviewed proposal is ready.',
+      })
+    } else {
+      setState({
+        phase: 'error',
+        message: outcome?.error || 'Could not start this preparation. Try again.',
+      })
+    }
+  }
+
+  return (
+    <section className="co-project-next-action">
+      <div><strong>{title}</strong><p>{detail}</p></div>
+      <button
+        type="button"
+        className="co-btn co-btn-primary"
+        disabled={state.phase === 'starting' || state.phase === 'started'}
+        onClick={prepare}
+      >
+        {state.phase === 'starting' ? 'Starting…' : state.phase === 'started' ? 'Preparing…' : label}
+      </button>
+      {state.message ? (
+        <small role={state.phase === 'error' ? 'alert' : 'status'}>{state.message}</small>
+      ) : null}
+    </section>
+  )
+}
+
+function ProjectDetail({
+  project,
+  journey,
+  loadProjectDiff,
+  onRefresh,
+  onViewReview,
+  onPrepareProject,
+}) {
   const status = projectStatus(project)
   return (
     <article className="co-source-detail">
@@ -205,6 +263,7 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onViewRev
         <span><strong>{projectNextStep(project, journey)}</strong></span>
       </div>
       <p className="co-source-overview-copy">{projectDetailSummary(project)}</p>
+      <ProjectPreparationAction project={project} onPrepareProject={onPrepareProject} />
       <div className="co-project-request-summary" aria-label="Active GitHub work">
         <span>{projectContributionCountLabel(project)}</span>
       </div>
@@ -231,16 +290,26 @@ function ProjectDetail({ project, journey, loadProjectDiff, onRefresh, onViewRev
 
 function ProjectRow({ project, journey, selected, onSelect }) {
   const status = projectStatus(project)
+  const next = projectNextStep(project, journey)
   return (
     <div className={'co-source-row-wrap' + (selected ? ' is-selected' : '')}>
-      <button type="button" className="co-source-row" onClick={() => onSelect(project.key)} aria-expanded={selected}>
+      <button
+        type="button"
+        className="co-source-row"
+        onClick={() => onSelect(project.key)}
+        aria-expanded={selected}
+        aria-label={`Open ${project.name}: ${next}`}
+      >
         <ProjectGlyph project={project} />
         <span className="co-source-row-id"><strong>{project.name}</strong></span>
         <span className="co-source-row-facts">
-          <span>{projectNextStep(project, journey)}</span>
+          <span>{next}</span>
           <small>{projectContributionCountLabel(project)}</small>
         </span>
-        <span className={'co-source-dot tone-' + status.tone} title={status.label} />
+        <span className="co-source-row-cue" aria-hidden="true">
+          <small className={'tone-' + status.tone}>{status.label}</small>
+          <Icon name="right" size={15} />
+        </span>
       </button>
     </div>
   )
@@ -270,8 +339,9 @@ export function SourceMap({
   onRetry,
   loadProjectDiff,
   onViewReview,
+  onPrepareProject,
 }) {
-  const [filter, setFilter] = useState(() => focusKey ? 'all' : 'attention')
+  const [filter, setFilter] = useState(() => focusKey ? 'all' : 'local')
   const [query, setQuery] = useState('')
   const filtered = useMemo(
     () => projects.filter((project) => (
@@ -373,9 +443,9 @@ export function SourceMap({
   const builtHere = filtered.filter((project) => project.builtHere)
   const tracked = filtered.filter((project) => !project.builtHere)
   const copy = {
-    attention: {
-      title: 'Needs attention',
-      description: 'Projects with local or shared changes that need preparing, understanding, or aligning.',
+    local: {
+      title: 'Local work not yet resolved upstream',
+      description: 'These projects contain local work that still needs preparing or sorting. Open a row to see the files and any existing pull requests.',
     },
     all: {
       title: 'All projects',
@@ -402,7 +472,7 @@ export function SourceMap({
         <header className="co-view-heading">
           <div>
             <h2>Projects</h2>
-            <p>See what changed in each local project and what should happen next.</p>
+            <p>Start with local work that is not yet resolved upstream. Open any row for its files, pull requests, and next step.</p>
           </div>
           <div className="co-project-view-actions">
             <button
@@ -470,14 +540,14 @@ export function SourceMap({
           ) : (
             <div className="co-project-index">
               <ProjectGroup
-                label={builtHere.length ? 'Platform and installed apps' : ''}
+                label={builtHere.length ? 'Tracked upstream' : ''}
                 projects={tracked}
                 journey={filter}
                 selectedKey=""
                 onSelect={openProject}
               />
               <ProjectGroup
-                label="Built here"
+                label="Local apps without an upstream repository"
                 projects={builtHere}
                 journey={filter}
                 selectedKey=""
@@ -498,6 +568,7 @@ export function SourceMap({
             loadProjectDiff={loadProjectDiff}
             onRefresh={onRetry}
             onViewReview={onViewReview}
+            onPrepareProject={onPrepareProject}
           />
         </div>
       )}

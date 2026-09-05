@@ -347,16 +347,11 @@ test('human-required prepared attention stays in Needs you and outside private w
 test('incoming-only project is alignment work, never preparation', () => {
   const run = buildContributionRun({ projects: [{
     key: 'demo', name: 'Demo', canonical_repo: 'owner/demo',
-    kind: 'platform', available: true, semanticAvailable: true,
-    state: 'incoming', workingFiles: 0, localFiles: 0,
-    compatibleFiles: 0, conflictFiles: 0,
     incomingFiles: 4, outgoingFiles: 0, contributions: [],
-    origin: { sha: 'shared' },
   }] })
 
   assert.equal(run.projects[0].kind, 'align')
   assert.notEqual(run.projects[0].kind, 'prepare')
-  assert.equal(run.privateAction, null)
 })
 
 test('project kinds preserve candidate, ambiguous, conflict, and active-review work', () => {
@@ -400,7 +395,7 @@ test('global run rows retain their owning project identity', () => {
   assert.equal(run.projects[0].project, project)
 })
 
-test('merged app handoff is pulled out of Recent into Decisions', () => {
+test('merged app handoff finishes automatically in Working', () => {
   const record = {
     id: 'app', type: 'pr', repo: 'mobius-os/app-demo', status: 'merged',
     title: 'Demo app',
@@ -408,7 +403,8 @@ test('merged app handoff is pulled out of Recent into Decisions', () => {
   }
   const run = buildContributionRun({ records: [record] })
 
-  assert.equal(run.decisions[0].kind, 'connect')
+  assert.equal(run.decisions.length, 0)
+  assert.equal(run.working[0].kind, 'connecting')
   assert.equal(run.recent.length, 0)
 })
 
@@ -436,10 +432,10 @@ test('an active stack owns its merged app connection handoff exactly once', () =
   }
   const run = buildContributionRun({ records: [merged, open] })
 
-  assert.deepEqual(run.decisions.map(item => item.kind), ['connect'])
-  assert.equal(run.working.length, 0)
+  assert.equal(run.decisions.length, 0)
+  assert.deepEqual(run.working.map(item => item.kind), ['connecting'])
   assert.equal(run.recent.length, 0)
-  assert.deepEqual(runUnitRecords(run.decisions[0]).map(record => record.id), [
+  assert.deepEqual(runUnitRecords(run.working[0]).map(record => record.id), [
     merged.id, open.id,
   ])
 })

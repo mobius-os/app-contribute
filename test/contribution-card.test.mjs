@@ -267,12 +267,12 @@ test('a local app publication review explains the verified after-merge handoff',
   })
 
   assert.match(html, /After merge/)
-  assert.match(html, /Connect this local app in place/)
-  assert.match(html, /same in your workspace/)
+  assert.match(html, /Link this local app to its published version/)
+  assert.match(html, /app and its saved data stay in place/)
   assert.match(html, /saved data/)
 })
 
-test('a merged app publication offers one explicit connection action', async (t) => {
+test('a merged app publication shows its automatic connection progress', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
     return
@@ -294,10 +294,10 @@ test('a merged app publication offers one explicit connection action', async (t)
     },
   })
 
-  assert.match(html, /App ready to connect/)
-  assert.match(html, /Keep the local app and its published version together/)
-  assert.match(html, />Connect app</)
-  assert.match(html, /Saved app data stays in place/)
+  assert.match(html, /Finishing publication/)
+  assert.match(html, /Attaching the published identity to this local app/)
+  assert.doesNotMatch(html, />Link app</)
+  assert.match(html, /Saved app data and newer local work stay in place/)
 })
 
 test('a completed publication connection stays visible without another button', async (t) => {
@@ -327,9 +327,9 @@ test('a completed publication connection stays visible without another button', 
     },
   })
 
-  assert.match(html, /App connected/)
+  assert.match(html, /App linked/)
   assert.match(html, /Future App Store updates will update this same app/)
-  assert.doesNotMatch(html, />Connect app</)
+  assert.doesNotMatch(html, />Link app</)
 })
 
 const autopilotCardRenderer = () => renderModule(`

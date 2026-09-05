@@ -12,7 +12,12 @@ test('explicit exact chat approval does not need a second Contribute approval', 
   assert.match(prose, /Proceed without requiring the matching Contribute press/)
   assert.match(prose, /chat approval changes the approval surface, not the safety preflight/)
   assert.match(prose, /do not require both approval surfaces/)
-  assert.match(prose, /After chat approval, the agent may call the same guarded endpoint/)
+})
+
+test('app publication is one reviewed outcome with an automatic local connection', () => {
+  assert.match(prose, /one publication outcome, not a later public or destructive action/)
+  assert.match(prose, /never present a second \*\*Link app\*\* decision/)
+  assert.match(prose, /Do not call the publication complete until the local connection is recorded/)
 })
 
 test('chat approval stays bound to the exact current public action', () => {

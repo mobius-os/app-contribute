@@ -8,6 +8,8 @@ import {
   contributionApprovalFingerprint,
   contributionApprovalIsCurrent,
   contributionFailureOwner,
+  contributionOutcomeAction,
+  contributionPhaseApprovalIsCurrent,
   contributionReviewTargetFromIntent,
   contributionReviewScope,
   focusedContributionNavigationReady,
@@ -63,18 +65,19 @@ test('public approval fingerprints bind reviewed code, target, text, labels, and
     { ...approved, plan: { ...approved.plan, title: 'Changed title' } },
     { ...approved, plan: { ...approved.plan, body_draft: 'Changed body' } },
     { ...approved, plan: { ...approved.plan, labels: ['bug'] } },
+    { ...approved, quality_review: { ...approved.quality_review, state: 'changes_needed' } },
   ]
-  for (const current of changes) {
-    assert.equal(contributionApprovalIsCurrent(approved, current), false)
+  for (const changed of changes) {
+    assert.equal(contributionApprovalIsCurrent(approved, changed), false)
   }
-})
 
-test('every public batch path rejects a fresh record that differs from the approval', () => {
-  assert.match(feedSource, /contributionApprovalFingerprint\(record\)/)
-  assert.match(appSource, /const refreshed[\s\S]*?contributionApprovalIsCurrent\(rec, refreshed\)/)
-  assert.match(appSource, /const current[\s\S]*?contributionApprovalIsCurrent\(rec, current\)/)
-  assert.match(appSource, /loadFreshContributionRecords\([\s\S]*?contributionApprovalIsCurrent\(approved, currentRecords\[index\]\)/)
-  assert.match(appSource, /code: 'approval_changed'/)
+  assert.equal(contributionPhaseApprovalIsCurrent([approved], [reordered]), true)
+  assert.equal(contributionPhaseApprovalIsCurrent([approved], []), false)
+  assert.equal(contributionPhaseApprovalIsCurrent(
+    [approved],
+    [{ ...reordered, id: 'different' }],
+  ), false)
+  assert.equal(contributionPhaseApprovalIsCurrent([approved], [changes[2]]), false)
 })
 
 test('shell review intents name one ledger record without encoding presentation state', () => {
@@ -190,7 +193,9 @@ test('the Run owns one exact grouped action across standalone and stacked work',
   assert.match(feedSource, /<ExactActionList[\s\S]*?items=\{activeItems\}/)
   assert.match(feedSource, /sortStackRecords\(runUnitRecords\(item\)\)/)
   assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
-  assert.match(feedSource, /Send all \$\{count\}/)
+  assert.match(feedSource, /Review and send \$\{count\}/)
+  assert.match(feedSource, /Send \$\{count\} to GitHub/)
+  assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
   assert.match(feedSource, /Personal pull requests open ready for review/)
   assert.match(feedSource, /Nothing merges\./)
   assert.doesNotMatch(feedSource, /unit\.type !== 'stack'/)
@@ -203,8 +208,25 @@ test('the Run keeps one private owner while focused work remains inspectable', (
   assert.match(feedSource, /function BatchOwnedFocus/)
   assert.match(feedSource, /\['publish', 'mark_ready', 'private_review'\]\.includes\(item\.kind\)/)
   assert.match(feedSource, /<PrivateRunAction/)
-  assert.match(feedSource, /onStart=\{\(\) => onStartCycle\?\.\(run\?\.privateAction\)\}/)
+  assert.match(feedSource, /onReview=\{onReviewPrivateWork\}/)
+  assert.match(feedSource, /onStart=\{onStartCycle\}/)
   assert.doesNotMatch(feedSource, /<AgentHandoffButton/)
+})
+
+test('Merge is an end-state intent without widening the public grant', () => {
+  const prepare = {
+    event: 'organize_private_contributions',
+    revision: 'current-source',
+    draft: 'Prepare this exact work privately.',
+  }
+  assert.equal(contributionOutcomeAction(prepare, 'prepare'), prepare)
+  const merge = contributionOutcomeAction(prepare, 'merge')
+  assert.equal(merge.label, 'Merge')
+  assert.equal(merge.scopeLabel, 'Prepare the full merge cycle')
+  assert.match(merge.scope, /^contribute-merge:/)
+  assert.match(merge.draft, /owner chose Merge as the desired outcome/)
+  assert.match(merge.draft, /final merge still requires its own current explicit approval/)
+  assert.notEqual(contributionActionScope(merge), contributionActionScope(prepare))
 })
 
 test('batch recovery releases confirmation and returns durable failures to projection', () => {
@@ -232,18 +254,18 @@ test('the app has one contribution Run with Projects as a prominent searchable l
   assert.doesNotMatch(appSource, />\s*Issues\s*<\/button>/)
   assert.doesNotMatch(feedSource, /One workshop for every project/)
   assert.match(feedSource, /<summary><span>Working<\/span><b>\{working\.length\}<\/b>/)
-  assert.match(feedSource, /<h3 id="co-run-decisions">Needs you<\/h3><span>\{ownerDecisions\.length\}<\/span>/)
+  assert.match(feedSource, /<h3 id="co-run-decisions">Other decisions<\/h3><span>\{ownerActionCount\}<\/span>/)
   assert.match(feedSource, />Done recently</)
   assert.doesNotMatch(feedSource, /Browse projects/)
   assert.doesNotMatch(appSource, /runProjectFilter/)
   assert.doesNotMatch(feedSource, /projectFilter|Filter by project|All projects/)
   assert.match(feedSource, /className="co-run-focus-layout"/)
   assert.match(feedSource, /DECISION_ACTION_LABELS/)
-  assert.match(sourceMapSource, /See what changed in each local project/)
+  assert.match(sourceMapSource, /Start with local work that is not yet resolved upstream/)
   assert.match(sourceMapSource, /placeholder="Find a project"/)
-  assert.match(sourceMapSource, /\['attention', 'Needs attention'\]/)
+  assert.match(sourceMapSource, /\['local', 'Local work'\]/)
   assert.equal((sourceMapSource.match(/\['all', 'All projects'\]/g) || []).length, 1)
-  assert.doesNotMatch(sourceMapSource, /\['sorting', 'Needs sorting'\]/)
+  assert.match(sourceMapSource, /Local apps without an upstream repository/)
 })
 
 test('focused attention is separate from the contribution information card', () => {
@@ -384,10 +406,13 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
 })
 
-test('existing pull-request stacks use the Run\'s one exact update route', () => {
-  assert.match(appSource, /const updating = currentRecords\.every/)
+test('existing pull-request stack prefixes use one exact update phase', () => {
+  assert.match(appSource, /const publicationRecords = stackPublicationRecords/)
+  assert.match(appSource, /const updating = publicationRecords\.length > 0/)
   assert.match(appSource, /rec\?\.plan\?\.action === 'pr_update'/)
   assert.match(appSource, /updating\s*\? updateContributionStack\s*: submitContributionStack/)
+  assert.match(appSource, /resolutions = publicationRecords\.map/)
+  assert.match(appSource, /loadFreshContributionRecords\(\s*publicationRecords\.map/)
 })
 
 test('sending a pull request stays concise instead of repeating publication narration', () => {

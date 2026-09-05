@@ -11,6 +11,7 @@ const preparedReconcile = readFileSync(
 test('the scheduled job uses only its supervised app credential', () => {
   assert.match(job, /APP_TOKEN="\$\{APP_TOKEN:-\}"/)
   assert.match(job, /TOKEN = os\.environ\["APP_TOKEN"\]/)
+  assert.match(job, /\/connect-app/)
   assert.match(preparedReconcile, /os\.environ\.get\("APP_TOKEN", ""\)/)
   assert.doesNotMatch(job, /service-token\.txt|SERVICE_TOKEN/)
   assert.doesNotMatch(preparedReconcile, /SERVICE_TOKEN/)

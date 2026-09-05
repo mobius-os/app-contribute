@@ -465,7 +465,7 @@ test('keeps locally built apps at the bottom as publishing candidates', () => {
     ],
   }, [])
   assert.equal(projects.at(-1).name, 'Local scratchpad')
-  assert.equal(projectStatus(projects.at(-1)).label, 'Built here')
+  assert.equal(projectStatus(projects.at(-1)).label, 'Local only')
   assert.equal(projectMatchesFilter(projects.at(-1), 'changed'), false)
   assert.equal(projects.length, 3)
 })
@@ -480,7 +480,7 @@ test('does not offer to publish an app that already has a GitHub repository', ()
     }],
   }, [])[0]
   assert.equal(project.builtHere, false)
-  assert.equal(projectStatus(project).label, 'No shared source')
+  assert.equal(projectStatus(project).label, 'No upstream')
   assert.equal(projectNeedsPreparation(project), false)
 })
 
