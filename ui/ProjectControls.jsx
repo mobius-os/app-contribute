@@ -36,26 +36,26 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   </div> : null
   return <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     {local ? <>
-      <header><h3>Your local work</h3><button className="co-quiet-action" onClick={() => task?.open('task:prepare')}>Prepare</button></header>
+      <header><h3>Your local work</h3></header>
       <button className="co-local-summary" onClick={() => task?.open('task:prepare')}>
-        <Icon name="prepare" size={22} /><span><strong>{project.builtHere ? 'Not shared yet' : project.localFiles || project.workingFiles ? `${project.localFiles || 0} files with local differences${project.workingFiles ? ` · ${project.workingFiles} being edited` : ''}` : 'No unprepared changes found'}</strong><small>Current code · across this project’s conversations</small></span><Icon name="right" size={17} />
+        <Icon name="prepare" size={22} /><span><strong>{project.builtHere ? 'Not shared yet' : project.localFiles || project.workingFiles ? `${project.localFiles || project.workingFiles} changed files` : 'No unprepared changes found'}</strong><small>{project.workingFiles ? `${project.workingFiles} being edited` : 'Prepare for sharing'}</small></span><Icon name="right" size={17} />
       </button>
-      <button className="co-quiet-action" onClick={() => task?.open('task:scope')}>Choose scope</button>
       <SourceConversations project={project} appId={appId} token={token} />
     </> : null}
     {progress ? <button className="co-work-progress-row" onClick={() => task?.open('task:prepare')}><Icon name={waiting ? 'feedback' : 'cycle'} size={18} />{waiting ? 'Your agent has a question' : paused ? 'Work paused' : 'Agent working'}<Icon name="right" size={16} /></button> : null}
     <TaskPane id="task:prepare">
-      <Icon name="prepare" size={23} />
-      <h3>Prepare your changes</h3>
-      <p>Let the agent organize and review this project’s local work before you share it.</p>
+      <h3>Prepare changes</h3>
+      <p>Organize and review your local work before sharing.</p>
       {checking ? <p role="status">Checking existing work…</p> : null}
-      <div className="co-task-scope"><strong>All local work in {project.name}</strong><p>Group related changes into the smallest sensible set of pull requests.</p>{local ? <button className="co-quiet-action" onClick={() => task?.open('task:scope')}>Change scope</button> : null}</div>
+      <div className="co-task-scope"><span>Scope</span>{local ? <button className="co-quiet-action" onClick={() => task?.open('task:scope')}>All local changes <Icon name="chevron" size={16} /></button> : null}</div>
       {progress || <>
-        {fullCycle ? <label className="co-workflow-option"><input type="checkbox" checked={merge} onChange={event => setMerge(event.target.checked)} /><span>Continue through merge<small>Clear work can proceed. Questions come back to you.</small></span></label> : null}
         <button type="button" className="co-btn co-btn-primary co-task-primary" disabled={loading || checking || active || !run?.privateAction} onClick={() => start(merge && fullCycle ? fullCycle : run.privateAction)}><Icon name="prepare" size={18} /> Prepare changes</button>
-        <p className="co-task-footnote">Private first. You approve the exact changes before sharing{merge ? ' and merging' : ''}.</p>
+        <p className="co-task-footnote">Private until you approve sharing.</p>
       </>}
-      <details className="co-task-details"><summary>What the agent will do</summary><p>Compare with upstream in isolation, preserve local and sibling work, group related changes, and thoroughly review each proposed pull request.</p><p>To prepare only one conversation’s work, use Prepare to submit in that conversation’s Changes view.</p></details>
+      <details className="co-task-details"><summary>Options & process</summary>
+        {fullCycle ? <label className="co-workflow-option"><input type="checkbox" checked={merge} onChange={event => setMerge(event.target.checked)} /><span>Continue through merge<small>Keep the agent on the full journey. Approve sharing and merging in chat or Contribute.</small></span></label> : null}
+        <p>Group related changes into the smallest sensible set of PRs. Compare with upstream, preserve unfinished work, and review thoroughly.</p>
+      </details>
       {error || cycle?.error ? <p className="co-run-error" role="alert">{error || cycle.error}</p> : null}
     </TaskPane>
     {canUpdate ? <TaskPane id="task:update">

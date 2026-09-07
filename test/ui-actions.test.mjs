@@ -151,7 +151,7 @@ test('contribution details retain their project parent and refresh only source d
 test('preparation runs as one cycle while every public send stays explicit', () => {
   assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
   assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
-  assert.match(controlsSource, /organize and review this project/)
+  assert.match(controlsSource, /Organize and review your local work/)
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing merges\./)
@@ -260,7 +260,7 @@ test('Projects owns vertical scrolling and makes every row visibly navigable', (
 test('one scoped control surface starts private preparation without leaving the project', () => {
   assert.match(sourceMapSource, /renderControls\?\.\(project\)/)
   assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
-  assert.match(controlsSource, /organize and review this project/)
+  assert.match(controlsSource, /Organize and review your local work/)
   assert.match(appSource, /recordsForProject\(records, project\)/)
   assert.match(appSource, /onStart=\{startAgentTask\}/)
   assert.match(themeSource, /\.co-project-controls \{/)

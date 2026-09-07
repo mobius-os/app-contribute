@@ -96,7 +96,7 @@ test('project controls keep preparation and updating direct without a competing 
   assert.match(html, /Get up to date/)
   assert.doesNotMatch(html, /Prepare &amp; merge|Prepare all|Update all/)
   assert.doesNotMatch(html, /More actions|View reviews/)
-  assert.match(html, /What the agent will do/)
+  assert.match(html, /Options &amp; process/)
   assert.doesNotMatch(html, /<details[^>]* open/)
   const loading = render({ ...props, loading: true })
   assert.match(loading, /disabled=""/)

@@ -250,6 +250,7 @@ export function SourceMap({
   loadProjectDiff,
   renderActivity,
   renderControls,
+  repositoryPicker,
 }) {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
@@ -265,7 +266,7 @@ export function SourceMap({
   const filterCounts = useMemo(
     () => Object.fromEntries(FILTERS.map(([key]) => [
       key,
-      projects.filter((project) => projectMatchesJourney(project, key)).length,
+      projects.filter((project) => project.kind !== 'external' && projectMatchesJourney(project, key)).length,
     ])),
     [projects],
   )
@@ -399,7 +400,9 @@ export function SourceMap({
     ? projects.find((project) => project.key === selected) || null
     : null
   const builtHere = filtered.filter((project) => project.builtHere)
-  const tracked = filtered.filter((project) => !project.builtHere)
+  const tracked = filtered.filter((project) => !project.builtHere && project.kind !== 'external')
+  const external = filtered.filter((project) => project.kind === 'external')
+  const externalQuestions = external.reduce((count, project) => count + (project.incomingReviews?.length || 0), 0)
   if (loading && !snapshot && !projects.length) return <LoadingState />
   return (
     <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Project details">
@@ -409,6 +412,7 @@ export function SourceMap({
             <h2>Your projects</h2>
           </div>
           <div className="co-project-view-actions">
+            {repositoryPicker}
             <button
               type="button"
               className="co-quiet-action"
@@ -484,16 +488,22 @@ export function SourceMap({
               />
             </div>
           )}
+          {external.length ? <details className="co-other-repositories" open={query.trim() ? true : undefined}>
+            <summary>Other repositories <span>{external.length}{externalQuestions ? ` · ${externalQuestions} review requests` : ''}</span></summary>
+            <ProjectGroup label="" projects={external} selectedKey="" onSelect={openProject} />
+          </details> : null}
           </div>
         </>
       ) : (
         <div className="co-project-layout">
-          <nav className="co-project-rail" aria-label="Your projects">
-            <button type="button" className="co-quiet-action" onClick={closeProject}><Icon name="left" size={15} /> All projects</button>
-            <label className="co-rail-search"><span className="co-visually-hidden">Find a project</span><input type="search" placeholder="Find a project" value={query} onChange={event => { setQuery(event.target.value); setFilter('all') }} /></label>
-            <div>{filtered.map(project => <button key={project.key} className={'co-rail-project' + (project.key === selected ? ' is-selected' : '')} onClick={() => openProject(project.key)} aria-current={project.key === selected ? 'page' : undefined}>
-              <ProjectGlyph project={project} /><span><strong>{project.name}</strong><small>{project.builtHere ? 'Only on your Möbius' : project.localFiles || project.workingFiles ? 'Local changes' : project.contributions?.length ? 'Contributions in progress' : 'Shared project'}</small></span>
-            </button>)}</div>
+          <nav className="co-project-switcher" aria-label="Project navigation">
+            <button type="button" className="co-quiet-action" onClick={closeProject}><Icon name="left" size={16} /> All projects</button>
+            <label><span className="co-visually-hidden">Switch project</span>
+              <select aria-label="Switch project" value={selected} onChange={event => openProject(event.target.value)}>
+                <optgroup label="Your projects">{projects.filter(project => project.kind !== 'external').map(project => <option key={project.key} value={project.key}>{project.name}</option>)}</optgroup>
+                {projects.some(project => project.kind === 'external') ? <optgroup label="Other repositories">{projects.filter(project => project.kind === 'external').map(project => <option key={project.key} value={project.key}>{project.name}</option>)}</optgroup> : null}
+              </select>
+            </label>
           </nav>
           <ProjectDetail
             key={selectedProject.key}

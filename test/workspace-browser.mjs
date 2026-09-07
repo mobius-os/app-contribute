@@ -183,8 +183,12 @@ async function inventory() {
 }
 async function chooseProject(name) {
   await inventory()
-  const rail = [...document.querySelectorAll('.co-rail-project')].find(node => text(node.querySelector('strong')) === name)
-  if (rail?.getClientRects().length) { await click(rail); return }
+  const switcher = query('select[aria-label="Switch project"]')
+  if (switcher?.getClientRects().length) {
+    switcher.value = [...switcher.options].find(option => option.textContent === name).value
+    switcher.dispatchEvent(new Event('change', { bubbles:true }))
+    await frame(); await frame(); return
+  }
   await click(button('All projects'))
   await until(() => query('.co-source-row'), 'Project list did not return')
   await click([...document.querySelectorAll('.co-source-row')].find(node => text(node.querySelector('strong')) === name))
@@ -307,7 +311,7 @@ window.runWorkspaceChecks = async () => {
       await inventory()
     })
     await check('preparation starts one scoped task and a different project does not inherit its progress', async () => {
-      await click(button('Prepare', query('.co-local-work')))
+      await click(query('.co-local-summary'))
       await until(() => button('Prepare changes') && !button('Prepare changes').disabled, 'Preparation did not become available')
       const prepareButton = button('Prepare changes')
       prepareButton.click(); prepareButton.click()

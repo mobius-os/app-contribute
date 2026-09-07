@@ -31,6 +31,19 @@ export async function discoverRepositories(token, cursor = null) {
   const connection = data.viewer.repositories
   return { repositories: connection.nodes.filter(repo => mayAssign(repo.viewerPermission) && !repo.isArchived).map(repo => ({ ...repo, openPullRequestCount: repo.pullRequests?.totalCount || 0 })), ...connection.pageInfo }
 }
+export function repositoryName(value) {
+  const name = String(value || '').trim().replace(/^https:\/\/github\.com\//i, '').replace(/\/$/, '')
+  return /^[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : ''
+}
+
+export async function discoverRepository(token, value) {
+  const name = repositoryName(value)
+  if (!name) throw new Error('Enter a GitHub repository, such as owner/project.')
+  const [owner, repo] = name.split('/')
+  const data = await graph(token, `query ContributeRepository { repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(repo)}) { nameWithOwner viewerPermission isArchived } }`)
+  if (!data.repository) throw new Error('Repository not found, or your GitHub account cannot access it.')
+  return data.repository
+}
 export async function discoverPulls(token, repo = '', cursor = null) {
   const queryText = repo ? `repo:${repo} is:pr is:open` : 'is:pr is:open involves:@me'
   if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('Choose a valid repository.')

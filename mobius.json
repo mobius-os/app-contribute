@@ -77,6 +77,8 @@
     "ui/TaskPane.jsx",
     "workspace-theme.js",
     "ui/useProjectCycle.js",
-    "ui/SourceConversations.jsx"
+    "ui/SourceConversations.jsx",
+    "repositories.js",
+    "ui/RepositoryPicker.jsx"
   ]
 }

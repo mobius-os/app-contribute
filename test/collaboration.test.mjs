@@ -23,8 +23,10 @@ test('pagination replaces changed identities rather than duplicating them', () =
   assert.equal(mergeSelection([pull(1)], [pull(1, { headRefOid: 'b'.repeat(40) })]).length, 1)
   assert.equal(mergeSelection([pull(1)], [pull(1, { headRefOid: 'b'.repeat(40) })])[0].headRefOid, 'b'.repeat(40))
 })
-test('maintained repositories appear without an installation or existing contribution record', () => {
-  const projects = attachSourceProjects(null, [], [], [{ nameWithOwner: 'team/repo', viewerPermission: 'MAINTAIN', openPullRequestCount: 1 }])
+test('repository access is not membership; explicitly added repositories retain permissions', () => {
+  const repositories = [{ nameWithOwner: 'team/repo', viewerPermission: 'MAINTAIN', openPullRequestCount: 1 }]
+  assert.deepEqual(attachSourceProjects(null, [], [], repositories), [])
+  const projects = attachSourceProjects(null, [], [], repositories, ['team/repo'])
   assert.equal(projects.length, 1); assert.equal(projects[0].kind, 'external')
   assert.equal(projects[0].viewerPermission, 'MAINTAIN')
   assert.equal(projects[0].available, false)

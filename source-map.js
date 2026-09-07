@@ -67,7 +67,7 @@ export function activeContribution(rec) {
   return !!rec && (action === 'pr' || action === 'issue') && ACTIVE.has(rec.status)
 }
 
-export function attachSourceProjects(snapshot, records, incomingReviews = [], repositories = []) {
+export function attachSourceProjects(snapshot, records, incomingReviews = [], repositories = [], followedRepositories = []) {
   const base = []
   if (snapshot?.platform) base.push(snapshot.platform)
   if (Array.isArray(snapshot?.apps)) {
@@ -100,9 +100,11 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
     if (key && !byRepo.has(key)) byRepo.set(key, [])
   }
 
-  for (const repository of repositories) {
-    const key = repoKey(repository.nameWithOwner)
-    if (key && repository.openPullRequestCount > 0 && !byRepo.has(key)) byRepo.set(key, [])
+  // Access supplies permissions, not project membership. Other repositories
+  // enter this workspace only by explicit choice or actual contribution work.
+  for (const repository of followedRepositories) {
+    const key = repoKey(repository)
+    if (key && !byRepo.has(key)) byRepo.set(key, [])
   }
 
   const seen = new Set()

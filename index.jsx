@@ -65,6 +65,8 @@ import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
+import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
+import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { TaskPane } from './ui/TaskPane.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
@@ -128,6 +130,8 @@ export default function ContributeApp({ appId, token }) {
     nonce: '', recordId: '', ready: false,
   })
   const [incomingReviews, setIncomingReviews] = useState([])
+  const [followedRepos, setFollowedRepos] = useState([])
+  useEffect(() => window.mobius.storage.subscribe(FOLLOWED_REPOSITORIES, value => setFollowedRepos(followedRepositories(value))), [])
   const repositoryRequest = useRef(0)
   const [repositoryAccess, setRepositoryAccess] = useState({ repositories: [], error: '', hasNextPage: false })
   const loadRepositories = useCallback(async (cursor = null) => {
@@ -1273,8 +1277,8 @@ export default function ContributeApp({ appId, token }) {
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   const sourceProjects = useMemo(
-    () => attachSourceProjects(sourceSnapshot, records, incomingReviews, repositoryAccess.repositories),
-    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories],
+    () => attachSourceProjects(sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos),
+    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos],
   )
   const contributionRun = useMemo(() => buildContributionRun({
     records,
@@ -1339,6 +1343,11 @@ export default function ContributeApp({ appId, token }) {
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus}
           conn={conn} loading={sourceLoading} error={sourceError}
           onRetry={() => refreshSources()} loadProjectDiff={loadProjectDiff}
+          repositoryPicker={<RepositoryPicker token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
+            setFollowedRepos(followed)
+            setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
+            setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.nameWithOwner.toLowerCase())?.key || 'external:' + repo.nameWithOwner.toLowerCase(), nonce: crypto.randomUUID() })
+          }} />}
           renderControls={(project) => project ? <ProjectControls
             key={project.key} appId={appId} token={token} project={project} run={projectRun(project)} mergeRun={projectMergeRun(project)}
             loading={loading || !ledgerReady || sourceLoading || !!sourceError}
@@ -1347,8 +1356,7 @@ export default function ContributeApp({ appId, token }) {
           renderActivity={(project, navigation) => (
             <>
 
-            {!project && repositoryAccess.error ? <p className="co-run-error" role="alert">{repositoryAccess.error} <button className="co-btn" onClick={() => loadRepositories()}>Retry</button></p> : null}
-            {!project && repositoryAccess.hasNextPage ? <button className="co-btn" onClick={() => loadRepositories(repositoryAccess.endCursor)}>Load more repositories</button> : null}
+
             {project && conn.state !== 'connected' ? <TaskPane id="task:pulls"><h3>Review contributions</h3><p>Connect GitHub in the top right to see this project’s public pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane> : null}
             {project ? <ContributionRun
               renderPublicWork={project ? () => renderPullRequests(project, navigation) : null}
