@@ -119,7 +119,10 @@ test('pull requests and requests share one decision-first Run', () => {
 test('one mounted project workspace owns both reversible Back levels', () => {
   assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-project'/)
   assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-review'/)
-  assert.doesNotMatch(appSource + feedSource, /window\.mobius\.nav\.open/)
+  assert.doesNotMatch(appSource + feedSource, /nav\.open\('contribute-(project|review)'/)
+  assert.match(appSource, /nav\.open\('contribute-approval'/)
+  assert.match(appSource, /onBack:.*setSelectionFocus\(null\)/)
+  assert.match(appSource, /onForward:.*setSelectionFocus\(id\)/)
   assert.doesNotMatch(appSource, /showProjects|View all reviews|contribute-reviews/)
   assert.match(sourceMapSource, /onBack:[\s\S]*?setSelectedWorkId\(''\)/)
   assert.match(sourceMapSource, /onForward:[\s\S]*?setSelected\(projectKey\)[\s\S]*?showWork\(itemId\)/)

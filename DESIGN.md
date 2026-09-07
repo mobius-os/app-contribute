@@ -1,6 +1,6 @@
 ---
 name: Contribute
-description: Project context, stable work inventory, and one contextual task.
+description: Compact project switching, stable work inventory, and one contextual task.
 colors:
   accent: "var(--accent)"
   action: "var(--accent-hover, var(--accent))"
@@ -103,12 +103,12 @@ components:
 
 **Creative North Star: "Project · Work · Task"**
 
-Contribute is a task-first project workspace: project context, a stable inventory of work, and one contextual action pane. Its character is quiet and practical, with comfortable hierarchy, visible actions, and restrained iconography. The selected workspace uses the available app width rather than the superseded centered-detail composition.
+Contribute is a task-first project workspace: project context, a compact project switcher, a stable inventory of work, and one contextual action pane. Its character is quiet and practical, with comfortable hierarchy, visible actions, and restrained iconography. The selected workspace uses the available app width rather than the superseded centered-detail composition.
 
 The shell supplies the theme and font. This design changes Contribute, not the Möbius shell or chat Changes view. Implementation authority is `workspace-theme.js`, appended after `theme.js`, with behavior owned by `ui/SourceMap.jsx`, `ProjectControls.jsx`, `PullRequests.jsx`, `Feed.jsx`, and `TaskPane.jsx`.
 
 **Key Characteristics:**
-- Project context stays visible beside the work on wide screens.
+- A compact project switcher replaces a permanently open second sidebar.
 - AI preparation is the primary local-work action; updating is a separate journey.
 - Private preparation, prepared work, and public contributions remain visibly distinct.
 - Selection collects work; explicit task opening changes context.
@@ -117,10 +117,10 @@ The shell supplies the theme and font. This design changes Contribute, not the M
 ## Colors
 
 ### Primary
-The inherited accent identifies actions, selected projects, links, and working states. Primary buttons use the shell’s action shade with its matching foreground; selected rail items use the muted accent surface.
+The inherited accent identifies actions, selected projects, links, and working states. Primary buttons use the shell’s action shade with its matching foreground; selected controls use the muted accent surface.
 
 ### Neutral
-Background holds the inventory; surface differentiates the rail and task pane. Muted text carries explanation and metadata; borders divide regions and rows. Success, caution, and danger describe outcomes, not decoration. Caution is the existing app-owned amber for advisory states; danger remains for actual failures or destructive actions. State labels must work without color.
+Background holds the inventory; surface differentiates the task pane. Muted text carries explanation and metadata; borders divide regions and rows. Success, caution, and danger describe outcomes, not decoration. Caution is the existing app-owned amber for advisory states; danger remains for actual failures or destructive actions. State labels must work without color.
 
 **The Inherited Theme Rule.** Use the shell’s semantic colors and font; do not freeze its accent into a named hue or a fabricated tonal ramp.
 
@@ -132,11 +132,11 @@ At the phone breakpoint, the project headline becomes 27px, task titles 25px, an
 
 ## Layout
 
-- **Project index:** searchable, filtered by All projects / Local changes / Updates; maximum width 1120px with 28px padding. Rows separate local-work facts from the last recorded shared-version relationship. The app header retains its existing 1040px cap on wide screens.
-- **Selected project, above 1150px:** full-width workspace with a 196px project rail, flexible inventory, and 350px task pane. The workspace header spans inventory and task; inventory has 28px padding, task 26px. Rail, inventory, and task scroll independently.
-- **At 1150px and below:** rail narrows to 170px, task to 310px, and inventory/task padding to 22px.
-- **At 950px and below:** the rail becomes an All projects return strip; its search and project list are hidden. Inventory and task remain side by side until the phone breakpoint.
-- **At 680px and below:** the project uses document-style vertical scrolling. Inventory padding is 20px; the task is hidden until explicitly opened. An explicit task hides the project header, inventory, rail, and app header, and occupies the view with a Back to project control. Back restores the inventory and saved page-scroll position. Project selection and task navigation retain their existing Back/Forward hierarchy.
+- **Project index:** actual local projects are searchable and filtered by All projects / Local changes / Updates. GitHub permissions never add a repository by themselves. Existing external contribution work and deliberately followed repositories remain under collapsed **Other repositories**. **Add repository** explicitly follows a GitHub project without installing it.
+- **Selected project, desktop:** one compact All projects / project-switcher row; then the project header and a flexible work inventory beside a 350px contextual task. No persistent project rail. The work inventory and task scroll independently.
+- **At 1150px and below:** task narrows to 310px; inventory/task padding becomes 22px.
+- **At 680px and below:** document-style vertical scrolling. Inventory padding is 20px. The task is hidden until explicitly opened, then replaces inventory/header/switcher with a Back to project control. Back restores inventory and its scroll position.
+- **Approval links:** a focused, maximum-760px decision page displays the exact selected versions and one approval. Opening or checking the link is read-only; an existing approved selection links to its owning conversation instead of asking again.
 
 The default desktop task is Prepare for a local project and Review contributions for an external project. Merely showing that default does not take keyboard focus. Explicitly opening a task focuses its content; task content changes alone do not refocus it.
 
@@ -146,13 +146,13 @@ The default desktop task is Prepare for a local project and Review contributions
 
 **The Flat Workspace Rule.** Use borders, tone, and spacing to separate persistent regions; do not turn the work inventory into floating nested cards.
 
-The rail and task pane are differentiated by surface color and single-pixel borders. Workspace contribution rows, prepared-work disclosures, and focused detail cards are flattened. Rounded boundaries remain useful for the local-work summary, fields, and controls. The existing small settings-help popover is a transient exception with a soft shadow; it is not a model for persistent work content.
+The task pane is differentiated by surface color and a single-pixel border. Workspace contribution rows, prepared-work disclosures, and focused detail cards are flattened. Rounded boundaries remain useful for the local-work summary, fields, and controls. The existing small settings-help popover is a transient exception with a soft shadow; it is not a model for persistent work content.
 
 Motion is limited to short state transitions: background and borders (140ms ease), button press (100ms ease, scale 0.97), and disclosure icons. Reduced-motion preferences collapse transitions and animation to effectively instant.
 
 ## Shapes
 
-Small rounded controls and summaries coexist with square, line-separated inventory regions. Use the frontmatter’s established state, field, control, and summary radii. Rail project buttons use 9px corners; project glyphs are compact rounded squares. Public work-state labels use small corners, while existing contribution-detail status chips remain pills. Do not make every container a card.
+Small rounded controls and summaries coexist with square, line-separated inventory regions. Use the frontmatter’s established state, field, control, and summary radii. Project glyphs are compact rounded squares; the project switcher uses a native select for keyboard and phone accessibility. Public work-state labels use small corners, while existing contribution-detail status chips remain pills. Do not make every container a card.
 
 ## Components
 
@@ -164,9 +164,9 @@ Project-index search uses a surface fill and rounded border, with a minimum 46px
 
 ### Project navigation and work inventory
 
-Rail items pair an icon with project name and one short work description; the current project has a muted accent fill and `aria-current`. Inventory sections separate Your local work, exact ready-to-share actions, Needs you, Prepared · not shared, Contributions, In progress, Done recently, and History when relevant. Secondary inventories collapse instead of competing with the current task.
+The compact project switcher groups local projects separately from other repositories. Work sections retain Needs you, Prepared · not shared, Contributions and History where relevant; secondary inventories remain collapsed.
 
-The local-work summary is one outlined, roomy action (minimum 88px height), not a file-count dashboard. Its Prepare action leads to agent-owned private preparation. Choose scope remains explicit; Files & technical details opens the separate technical task rather than expanding a second main workspace.
+Local work has one summary opening the preparation task. That task contains a short description, a single scope choice and one **Prepare changes** button. **Options & process** contains maintainer continuation and explanatory detail. Files & technical details remains a separate task. No duplicated Prepare or scope controls in the work inventory.
 
 ### Contribution selection and review
 

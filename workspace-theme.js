@@ -151,4 +151,11 @@ export const WORKSPACE_CSS = `
 .co-repository-picker form > div { display:flex; align-items:center; gap:12px; }
 .co-repository-picker input { min-width:0; width:100%; min-height:44px; padding:10px 12px; font-size:16px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:8px; }
 .co-repository-picker p { color:var(--muted); font-size:14px; line-height:1.5; }
+.co-selection-page { width:100%; max-width:760px; margin:0 auto; padding:28px; }
+.co-selection-page > .co-quiet-action { min-height:44px; margin-bottom:20px; }
+.co-selection-page h2,.co-selection-page h3 { font-size:26px; line-height:1.25; letter-spacing:-.02em; }
+.co-selection-page p { font-size:16px; line-height:1.6; color:var(--muted); }
+.co-selection-page .co-pr-confirm { padding:0; border:0; background:none; }
+.co-selection-page .co-board-actions { margin-top:24px; }
+@media(max-width:680px) { .co-selection-page { padding:20px; } }
 `

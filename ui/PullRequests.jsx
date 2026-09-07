@@ -57,7 +57,7 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onCancel })
   </div>
 }
 
-export function ReviewConfirmation({ choice, busy, error, onConfirm, onCancel, onModeChange }) {
+export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange }) {
   const confirmation = useRef(null)
   useEffect(() => {
     if (choice) {
@@ -76,7 +76,7 @@ export function ReviewConfirmation({ choice, busy, error, onConfirm, onCancel, o
     <ul>{choice.pulls.map(pr => <li key={prKey(pr)}><strong>{pr.title}</strong><span>{pr.repository.nameWithOwner} #{pr.number} · version {pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({pr.baseRefOid?.slice(0, 7)})</span></li>)}</ul>
     {onModeChange && choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft) ? <label className="co-workflow-option"><input type="checkbox" checked={merge} disabled={busy} onChange={event => onModeChange(event.target.checked ? 'review_merge' : 'review')} /> Merge when safe</label> : null}
     <div className="co-board-actions">
-      <button className="co-btn co-btn-primary" disabled={busy} onClick={onConfirm}>{busy ? 'Starting…' : merge ? 'Allow review & merge' : 'Start review'}</button>
+      <button className="co-btn co-btn-primary" disabled={busy || disabled} onClick={onConfirm}>{busy ? 'Starting…' : merge ? 'Allow review & merge' : 'Start review'}</button>
       <button className="co-btn" disabled={busy} onClick={onCancel}>Cancel</button>
     </div>
     {error ? <p className="co-run-error" role="alert">{error}</p> : null}

@@ -103,7 +103,7 @@ def main(argv=None):
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("prs", nargs="*", help="owner/repository#123 or full PR URL")
   parser.add_argument("--app-id", type=int)
-  parser.add_argument("--mode", choices=("review", "review_merge"), default="review")
+  parser.add_argument("--mode", choices=("review", "review_merge"), help="New selection mode; default: review")
   parser.add_argument("--selection", help="Use an already prepared exact selection; never refresh its versions")
   parser.add_argument("--approved-in-chat", action="store_true",
                       help="The owner explicitly approved this exact action in this owning chat")
@@ -111,6 +111,8 @@ def main(argv=None):
   args = parser.parse_args(argv)
   if args.selection and args.prs:
     parser.error("Use either a saved --selection or PR references, not both.")
+  if args.selection and args.mode:
+    parser.error("A saved selection already has an exact mode; prepare a new selection to change it.")
   if args.approved_in_chat != bool(args.approval_context and args.approval_context.strip()):
     parser.error("--approved-in-chat requires --approval-context; context alone is not approval.")
   app_id = args.app_id or find_app_id()
@@ -120,16 +122,26 @@ def main(argv=None):
     if selection.get("request_id") != args.selection:
       raise ValueError("The saved selection has a different identity.")
   else:
-    selection = save_selection(app_id, prepare_selection(args.prs, args.mode, chat_id))
+    selection = save_selection(app_id, prepare_selection(args.prs, args.mode or "review", chat_id))
   result = {"selection": selection,
             "approval_url": "/shell/?" + urlencode({"app": app_id, "intent": "review-selection:" + selection["request_id"]}, quote_via=quote),
             "approved": False}
   if args.approved_in_chat:
     if selection.get("source_chat_id") != chat_id:
-      raise ValueError("This selection belongs to another source chat. Continue there; do not borrow its consent.")
+      link = "/shell/?" + urlencode({"chat": selection.get("source_chat_id", "")})
+      raise ValueError(f"This selection belongs to another source chat. Continue at {link}; do not borrow its consent.")
     body = {**start_body(selection), "chat_approval": {"context": args.approval_context.strip()}}
-    result.update(api(f"/api/github/contributions/{app_id}/review-runs", method="POST", data=body))
-    result["approved"] = True
+    try:
+      result.update(api(f"/api/github/contributions/{app_id}/review-runs", method="POST", data=body))
+      result["approved"] = True
+    except HTTPError as error:
+      if error.code != 409:
+        raise
+      detail = json.loads(error.read()).get("detail")
+      if not isinstance(detail, dict) or not detail.get("chat_id"):
+        raise ValueError(detail or "This selection changed. Inspect it before preparing another approval.") from error
+      result.update(already_owned=True, message=detail.get("message"),
+                    review_url="/shell/?" + urlencode({"chat": detail["chat_id"]}))
   print(json.dumps(result, indent=2))
 
 

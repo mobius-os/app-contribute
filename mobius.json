@@ -79,6 +79,9 @@
     "ui/useProjectCycle.js",
     "ui/SourceConversations.jsx",
     "repositories.js",
-    "ui/RepositoryPicker.jsx"
+    "ui/RepositoryPicker.jsx",
+    "review-selection.js",
+    "ui/ReviewSelection.jsx",
+    "review_prs.py"
   ]
 }

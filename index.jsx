@@ -66,6 +66,8 @@ import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
+import { ReviewSelection } from './ui/ReviewSelection.jsx'
+import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { TaskPane } from './ui/TaskPane.jsx'
@@ -126,6 +128,29 @@ export default function ContributeApp({ appId, token }) {
     state: 'loading', byId: {}, checkedAt: '',
   })
   const [reviewFocus, setReviewFocus] = useState(null)
+  const [selectionFocus, setSelectionFocus] = useState(null)
+  const selectionNav = useRef(null)
+  const [selectionError, setSelectionError] = useState('')
+  function closeSelection() {
+    const handle = selectionNav.current
+    selectionNav.current = null
+    handle?.close()
+    setSelectionFocus(null)
+  }
+  async function openSelection(id) {
+    closeSelection(); setSelectionError('')
+    let handle
+    handle = window.mobius.nav.open('contribute-approval', {
+      onBack: () => { selectionNav.current = null; setSelectionFocus(null) },
+      onForward: () => { selectionNav.current = handle; setSelectionFocus(id) },
+    })
+    selectionNav.current = handle
+    const outcome = await handle.outcome
+    if (selectionNav.current !== handle) { handle.close(); return }
+    if (outcome?.status !== 'owned') { selectionNav.current = null; setSelectionError('Could not open the review link. Try opening it again.'); return }
+    setSelectionFocus(id)
+  }
+  useEffect(() => () => { selectionNav.current?.close() }, [])
   const [focusedRecordLookup, setFocusedRecordLookup] = useState({
     nonce: '', recordId: '', ready: false,
   })
@@ -504,8 +529,11 @@ export default function ContributeApp({ appId, token }) {
     function onReviewIntent(event) {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
       if (event.data?.type !== 'moebius:app-intent') return
+      const selectionId = reviewSelectionIdFromIntent(event.data.intent)
+      if (selectionId) { void openSelection(selectionId); return }
       const target = contributionReviewTargetFromIntent(event.data.intent)
       if (!target) return
+      closeSelection()
       setReviewFocus({
         ...target,
         nonce: String(event.data.nonce ?? Date.now()),
@@ -1339,10 +1367,11 @@ export default function ContributeApp({ appId, token }) {
         </Header>
       </div>
       <main ref={pageRef} className="co-page is-sources">
-        <SourceMap
+        {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
+        {selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} /> : <SourceMap
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus}
           conn={conn} loading={sourceLoading} error={sourceError}
-          onRetry={() => refreshSources()} loadProjectDiff={loadProjectDiff}
+          onRetry={() => { void refreshSources(); if (conn.state === 'connected') void loadRepositories() }} loadProjectDiff={loadProjectDiff}
           repositoryPicker={<RepositoryPicker token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
@@ -1376,7 +1405,7 @@ export default function ContributeApp({ appId, token }) {
             /> : null}
             </>
           )}
-        />
+        />}
       </main>
     </div>
   )

@@ -18,7 +18,7 @@ contribution. This app is the dashboard for that loop:
   There is no separate Reviews destination. All projects, Local changes and
   Updates filter the same searchable overview.
 - **Task-first controls** — open a project to see its work list beside one
-  contextual task. **Prepare changes** is the main action; **Get up to date**
+  contextual task, with a compact project switcher rather than another sidebar. **Prepare changes** is the main action; **Get up to date**
   stays visible in the project header. A permitted maintainer can choose
   **Continue through merge** without granting unknown future public actions.
   Preparation stays private, and updates use the reviewed adapter rather than
@@ -32,6 +32,15 @@ contribution. This app is the dashboard for that loop:
   one project. Sending is not merging; stale heads and incomplete stacks
   keep the existing guarded boundaries. Questions appear before optional work
   inventories, with source and review conversation links available in detail.
+- **Deliberate project membership** — GitHub access alone does not add a project.
+  Local projects form the main list. Use **Add repository** to follow another
+  GitHub project; existing external contributions and incoming requests remain
+  discoverable under **Other repositories**, including when offline.
+- **One approval, either surface** — agents normally give an exact approval link
+  into Contribute. Explicit approval in the owning chat uses the same guarded
+  review-run path without a duplicate click. Opening a link is never consent;
+  stale versions, lost merge receipts, permissions and repository protections
+  still gate public actions. Chat consent requires the companion backend update.
 - **Honest shared status** — local work and shared-version status are visible,
   not hidden inside file details. Ordinary refresh reads recorded source facts;
   it does not fetch online or certify linear history. Missing source does not

@@ -18,6 +18,8 @@ const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SourceMap } from './ui/SourceMap.jsx'
+import { ReviewSelection } from './ui/ReviewSelection.jsx'
+import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
@@ -59,6 +61,8 @@ window.fetch = async (url, options = {}) => {
   calls.requests.push(call)
   if (call.url === '/api/github/graphql' && call.method === 'POST') {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
+    if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
+    if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
     const found = call.body.query.includes('repo:owner/other') ? [] : pulls
     return response({ data: { search: { nodes: found, issueCount: found.length,
       pageInfo: { hasNextPage: false, endCursor: null } } } })
@@ -67,7 +71,7 @@ window.fetch = async (url, options = {}) => {
     if (call.method === 'GET') return response({ runs: reviewRuns })
     if (call.method !== 'POST') return forbidden('unexpected review method')(call.method)
     const run = { id: 'review-' + (reviewRuns.length + 1), chat_id: 'review-chat-fixture',
-      mode: call.body.mode, state: 'reviewing', items: call.body.items.map(item => ({ ...item, state: 'reviewing' })) }
+      request_id: call.body.request_id, mode: call.body.mode, state: 'reviewing', items: call.body.items.map(item => ({ ...item, state: 'reviewing' })) }
     reviewRuns.unshift(run)
     return response({ run })
   }
@@ -96,6 +100,8 @@ window.mobius = {
     set: async (key, value) => { values.set(key, structuredClone(value)) },
     remove: async key => { values.delete(key) },
     subscribe: () => () => {},
+    getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? 'fixture-version' : null}),
+    durableWrite: async (key, value) => values.set(key,structuredClone(value)),
   },
   nav: {
     open(name, callbacks) {
@@ -116,6 +122,11 @@ window.mobius = {
 
 function Fixture() {
   const [records, setRecords] = useState([prepared])
+  const [selectionId, setSelectionId] = useState(null)
+  const [allProjects, setAllProjects] = useState(projects)
+  window.openSelectionFixture = setSelectionId
+  function repositoryAdded(repo) { setAllProjects(old => [...old, {key:'external:' + repo.nameWithOwner,kind:'external',name:repo.nameWithOwner,canonical_repo:repo.nameWithOwner,contributions:[]}]) }
+
   function runFor(project) {
     const items = records.filter(record => record.repo === project.canonical_repo).map(record => ({
       id: (record.status === 'prepared' ? 'publish:' : 'public:') + record.id,
@@ -136,8 +147,9 @@ function Fixture() {
   }
   async function start(action) { return { ok: true, ...await window.mobius.chat.start(action) } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
-    <SourceMap projects={projects} snapshot={{ generated_at: 'fixture' }} conn={{ state: 'connected', login: 'owner' }}
+    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture' }} conn={{ state: 'connected', login: 'owner' }}
       onRetry={forbidden('unexpected source refresh')}
+      repositoryPicker={<RepositoryPicker token="fixture-only" connected onAdded={repositoryAdded} />}
       renderControls={project => project ? <ProjectControls appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start} /> : null}
       renderActivity={(project, navigation) => project ? <ContributionRun run={runFor(project)}
@@ -145,7 +157,7 @@ function Fixture() {
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send}
         renderPublicWork={() => <PullRequests appId="fixture-app" token="fixture-only" project={project}
           conn={{ state: 'connected', login: 'owner' }} records={records.filter(record => record.repo === project.canonical_repo)} />}
-      /> : null} />
+      /> : null} />}
   </main></div>
 }
 createRoot(document.getElementById('root')).render(<Fixture />)
@@ -335,6 +347,73 @@ window.runWorkspaceChecks = async () => {
       window.mobius.nav.back()
       await until(() => !query('.co-workspace') && document.querySelectorAll('.co-source-row').length === 2, 'Project Back did not restore the project list')
     })
+    const savedSelection = id => ({request_id:id,mode:'review_merge',items:[{repo:'owner/project',number:7,head_sha:HEAD,base_ref:'main',base_sha:BASE}]})
+    async function showSelection(id, value = savedSelection(id)) {
+      values.set('review-selections/' + id + '.json', value)
+      window.openSelectionFixture(id)
+      await until(() => !text(query('.co-selection-page')).includes('Checking the selected'), 'Approval link did not settle')
+    }
+    const beforeLink = mutationRequests().length
+    await check('direct link opens exact approval without granting consent on navigation', async () => {
+      await showSelection('selection-link-one')
+      await until(() => button('Allow review & merge'), 'Review link did not reach exact approval')
+      ensure(text(query('.co-selection-page')).includes('aaaaaaa → main (bbbbbbb)'), 'Link omitted selected version')
+      ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
+    })
+    await check('direct link confirmation posts exact scope once even after double click', async () => {
+      const confirm = button('Allow review & merge')
+      confirm.click(); confirm.click()
+      await until(() => button('Open review conversation'), 'Approval did not open its owning conversation')
+      ensure(mutationRequests().length === beforeLink + 1, 'Approval did not produce exactly one request')
+      const body = mutationRequests().at(-1).body
+      ensure(body.request_id === 'selection-link-one' && body.items[0].head_sha === HEAD && !body.chat_approval, 'Browser forged chat authority or changed selected work')
+    })
+    await check('already approved chat selection opens its owner without another approval', async () => {
+      await click(button('Back to projects'))
+      await showSelection('selection-link-one')
+      await until(() => button('Open review conversation'), 'Existing selection did not resolve its owner')
+      ensure(!button('Allow review & merge') && mutationRequests().length === beforeLink + 1, 'Existing selection asked for duplicate approval')
+    })
+    await check('changed public version invalidates a link without silently advancing it', async () => {
+      await click(button('Back to projects'))
+      const stale = savedSelection('selection-stale'); stale.items[0].head_sha = SECOND_HEAD
+      await showSelection('selection-stale', stale)
+      await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed version did not stop approval')
+      ensure(!button('Allow review & merge') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
+    })
+    await check('editing saved selection during confirmation never approves replacement work', async () => {
+      await click(button('Back to projects'))
+      await showSelection('selection-replaced')
+      await until(() => button('Allow review & merge'), 'Proposal not ready')
+      const changed = savedSelection('selection-replaced'); changed.items[0].number = 8
+      values.set('review-selections/selection-replaced.json', changed)
+      await click(button('Allow review & merge'))
+      await until(() => text(query('.co-selection-page')).includes('changed while you were reading'), 'Proposal replacement was not detected')
+      ensure(mutationRequests().length === beforeLink + 1, 'Replaced proposal was approved')
+    })
+    await check('read-only contributor can privately review but cannot approve merging', async () => {
+      await click(button('Back to projects')); window.fixturePermission = 'READ'
+      await showSelection('selection-reader')
+      await until(() => button('Review privately instead'), 'Permission failure not explained')
+      ensure(button('Allow review & merge')?.disabled, 'Read permission exposed active merge approval')
+      await click(button('Review privately instead'))
+      ensure(button('Start review') && !button('Start review').disabled, 'Private review became unavailable')
+      ensure(mutationRequests().length === beforeLink + 1, 'Changing mode counted as approval')
+      window.fixturePermission = 'WRITE'
+    })
+    await check('adding an external repository is an explicit saved choice, not a GitHub mutation', async () => {
+      await click(button('Back to projects'))
+      await click(query('.co-repository-picker summary'))
+      const input = query('#co-repository-name')
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'team/community')
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+      await frame(); await click(button('Add'))
+      await until(() => values.get('followed-repositories.json')?.includes('team/community'), 'Repository preference was not saved')
+      ensure(query('.co-other-repositories') && !query('.co-other-repositories').open, 'Other repositories cluttered the default project list')
+      await click(query('.co-other-repositories summary'))
+      ensure([...document.querySelectorAll('.co-source-row')].some(node => node.getClientRects().length && text(node).includes('team/community')), 'Explicitly added repository was lost')
+      ensure(mutationRequests().length === beforeLink + 1, 'Adding repository mutated GitHub')
+    })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
       reviewRequests: reviewRuns.length, assignments: mutationRequests().filter(call => call.url.endsWith('/assign-review')).length,
@@ -459,9 +538,10 @@ async function main() {
     await protocol.send('Browser.close')
   } finally {
     if (browser && browser.exitCode === null && browser.signalCode === null) {
-      browser.kill('SIGTERM')
+      // Browser.close owns graceful shutdown, including profile writers. Do
+      // not interrupt that shutdown and race its child processes during rm.
       await new Promise(resolve => {
-        const timer = setTimeout(() => { browser.kill('SIGKILL'); resolve() }, 3000)
+        const timer = setTimeout(() => browser.kill('SIGKILL'), 3000)
         browser.once('exit', () => { clearTimeout(timer); resolve() })
       })
     }
