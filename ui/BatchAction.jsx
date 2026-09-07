@@ -79,9 +79,9 @@ export function AgentHandoffButton({
     if (collapseOnStart) return null
     const tokenTotal = Number(started?.usage?.totals?.total_tokens)
     const usageLabel = Number.isFinite(tokenTotal) && tokenTotal >= 0
-      ? `${new Intl.NumberFormat(undefined, {
+      ? `Helper chat total: ${new Intl.NumberFormat(undefined, {
           notation: 'compact', maximumFractionDigits: 1,
-        }).format(tokenTotal)} tokens used`
+        }).format(tokenTotal)} tokens`
       : ''
     return (
       <div className="co-agent-started" role="status" aria-live="polite">

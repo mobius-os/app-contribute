@@ -1,6 +1,5 @@
 import {
   actionableSourceProjects,
-  projectNeedsPreparation,
   projectNeedsSorting,
   projectReadyToPrepare,
   projectStatus,
@@ -434,10 +433,10 @@ export function buildContributionRun({
 
   for (const unit of connectionUnits) {
     const record = runUnitRecords(unit).find(awaitingAppConnection)
-    decisions.push(decision('connect', unit, byRepo, {
+    working.push(decision('connecting', unit, byRepo, {
       record,
       label: recordTitle(record),
-      detail: `Merged app ready to connect · ${recordRepo(record)}`,
+      detail: `Finishing the local publication link · ${recordRepo(record)}`,
     }))
   }
 
@@ -521,7 +520,7 @@ export function buildContributionRun({
   const privateAction = organizePrivateWorkAction(
     privateRecords,
     reviewStatus,
-    actionableSourceProjects(safeProjects).filter(projectNeedsPreparation),
+    actionableSourceProjects(safeProjects),
   )
 
   const uniqueDecisions = [...new Map(decisions.map(item => [item.id, item])).values()]

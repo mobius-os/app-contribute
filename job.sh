@@ -9,9 +9,10 @@
 # recovery handoff so its remaining private work cannot be mistaken for
 # sendable. That pass is independently CAS-safe and never sends a notification.
 #
-# Reconcile disposable staging checkouts for terminal records before the
-# GitHub-dependent work. This is deliberately retryable: a checkout remains on
-# disk after a failed cleanup, so the next scheduled pass tries it again.
+# Reconcile disposable staging checkouts and finish reviewed app-publication
+# links for terminal records before the GitHub-dependent work. Both are
+# deliberately retryable: the next scheduled pass resumes either outcome
+# without asking the owner to repeat the publication decision.
 #
 # Then, for every pr/issue ledger record that is still draft/open, ask GitHub
 # for its live state, latest activity, and check status in ONE batched GraphQL
@@ -213,6 +214,54 @@ def _reconcile_terminal_staging():
 
 
 _reconcile_terminal_staging()
+
+
+def _awaiting_publication_connection(rec):
+  plan = rec.get("plan") if isinstance(rec.get("plan"), dict) else {}
+  handoff = (
+    plan.get("after_merge")
+    if isinstance(plan.get("after_merge"), dict)
+    else {}
+  )
+  connection = (
+    rec.get("publication_connection")
+    if isinstance(rec.get("publication_connection"), dict)
+    else {}
+  )
+  return (
+    rec.get("status") == "merged"
+    and handoff.get("action") == "connect_app"
+    and connection.get("status") not in ("connected", "connected_conflict")
+  )
+
+
+def _finish_publication_connection(rec):
+  if not _awaiting_publication_connection(rec):
+    return
+  record_id = urllib.parse.quote(str(rec.get("id") or ""), safe="")
+  if not record_id:
+    return
+  try:
+    _call(
+      "POST",
+      "/api/github/contributions/%s/%s/connect-app" % (
+        APP_ID, record_id,
+      ),
+      {},
+    )
+  except Exception as exc:
+    # The route owns exact proof and leaves the app untouched on failure. Keep
+    # the handoff pending so the next supervised pass retries it.
+    print(
+      "contribute: publication connection %s pending: %s" % (
+        rec.get("id"), exc,
+      ),
+      file=sys.stderr,
+    )
+
+
+for _name, _record, _etag in records:
+  _finish_publication_connection(_record)
 
 
 def _is_target(rec):
@@ -797,6 +846,8 @@ for alias, (name, rec, etag) in aliases.items():
     except Exception as exc:
       print("contribute: staging cleanup %s failed: %s" % (name, exc),
             file=sys.stderr)
+  if new_status == "merged":
+    _finish_publication_connection(updated)
   # Attention routing. For an autopilot record we hand actionable events to the
   # background loop (POST /respond) and stay SILENT — the owner is normally
   # contacted only on merged / closed / human_required (the last sent

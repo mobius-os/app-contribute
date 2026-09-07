@@ -536,47 +536,12 @@ export async function withdrawMobiusContribution({ appId, token, rec }) {
   }
 }
 
-// Complete the reviewed publication handoff after GitHub merges an app PR.
-// The platform re-verifies the PR and immutable merged source/permissions before it
-// attaches that public identity to the original local app row. The endpoint is
-// idempotent: a lost response can be retried without duplicating or reinstalling
-// the app.
-export async function connectPublishedApp({ appId, token, recordId }) {
-  try {
-    const r = await fetch(
-      '/api/github/contributions/' +
-        encodeURIComponent(appId) + '/' +
-        encodeURIComponent(recordId) + '/connect-app',
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-      },
-    )
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    if (r.ok && body?.record && body?.connection) {
-      return {
-        ok: body.record,
-        connection: body.connection,
-      }
-    }
-    return {
-      error: typeof body?.detail === 'string'
-        ? body.detail
-        : 'Could not connect this published app.',
-    }
-  } catch {
-    return {
-      error: 'The response was lost. It is safe to try Connect again.',
-    }
-  }
-}
-
-// Batch approval paths for one immutable PR stack. recordIds is the exact
-// ordered list rendered in the confirmation, so the server cannot silently
-// include a layer the partner did not review. Publishing new PRs and updating
-// existing PRs remain distinct guarded writes even though their partial-result
-// handling is identical here.
+// Batch approval paths for one immutable PR stack. recordIds carries the full
+// ordered chain so the server can revalidate topology, while operation binds
+// the confirmation to only its current action phase. Deferred records remain
+// prepared and receive no claim. Publishing new PRs and updating existing PRs
+// stay distinct guarded writes even though their partial-result handling is
+// identical here.
 async function writeContributionStack({
   appId,
   token,

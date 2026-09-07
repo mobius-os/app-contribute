@@ -420,8 +420,8 @@ export function projectSourceState(project) {
 export function projectStatus(project) {
   const state = projectSourceState(project)
   if (state === 'external') return { label: 'Contribution only', tone: 'quiet' }
-  if (state === 'built_here') return { label: 'Built here', tone: 'accent' }
-  if (state === 'local_only') return { label: 'No shared source', tone: 'warn' }
+  if (state === 'built_here') return { label: 'Local only', tone: 'accent' }
+  if (state === 'local_only') return { label: 'No upstream', tone: 'warn' }
   if (state === 'unavailable') return { label: 'Not tracked', tone: 'quiet' }
   if (state === 'conflict') {
     return {

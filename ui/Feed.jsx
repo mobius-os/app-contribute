@@ -2,9 +2,9 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import {
   contributionActionScope,
-  contributionApprovalFingerprint,
   contributionCycleProgress,
   contributionFailureOwner,
+  contributionOutcomeAction,
   progressReviewAction,
   reviewStateFor,
 } from '../review.js'
@@ -13,7 +13,7 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
-import { sortStackRecords, stackMeta } from '../stack.js'
+import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   findRunItemByRecord,
   runPrimaryRecord,
@@ -29,9 +29,17 @@ function itemProject(item) {
   return item?.project || { name: item?.detail || 'Contribution' }
 }
 
+function itemPublicationRecords(item) {
+  return item?.unit?.type === 'stack'
+    ? stackPublicationRecords(item.unit)
+    : runUnitRecords(item).filter(record => record?.status === 'prepared')
+}
+
 function actionCount(items) {
-  return (items || []).reduce((total, item) => total + runUnitRecords(item)
-    .filter(record => record?.status === 'prepared').length, 0)
+  return (items || []).reduce(
+    (total, item) => total + itemPublicationRecords(item).length,
+    0,
+  )
 }
 
 function readyCount(items) {
@@ -43,24 +51,32 @@ export function batchFingerprint(items, mode, publicationPreference, githubState
   const rows = (items || []).flatMap(item => runUnitRecords(item).map(record => [
     item?.kind,
     runUnitKey(item),
-    contributionApprovalFingerprint(record),
+    record?.id,
+    record?.status,
+    record?.plan?.action,
+    record?.plan?.repo || record?.repo,
+    record?.plan?.branch || record?.branch,
+    record?.plan?.head_sha,
+    record?.last_submit_push_sha,
+    record?.submission_mode,
+    record?.readying ? 'readying' : '',
+    record?.last_submit_error,
+    record?.last_ready_error_code,
   ].map(value => String(value || '')).join('\u0001')))
   return JSON.stringify([
     mode, publicationPreference, githubState, ...rows.sort(),
   ])
 }
 
-function captureBatchValue(value) {
-  if (Array.isArray(value)) return value.map(captureBatchValue)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
-    key, captureBatchValue(child),
-  ]))
-}
-
 function captureBatchItems(items) {
   return (items || []).map((item) => {
-    const records = runUnitRecords(item).map(captureBatchValue)
+    const records = runUnitRecords(item).map(record => ({
+      ...record,
+      plan: record?.plan ? { ...record.plan } : record?.plan,
+      quality_review: record?.quality_review
+        ? { ...record.quality_review }
+        : record?.quality_review,
+    }))
     const primaryId = runPrimaryRecord(item)?.id
     return {
       ...item,
@@ -92,7 +108,9 @@ export function publicationRouteProblem(item, publicationPreference, githubState
       : 'Reconnect Personal GitHub before requesting review for these drafts.'
   }
   if (item?.kind !== 'publish') return ''
-  const records = runUnitRecords(item)
+  const records = item?.unit?.type === 'stack'
+    ? stackPublicationRecords(item.unit)
+    : runUnitRecords(item)
   const updating = records.length > 0 && records.every(
     record => record?.plan?.action === 'pr_update',
   )
@@ -130,8 +148,11 @@ function ExactActionList({
         const ordered = unit?.type === 'stack'
           ? sortStackRecords(runUnitRecords(item))
           : runUnitRecords(item)
+        const publicationIds = new Set(
+          mode === 'send' ? itemPublicationRecords(item).map(record => record.id) : [],
+        )
         return ordered
-          .filter(record => mode !== 'send' || record?.status === 'prepared')
+          .filter(record => mode !== 'send' || publicationIds.has(record.id))
           .filter(record => mode !== 'ready' || (
             record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
           ))
@@ -242,10 +263,10 @@ function ExactBatchAction({
           <Icon name={mode === 'ready' ? 'review' : 'send'} size={19} />
         </span>
         <div>
-          <small>{mode === 'ready' ? 'Drafts ready' : 'Reviews ready'}</small>
+          <small>{mode === 'ready' ? 'Drafts ready' : 'Ready to send'}</small>
           <strong>{mode === 'ready'
             ? `${count} ${count === 1 ? 'pull request is' : 'pull requests are'} ready to request review`
-            : `${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'} can move now`}</strong>
+            : `${count} reviewed ${count === 1 ? 'pull request is' : 'pull requests are'} ready to send`}</strong>
           <p>{mode === 'ready'
             ? 'One exact approval moves these drafts into review. Nothing merges.'
             : 'One exact approval opens or updates the complete reviewed set. Nothing merges.'}</p>
@@ -259,9 +280,7 @@ function ExactBatchAction({
             setApproval({ fingerprint, items: captureBatchItems(items) })
           }}
         >
-          {mode === 'ready'
-            ? (count === 1 ? 'Request review' : `Request review for ${count}`)
-            : (count === 1 ? 'Send' : `Send all ${count}`)}
+          {count === 1 ? 'Review and send' : `Review and send ${count}`}
         </button>
         <details className="co-run-primary-details">
           <summary>Review exact set <Icon name="chevron" size={14} /></summary>
@@ -305,53 +324,85 @@ function ExactBatchAction({
         </button>
         <button type="button" className="co-btn co-btn-primary" disabled={busy} aria-busy={busy} onClick={applyAll}>
           {busy ? 'Working…' : mode === 'ready'
-            ? 'Request review'
-            : (count === 1 ? 'Send' : `Send all ${count}`)}
+            ? (count === 1 ? 'Request review on GitHub' : `Request review for ${count} on GitHub`)
+            : (count === 1 ? 'Send to GitHub' : `Send ${count} to GitHub`)}
         </button>
       </div>
     </section>
   )
 }
 
-function PrivateRunAction({ action, cycle, items = [], onStart, onStop, onOpen, onSelect }) {
+function PrivateRunAction({
+  action,
+  cycle,
+  items = [],
+  onReview,
+  onStart,
+  onStop,
+  onOpen,
+  onSelect,
+}) {
   const phase = cycle?.phase || 'idle'
   const progress = contributionCycleProgress(cycle?.runtime)
   const currentScope = contributionActionScope(action)
-  const earlier = action && cycle?.scope && currentScope && cycle.scope !== currentScope
+  const mergeAction = contributionOutcomeAction(action, 'merge')
+  const mergeScope = contributionActionScope(mergeAction)
+  const currentCycleMatches = cycle?.scope && [currentScope, mergeScope].includes(cycle.scope)
+  const earlier = action && cycle?.scope && currentScope && !currentCycleMatches
   if (!action && !['running', 'starting', 'checking', 'stopping', 'waiting', 'paused', 'failed'].includes(phase)) return null
   const running = ['running', 'starting', 'checking', 'stopping'].includes(phase)
+  const mergeRunning = running && cycle?.scope === mergeScope
   const tokenTotal = Number(cycle?.runtime?.usage?.totals?.total_tokens)
   const tokenLabel = Number.isFinite(tokenTotal) && tokenTotal >= 0
-    ? `${new Intl.NumberFormat(undefined, {
+    ? `Preparation chat total: ${new Intl.NumberFormat(undefined, {
         notation: 'compact', maximumFractionDigits: 1,
-      }).format(tokenTotal)} tokens used`
+      }).format(tokenTotal)} tokens`
     : ''
   const title = running
-    ? 'Preparing private work'
+    ? mergeRunning ? 'Preparing the full merge cycle' : 'Preparing local work'
     : phase === 'waiting'
-      ? 'A private decision needs you'
+      ? 'Preparation needs your decision'
       : phase === 'paused' || phase === 'failed'
-        ? 'Earlier private work paused'
-        : 'Private work can be handled together'
+        ? 'Preparation stopped'
+        : earlier
+          ? 'Local work changed since the last preparation'
+          : 'Local work needs sorting'
   return (
     <section className={'co-run-private is-' + phase}>
       <span aria-hidden="true">{running ? <span className="ma-spinner is-compact" /> : <Icon name="cycle" size={17} />}</span>
       <div>
         <strong>{title}</strong>
         <p>{running
-          ? (progress.label || 'Aligning and reviewing the current private work.')
+          ? (progress.label || (mergeRunning
+              ? 'Refreshing upstream, preparing the exact work, and bringing the approval checkpoints back here.'
+              : 'Refreshing upstream and privately preparing the worthwhile contributions.'))
           : action
-            ? 'One private run prepares, aligns, and reviews everything that needs judgment.'
-            : 'Open the earlier run to continue.'}</p>
+            ? earlier
+              ? 'The earlier chat remains available, but it no longer represents the current source. Start a fresh preparation for today’s work.'
+              : 'Inspect the exact work, prepare it privately, or take the full cycle through its guarded approval checkpoints.'
+            : 'Open the preparation chat to continue.'}</p>
         {running && progress.total > 0 ? <small>{progress.completed} of {progress.total} complete</small> : null}
-        {tokenLabel ? <small>{tokenLabel}</small> : null}
+        {running && tokenLabel ? <small>{tokenLabel}</small> : null}
         {cycle?.error ? <small className="co-run-error">{cycle.error}</small> : null}
       </div>
       <div className="co-run-private-actions">
         {!running && action ? (
-          <button type="button" className="co-btn co-btn-sm co-btn-primary" onClick={onStart}>
-            {earlier ? 'Prepare latest' : action.label || 'Prepare all'}
-          </button>
+          <>
+            <button type="button" className="co-btn co-btn-sm" onClick={onReview}>
+              Review
+            </button>
+            <button type="button" className="co-btn co-btn-sm" onClick={() => onStart?.(action)}>
+              Prepare
+            </button>
+            <button
+              type="button"
+              className="co-btn co-btn-sm co-btn-primary"
+              title="Take this work through preparation and every exact approval checkpoint"
+              onClick={() => onStart?.(mergeAction)}
+            >
+              Merge
+            </button>
+          </>
         ) : null}
         {phase === 'running' ? <button type="button" className="co-btn co-btn-sm" onClick={onStop}>Stop</button> : null}
         {cycle?.chatId && ['waiting', 'paused', 'failed'].includes(phase) ? (
@@ -398,7 +449,7 @@ const STATE_LABELS = {
   route_attention: 'Choose route',
   public_attention: 'Resolve',
   private_review: 'Review',
-  connect: 'Connect',
+  connecting: 'Finishing publication',
   incoming_review: 'Incoming',
   request: 'Review draft',
 }
@@ -408,7 +459,6 @@ const DECISION_ACTION_LABELS = {
   route_attention: 'Choose',
   public_attention: 'Resolve',
   private_review: 'Review',
-  connect: 'Connect',
   request: 'Review',
 }
 
@@ -425,6 +475,7 @@ function DecisionRow({
           <strong>{item.label}</strong>
           <small>{item.detail}</small>
         </span>
+        <Icon name="right" size={14} />
       </button>
       {item.kind === 'incoming_review' ? (
         <IncomingAction item={item.item} onAssign={onAssignIncomingReview} />
@@ -485,7 +536,6 @@ function StackFocus({
   onFeedback,
   onRestore,
   onSetAutopilot,
-  onConnectApp,
   loadDiff,
 }) {
   const records = sortStackRecords(runUnitRecords(item))
@@ -493,8 +543,6 @@ function StackFocus({
     ? 'Public follow-up'
     : item.kind === 'private_review'
       ? 'Private repair'
-      : item.kind === 'connect'
-        ? 'App ready to connect'
       : item.kind === 'route_attention'
         ? 'Publication route'
         : item.kind === 'mark_ready'
@@ -519,8 +567,6 @@ function StackFocus({
         {records.map(record => (
           <div key={record.id}>
             {record?.status === 'abandoned' || (
-              item.kind === 'connect' && record?.id === item.record?.id
-            ) || (
               item.kind === 'public_attention' && (
                 record?.needs_attention === true ||
                 !!record?.attention?.title ||
@@ -532,7 +578,6 @@ function StackFocus({
                 reviewState={reviewStateFor(record, reviewStatus)}
                 onFeedback={onFeedback}
                 onRestore={onRestore}
-                onConnectApp={onConnectApp}
               />
             ) : null}
             <ContributionCard
@@ -604,7 +649,7 @@ function IncomingFocus({ item, onAssignIncomingReview }) {
   )
 }
 
-function BatchOwnedFocus({ item, reviewStatus, onFeedback, onDismiss, onSetAutopilot, loadDiff }) {
+function BatchOwnedFocus({ item, reviewStatus, onFeedback, onSetAutopilot, loadDiff }) {
   const record = runPrimaryRecord(item)
   if (!record) return null
   const eyebrow = item.kind === 'publish'
@@ -620,13 +665,6 @@ function BatchOwnedFocus({ item, reviewStatus, onFeedback, onDismiss, onSetAutop
         <p>{item.detail}</p>
         <SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />
       </section>
-      <ContributionDecision
-        rec={record}
-        reviewState={reviewStateFor(record, reviewStatus)}
-        reviewAction={progressReviewAction([record], reviewStatus)}
-        onFeedback={onFeedback}
-        onDismiss={onDismiss}
-      />
       <ContributionCard
         rec={record}
         reviewState={reviewStateFor(record, reviewStatus)}
@@ -647,7 +685,6 @@ export function FocusedItem({
   onRestore,
   onSetAutopilot,
   onWithdraw,
-  onConnectApp,
   onMarkReady,
   onAssignIncomingReview,
   loadDiff,
@@ -659,6 +696,28 @@ export function FocusedItem({
   if (item.kind === 'ready_attention') {
     return <ReadyAttentionFocus item={item} onMarkReady={onMarkReady} onFeedback={onFeedback} />
   }
+  if (item.kind === 'connecting') {
+    const record = runPrimaryRecord(item)
+    return (
+      <div className="co-focus-unit">
+        <section className="co-run-focus-summary is-connecting">
+          <small>Finishing publication</small>
+          <h3>{item.label}</h3>
+          <p>The reviewed app is already public. Contribute is attaching that identity to the same local app automatically; saved data and newer local work stay in place.</p>
+        </section>
+        {record ? (
+          <ContributionCard
+            rec={record}
+            reviewState={reviewStateFor(record, reviewStatus)}
+            onSetAutopilot={onSetAutopilot}
+            loadDiff={loadDiff}
+            initialExpanded
+            showDecision={false}
+          />
+        ) : null}
+      </div>
+    )
+  }
   if (item?.unit?.type === 'stack') {
     return (
       <StackFocus
@@ -667,7 +726,29 @@ export function FocusedItem({
         onFeedback={onFeedback}
         onRestore={onRestore}
         onSetAutopilot={onSetAutopilot}
-        onConnectApp={onConnectApp}
+        loadDiff={loadDiff}
+      />
+    )
+  }
+  if (item.kind === 'route_attention') {
+    return (
+      <section className="co-run-focus-summary is-route_attention">
+        <small>Choose a publication route</small>
+        <h3>{item.label}</h3>
+        <p>{item.detail}</p>
+        <p>Choose Personal GitHub from Contribute settings, then return to the exact Send batch.</p>
+        <SourceChatChoices records={records} onFeedback={onFeedback} />
+      </section>
+    )
+  }
+  if (['publish', 'mark_ready', 'private_review'].includes(item.kind)) {
+    return (
+      <BatchOwnedFocus
+        item={item}
+        reviewStatus={reviewStatus}
+        onFeedback={onFeedback}
+        onRestore={onRestore}
+        onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
       />
     )
@@ -707,7 +788,6 @@ export function FocusedItem({
         onDismiss={onDismiss}
         onRestore={onRestore}
         onWithdraw={onWithdraw}
-        onConnectApp={onConnectApp}
       />
       <ContributionCard
         rec={record}
@@ -730,6 +810,7 @@ export function ContributionRun({
   reviewStatus,
   cycle,
   onStartCycle,
+  onReviewPrivateWork,
   onStopCycle,
   onOpenCycle,
   onSend,
@@ -740,7 +821,6 @@ export function ContributionRun({
   onRestore,
   onSetAutopilot,
   onWithdraw,
-  onConnectApp,
   onAssignIncomingReview,
   onViewProject,
   loadDiff,
@@ -878,12 +958,13 @@ export function ContributionRun({
   const ownerDecisions = decisions.filter(item => ![
     'publish', 'mark_ready', 'private_review',
   ].includes(item.kind))
+  const ownerActionCount = ownerDecisions.length
   const headline = publishTotal > 0
-    ? `${publishTotal} reviewed ${publishTotal === 1 ? 'change is' : 'changes are'} ready`
+    ? 'Ready to send'
     : readyTotal > 0
       ? `${readyTotal} ${readyTotal === 1 ? 'draft is' : 'drafts are'} ready for review`
-      : ownerDecisions.length > 0
-        ? `${ownerDecisions.length} ${ownerDecisions.length === 1 ? 'decision needs' : 'decisions need'} you`
+      : ownerActionCount > 0
+        ? 'Decisions waiting'
         : working.length > 0
           ? 'Everything is moving'
           : run?.privateAction
@@ -941,7 +1022,6 @@ export function ContributionRun({
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
             onWithdraw={onWithdraw}
-            onConnectApp={onConnectApp}
             onMarkReady={onMarkReady}
             onAssignIncomingReview={onAssignIncomingReview}
             loadDiff={loadDiff}
@@ -986,15 +1066,16 @@ export function ContributionRun({
         action={run?.privateAction}
         cycle={cycle}
         items={privateCycleRunning ? [] : privateItems}
-        onStart={() => onStartCycle?.(run?.privateAction)}
+        onReview={onReviewPrivateWork}
+        onStart={onStartCycle}
         onStop={onStopCycle}
         onOpen={onOpenCycle}
         onSelect={selectRunItem}
       />
 
       <section className="co-run-section" aria-labelledby="co-run-decisions">
-        <header><h3 id="co-run-decisions">Needs you</h3><span>{ownerDecisions.length}</span></header>
-        {ownerDecisions.length > 0 ? (
+        <header><h3 id="co-run-decisions">Other decisions</h3><span>{ownerActionCount}</span></header>
+        {ownerActionCount > 0 ? (
           <div className="co-run-list">
             {ownerDecisions.map(item => (
               <DecisionRow

@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CSS } from './theme.js'
 import {
   attachSourceProjects,
+  projectWorkRevision,
 } from './source-map.js'
 import {
   applyLiveStates,
@@ -32,18 +33,9 @@ import {
   syncSetupCompletion,
   upsertRecord,
 } from './domain.js'
-import {
-  contributionActionScope,
-  contributionApprovalIsCurrent,
-  contributionCyclePhase,
-  contributionReviewTargetFromIntent,
-  focusedContributionNavigationReady,
-  focusedContributionReady,
-  indexReviewStatus,
-  isContributionCycleChat,
-  qualityReviewFor,
-} from './review.js'
+import { contributionActionScope, contributionApprovalIsCurrent, contributionPhaseApprovalIsCurrent, contributionReviewTargetFromIntent, contributionCyclePhase, focusedContributionNavigationReady, focusedContributionReady, isContributionCycleChat, indexReviewStatus, qualityReviewFor } from './review.js'
 import { buildContributionRun } from './run.js'
+import { stackPublicationRecords } from './stack.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings, saveCycleState } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
@@ -51,7 +43,6 @@ import {
   contributionStackDecision,
 } from './contribution-policy.js'
 import {
-  connectPublishedApp,
   assignIncomingReview,
   fetchIncomingReviews,
   fetchGithubStatus,
@@ -834,6 +825,32 @@ export default function ContributeApp({ appId, token }) {
     [token],
   )
 
+  const prepareProject = useCallback(async (project) => {
+    const name = project?.name || project?.canonical_repo || 'this project'
+    const local = Number(project?.localFiles || 0)
+    const compatible = Number(project?.compatibleFiles || 0)
+    const conflicts = Number(project?.conflictFiles || 0)
+    return startAgentTask({
+      event: 'prepare_source_project',
+      title: `Prepare ${name}`,
+      count: 1,
+      revision: projectWorkRevision(project),
+      scopeLabel: `${name} contribution`,
+      draft: [
+        `Inspect and privately prepare the current local work in ${name}.`,
+        '',
+        `Project key: ${project?.key || 'unknown'}`,
+        `Current source: ${project?.head_sha || 'unknown'}`,
+        `Comparison source: ${project?.comparison_sha || project?.base_sha || 'unknown'}`,
+        `Current classification: ${local} local-only, ${compatible} compatible overlap, ${conflicts} unresolved overlap.`,
+        '',
+        'Refresh the source status first. Preserve the installed app, saved data, and every newer local edit. Resolve overlaps by comparing both complete intents; never reset the live source or treat incoming-only work as a contribution.',
+        'Prepare only the coherent reusable changes for private review, with the complete current diff and exact-head checks. Do not perform a public GitHub action without the owner’s explicit approval of the resulting reviewed action.',
+        'Keep Contribute as the owner-facing surface. Return decisions or blockers to the source chat rather than navigating the owner away from the project.',
+      ].join('\n'),
+    })
+  }, [startAgentTask])
+
   // Contributions is one long reading feed; Repository map owns two internal
   // panes on desktop. Reset the shared page scroller at the boundary so a deep
   // feed position never shifts the map header or couples the two scroll modes.
@@ -1172,34 +1189,6 @@ export default function ContributeApp({ appId, token }) {
     return { error: outcome.error || 'Could not update autopilot.' }
   }, [appId, token, applyRecordUpdates])
 
-  // A merged app contribution can finish by attaching its reviewed public
-  // identity to the same local app row. The backend rechecks GitHub and the
-  // immutable merged package; this handler only reflects the durable result.
-  const onConnectApp = useCallback(async (rec) => {
-    const outcome = await connectPublishedApp({
-      appId,
-      token,
-      recordId: rec.id,
-    })
-    if (!outcome.ok) {
-      return {
-        error: outcome.error || 'Could not connect this published app.',
-      }
-    }
-    const next = { ...outcome.ok, path: rec.path }
-    applyRecordUpdates(next)
-    refreshSources()
-    window.mobius?.signal?.('published_app_connected', {
-      contribution_id: rec.id,
-      app_id: outcome.connection?.app_id,
-      status: outcome.connection?.status,
-    })
-    return {
-      ok: true,
-      connection: outcome.connection,
-    }
-  }, [appId, token, applyRecordUpdates, refreshSources])
-
   const onToggleAutopilotDefault = useCallback(async (next) => {
     setAutopilotDefault(next)
     const settings = await loadAppSettings()
@@ -1245,11 +1234,13 @@ export default function ContributeApp({ appId, token }) {
     return { ok: true }
   }, [appId, token, startAgentTask])
 
-  // One explicit confirmation can publish an exact, already-reviewed chain.
-  // The response may contain partial progress (for example, parent opened and
-  // child creation bounced), so merge every returned ledger record rather
-  // than treating the stack as all-or-nothing after public work has begun.
+  // One explicit confirmation advances the exact current phase of an already-
+  // reviewed chain. The response may contain partial progress, so merge every
+  // returned ledger record rather than treating the phase as all-or-nothing.
   const onSendStack = useCallback(async (stackRecords) => {
+    const approvedPublicationRecords = stackPublicationRecords({
+      type: 'stack', records: stackRecords, total: stackRecords.length,
+    })
     let freshRecords = []
     try {
       freshRecords = await loadFreshContributionRecords(
@@ -1268,13 +1259,16 @@ export default function ContributeApp({ appId, token }) {
       }
     }
     applyRecordUpdates(currentRecords)
-    if (stackRecords.some((approved, index) => (
-      !contributionApprovalIsCurrent(approved, currentRecords[index])
-    ))) {
+    const publicationRecords = stackPublicationRecords({
+      type: 'stack', records: currentRecords, total: currentRecords.length,
+    })
+    if (!contributionPhaseApprovalIsCurrent(
+      approvedPublicationRecords,
+      publicationRecords,
+    )) {
       return stalePublicApproval()
     }
-
-    const updating = currentRecords.every(
+    const updating = publicationRecords.length > 0 && publicationRecords.every(
       (rec) => rec?.plan?.action === 'pr_update',
     )
     if (updating && connRef.current.state !== 'connected') {
@@ -1336,27 +1330,33 @@ export default function ContributeApp({ appId, token }) {
       return { alreadyHandled: true }
     }
     if (outcome.uncertain) {
-      let resolutions = currentRecords.map(() => ({ state: 'unconfirmed', record: null }))
+      let resolutions = publicationRecords.map(() => ({
+        state: 'unconfirmed', record: null,
+      }))
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (attempt > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, 450))
         }
         try {
           const records = await loadFreshContributionRecords(
-            currentRecords.map((rec) => rec.id),
+            publicationRecords.map((rec) => rec.id),
           )
           const ledger = {
             records,
             fromCache: window.mobius.online === false,
           }
-          resolutions = currentRecords.map((rec) => resolveUncertainSubmission(rec, ledger))
+          resolutions = publicationRecords.map(
+            (rec) => resolveUncertainSubmission(rec, ledger),
+          )
         } catch {
-          resolutions = currentRecords.map(() => ({ state: 'unconfirmed', record: null }))
+          resolutions = publicationRecords.map(() => ({
+            state: 'unconfirmed', record: null,
+          }))
         }
         if (resolutions.every(isSubmissionResolutionSettled)) break
       }
       const durable = resolutions.flatMap((item, index) => item.record
-        ? [{ ...item.record, path: currentRecords[index].path }]
+        ? [{ ...item.record, path: publicationRecords[index].path }]
         : [])
       if (durable.length > 0) applyRecordUpdates(durable)
       const summary = summarizeSubmissionResolutions(resolutions)
@@ -1493,7 +1493,7 @@ export default function ContributeApp({ appId, token }) {
     })
     const outcome = await startAgentTask({
       ...requestedAction,
-      scopeLabel: 'Private contribution work',
+      scopeLabel: requestedAction.scopeLabel || 'Private contribution work',
     })
     if (!outcome.ok) {
       setCycle({
@@ -1600,6 +1600,7 @@ export default function ContributeApp({ appId, token }) {
             onRetry={() => refreshSources()}
             loadProjectDiff={loadProjectDiff}
             onViewReview={openProjectReview}
+            onPrepareProject={prepareProject}
           />
         ) : (
           <div className="co-contributions-view">
@@ -1622,6 +1623,7 @@ export default function ContributeApp({ appId, token }) {
                 reviewStatus={reviewStatus}
                 cycle={cycle}
                 onStartCycle={onStartCycle}
+                onReviewPrivateWork={() => viewProjects()}
                 onStopCycle={onStopCycle}
                 onOpenCycle={onOpenCycle}
                 onSend={onSend}
@@ -1632,7 +1634,6 @@ export default function ContributeApp({ appId, token }) {
                 onRestore={onRestore}
                 onSetAutopilot={onSetAutopilot}
                 onWithdraw={onWithdraw}
-                onConnectApp={onConnectApp}
                 onAssignIncomingReview={onAssignIncomingReview}
                 onViewProject={viewProjects}
                 loadDiff={loadFullDiff}

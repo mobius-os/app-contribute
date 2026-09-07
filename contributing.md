@@ -551,8 +551,11 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   the target app repository (or declares the live id as `previous_id`). Never
   use it for platform changes, an unrelated app, a non-`app-*` repository, or
   as a workaround for an ordinary App Store update. Contribute shows this
-  action inside the private review. Send binds it to the exact reviewed source
-  and capability digests; it does not connect or reinstall anything yet.
+  handoff inside the private review. Approval to send the exact reviewed app
+  publication also approves this exact post-merge connection; it is one
+  publication outcome, not a later public or destructive action. Send binds it
+  to the exact reviewed source and capability digests, but the connection does
+  not run until GitHub confirms the reviewed change has merged.
 
 Before you tell the partner it is ready, complete the exact-head review contract
 from **Thoroughly review prepared work**. CAS-mark `quality_review.state` as
@@ -627,14 +630,11 @@ merge.
 
 ### After an app PR merges: connect the same local app
 
-A merged record with a reviewed `after_merge.action: connect_app` shows
-**Link app** in Contribute History. Several compatible handoffs may appear as
-one exact **Link N apps** action. Pressing the named item or that exact current
-batch is the owner's approval for only those handoffs. The owner may instead
-explicitly, unambiguously approve the same handoff in chat. Without either form
-of approval, do not simulate the action.
-After chat approval, the agent may call the same guarded endpoint; do not make
-the owner repeat that approval in Contribute.
+A merged record with a reviewed `after_merge.action: connect_app` finishes the
+local connection automatically. This is the completion step of the exact app
+publication the owner already approved; never present a second **Link app**
+decision or count it among owner actions. The scheduled reconciler retries any
+interrupted handoff until it either completes or has a concrete recovery error.
 
 The platform then checks GitHub's actual merge commit, the stored reviewed diff,
 the durable landed witness, the immutable merged source and permission digests,
@@ -645,6 +645,12 @@ updates target the same installation instead of creating a second app. If the
 local source advanced after review, the ordinary update merge may report
 conflicts; Contribute keeps the app connected and sends those source conflicts
 back to its owning chat for deliberate resolution.
+
+Do not call the publication complete until the local connection is recorded.
+When the intended catalog identity is already attached to the same numeric app
+row, the guarded route may reconcile that already-true connection without
+rewriting the app or its source. Any other proof failure stays visible in
+Working and must not be relabelled as connected.
 
 This handoff depends on the running platform version that supports reviewed
 publication connections. If Contribute reports that the route is unavailable,
