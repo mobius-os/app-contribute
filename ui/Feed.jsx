@@ -749,7 +749,7 @@ export function ContributionRun({
   }, [focusTarget, focusReady, run, onFocusConsumed])
 
   function selectRunItem(item) { onSelect?.(item.id) }
-  
+
 
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review')

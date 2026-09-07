@@ -1346,7 +1346,7 @@ export default function ContributeApp({ appId, token }) {
           /> : null}
           renderActivity={(project, navigation) => (
             <>
-            
+
             {!project && repositoryAccess.error ? <p className="co-run-error" role="alert">{repositoryAccess.error} <button className="co-btn" onClick={() => loadRepositories()}>Retry</button></p> : null}
             {!project && repositoryAccess.hasNextPage ? <button className="co-btn" onClick={() => loadRepositories(repositoryAccess.endCursor)}>Load more repositories</button> : null}
             {project && conn.state !== 'connected' ? <TaskPane id="task:pulls"><h3>Review contributions</h3><p>Connect GitHub in the top right to see this project’s public pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane> : null}

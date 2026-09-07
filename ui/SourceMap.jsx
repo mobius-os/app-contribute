@@ -217,7 +217,7 @@ function ProjectRow({ project, selected, onSelect }) {
           {project.incomingReviews?.length ? <span className="co-source-attention">{project.incomingReviews.length} incoming {project.incomingReviews.length === 1 ? 'review' : 'reviews'}</span> : null}
         </span>
         <span className="co-source-row-cue" aria-hidden="true">
-          
+
           <Icon name="right" size={15} />
         </span>
       </button>
