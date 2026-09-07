@@ -11,7 +11,7 @@ export function isMobiusRepository(record) {
 export function contributionPath(record, preference, githubState) {
   if (!isMobiusRepository(record)) return 'github'
   if (githubState !== 'connected') return 'mobius'
-  return preference === 'mobius' ? 'mobius' : 'github'
+  return preference === 'github' ? 'github' : 'mobius'
 }
 
 export function contributionPathDecision(record, preference, githubState) {

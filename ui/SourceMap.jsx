@@ -2,17 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   projectNeedsSorting,
   projectReadyToPrepare,
-  projectDetailSummary,
-  projectStatus,
+  projectBoardFacts,
   sourcePathRelationship,
 } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
+import { TaskContext, TaskPane } from './TaskPane.jsx'
 
 const FILTERS = [
-  ['local', 'Local work'],
   ['all', 'All projects'],
+  ['local', 'Local changes'],
+  ['updates', 'Updates'],
 ]
 
 function projectMatchesJourney(project, filter) {
@@ -20,35 +21,8 @@ function projectMatchesJourney(project, filter) {
     projectReadyToPrepare(project)
     || projectNeedsSorting(project)
   )
+  if (filter === 'updates') return project.incomingFiles > 0 || project.originBehind > 0 || project.sourceComparisonRequired || project.conflictFiles > 0
   return true
-}
-
-function projectContributionCountLabel(project) {
-  const pullRequests = Number(project?.contributionCounts?.pullRequests || 0)
-  const issues = Number(project?.contributionCounts?.issues || 0)
-  return `${pullRequests} ${pullRequests === 1 ? 'pull request' : 'pull requests'} · ${issues} ${issues === 1 ? 'issue' : 'issues'}`
-}
-
-function localWorkLabel(project, ending) {
-  const committed = project.localFiles + project.compatibleFiles + project.conflictFiles
-  const count = committed || project.workingFiles || project.authoredFiles
-  return count > 0 ? `${count} local ${count === 1 ? 'difference' : 'differences'} ${ending}` : ending[0].toUpperCase() + ending.slice(1)
-}
-
-function projectNextStep(project, journey = 'all') {
-  if (project.builtHere) return 'Local app · no upstream repository'
-  if (projectReadyToPrepare(project)) return localWorkLabel(project, 'ready to prepare')
-  if (projectNeedsSorting(project)) return localWorkLabel(project, 'need sorting')
-  if (project.conflictFiles > 0) return `${project.conflictFiles} need a choice`
-  if (project.workingFiles > 0) return `${project.workingFiles} being edited`
-  if (project.localFiles > 0 || project.compatibleFiles > 0) {
-    const total = project.localFiles + project.compatibleFiles
-    return `${total} ${total === 1 ? 'change' : 'changes'} to prepare`
-  }
-  if (project.incomingFiles > 0) return 'Shared update available'
-  const activeRequests = (project.contributions?.length || 0) + (project.issues?.length || 0)
-  if (activeRequests > 0) return `${activeRequests} active ${activeRequests === 1 ? 'request' : 'requests'}`
-  return 'Up to date'
 }
 
 function shortCommit(value) {
@@ -171,126 +145,61 @@ function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
   )
 }
 
-function ProjectRequests({ title, emptyLabel, rows, onViewReview, projectKey }) {
-  if (!rows.length) return null
-  return (
-    <section className="co-project-reviews">
-      <header><strong>{title}</strong><small>{rows.length}</small></header>
-      {rows.map((rec) => (
-        <button type="button" key={rec.id} onClick={() => onViewReview(rec, projectKey)}>
-          <span>{rec.plan?.title || rec.title || emptyLabel}</span>
-          <small>{rec.status === 'prepared' ? 'Prepared' : rec.status === 'open' ? 'Open' : rec.status}</small>
-        </button>
-      ))}
-    </section>
-  )
-}
-
-function ProjectPreparationAction({ project, onPrepareProject }) {
-  const [state, setState] = useState({ phase: 'idle', message: '' })
-  const needsSorting = projectNeedsSorting(project)
-  const ready = projectReadyToPrepare(project)
-  if ((!needsSorting && !ready) || typeof onPrepareProject !== 'function') return null
-
-  const hasOverlap = project.conflictFiles > 0 || project.compatibleFiles > 0
-  const title = hasOverlap
-    ? 'Resolve the overlap and prepare what remains'
-    : needsSorting
-      ? 'Compare and prepare this work'
-      : 'Prepare these changes'
-  const detail = hasOverlap
-    ? 'Your local version stays in place while both versions are compared. Only the changes you keep move into review.'
-    : needsSorting
-      ? 'Contribute will classify the local and shared work, then bring back one reviewed proposal.'
-      : 'Contribute can prepare this local work for private review now.'
-  const label = hasOverlap
-    ? 'Resolve and prepare'
-    : needsSorting
-      ? 'Compare and prepare'
-      : 'Prepare changes'
-
-  async function prepare() {
-    if (state.phase === 'starting' || state.phase === 'started') return
-    setState({ phase: 'starting', message: '' })
-    const outcome = await onPrepareProject(project)
-    if (outcome?.ok) {
-      setState({
-        phase: 'started',
-        message: 'Working here in the background. This project will refresh when its reviewed proposal is ready.',
-      })
-    } else {
-      setState({
-        phase: 'error',
-        message: outcome?.error || 'Could not start this preparation. Try again.',
-      })
-    }
-  }
-
-  return (
-    <section className="co-project-next-action">
-      <div><strong>{title}</strong><p>{detail}</p></div>
-      <button
-        type="button"
-        className="co-btn co-btn-primary"
-        disabled={state.phase === 'starting' || state.phase === 'started'}
-        onClick={prepare}
-      >
-        {state.phase === 'starting' ? 'Starting…' : state.phase === 'started' ? 'Preparing…' : label}
-      </button>
-      {state.message ? (
-        <small role={state.phase === 'error' ? 'alert' : 'status'}>{state.message}</small>
-      ) : null}
-    </section>
-  )
-}
-
 function ProjectDetail({
   project,
-  journey,
   loadProjectDiff,
   onRefresh,
-  onViewReview,
-  onPrepareProject,
+  renderActivity,
+  navigation,
+  renderControls,
+  sourceRevision,
 }) {
-  const status = projectStatus(project)
+  const [host, setHost] = useState(null)
+  const [cycle, setCycle] = useState(null)
+  const [publicKeys, setPublicKeys] = useState(new Set())
+  const facts = projectBoardFacts(project)
+  const activeId = navigation.selectedId || (project.kind === 'external' ? 'task:pulls' : 'task:prepare')
+  const task = { cycle, setCycle, publicKeys, setPublicKeys, activeId, explicit: !!navigation.selectedId, host, open: navigation.onSelect, close: navigation.onBack }
+  const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   return (
-    <article className="co-source-detail">
-      <header className="co-source-detail-head">
-        <div className="co-source-detail-title"><ProjectGlyph project={project} /><div><h3>{project.name}</h3></div></div>
-        <span className={'co-source-status tone-' + status.tone}>{status.label}</span>
-      </header>
-      <div className="co-project-next">
-        <span><strong>{projectNextStep(project, journey)}</strong></span>
-      </div>
-      <p className="co-source-overview-copy">{projectDetailSummary(project)}</p>
-      <ProjectPreparationAction project={project} onPrepareProject={onPrepareProject} />
-      <div className="co-project-request-summary" aria-label="Active GitHub work">
-        <span>{projectContributionCountLabel(project)}</span>
-      </div>
-      <ProjectRequests
-        title="Pull requests"
-        emptyLabel="Untitled pull request"
-        rows={project.contributions || []}
-        onViewReview={onViewReview}
-        projectKey={project.key}
-      />
-      <ProjectRequests
-        title="Issues"
-        emptyLabel="Untitled issue"
-        rows={project.issues || []}
-        onViewReview={onViewReview}
-        projectKey={project.key}
-      />
-      <ProjectFileChanges project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
-      <ProjectPosition project={project} />
-      {project.kind !== 'external' && !project.available && project.state !== 'local_only' ? <div className="co-source-unavailable">No inspectable local source is available.</div> : null}
-    </article>
+    <TaskContext.Provider value={task}>
+      <article className={'co-workspace' + (navigation.selectedId ? ' has-task' : '')}>
+        <header className="co-workspace-head">
+          <div className="co-workspace-title"><ProjectGlyph project={project} /><div>
+            <h2>{project.name}</h2>
+            <p>{project.canonical_repo || 'Only on your Möbius'}{project.viewerPermission ? ` · ${['ADMIN', 'MAINTAIN', 'WRITE'].includes(project.viewerPermission) ? 'Maintainer' : 'Contributor'}` : ''}</p>
+          </div></div>
+          {project.viewerPermission === 'ADMIN' ? <a className="co-quiet-action" href={`https://github.com/${project.canonical_repo}/settings/access`} target="_blank" rel="noopener noreferrer">People & access</a> : null}
+          <div className="co-workspace-position"><span>{facts.shared}</span>
+            {canUpdate ? <button className="co-quiet-action" onClick={() => task.open('task:update')}><Icon name="refresh" size={17} /> Get up to date</button> : null}
+          </div>
+        </header>
+        <div className="co-workspace-body">
+          <div className="co-workspace-inventory">
+            {renderControls?.(project)}
+            {renderActivity?.(project, navigation)}
+            <button className="co-quiet-action co-workspace-files" onClick={() => task.open('task:files')}>Files & technical details <Icon name="right" size={16} /></button>
+          </div>
+          <aside className="co-task-pane" aria-label="Next action">
+            {navigation.selectedId ? <button className="co-task-back co-quiet-action" onClick={navigation.onBack}><Icon name="left" size={16} /> Back to {project.name}</button> : null}
+            <div className="co-task-outlet" ref={setHost} />
+          </aside>
+        </div>
+        <TaskPane id="task:files">
+          <h3>Files & technical details</h3>
+          <p>Current source, not a sum of past chat edits.</p>
+          <ProjectFileChanges key={sourceRevision} project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
+          <ProjectPosition project={project} />
+          {!project.available ? <p>No inspectable local source is available.</p> : null}
+        </TaskPane>
+      </article>
+    </TaskContext.Provider>
   )
 }
 
-function ProjectRow({ project, journey, selected, onSelect }) {
-  const status = projectStatus(project)
-  const next = projectNextStep(project, journey)
+function ProjectRow({ project, selected, onSelect }) {
+  const facts = projectBoardFacts(project)
+  const next = `${facts.work}; ${facts.shared}`
   return (
     <div className={'co-source-row-wrap' + (selected ? ' is-selected' : '')}>
       <button
@@ -303,11 +212,12 @@ function ProjectRow({ project, journey, selected, onSelect }) {
         <ProjectGlyph project={project} />
         <span className="co-source-row-id"><strong>{project.name}</strong></span>
         <span className="co-source-row-facts">
-          <span>{next}</span>
-          <small>{projectContributionCountLabel(project)}</small>
+          <span>{facts.work}</span>
+          <span className="co-source-shared">{facts.shared}</span>
+          {project.incomingReviews?.length ? <span className="co-source-attention">{project.incomingReviews.length} incoming {project.incomingReviews.length === 1 ? 'review' : 'reviews'}</span> : null}
         </span>
         <span className="co-source-row-cue" aria-hidden="true">
-          <small className={'tone-' + status.tone}>{status.label}</small>
+          
           <Icon name="right" size={15} />
         </span>
       </button>
@@ -315,12 +225,12 @@ function ProjectRow({ project, journey, selected, onSelect }) {
   )
 }
 
-function ProjectGroup({ label, projects, journey, selectedKey, onSelect }) {
+function ProjectGroup({ label, projects, selectedKey, onSelect }) {
   if (!projects.length) return null
   return (
     <div className="co-source-group">
       {label ? <div className="co-source-group-label">{label}</div> : null}
-      {projects.map((project) => <ProjectRow key={project.key} project={project} journey={journey} selected={project.key === selectedKey} onSelect={onSelect} />)}
+      {projects.map((project) => <ProjectRow key={project.key} project={project} selected={project.key === selectedKey} onSelect={onSelect} />)}
     </div>
   )
 }
@@ -338,10 +248,10 @@ export function SourceMap({
   error,
   onRetry,
   loadProjectDiff,
-  onViewReview,
-  onPrepareProject,
+  renderActivity,
+  renderControls,
 }) {
-  const [filter, setFilter] = useState(() => focusKey ? 'all' : 'local')
+  const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const filtered = useMemo(
     () => projects.filter((project) => (
@@ -363,7 +273,53 @@ export function SourceMap({
   const listScrollRef = useRef(0)
   const projectNavRef = useRef(null)
   const handledFocusRef = useRef('')
+  const [selectedWorkId, setSelectedWorkId] = useState('')
+  const workNavRef = useRef(null)
+  const workScrollRef = useRef(0)
+  const [navigationError, setNavigationError] = useState('')
   const pageScroller = () => document.querySelector('.co-page')
+
+  function closeWork() {
+    const handle = workNavRef.current
+    workNavRef.current = null
+    handle?.close?.()
+    setSelectedWorkId('')
+    requestAnimationFrame(() => pageScroller()?.scrollTo({ top: workScrollRef.current, left: 0 }))
+  }
+
+  function showWork(itemId) {
+    setSelectedWorkId(itemId)
+    requestAnimationFrame(() => pageScroller()?.scrollTo({ top: 0, left: 0 }))
+  }
+
+  async function openWork(itemId) {
+    if (!itemId || itemId === selectedWorkId) return
+    setNavigationError('')
+    if (workNavRef.current) closeWork()
+    workScrollRef.current = pageScroller()?.scrollTop || 0
+    if (!window.mobius?.nav?.open) { showWork(itemId); return }
+    const projectKey = selected
+    let handle = null
+    handle = window.mobius.nav.open('contribute-review', {
+      onBack: () => {
+        if (workNavRef.current !== handle) return
+        workNavRef.current = null
+        setSelectedWorkId('')
+        requestAnimationFrame(() => pageScroller()?.scrollTo({ top: workScrollRef.current, left: 0 }))
+      },
+      onForward: () => {
+        workNavRef.current = handle
+        setSelected(projectKey)
+        showWork(itemId)
+      },
+    })
+    workNavRef.current = handle
+    const outcome = await handle.outcome
+    if (workNavRef.current !== handle) { handle.close(); return }
+    if (outcome?.status !== 'owned') { workNavRef.current = null; setNavigationError('Could not open this contribution. Try again.'); return }
+    showWork(itemId)
+  }
+  const activityNavigation = { selectedId: selectedWorkId, onSelect: openWork, onBack: closeWork }
 
   function showProject(key) {
     listScrollRef.current = pageScroller()?.scrollTop || 0
@@ -373,6 +329,9 @@ export function SourceMap({
 
   async function openProject(key) {
     if (!key || selected === key) return
+    setNavigationError('')
+    if (workNavRef.current) closeWork()
+    if (projectNavRef.current) closeProject()
     if (!window.mobius?.nav?.open) {
       showProject(key)
       return
@@ -400,14 +359,16 @@ export function SourceMap({
       handle.close()
       return
     }
-    if (!['owned', 'standalone'].includes(outcome?.status)) {
+    if (outcome?.status !== 'owned') {
       projectNavRef.current = null
+      setNavigationError('Could not open this project. Try again.')
       return
     }
     showProject(key)
   }
 
   function closeProject() {
+    closeWork()
     const handle = projectNavRef.current
     projectNavRef.current = null
     try { handle?.close?.() } catch {}
@@ -419,60 +380,33 @@ export function SourceMap({
   }
 
   useEffect(() => () => {
+    workNavRef.current?.close?.()
+    workNavRef.current = null
     try { projectNavRef.current?.close?.() } catch {}
     projectNavRef.current = null
   }, [])
 
   useEffect(() => {
-    if (!focusKey || handledFocusRef.current === focusKey) return
-    if (!projects.some((project) => project.key === focusKey)) return
-    handledFocusRef.current = focusKey
+    if (!focusKey?.nonce || handledFocusRef.current === focusKey.nonce) return
+    if (focusKey.key && !projects.some(project => project.key === focusKey.key)) return
+    handledFocusRef.current = focusKey.nonce
+    if (!focusKey.key) { closeProject(); return }
     setFilter('all')
-    void openProject(focusKey)
+    void openProject(focusKey.key)
   }, [focusKey, projects])
 
-  useEffect(() => {
-    if (selected && !filtered.some((project) => project.key === selected)) {
-      closeProject()
-    }
-  }, [filtered, selected])
-
   const selectedProject = selected
-    ? filtered.find((project) => project.key === selected) || null
+    ? projects.find((project) => project.key === selected) || null
     : null
   const builtHere = filtered.filter((project) => project.builtHere)
   const tracked = filtered.filter((project) => !project.builtHere)
-  const copy = {
-    local: {
-      title: 'Local work not yet resolved upstream',
-      description: 'These projects contain local work that still needs preparing or sorting. Open a row to see the files and any existing pull requests.',
-    },
-    all: {
-      title: 'All projects',
-      description: 'Every project Contribute can currently inspect.',
-    },
-  }[filter]
-
-  if (loading && !snapshot) return <LoadingState />
-  if (error && !snapshot) {
-    return (
-      <div className="co-source-error">
-        <strong>{error === 'restart' ? 'Restart to finish Projects' : 'Projects unavailable'}</strong>
-        <p>{error === 'restart'
-          ? 'The source review service starts after the next Möbius restart.'
-          : 'Contribute could not read local source status. Your contribution run is unaffected.'}</p>
-        <button type="button" className="co-btn co-btn-sm" onClick={onRetry}>Try again</button>
-      </div>
-    )
-  }
-
+  if (loading && !snapshot && !projects.length) return <LoadingState />
   return (
     <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Project details">
       {selectedProject ? <h2 className="co-visually-hidden">Project detail</h2> : (
         <header className="co-view-heading">
           <div>
-            <h2>Projects</h2>
-            <p>Start with local work that is not yet resolved upstream. Open any row for its files, pull requests, and next step.</p>
+            <h2>Your projects</h2>
           </div>
           <div className="co-project-view-actions">
             <button
@@ -482,21 +416,25 @@ export function SourceMap({
               disabled={loading}
             >
               <Icon name="refresh" size={15} />
-              {loading ? 'Refreshing…' : 'Refresh'}
+              {loading ? 'Refreshing…' : 'Refresh status'}
             </button>
           </div>
         </header>
       )}
 
-      {['disconnected', 'unknown', 'unsupported'].includes(conn?.state) ? (
-        <div className="co-view-note">Local positions are current; GitHub review states may be older.</div>
+      {navigationError ? <p className="co-run-error" role="alert">{navigationError}</p> : null}
+      {['unknown', 'unsupported'].includes(conn?.state) ? (
+        <div className="co-view-note">GitHub is unavailable. Local status and saved reviews remain visible.</div>
       ) : null}
-      {error && snapshot ? (
-        <div className="co-view-warning" role="status">Refresh failed—keeping the last project snapshot.</div>
+      {error ? (
+        <div className="co-view-warning" role="status">Project status could not refresh. Saved contributions remain available.</div>
       ) : null}
 
       {!selectedProject ? (
         <>
+          {renderControls?.(null)}
+          {renderActivity?.(null, activityNavigation)}
+          <div hidden={!!selectedWorkId}>
           <label className="co-project-search">
             <span className="co-visually-hidden">Find a project</span>
             <input
@@ -524,51 +462,48 @@ export function SourceMap({
             ))}
           </nav>
 
-          <section className="co-stage-intro" aria-labelledby="co-project-stage-title">
-            <div>
-              <h3 id="co-project-stage-title">{copy.title}</h3>
-              <p>{copy.description}</p>
-            </div>
-          </section>
-
           {filtered.length === 0 ? (
             <div className="co-stage-empty">
               <Icon name={query.trim() ? 'review' : 'check'} size={20} />
-              <strong>{query.trim() ? 'No matching project' : 'Nothing here'}</strong>
-              <span>{query.trim() ? 'Try a project name or repository.' : 'This project stage is clear.'}</span>
+              <strong>{query.trim() ? 'No matching project' : filter === 'updates' ? 'No shared updates found' : 'No local work to prepare'}</strong>
+              <span>{query.trim() ? 'Try a project name or repository.' : filter === 'all' ? 'No projects are available.' : 'All projects includes work already prepared or shared.'}</span>
             </div>
           ) : (
             <div className="co-project-index">
               <ProjectGroup
-                label={builtHere.length ? 'Tracked upstream' : ''}
+                label=""
                 projects={tracked}
-                journey={filter}
                 selectedKey=""
                 onSelect={openProject}
               />
               <ProjectGroup
-                label="Local apps without an upstream repository"
+                label="Only on your Möbius"
                 projects={builtHere}
-                journey={filter}
                 selectedKey=""
                 onSelect={openProject}
               />
             </div>
           )}
+          </div>
         </>
       ) : (
-        <div className="co-focus-view">
-          <button type="button" className="co-focus-back" onClick={closeProject}>
-            <Icon name="left" size={15} /> Back to {copy.title.toLowerCase()}
-          </button>
+        <div className="co-project-layout">
+          <nav className="co-project-rail" aria-label="Your projects">
+            <button type="button" className="co-quiet-action" onClick={closeProject}><Icon name="left" size={15} /> All projects</button>
+            <label className="co-rail-search"><span className="co-visually-hidden">Find a project</span><input type="search" placeholder="Find a project" value={query} onChange={event => { setQuery(event.target.value); setFilter('all') }} /></label>
+            <div>{filtered.map(project => <button key={project.key} className={'co-rail-project' + (project.key === selected ? ' is-selected' : '')} onClick={() => openProject(project.key)} aria-current={project.key === selected ? 'page' : undefined}>
+              <ProjectGlyph project={project} /><span><strong>{project.name}</strong><small>{project.builtHere ? 'Only on your Möbius' : project.localFiles || project.workingFiles ? 'Local changes' : project.contributions?.length ? 'Contributions in progress' : 'Shared project'}</small></span>
+            </button>)}</div>
+          </nav>
           <ProjectDetail
-            key={`${selectedProject.key}:${snapshot?.generated_at || ''}`}
+            key={selectedProject.key}
             project={selectedProject}
-            journey={filter}
             loadProjectDiff={loadProjectDiff}
             onRefresh={onRetry}
-            onViewReview={onViewReview}
-            onPrepareProject={onPrepareProject}
+            renderActivity={renderActivity}
+            navigation={activityNavigation}
+            renderControls={renderControls}
+            sourceRevision={snapshot?.generated_at}
           />
         </div>
       )}

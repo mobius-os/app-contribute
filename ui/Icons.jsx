@@ -7,10 +7,14 @@ import {
   ChevronDown,
   ChevronRight,
   InfoCircle,
+  Settings,
+  Sparkle,
+  DotsHorizontal,
   Trash,
 } from '@openai/apps-sdk-ui/components/Icon'
 
 const SDK_ICONS = {
+  prepare: Sparkle,
   send: ArrowUp,
   feedback: Chat,
   trash: Trash,
@@ -19,6 +23,8 @@ const SDK_ICONS = {
   chevron: ChevronDown,
   right: ChevronRight,
   info: InfoCircle,
+  settings: Settings,
+  more: DotsHorizontal,
 }
 
 const PATHS = {

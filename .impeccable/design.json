@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-07T19:46:20.787497Z",
+  "title": "Design System: Contribute",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Inherited accent"
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Inherited action shade"
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Workspace background"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Context surface"
+      },
+      "caution": {
+        "displayName": "Advisory amber"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Project headline",
+        "purpose": "Names the selected project."
+      },
+      "title": {
+        "displayName": "Task title",
+        "purpose": "Names the explicit next task."
+      },
+      "explanation": {
+        "displayName": "Task explanation",
+        "purpose": "Explains scope and consequences without competing with the action."
+      }
+    },
+    "shadows": [
+      {
+        "name": "settings-help",
+        "value": "0 10px 28px color-mix(in srgb, #000 24%, transparent)",
+        "purpose": "Existing transient settings-help popover; not persistent workspace depth."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "140ms ease",
+        "purpose": "Existing background and border transitions."
+      },
+      {
+        "name": "button-press",
+        "value": "100ms ease",
+        "purpose": "Button active contraction to scale(0.97)."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow-workspace",
+        "value": "1150px"
+      },
+      {
+        "name": "project-return-strip",
+        "value": "950px"
+      },
+      {
+        "name": "task-replaces-inventory",
+        "value": "680px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The current task’s main action.",
+      "html": "<button type=\"button\" class=\"ds-primary\">Prepare changes</button>",
+      "css": ".ds-primary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; background:var(--accent-hover,var(--accent)); border-color:var(--accent-hover,var(--accent)); color:var(--accent-fg); } @media(hover:hover) { .ds-primary:not(:disabled):hover { background:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); border-color:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); } } .ds-primary:active { transform:scale(.97); } .ds-primary:disabled { opacity:.5; cursor:default; } .ds-primary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(prefers-reduced-motion:reduce) { .ds-primary { transition-duration:.01ms; } }"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A visible alternative, subordinate to the primary task.",
+      "html": "<button type=\"button\" class=\"ds-secondary\">Assign to someone</button>",
+      "css": ".ds-secondary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; background:var(--surface); color:var(--text); } @media(hover:hover) { .ds-secondary:not(:disabled):hover { background:var(--surface2,var(--surface)); border-color:color-mix(in srgb,var(--accent) 34%,var(--border)); } } .ds-secondary:active { transform:scale(.97); } .ds-secondary:disabled { opacity:.5; cursor:default; } .ds-secondary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(prefers-reduced-motion:reduce) { .ds-secondary { transition-duration:.01ms; } }"
+    },
+    {
+      "name": "Quiet action",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Back, scope, refresh, and secondary navigation stay directly visible.",
+      "html": "<button type=\"button\" class=\"ds-quiet\">Back to project</button>",
+      "css": ".ds-quiet { display:inline-flex; align-items:center; gap:6px; min-height:44px; padding:8px 2px; border:0; background:transparent; color:var(--muted); font:650 14px var(--font); cursor:pointer; } @media(hover:hover) { .ds-quiet:hover { color:var(--text); background:var(--surface2,var(--surface)); } } .ds-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Project search",
+      "kind": "input",
+      "refersTo": "project-search",
+      "description": "Readable search in the project index; no framework runtime required.",
+      "html": "<input class=\"ds-search\" type=\"search\" aria-label=\"Find a project\" placeholder=\"Find a project\">",
+      "css": ".ds-search { width:100%; min-height:46px; padding:10px 13px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--text); caret-color:var(--accent); font:400 16px var(--font); } .ds-search::placeholder { color:var(--muted); } .ds-search:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-color:color-mix(in srgb,var(--accent) 42%,var(--border)); }"
+    },
+    {
+      "name": "Project rail item",
+      "kind": "nav",
+      "description": "Selected project identity and one short work description; live-bound to shell colors.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Your projects\"><button type=\"button\" class=\"ds-project\" aria-current=\"page\"><span class=\"ds-glyph\">C</span><span><strong>Contribute</strong><small>Local changes</small></span></button></nav>",
+      "css": ".ds-rail { padding:18px 12px; background:var(--surface); color:var(--text); font-family:var(--font); } .ds-project { display:flex; align-items:center; gap:10px; width:100%; min-height:64px; border:0; border-radius:9px; padding:14px 10px; background:none; color:var(--text); text-align:left; cursor:pointer; } .ds-project strong { display:block; font:700 15px/1.3 var(--font); overflow-wrap:anywhere; } .ds-project small { display:block; color:var(--muted); font:400 14px/1.35 var(--font); margin-top:4px; } .ds-glyph { flex-shrink:0; width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border-radius:10px; background:color-mix(in srgb,var(--accent) 11%,var(--surface2,var(--surface))); color:var(--accent); font:750 14px var(--font); } .ds-project:hover { background:var(--bg); } .ds-project[aria-current=page] { background:var(--accent-dim); color:var(--accent); } .ds-project:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Work-state label",
+      "kind": "chip",
+      "refersTo": "work-state",
+      "description": "A written status in public contribution rows; not an interactive filter.",
+      "html": "<span class=\"ds-state\">Ready for review</span>",
+      "css": ".ds-state { display:inline-block; width:fit-content; margin-top:10px; border-radius:5px; padding:2px 7px; background:var(--surface); color:var(--muted); font:400 14px/1.5 var(--font); }"
+    },
+    {
+      "name": "Local-work summary",
+      "kind": "card",
+      "refersTo": "local-summary",
+      "description": "One outlined action leads from current local work to private preparation.",
+      "html": "<button type=\"button\" class=\"ds-local\"><span><strong>No unprepared changes found</strong><small>Current code · across this project’s conversations</small></span></button>",
+      "css": ".ds-local { display:flex; align-items:center; gap:14px; width:100%; min-height:88px; padding:18px; text-align:left; background:transparent; color:var(--text); border:1px solid var(--border); border-radius:12px; cursor:pointer; font-family:var(--font); } .ds-local > span { flex:1; min-width:0; } .ds-local strong { display:block; font:600 15px/1.5 var(--font); } .ds-local small { display:block; margin-top:6px; color:var(--muted); font:400 14px/1.5 var(--font); } .ds-local:hover { background:var(--surface); } .ds-local:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Contribution row",
+      "kind": "custom",
+      "description": "Selection and opening are separate controls. This static specimen preserves native checkbox focus; task navigation belongs to the app.",
+      "html": "<article class=\"ds-pr\"><label class=\"ds-select\"><input type=\"checkbox\" aria-label=\"Select this contribution\"></label><button type=\"button\" class=\"ds-open\"><strong class=\"ds-pr-title\">Improve project navigation</strong><span class=\"ds-meta\">Your PR · Unassigned</span><span class=\"ds-row-state\">Ready for review</span></button></article>",
+      "css": ".ds-pr { display:grid; grid-template-columns:44px minmax(0,1fr); gap:4px; padding:18px 0; border-bottom:1px solid var(--border); background:none; color:var(--text); font-family:var(--font); } .ds-select { display:flex; align-items:flex-start; justify-content:center; padding-top:5px; min-width:44px; min-height:44px; cursor:pointer; } .ds-select input { width:18px; height:18px; accent-color:var(--accent); cursor:pointer; } .ds-open { background:none; border:0; text-align:left; color:var(--text); padding:0; cursor:pointer; width:100%; min-height:44px; } .ds-pr-title { display:block; font:600 15px/1.45 var(--font); overflow-wrap:anywhere; } .ds-meta { display:block; color:var(--muted); margin:5px 0 4px; font:400 14px/1.5 var(--font); overflow-wrap:anywhere; } .ds-row-state { display:inline-block; margin-top:10px; border-radius:5px; padding:2px 7px; background:var(--surface); color:var(--muted); font:400 14px/1.5 var(--font); } .ds-open:hover .ds-pr-title { color:var(--accent); } .ds-pr:has(input:checked) .ds-pr-title { color:var(--accent); } .ds-open:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } .ds-select input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-pr-title { font-size:16px; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Project · Work · Task",
+    "overview": "Contribute is a task-first project workspace: project context, a stable inventory of work, and one contextual action pane. Its character is quiet and practical, with comfortable hierarchy, visible actions, and restrained iconography. The selected workspace uses the available app width rather than the superseded centered-detail composition.\n\nThe shell supplies the theme and font. This design changes Contribute, not the Möbius shell or chat Changes view. Implementation authority is `workspace-theme.js`, appended after `theme.js`, with behavior owned by `ui/SourceMap.jsx`, `ProjectControls.jsx`, `PullRequests.jsx`, `Feed.jsx`, and `TaskPane.jsx`.",
+    "keyCharacteristics": [
+      "Project context stays visible beside the work on wide screens.",
+      "AI preparation is the primary local-work action; updating is a separate journey.",
+      "Private preparation, prepared work, and public contributions remain visibly distinct.",
+      "Selection collects work; explicit task opening changes context.",
+      "Phone tasks replace the inventory rather than squeezing columns."
+    ],
+    "rules": [
+      {
+        "name": "Inherited Theme",
+        "body": "Use the shell’s semantic colors and font; do not freeze its accent into a named hue or a fabricated tonal ramp.",
+        "section": "colors"
+      },
+      {
+        "name": "Stable Inventory",
+        "body": "Checkbox selection changes only the selection. It never opens the task pane, scrolls to it, or steals keyboard focus.",
+        "section": "layout"
+      },
+      {
+        "name": "Flat Workspace",
+        "body": "Use borders, tone, and spacing to separate persistent regions; do not turn the work inventory into floating nested cards.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep project identity, work inventory, and the current task distinct.",
+      "Do keep Prepare prominent and Get up to date separate.",
+      "Do label private, prepared, public, queued, and accepted states in words.",
+      "Do enumerate exact public effects and versions before the owner approves.",
+      "Do preserve checkbox focus and open batch work only through the explicit selected-work action.",
+      "Do preserve readable phone text, visible focus, and practical touch targets."
+    ],
+    "donts": [
+      "Don’t restore the centered selected-project layout or spread reading copy across the whole workspace.",
+      "Don’t hide essential actions in a catch-all menu or shrink type to fit more columns.",
+      "Don’t treat a row checkbox as navigation; row opening is a separate control.",
+      "Don’t imply preparation is public, publication is merge, a queue entry is merged, or a recorded comparison is a fresh check.",
+      "Don’t invent fixed theme colors, tonal ramps, workflow states, or capabilities from a preview."
+    ]
+  }
+}

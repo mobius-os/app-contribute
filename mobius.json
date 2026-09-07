@@ -1,0 +1,82 @@
+{
+  "id": "contribute",
+  "name": "Contribute",
+  "version": "0.5.29",
+  "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
+  "author": "mobius-os",
+  "license": "MIT",
+  "homepage": "https://github.com/mobius-os/app-contribute",
+  "icon": "icon.png",
+  "entry": "index.jsx",
+  "offline_capable": true,
+  "offline": {
+    "reads": true,
+    "writes": "none",
+    "execution": "none"
+  },
+  "permissions": {
+    "cross_app_access": "none",
+    "share_with_apps": "none",
+    "github_access": true,
+    "github_connect": true
+  },
+  "runtime": {
+    "imports": [
+      "react",
+      "react-dom",
+      "marked",
+      "dompurify",
+      "@openai/apps-sdk-ui/components/Icon"
+    ],
+    "esm_deps": []
+  },
+  "schedule": {
+    "default": "*/15 * * * *",
+    "job": "job.sh"
+  },
+  "skills": [
+    "contributing.md",
+    "review-followup.md"
+  ],
+  "source_files": [
+    "theme.js",
+    "domain.js",
+    "labels.js",
+    "review.js",
+    "run.js",
+    "refresh.js",
+    "stack.js",
+    "source-map.js",
+    "autopilot.js",
+    "diff.js",
+    "api.js",
+    "github-connection.js",
+    "storage.js",
+    "prepared_reconcile.py",
+    "agent_snapshot.py",
+    "contributing.md",
+    "review-followup.md",
+    "ui/Icons.jsx",
+    "ui/BatchAction.jsx",
+    "ui/ConnectionCard.jsx",
+    "ui/MarkdownView.jsx",
+    "ui/FileDiffList.jsx",
+    "ui/ContributionCard.jsx",
+    "ui/Feed.jsx",
+    "ui/SourceMap.jsx",
+    "contribution-policy.js",
+    "ui/ProjectIcon.jsx",
+    "ui/diff/DiffView.jsx",
+    "ui/diff/FileDiffList.jsx",
+    "ui/diff/UnifiedDiff.jsx",
+    "ui/diff/parseUnifiedDiff.js",
+    "ui/diff/styles.js",
+    "ui/ProjectControls.jsx",
+    "collaboration.js",
+    "ui/PullRequests.jsx",
+    "ui/TaskPane.jsx",
+    "workspace-theme.js",
+    "ui/useProjectCycle.js",
+    "ui/SourceConversations.jsx"
+  ]
+}
