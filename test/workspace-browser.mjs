@@ -64,9 +64,12 @@ window.fetch = async (url, options = {}) => {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
     if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
     if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
-    const found = call.body.query.includes('repo:owner/other') ? [] : pulls
-    return response({ data: { search: { nodes: found, issueCount: found.length,
-      pageInfo: { hasNextPage: false, endCursor: null } } } })
+    let found = call.body.query.includes('repo:owner/other') ? [] : pulls
+    const laterPage = call.body.query.includes('after:"fixture-page-2"')
+    if (window.fixturePaging) found = laterPage ? found.slice(1) : found.slice(0,1)
+    if (window.fixtureChangedHead) found = found.map(pr => pr.number===8 ? {...pr,headRefOid:'e'.repeat(40)} : pr)
+    return response({ data: { search: { nodes: found, issueCount: pulls.length,
+      pageInfo: { hasNextPage: Boolean(window.fixturePaging && !laterPage), endCursor: window.fixturePaging && !laterPage ? 'fixture-page-2' : null } } } })
   }
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') return response({ runs: reviewRuns })
@@ -228,7 +231,7 @@ window.runWorkspaceChecks = async () => {
     const originalInventory = query('.co-workspace-inventory'), originalList = query('.co-pr-list'), originalRow = query('.co-pr-row')
     const inventoryNavigationDepth = navigation.length
     const firstCheckbox = query('input[aria-label="Select owner/project #7"]')
-    const secondCheckbox = query('input[aria-label="Select owner/project #8"]')
+    let secondCheckbox = query('input[aria-label="Select owner/project #8"]')
     function selectionStaysInInventory(focused) {
       ensure(navigation.length === inventoryNavigationDepth, 'Checkbox selection changed navigation')
       ensure(firstCheckbox.getClientRects().length && secondCheckbox.getClientRects().length, 'Batch selection hid checkboxes')
@@ -265,6 +268,44 @@ window.runWorkspaceChecks = async () => {
       await click(secondCheckbox)
       await click(query('.co-selection-toggle'))
       ensure(mutationRequests().length===0,'Selection tray mutated remote work')
+    })
+    await check('refresh preserves selection across pages and announces changed versions', async () => {
+      window.fixturePaging=true
+      await click(query('[aria-label="Refresh pull requests"]'))
+      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Refresh did not finish')
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Refresh discarded unchanged selection or skipped selected later page')
+      window.fixtureChangedHead=true
+      await click(query('[aria-label="Refresh pull requests"]'))
+      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Changed refresh did not finish')
+      ensure(firstCheckbox.checked && !secondCheckbox.checked,'Changed head remained selected or unchanged head was lost')
+      ensure(text(query('.co-public-work')).includes('Selection updated: owner/project#8'),'Selection change was not announced')
+      window.fixturePaging=false; window.fixtureChangedHead=false
+      await click(query('[aria-label="Refresh pull requests"]'))
+      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Restored refresh did not finish')
+      await click(secondCheckbox)
+    })
+    await check('inspecting a filtered selected card restores its row and keyboard focus', async () => {
+      const filter=query('[aria-label="Filter pull requests"]')
+      filter.value='unassigned'; filter.dispatchEvent(new Event('change',{bubbles:true})); await frame(); await frame()
+      ensure(!query('input[aria-label="Select owner/project #8"]'),'Fixture filter did not hide selected PR')
+      const card=[...document.querySelectorAll('.co-selected-open')].find(node => text(node).startsWith('#8'))
+      await click(card)
+      await until(() => query('input[aria-label="Select owner/project #8"]') && query('.co-pr-detail'),'Filtered selected card did not restore detail')
+      secondCheckbox=query('input[aria-label="Select owner/project #8"]')
+      const title=secondCheckbox.closest('.co-pr-row').querySelector('.co-pr-open'),rect=title.getBoundingClientRect()
+      ensure(document.activeElement===title && rect.bottom>0 && rect.top<innerHeight,'Restored selection detail stayed offscreen or unfocused')
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Inspecting hidden PR changed selection')
+      await click(title)
+    })
+    await check('cancelling batch actions restores their original keyboard trigger', async () => {
+      for (const label of ['Review 2','Assign…']) {
+        const trigger=button(label,query('.co-pr-selection')); trigger.focus(); await click(trigger)
+        await until(() => query('.co-task-dock'),'Dock did not open')
+        await click(button('Cancel',query('.co-task-dock')))
+        await until(() => !query('.co-task-dock'),'Dock did not close')
+        ensure(trigger.isConnected && document.activeElement===trigger,'Cancel lost keyboard focus instead of returning to the batch action')
+      }
+      ensure(mutationRequests().length===0,'Cancel submitted a workflow')
     })
     await check('opening an own assigned PR preserves batch selection and leads with description', async () => {
       await click(document.querySelectorAll('.co-pr-open')[1])

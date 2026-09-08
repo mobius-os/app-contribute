@@ -14,15 +14,14 @@ function SelectionTray({ selection, busy, onClear, onRemove, onInspect, onReview
   const tray = useRef(null)
   useLayoutEffect(() => {
     const node = tray.current
-    if (!node) return
+    if (!node || hidden) return
     const root = node.closest('.co-root')
     const measure = () => root?.style.setProperty('--co-selection-height', `${node.getBoundingClientRect().height + 32}px`)
     const observer = new ResizeObserver(measure)
     observer.observe(node); measure()
     return () => { observer.disconnect(); root?.style.removeProperty('--co-selection-height') }
   }, [hidden])
-  if (hidden) return null
-  return <section ref={tray} className={'co-pr-selection' + (expanded ? ' is-expanded' : '')} aria-label="Selected contributions">
+  return <section hidden={hidden} ref={tray} className={'co-pr-selection' + (expanded ? ' is-expanded' : '')} aria-label="Selected contributions">
     <div className="co-selection-heading">
       <button className="co-selection-toggle" aria-expanded={expanded} aria-controls="co-selected-cards" onClick={() => setExpanded(value => !value)}><span className="co-selection-stack" aria-hidden="true"><Icon name="check" size={18} /></span><strong>{selection.length} selected</strong><Icon name="chevron" size={16} /></button>
       <button className="co-quiet-action" aria-label="Clear selection" onClick={onClear}><Icon name="close" size={18} /></button>
@@ -129,6 +128,19 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const [query, setQuery] = useState('')
   const [opened, setOpened] = useState('')
   const [selected, setSelected] = useState(new Set())
+  const [selectionNotice, setSelectionNotice] = useState('')
+  const currentSelection = useRef({ selected, pulls: data.pulls })
+  currentSelection.current = { selected, pulls: data.pulls }
+  const pendingInspect = useRef('')
+  useLayoutEffect(() => {
+    if (!pendingInspect.current) return
+    const row = [...document.querySelectorAll('.co-pr-row')].find(node => node.dataset.pr === pendingInspect.current)
+    if (row) {
+      pendingInspect.current = ''
+      row.scrollIntoView({ block: 'center' })
+      row.querySelector('.co-pr-open')?.focus({ preventScroll: true })
+    }
+  }, [opened, filter, query])
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -140,10 +152,26 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     const id = ++request.current
     setData(old => ({ ...old, loading: true, error: '' }))
     try {
-      const next = await discoverPulls(token, repo, cursor)
+      let next = await discoverPulls(token, repo, cursor)
+      // A first-page refresh must not discard selections from later pages.
+      while (!cursor && next.hasNextPage && [...currentSelection.current.selected].some(key => !next.pulls.some(pr => prKey(pr) === key))) {
+        if (id !== request.current || !alive.current) return
+        const page = await discoverPulls(token, repo, next.endCursor)
+        next = { ...page, pulls: mergeSelection(next.pulls, page.pulls) }
+      }
       if (id !== request.current || !alive.current) return
       setData(old => ({ ...next, pulls: cursor ? mergeSelection(old.pulls, next.pulls) : next.pulls, loading: false, error: '' }))
-      if (!cursor) setSelected(new Set())
+      if (!cursor) {
+        const previous = currentSelection.current
+        const retained = new Set([...previous.selected].filter(key => {
+          const before = previous.pulls.find(pr => prKey(pr) === key)
+          const after = next.pulls.find(pr => prKey(pr) === key)
+          return before && after && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
+        }))
+        const removed = [...previous.selected].filter(key => !retained.has(key))
+        setSelected(retained)
+        setSelectionNotice(removed.length ? `Selection updated: ${removed.join(', ')} changed or is no longer open. Select its current version again if needed.` : '')
+      }
     } catch (error) {
       if (id === request.current && alive.current) setData(old => ({ ...old, loading: false, error: error.message }))
     }
@@ -202,16 +230,18 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     </header>
     <div className="co-pr-list-controls"><input type="search" aria-label="Find a pull request" placeholder="Find a pull request" value={query} onChange={event => setQuery(event.target.value)} /><label>Show<select aria-label="Filter pull requests" value={filter} onChange={event => setFilter(event.target.value)}>{FILTERS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
     {selection.length ? <SelectionTray selection={selection} busy={busy} hidden={['task:review', 'task:assign'].includes(task?.activeId)} onClear={() => setSelected(new Set())} onRemove={toggle} onReview={choose} onAssign={() => assignSelection()} onInspect={pr => {
-      setOpened(prKey(pr))
+      pendingInspect.current = prKey(pr)
+      setOpened(prKey(pr)); setFilter('all'); setQuery('')
+      // Reopening an already visible detail need not trigger another render.
       const row = [...document.querySelectorAll('.co-pr-row')].find(node => node.dataset.pr === prKey(pr))
-      if (row) { row.scrollIntoView({ block: 'center' }); row.querySelector('.co-pr-open')?.focus({ preventScroll: true }) }
-      else { setFilter('all'); setQuery('') }
+      if (row) { pendingInspect.current = ''; row.scrollIntoView({ block: 'center' }); row.querySelector('.co-pr-open')?.focus({ preventScroll: true }) }
     }} /> : null}
     <TaskPane id="task:review" dock><ReviewConfirmation choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
     <TaskPane id="task:assign" dock>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       setData(old => ({ ...old, pulls: old.pulls.map(item => keys.includes(prKey(item)) ? { ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } } : item) }))
       void onChanged?.()
     }} /> : null}</TaskPane>
+    {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
     {runError ? <p className="co-pr-note" role="status">Review progress unavailable: {runError}</p> : null}
     {data.error ? <p className="co-run-error" role="alert">{data.error} Use Refresh to try again.</p> : null}
     {!data.loading && !data.error && !visible.length ? <div className="co-work-empty"><strong>No {filter === 'unassigned' ? 'unassigned ' : ''}pull requests here</strong><p>{data.hasNextPage ? 'Load more to search the remaining results.' : filter === 'all' ? 'When work is shared on GitHub, it appears here for review.' : 'Try All to see the project’s other contributions.'}</p></div> : null}

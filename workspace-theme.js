@@ -72,6 +72,7 @@ export const WORKSPACE_CSS = `
 .co-page.is-sources { padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); scroll-padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); }
 .co-workspace .co-pr-selection,.co-workspace .co-task-dock { position:fixed; inset:auto 24px max(16px,env(safe-area-inset-bottom)); width:calc(100% - 48px); max-width:920px; margin:0 auto; z-index:20; background:var(--surface); border:1px solid var(--border); border-radius:18px; box-shadow:0 8px 40px color-mix(in srgb,var(--text) 14%,transparent); }
 .co-workspace .co-pr-selection { display:block; padding:12px; }
+.co-workspace .co-pr-selection[hidden] { display:none; }
 .co-selection-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .co-selection-heading > .co-quiet-action { width:44px; justify-content:center; }
 .co-selection-toggle { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 8px; border:0; background:none; color:var(--text); cursor:pointer; }
