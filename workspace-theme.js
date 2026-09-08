@@ -55,7 +55,7 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-run-fold { border-radius:0; border:0; border-bottom:1px solid var(--border); }
 .co-public-work { margin-top:32px; }
 .co-public-work > header > span { color:var(--muted); font-size:14px; flex:1; }
-.co-workspace .co-pr-row { border-radius:0; border:0; border-bottom:1px solid var(--border); padding:18px 0; background:none; flex-wrap:wrap; }
+.co-workspace .co-pr-row { display:flex; gap:8px; border-radius:0; border:0; border-bottom:1px solid var(--border); padding:18px 0; background:none; flex-wrap:wrap; }
 .co-workspace .co-pr-title { font-size:17px; line-height:1.45; font-weight:600; }
 .co-workspace .co-pr-meta { display:flex; flex-wrap:wrap; gap:5px 10px; font-size:14px; margin-top:6px; color:var(--muted); }
 .co-pr-open { background:none; border:0; text-align:left; color:var(--text); padding:0; cursor:pointer; width:100%; min-height:44px; }
@@ -82,7 +82,7 @@ export const WORKSPACE_CSS = `
 .co-person-option:hover { background:var(--bg); }
 .co-person-option span:last-child { color:var(--muted); font-size:14px; margin-left:auto; }
 .co-avatar { display:inline-grid; place-items:center; width:32px; height:32px; background:var(--accent-dim); color:var(--accent); border-radius:50%; }
-.co-pr-detail { width:100%; padding:12px 12px 12px 56px; min-width:0; }
+.co-pr-detail { flex-basis:100%; width:100%; padding:12px 12px 12px 56px; min-width:0; }
 .co-detail-tabs { display:flex; gap:22px; border-bottom:1px solid var(--border); margin-bottom:20px; }
 .co-detail-tabs button { background:none; border:0; border-bottom:2px solid transparent; color:var(--muted); min-height:48px; font-size:16px; cursor:pointer; padding:8px 0; }
 .co-detail-tabs button[aria-pressed=true] { color:var(--text); border-bottom-color:var(--accent); }
@@ -138,6 +138,7 @@ export const WORKSPACE_CSS = `
  .co-pr-detail { padding:12px 0; }
  .co-workspace .co-pr-side { padding-left:44px; width:100%; }
  .co-pr-selection .co-btn { flex:1; }
+ .co-pr-list-controls input { flex-basis:100%; width:100%; }
  .co-directory { grid-template-columns:1fr; }
  .co-project-switcher { gap:8px; }
  .co-project-switcher > button { white-space:nowrap; }

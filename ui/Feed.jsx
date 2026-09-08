@@ -27,6 +27,11 @@ function itemProject(item) {
   return item?.project || { name: item?.detail || 'Contribution' }
 }
 
+function itemHeading(item) {
+  const record = runPrimaryRecord(item)
+  return record ? recordTitle(record) : item.label
+}
+
 function itemPublicationRecords(item) {
   return item?.unit?.type === 'stack'
     ? stackPublicationRecords(item.unit)
@@ -385,7 +390,7 @@ function DecisionRow({
       <button type="button" className="co-run-row-main" onClick={() => onSelect?.(item)}>
         <ProjectIcon project={itemProject(item)} className="co-run-row-icon" />
         <span>
-          <strong>{item.label}</strong>
+          <strong>{itemHeading(item)}</strong>
           <small>{item.detail}</small>
         </span>
         <Icon name="right" size={14} />
@@ -409,7 +414,7 @@ function QuietRow({ item, onSelect }) {
   return (
     <button type="button" className="co-run-quiet-row" onClick={() => onSelect?.(item)}>
       <span className={'co-run-dot is-' + item.kind} aria-hidden="true" />
-      <span><strong>{item.label}</strong><small>{item.detail}</small></span>
+      <span><strong>{itemHeading(item)}</strong><small>{item.detail}</small></span>
       <Icon name="right" size={14} />
     </button>
   )
@@ -465,7 +470,7 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
   }
   return <div className="co-focus-unit">
     <section className={'co-run-focus-summary is-' + item.kind}>
-      <h3>{item.label}</h3>
+      <h3>{itemHeading(item)}</h3>
       <p className="co-group-count">1 group · {records.length} contributions{questions.length ? ` · ${questions.length} need attention` : ''}</p>
       <p>{item.detail}</p>
       {item.kind === 'route_attention' ? <p>Choose Personal GitHub in Contribute settings to send this related group together.</p> : null}
@@ -502,7 +507,7 @@ function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
   return (
     <section className="co-run-focus-summary is-ready_attention">
       <small>Review stage needs attention</small>
-      <h3>{item.label}</h3>
+      <h3>{itemHeading(item)}</h3>
       <p>{record?.last_ready_error || item.detail}</p>
       {retryable ? (
         <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={run}>
@@ -525,7 +530,7 @@ function IncomingFocus({ item, onAssignIncomingReview }) {
   return (
     <section className="co-run-focus-summary is-incoming_review">
       <small>Incoming review</small>
-      <h3>{item.label}</h3>
+      <h3>{itemHeading(item)}</h3>
       <p>{item.detail}</p>
       <div className="co-run-focus-actions">
         <IncomingAction item={pull} onAssign={onAssignIncomingReview} />
@@ -578,7 +583,7 @@ export function FocusedItem({
       <div className="co-focus-unit">
         <section className="co-run-focus-summary is-connecting">
           <small>Finishing publication</small>
-          <h3>{item.label}</h3>
+          <h3>{itemHeading(item)}</h3>
           <p>The reviewed app is already public. Contribute is attaching that identity to the same local app automatically; saved data and newer local work stay in place.</p>
         </section>
         {record ? (
@@ -610,7 +615,7 @@ export function FocusedItem({
     return (
       <section className="co-run-focus-summary is-route_attention">
         <small>Choose a publication route</small>
-        <h3>{item.label}</h3>
+        <h3>{itemHeading(item)}</h3>
         <p>{item.detail}</p>
         <p>Choose Personal GitHub from Contribute settings, then return to the exact Send batch.</p>
         <SourceChatChoices records={records} onFeedback={onFeedback} />

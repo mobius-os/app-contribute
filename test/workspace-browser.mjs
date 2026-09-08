@@ -256,6 +256,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Opening detail replaced batch selection')
       ensure(!query('.co-file-disclosure') && !calls.requests.some(call => call.url.includes('/files?')),'Diff loaded by default')
+      const row=query('.co-pr-detail').closest('.co-pr-row'); ensure(row.querySelector('.co-pr-side').getBoundingClientRect().bottom <= row.querySelector('.co-pr-detail').getBoundingClientRect().top + 1,'Status overlaps PR detail')
       ensure(mutationRequests().length === 0 && navigation.length === inventoryNavigationDepth,'Opening PR changed work or screens')
     })
     await check('files load only on demand, remain collapsed, and activity is separate', async () => {
