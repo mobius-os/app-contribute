@@ -82,6 +82,8 @@
     "ui/RepositoryPicker.jsx",
     "review-selection.js",
     "ui/ReviewSelection.jsx",
-    "review_prs.py"
+    "review_prs.py",
+    "pull-details.js",
+    "ui/PullRequestDetail.jsx"
   ]
 }

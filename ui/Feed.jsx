@@ -448,69 +448,37 @@ function SourceChatChoices({ records, onFeedback }) {
   )
 }
 
-function StackFocus({
-  item,
-  reviewStatus,
-  onFeedback,
-  onRestore,
-  onSetAutopilot,
-  loadDiff,
-}) {
+function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot, loadDiff }) {
   const records = sortStackRecords(runUnitRecords(item))
-  const eyebrow = item.kind === 'public_attention'
-    ? 'Public follow-up'
-    : item.kind === 'private_review'
-      ? 'Private repair'
-      : item.kind === 'route_attention'
-        ? 'Publication route'
-        : item.kind === 'mark_ready'
-          ? 'Included in the review batch'
-          : item.kind === 'publish'
-            ? 'Included in the send batch'
-            : item.kind === 'archived'
-              ? 'Dismissed chain'
-              : 'Related pull requests'
-  return (
-    <div className="co-focus-unit">
-      <section className={'co-run-focus-summary is-' + item.kind}>
-        <small>{eyebrow}</small>
-        <h3>{item.label}</h3>
-        <p>{item.detail}</p>
-        {item.kind === 'route_attention' ? (
-          <p>Choose Personal GitHub from Contribute settings to send this related chain together.</p>
-        ) : null}
-        <SourceChatChoices records={records} onFeedback={onFeedback} />
-      </section>
-      <div className="co-run-stack-records">
-        {records.map(record => (
-          <div key={record.id}>
-            {record?.status === 'abandoned' || (
-              item.kind === 'public_attention' && (
-                record?.needs_attention === true ||
-                !!record?.attention?.title ||
-                !!record?.attention?.message
-              )
-            ) ? (
-              <ContributionDecision
-                rec={record}
-                reviewState={reviewStateFor(record, reviewStatus)}
-                onFeedback={onFeedback}
-                onRestore={onRestore}
-              />
-            ) : null}
-            <ContributionCard
-              rec={record}
-              reviewState={reviewStateFor(record, reviewStatus)}
-              onSetAutopilot={onSetAutopilot}
-              loadDiff={loadDiff}
-              initialExpanded={item.kind === 'public_attention'}
-              showDecision={false}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+  const needsAnswer = record => record?.needs_attention === true || !!record?.attention?.title || !!record?.attention?.message || record?.quality_review?.state === 'changes_needed'
+  const questions = records.filter(needsAnswer)
+  const [note, setNote] = useState('')
+  function addressTogether() {
+    const owner = records.find(record => record.quality_review?.chat_id || record.chat_id)
+    if (!owner) { setNote('No source conversation is saved for this group. Open a contribution below for its available actions.'); return }
+    const draft = ['Help me address these related contributions together. Treat each finding independently and preserve their dependency order.',
+      ...records.map(record => `${record.id}: ${recordTitle(record)}${record.attention?.message ? ` — ${record.attention.message}` : ''}`),
+      'Resolve what you can safely, ask me about remaining decisions, and return updated results for each contribution. This does not approve any public action.',
+    ].join('\n')
+    const result = onFeedback?.({ ...owner, chat_id: owner.quality_review?.chat_id || owner.chat_id }, { draft })
+    if (!result?.ok) setNote('The conversation could not open. Try the individual source conversation below.')
+  }
+  return <div className="co-focus-unit">
+    <section className={'co-run-focus-summary is-' + item.kind}>
+      <h3>{item.label}</h3>
+      <p className="co-group-count">1 group · {records.length} contributions{questions.length ? ` · ${questions.length} need attention` : ''}</p>
+      <p>{item.detail}</p>
+      {item.kind === 'route_attention' ? <p>Choose Personal GitHub in Contribute settings to send this related group together.</p> : null}
+      {onFeedback ? <button className="co-btn co-btn-primary" onClick={addressTogether}>Address group in conversation</button> : null}
+      {note ? <p role="status">{note}</p> : null}
+    </section>
+    <div className="co-group-members">{records.map(record => <details className="co-group-member" key={record.id}>
+      <summary>{recordTitle(record)}<span className="co-group-count"> · {needsAnswer(record) ? 'Needs attention' : record.status === 'prepared' ? 'Private proposal' : record.status}</span></summary>
+      {record?.status === 'abandoned' || needsAnswer(record) ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} onFeedback={onFeedback} onRestore={onRestore} /> : null}
+      <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} initialExpanded showDecision={false} />
+      <SourceChatChoices records={[record]} onFeedback={onFeedback} />
+    </details>)}</div>
+  </div>
 }
 
 function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
@@ -774,6 +742,8 @@ export function ContributionRun({
     'publish', 'mark_ready', 'private_review', 'request',
   ].includes(item.kind))
   const ownerActionCount = ownerDecisions.length
+  const ownerContributionCount = ownerDecisions.reduce((total, item) => total + Math.max(1, runUnitRecords(item).length), 0)
+  const groupedDecisions = ownerDecisions.filter(item => runUnitRecords(item).length > 1).length
   const privateProposals = [...(privateCycleRunning ? [] : privateItems), ...decisions.filter(item => item.kind === 'request')]
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
@@ -836,7 +806,7 @@ export function ContributionRun({
 
       {presentation === 'project' ? <>
       {ownerActionCount > 0 ? <section className="co-run-section" aria-label="Needs you">
-        <header><h3>Needs you <span className="co-section-count">{ownerActionCount}</span></h3></header>
+        <header><h3>Needs you <span className="co-section-count">{groupedDecisions ? `${groupedDecisions} ${groupedDecisions === 1 ? 'group' : 'groups'}${ownerActionCount > groupedDecisions ? ` + ${ownerActionCount - groupedDecisions} individual` : ''} · ${ownerContributionCount} contributions` : ownerActionCount}</span></h3></header>
         <div className="co-run-list">{(allDecisions ? ownerDecisions : ownerDecisions.slice(0, 3)).map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} onAssignIncomingReview={onAssignIncomingReview} />)}</div>
         {ownerActionCount > 3 ? <button className="co-quiet-action" onClick={() => setAllDecisions(!allDecisions)}>{allDecisions ? 'Show fewer' : `Show all ${ownerActionCount} decisions`}</button> : null}
       </section> : null}

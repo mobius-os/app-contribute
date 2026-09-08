@@ -3,6 +3,7 @@
 import { fetchLiveStates } from './api.js'
 
 export const PR_FIELDS = `id number title url headRefOid baseRefName baseRefOid isDraft
+  additions deletions changedFiles createdAt updatedAt
   author { login } assignees(first:100) { nodes { login } }
   repository { nameWithOwner viewerPermission }
   reviewDecision mergeable`

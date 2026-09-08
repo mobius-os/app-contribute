@@ -496,62 +496,25 @@ function PublicationReviewNote({ rec }) {
 // the full diff on expand — no raw diff_stat block, no excerpt step.
 export function ReviewPlan({ rec, loadDiff }) {
   const plan = rec.plan
-  const labels = rec.status === 'prepared' ? PREPARED_ACTION_LABELS : ACTION_LABELS
-  const badge = labels[plan.action] || 'Contribution'
+  const [tab, setTab] = useState('description')
   const isPr = plan.action === 'pr' || rec.type === 'pr'
-
-  return (
-    <>
-      {isPr ? (
-        <>
-          <div className="co-review-changes-head"><strong>Changes</strong><span>{badge}</span></div>
-          <FileDiffList rec={rec} loadDiff={loadDiff} />
-        </>
-      ) : null}
-      <details className="co-pr-metadata">
-        <summary><span>{isPr ? 'PR details' : 'Request details'}</span><Icon name="chevron" size={15} /></summary>
-        <div className="co-pr-metadata-body">
-          {plan.title ? (
-            <section className="co-review-section">
-              <div className="co-review-section-title">GitHub title</div>
-              <div className="co-review-title">{plan.title}</div>
-            </section>
-          ) : null}
-          {isPr ? (
-            <div className="co-review-coauthor" title="The contribution workflow adds this commit trailer before publishing.">
-              <span>Co-authored with</span>
-              <strong>Möbius Agent</strong>
-            </div>
-          ) : null}
-          <PublicationReviewNote rec={rec} />
-          <PriorWorkEvidence priorWork={plan.prior_work} />
-          <PlanLabels rec={rec} />
-          {plan.body_draft ? (
-            <section className="co-review-section">
-              <div className="co-review-section-title">Description</div>
-              <MarkdownView markdown={plan.body_draft} />
-            </section>
-          ) : null}
-          <p className="co-review-assurance">
-            {isPr
-              ? 'Contains only code and docs your agent changed — no personal data, chats, or memory.'
-              : 'Prepared from the source conversation. Nothing is published until you continue with that context.'}
-          </p>
-        </div>
-      </details>
-      {typeof plan.target_url === 'string' &&
-        plan.target_url.startsWith('https://github.com/') && (
-        <a
-          className="co-review-link"
-          href={plan.target_url}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          View the target on GitHub
-        </a>
-      )}
-    </>
-  )
+  return <>
+    <nav className="co-detail-tabs" aria-label="Prepared contribution details">
+      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}</button>)}
+    </nav>
+    {tab === 'description' ? <>
+      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} />
+      <PublicationReviewNote rec={rec} />
+    </> : null}
+    {tab === 'files' ? <FileDiffList rec={rec} loadDiff={loadDiff} /> : null}
+    {tab === 'activity' ? <>
+      <PriorWorkEvidence priorWork={plan.prior_work} />
+      <PlanLabels rec={rec} />
+      <p className="co-review-assurance">Prepared from the source conversation. Publication and merging remain separate approvals.</p>
+      <details className="co-pr-metadata"><summary>Technical details</summary><div className="co-pr-metadata-body"><PlanMeta rec={rec} /><p>Prepared head: <code>{plan.head_sha || 'Not recorded'}</code></p></div></details>
+    </> : null}
+    {typeof plan.target_url === 'string' && plan.target_url.startsWith('https://github.com/') ? <a className="co-review-link" href={plan.target_url} target="_blank" rel="noopener noreferrer">View target on GitHub</a> : null}
+  </>
 }
 
 // The Send/Dismiss row plus its outcome messaging; shared by the plan
