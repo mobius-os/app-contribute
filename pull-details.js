@@ -3,7 +3,7 @@
 // moving branch cannot silently put unrelated patches under an old approval.
 export function pullPath(pr) {
   const repo = pr?.repository?.nameWithOwner
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '') || !Number.isInteger(pr.number) || pr.number < 1) throw new Error('Choose a valid pull request.')
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '') || repo.split('/').some(part => part === '.' || part === '..') || !Number.isInteger(pr.number) || pr.number < 1) throw new Error('Choose a valid pull request.')
   return `repos/${repo}/pulls/${pr.number}`
 }
 export async function githubRead(token, path, signal) {

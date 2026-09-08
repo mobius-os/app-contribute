@@ -265,8 +265,9 @@ test('focused stacks preserve every source chat and never expose an unreviewed s
     record: first, label: 'Related changes', detail: 'Private review needed',
   })
 
-  assert.match(html, /Open source chat 1/)
-  assert.match(html, /Open source chat 2/)
+  assert.equal((html.match(/>Open source chat</g) || []).length, 2)
+  assert.equal((html.match(/class="co-group-member"/g) || []).length, 2)
+  assert.match(html, /Address group in conversation/)
   assert.doesNotMatch(html, />Send PRs?</)
 })
 

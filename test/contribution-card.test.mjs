@@ -77,7 +77,7 @@ test('request details do not render an empty pull-request changes section', asyn
       title: 'Clarify the review flow',
     },
   })
-  assert.match(html, /Request details/)
+  assert.match(html, /Description/)
   assert.doesNotMatch(html, />Changes</)
   assert.doesNotMatch(html, /co-diff/)
 })

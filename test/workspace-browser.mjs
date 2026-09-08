@@ -39,6 +39,7 @@ const pull = (number, extra = {}) => ({
   number, title: 'Contribution ' + number, headRefOid: HEAD, baseRefOid: BASE,
   baseRefName: 'main', isDraft: false, url: 'https://github.com/owner/project/pull/' + number,
   repository: { nameWithOwner: 'owner/project', viewerPermission: 'WRITE' },
+  changedFiles: 1, additions: 1, deletions: 0, createdAt: '2026-09-07T12:00:00Z', updatedAt: '2026-09-07T13:00:00Z',
   author: { login: 'owner' }, assignees: { nodes: [] }, ...extra,
 })
 const prepared = {
@@ -70,6 +71,7 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') return response({ runs: reviewRuns })
     if (call.method !== 'POST') return forbidden('unexpected review method')(call.method)
+    if (window.failReview) return new Response(JSON.stringify({detail:'Fixture review error'}), {status:503})
     const run = { id: 'review-' + (reviewRuns.length + 1), chat_id: 'review-chat-fixture',
       request_id: call.body.request_id, mode: call.body.mode, state: 'reviewing', items: call.body.items.map(item => ({ ...item, state: 'reviewing' })) }
     reviewRuns.unshift(run)
@@ -79,11 +81,19 @@ window.fetch = async (url, options = {}) => {
     return response({ assignees: [{ login: 'owner' }, { login: 'teammate' }], can_assign: true })
   }
   if (call.url === '/api/github/contributions/fixture-app/assign-review' && call.method === 'POST') {
+    if (window.failAssignment === call.body.number) return new Response(JSON.stringify({detail:'Fixture assignment error'}), {status:503})
     const selected = pulls.find(pr => pr.number === call.body.number)
     selected.assignees.nodes.push({ login: call.body.assignee })
     return response({ ok: true })
   }
   if (call.url.startsWith('/api/github/contributions/fixture-app/source-chats?') && call.method === 'GET') return response({ chats: [] })
+  if (call.url.startsWith('/api/github/api/repos/owner/project/') && call.method === 'GET') {
+    const number = Number(call.url.match(/(?:pulls|issues)\/(\d+)/)?.[1]); const pr=pulls.find(item=>item.number===number)
+    if (call.url.includes('/files?')) return response([{filename:'change.js',additions:1,deletions:0,status:'modified',patch:'@@ -1 +1 @@\n-old\n+safe change'}])
+    if (call.url.includes('/comments?')) return response([{id:1,body:'Please check this edge case',user:{login:'reviewer'},created_at:'2026-09-07T14:00:00Z'}])
+    if (call.url.includes('/reviews?')) return response([])
+    return response({body:'Fixture PR description '+number,head:{sha:pr.headRefOid},base:{sha:pr.baseRefOid,ref:pr.baseRefName}})
+  }
   return forbidden('fetch')(call.url)
 }
 window.XMLHttpRequest = class { constructor() { forbidden('XMLHttpRequest')() } }
@@ -188,10 +198,8 @@ async function click(node, message = 'Expected enabled visible control') {
   await frame(); await frame()
 }
 async function inventory() {
-  if (query('.co-workspace.has-task')) {
-    await click(query('.co-task-back'))
-    await until(() => !query('.co-workspace.has-task'), 'Back did not restore project inventory')
-  }
+  const close=query('.co-inline-close')
+  if (close) await click(close)
 }
 async function chooseProject(name) {
   await inventory()
@@ -210,142 +218,136 @@ window.runWorkspaceChecks = async () => {
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
     await until(() => query('.co-source-row'), 'Project list did not render')
-    await check('project opens inventory and contextual task without starting work', async () => {
+    await check('project directory labels filters instead of pretending they are screens', async () => {
+      ensure(query('.co-directory-filter select') && !query('.co-lens-nav'), 'Filters still look like views')
       await click(query('.co-source-row'))
       await until(() => document.querySelectorAll('.co-pr-row').length === 2 && !button('Prepare changes')?.disabled, 'Project did not settle')
-      ensure(query('.co-workspace-inventory') && query('.co-task-outlet h3'), 'Missing inventory or task outlet')
-      ensure(calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work')
+      ensure(query('.co-workspace-inventory') && !query('.co-task-pane'), 'Project still uses a separate action pane')
+      ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
     })
     const originalInventory = query('.co-workspace-inventory'), originalList = query('.co-pr-list'), originalRow = query('.co-pr-row')
     const inventoryNavigationDepth = navigation.length
     const firstCheckbox = query('input[aria-label="Select owner/project #7"]')
     const secondCheckbox = query('input[aria-label="Select owner/project #8"]')
     function selectionStaysInInventory(focused) {
-      ensure(navigation.length === inventoryNavigationDepth && !query('.co-workspace.has-task'), 'Checkbox selection opened task navigation')
-      ensure(firstCheckbox.getClientRects().length && secondCheckbox.getClientRects().length, 'Batch selection hid remaining checkboxes')
+      ensure(navigation.length === inventoryNavigationDepth, 'Checkbox selection changed navigation')
+      ensure(firstCheckbox.getClientRects().length && secondCheckbox.getClientRects().length, 'Batch selection hid checkboxes')
       ensure(document.activeElement === focused, 'Selection stole keyboard focus')
       ensure(query('.co-workspace-inventory') === originalInventory && query('.co-pr-row') === originalRow, 'Selection remounted inventory')
       ensure(mutationRequests().length === 0, 'Selection mutated GitHub or started review')
     }
-    await check('several checkbox selections and deselections keep inventory, navigation and focus in place', async () => {
-      for (const [checkbox, firstSelected, secondSelected] of [
-        [firstCheckbox, true, false], [secondCheckbox, true, true],
-        [firstCheckbox, false, true], [firstCheckbox, true, true],
-      ]) {
-        checkbox.focus()
-        await click(checkbox)
-        ensure(firstCheckbox.checked === firstSelected && secondCheckbox.checked === secondSelected, 'Batch selection changed an unrelated PR')
-        ensure(text(batchAction()).includes((Number(firstSelected) + Number(secondSelected)) + ' selected'), 'Selected count did not follow batch')
+    await check('multiple checkbox changes keep selection, focus and inventory stable', async () => {
+      for (const [checkbox, one, two] of [[firstCheckbox,true,false],[secondCheckbox,true,true],[firstCheckbox,false,true],[firstCheckbox,true,true]]) {
+        checkbox.focus(); await click(checkbox)
+        ensure(firstCheckbox.checked === one && secondCheckbox.checked === two, 'Unrelated selection changed')
+        ensure(text(query('.co-pr-selection')).includes((Number(one)+Number(two))+' selected'), 'Selection count drifted')
         selectionStaysInInventory(checkbox)
       }
     })
-    await check('native keyboard Space selects and deselects without leaving the batch inventory', async () => {
-      const keyboardEvents = []
-      const capture = event => keyboardEvents.push({ code: event.code, trusted: event.isTrusted })
-      secondCheckbox.addEventListener('keydown', capture)
-      secondCheckbox.focus()
-      for (const selected of [false, true]) {
-        await nativeSpace()
-        await until(() => secondCheckbox.checked === selected, 'Native Space did not toggle the focused checkbox')
-        ensure(firstCheckbox.checked, 'Native Space changed another selection')
-        selectionStaysInInventory(secondCheckbox)
-      }
-      secondCheckbox.removeEventListener('keydown', capture)
-      ensure(keyboardEvents.length === 2 && keyboardEvents.every(event => event.trusted && event.code === 'Space'), 'Keyboard test did not receive native trusted Space events')
+    await check('trusted keyboard Space selects and deselects without navigation', async () => {
+      const events = []; const capture = event => events.push({code:event.code,trusted:event.isTrusted})
+      secondCheckbox.addEventListener('keydown',capture); secondCheckbox.focus()
+      for (const selected of [false,true]) { await nativeSpace(); await until(() => secondCheckbox.checked === selected,'Space did not toggle'); selectionStaysInInventory(secondCheckbox) }
+      secondCheckbox.removeEventListener('keydown',capture)
+      ensure(events.length === 2 && events.every(event => event.trusted && event.code === 'Space'),'Keyboard test was not native')
     })
-    await check('Review or assign explicitly opens the selected batch without starting work', async () => {
-      await click(batchAction())
-      await until(() => button('Review selected'), 'Explicit batch action did not open its task')
-      ensure(text(query('.co-task-outlet')).includes('Review 2 contributions'), 'Batch action dropped selected PRs')
-      ensure(text(query('.co-task-outlet')).includes('Contribution 7') && text(query('.co-task-outlet')).includes('Contribution 8'), 'Batch task omitted a selected contribution')
-      ensure(mutationRequests().length === 0 && calls.starts.length === 0, 'Opening batch started work')
-    })
-    await check('own already-assigned PR row remains reviewable without changing assignment', async () => {
-      await inventory()
+    await check('opening an own assigned PR preserves batch selection and leads with description', async () => {
       await click(document.querySelectorAll('.co-pr-open')[1])
-      await until(() => text(query('.co-task-outlet')).includes('Contribution 8'), 'Row did not select its PR')
-      ensure(query('input[aria-label="Select owner/project #8"]').checked, 'Own assigned PR was not selected')
-      ensure(!query('input[aria-label="Select owner/project #7"]').checked, 'Row selection kept an unrelated PR')
-      ensure(mutationRequests().length === 0, 'Selecting assigned work mutated it')
+      await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Opening detail replaced batch selection')
+      ensure(!query('.co-file-disclosure') && !calls.requests.some(call => call.url.includes('/files?')),'Diff loaded by default')
+      ensure(mutationRequests().length === 0 && navigation.length === inventoryNavigationDepth,'Opening PR changed work or screens')
     })
-    await check('review and merge option enumerate exact versions and stay inert until confirmation', async () => {
-      await click(button('Review selected'))
-      await until(() => query('[aria-label="Confirm review workflow"]'), 'No exact review confirmation')
-      const confirm = query('.co-pr-confirm')
-      ensure(text(confirm).includes('owner/project #8') && text(confirm).includes('ccccccc → main (bbbbbbb)'), 'Confirmation omitted exact head/base')
-      const merge = confirm.querySelector('input[type="checkbox"]')
-      ensure(merge && !merge.checked, 'Own PR merge option missing or enabled by default')
-      await click(merge)
-      ensure(button('Allow review & merge') && mutationRequests().length === 0, 'Mode toggle granted authority early')
+    await check('files load only on demand, remain collapsed, and activity is separate', async () => {
+      await click(button('Files 1',query('.co-pr-detail')))
+      await until(() => query('.co-file-disclosure'),'Files did not load')
+      ensure(!query('.co-file-disclosure').open,'Patch opened by default')
+      await click(query('.co-file-disclosure summary'))
+      ensure(query('.co-file-disclosure').open && text(query('.co-file-disclosure pre')).includes('+safe change'),'Patch disclosure failed')
+      await click(button('Activity',query('.co-pr-detail')))
+      await until(() => text(query('.co-pr-detail')).includes('Please check this edge case'),'Activity did not load')
+      ensure(!query('.co-file-disclosure'),'Files leaked into activity')
+    })
+    await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
+      await click(button('Assign…',query('.co-pr-selection')))
+      await until(() => query('[aria-label="Assign to me"]'),'People did not load')
+      ensure(mutationRequests().length === 0,'Opening picker assigned prematurely')
+      ensure(document.activeElement === query('.co-person-search'),'People search did not receive focus')
+      window.failAssignment = 8
+      await click(query('[aria-label="Assign to me"]'))
+      await until(() => mutationRequests().length === 2 && text(query('.co-pr-assignment')).includes('Only remaining'),'Partial result missing')
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Partial assignment lost selection')
+      window.failAssignment = null
+      await click(query('[aria-label="Assign to me"]'))
+      await until(() => mutationRequests().length === 3 && !query('.co-pr-assignment'),'Assignment retry did not finish')
+      const assigned = mutationRequests().filter(call => call.url.endsWith('/assign-review'))
+      ensure(assigned.map(call => call.body.number).join(',') === '7,8,8','Successful assignment was repeated')
+      ensure(firstCheckbox.checked && secondCheckbox.checked && reviewRuns.length === 0,'Assignment started review or lost selection')
+    })
+    await check('batch review remains inline, enumerates exact versions, and starts only after approval', async () => {
+      await click(button('Review 2'))
+      await until(() => query('.co-pr-confirm'),'No confirmation')
+      ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Batch lost a PR')
+      ensure(text(query('.co-pr-confirm')).includes('aaaaaaa') && text(query('.co-pr-confirm')).includes('ccccccc'),'Exact heads absent')
+      ensure(!query('.co-pr-confirm input').checked && reviewRuns.length === 0,'Private review granted merge')
+      ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
+      const region=query('.co-pr-confirm'), rect=region.getBoundingClientRect()
+      ensure(rect.top >= 0 && rect.top < innerHeight && document.activeElement === region,'Review not visible/focused')
+      await click(query('.co-pr-confirm input'))
+      ensure(reviewRuns.length === 0,'Mode toggle counted as approval')
       await click(button('Allow review & merge'))
-      await until(() => button('Open review conversation'), 'Review progress did not replace confirmation')
-      const writes = mutationRequests()
-      ensure(writes.length === 1 && writes[0].method === 'POST' && writes[0].url.endsWith('/review-runs'), 'Review invoked unexpected mutations')
-      ensure(writes[0].body.mode === 'review_merge' && writes[0].body.request_id, 'Review grant missing mode/request identity')
-      ensure(JSON.stringify(writes[0].body.items) === JSON.stringify([{ repo: 'owner/project', number: 8,
-        head_sha: SECOND_HEAD, base_ref: 'main', base_sha: BASE }]), 'Review request changed selected version')
-      ensure(query('.co-pr-list') === originalList && query('.co-workspace-inventory') === originalInventory, 'Confirmation remounted public inventory')
+      await until(() => reviewRuns.length === 1 && button('Open review conversation'),'Review did not start')
+      const write=mutationRequests().at(-1)
+      ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
+      ensure(write.body.items[0].head_sha===HEAD && write.body.items[1].head_sha===SECOND_HEAD,'Approval lost selected heads')
+      ensure(query('.co-pr-list')===originalList,'Review replaced inventory')
     })
-    await check('assignment requires its own explicit confirmation and never starts another review', async () => {
-      await inventory()
-      await click(query('input[aria-label="Select owner/project #7"]'))
-      await click(batchAction())
-      await click(button('Assign to someone'))
-      await until(() => button('Choose me'), 'Assignee choices did not load')
-      ensure(mutationRequests().length === 1, 'Opening assignment mutated prematurely')
-      await click(button('Choose me'))
-      ensure(mutationRequests().length === 1, 'Choosing a person assigned prematurely')
-      await click(button('Assign on GitHub'))
-      await until(() => mutationRequests().length === 2 && button('Review selected'), 'Assignment did not settle')
-      const assigned = mutationRequests()[1]
-      ensure(assigned.method === 'POST' && assigned.url.endsWith('/assign-review') && assigned.body.number === 7 && assigned.body.expected_head_sha === HEAD && assigned.body.assignee === 'owner', 'Assignment did not pin its own exact request')
-      ensure(reviewRuns.length === 1 && calls.starts.length === 0, 'Assignment started an agent or extra review')
+    await check('review errors preserve exact selection for an explicit retry', async () => {
+      await inventory(); await click(firstCheckbox); await click(button('Review 1'))
+      window.failReview = true
+      await click(button('Start private review'))
+      await until(() => text(query('.co-pr-confirm')).includes('Fixture review error'),'No workflow error')
+      ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
+      window.failReview=false; await click(button('Cancel')); await click(button('',query('.co-pr-selection')) || query('[aria-label="Clear selection"]'))
     })
-    await check('explicit send updates the record and joins the same public review inventory', async () => {
-      await inventory()
-      await click(button('Review and send'))
-      await until(() => button('Send to GitHub'), 'Publication confirmation missing')
-      ensure(calls.publications.length === 0, 'Opening publication sent work')
+    await check('explicit send joins the same public inventory without implying merge', async () => {
+      await inventory(); await click(button('Review and send'))
+      await until(() => button('Send to GitHub'),'Publication confirmation missing')
+      ensure(calls.publications.length===0,'Opening publication sent work')
       await click(button('Send to GitHub'))
-      await until(() => query('input[aria-label="Select owner/project #9"]'), 'Sent record never joined the public inventory')
-      ensure(calls.publications.length === 1 && calls.publications[0].plan.head_sha === HEAD, 'Publication duplicated or lost reviewed head')
-      ensure(query('.co-pr-list') === originalList && query('.co-workspace-inventory') === originalInventory, 'Publication replaced the project inventory')
-      await until(() => button('Review public contributions'), 'Completed publication left an empty task')
-      ensure(text(query('.co-task-outlet')).includes('Publication status'), 'Completed publication has no outcome')
+      await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
+      ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
+      ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
+      await until(() => button('Review public contributions'),'Publication outcome missing')
       await click(button('Review public contributions'))
-      await until(() => query('input[aria-label="Select owner/project #9"]')?.getClientRects().length,
-        'Review public contributions did not return a visible PR selector')
-      ensure(text(query('.co-pr-list')).includes('Reviewed local change'), 'Published work has no public review row')
-      await click(query('input[aria-label="Select owner/project #9"]'))
-      await click(batchAction())
-      await until(() => button('Review selected') && text(query('.co-task-outlet')).includes('Reviewed local change'),
-        'Published contribution did not join the review workflow')
-      await inventory()
+      ensure(query('input[aria-label="Select owner/project #9"]').getClientRects().length,'Published PR not selectable')
     })
-    await check('preparation starts one scoped task and a different project does not inherit its progress', async () => {
-      await click(query('.co-local-summary'))
-      await until(() => button('Prepare changes') && !button('Prepare changes').disabled, 'Preparation did not become available')
-      const prepareButton = button('Prepare changes')
+    await check('source conversation scope loads lazily and remains separate from project preparation', async () => {
+      await click(button('Prepare changes'))
+      await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
+      await click(button('All local changes'))
+      await until(() => text(query('[data-task="task:scope"]')).includes('No source conversations'),'Scope did not load')
+      ensure(calls.starts.length===0,'Choosing scope started work')
+      await click([...document.querySelectorAll('.co-scope-row')][0])
+    })
+    await check('preparation starts once and project switching restores its durable owner', async () => {
+      const prepareButton=button('Prepare changes',query('[data-task="task:prepare"]'))
       prepareButton.click(); prepareButton.click()
-      await until(() => button('Open conversation'), 'Preparation progress did not appear')
-      ensure(calls.starts.length === 1, 'Repeated click started duplicate work')
-      ensure(calls.starts[0].draft.includes('app:fixture') && !calls.starts[0].draft.includes('owner/other'), 'Preparation escaped project scope')
-      await chooseProject('Other project')
-      await until(() => text(query('.co-workspace-title')).includes('Other project') && button('Prepare changes') && !button('Prepare changes').disabled, 'Other project did not restore independently')
-      ensure(!button('Open conversation') && calls.starts.length === 1, 'Other project inherited active progress')
+      await until(() => button('Open conversation'),'Preparation did not start')
+      ensure(calls.starts.length===1 && calls.starts[0].draft.includes('app:fixture') && !calls.starts[0].draft.includes('app:other'),'Duplicate or wrong scope')
+      await chooseProject('Other project'); ensure(!button('Open conversation'),'Other project inherited progress')
       await chooseProject('Fixture project')
-      await until(() => button('Open conversation'), 'Original project lost its durable conversation')
-      ensure(calls.status.includes('prepare-1') && calls.starts.length === 1, 'Restoring progress restarted work')
+      await until(() => text(query('.co-work-progress-row')).includes('Agent working'),'Saved task did not restore')
+      await click(query('.co-work-progress-row'))
+      await until(() => button('Open conversation'),'Saved conversation unavailable')
+      ensure(calls.status.includes('prepare-1') && calls.starts.length===1,'Restore restarted work')
     })
-    await check('host Back returns from the phone task to its inventory, then the project list', async () => {
-      await inventory()
-      await click(query('.co-pr-open'))
-      await until(() => query('.co-workspace.has-task'), 'Task did not own navigation')
+    await check('host Back leaves the project once; inline details add no hidden back steps', async () => {
+      await inventory(); await click(query('.co-pr-open'))
+      const before = navigation.length
       window.mobius.nav.back()
-      await until(() => query('.co-workspace') && !query('.co-workspace.has-task'), 'Task Back lost project context')
-      ensure(query('.co-workspace-inventory').getClientRects().length, 'Back left the inventory hidden')
-      window.mobius.nav.back()
-      await until(() => !query('.co-workspace') && document.querySelectorAll('.co-source-row').length === 2, 'Project Back did not restore the project list')
+      await until(() => !query('.co-workspace') && query('.co-source-row'),'Back did not restore directory')
+      ensure(navigation.length===before-1,'Inline detail owned an extra back step')
     })
     const savedSelection = id => ({request_id:id,mode:'review_merge',items:[{repo:'owner/project',number:7,head_sha:HEAD,base_ref:'main',base_sha:BASE}]})
     async function showSelection(id, value = savedSelection(id)) {
@@ -397,7 +399,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => button('Review privately instead'), 'Permission failure not explained')
       ensure(button('Allow review & merge')?.disabled, 'Read permission exposed active merge approval')
       await click(button('Review privately instead'))
-      ensure(button('Start review') && !button('Start review').disabled, 'Private review became unavailable')
+      ensure(button('Start private review') && !button('Start private review').disabled, 'Private review became unavailable')
       ensure(mutationRequests().length === beforeLink + 1, 'Changing mode counted as approval')
       window.fixturePermission = 'WRITE'
     })

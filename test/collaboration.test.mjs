@@ -61,7 +61,7 @@ test('review-and-merge confirmation enumerates exact versions and excludes extra
   const html = render({mode:'review_merge', pulls:[pull(1), pull(2)]})
   assert.match(html, /Allow review &amp; merge/)
   assert.match(html, /exact versions/); assert.match(html, /No branch edits or public review comments/)
-  assert.match(html, /team\/repo #1/); assert.match(html, /team\/repo #2/); assert.match(html, /version aaaaaaa/)
+  assert.match(html, /team\/repo #1/); assert.match(html, /team\/repo #2/); assert.match(html, /version <code>aaaaaaa/)
   assert.match(render({mode:'review', pulls:[pull(1)]}), /Nothing is posted or merged/)
 })
 

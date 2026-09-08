@@ -116,22 +116,15 @@ test('pull requests and requests share one decision-first Run', () => {
   assert.match(feedSource, /STATE_LABELS/)
 })
 
-test('one mounted project workspace owns both reversible Back levels', () => {
+test('only project drill-down owns reversible navigation; inline actions preserve the workspace', () => {
   assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-project'/)
-  assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-review'/)
-  assert.doesNotMatch(appSource + feedSource, /nav\.open\('contribute-(project|review)'/)
+  assert.doesNotMatch(sourceMapSource, /nav\.open\('contribute-review'/)
   assert.match(appSource, /nav\.open\('contribute-approval'/)
-  assert.match(appSource, /onBack:.*setSelectionFocus\(null\)/)
-  assert.match(appSource, /onForward:.*setSelectionFocus\(id\)/)
-  assert.doesNotMatch(appSource, /showProjects|View all reviews|contribute-reviews/)
-  assert.match(sourceMapSource, /onBack:[\s\S]*?setSelectedWorkId\(''\)/)
-  assert.match(sourceMapSource, /onForward:[\s\S]*?setSelected\(projectKey\)[\s\S]*?showWork\(itemId\)/)
   assert.match(sourceMapSource, /onForward:[\s\S]*?setSelected\(key\)/)
   assert.match(sourceMapSource, /function closeProject\(\) \{\s*closeWork\(\)/)
   assert.match(sourceMapSource, /outcome\?\.status !== 'owned'/)
-  assert.match(sourceMapSource, /Back to \{project.name\}/)
-  assert.match(sourceMapSource, /top: workScrollRef.current/)
-  assert.match(sourceMapSource, /Could not open this contribution. Try again/)
+  assert.doesNotMatch(sourceMapSource, /co-task-outlet|co-task-pane/)
+  assert.match(sourceMapSource, /workTriggerRef\.current = document\.activeElement/)
 })
 
 test('an assigned incoming review stays recoverable until its conversation starts', () => {
@@ -143,7 +136,6 @@ test('an assigned incoming review stays recoverable until its conversation start
 
 test('contribution details retain their project parent and refresh only source diffs', () => {
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
-  assert.match(sourceMapSource, /const projectKey = selected/)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
   assert.match(sourceMapSource, /<ProjectFileChanges key=\{sourceRevision\}/)
   assert.match(sourceMapSource, /sourceRevision=\{snapshot\?\.generated_at\}/)

@@ -26,7 +26,7 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   const summaries = [...new Map([...(run?.decisions || []), ...(run?.working || [])]
     .flatMap(runUnitRecords).filter(rec => rec.status === 'prepared' && (rec.summary || rec.plan?.body_draft))
     .map(rec => [rec.id, rec])).values()]
-  const changedFiles = new Set([...(project.localOnlyPaths || []), ...(project.working?.paths || []).map(row => row.path)]).size || Math.max(project.localFiles || 0, project.workingFiles || 0)
+  const changedFiles = Math.max(project.localFiles || 0, project.workingFiles || 0)
   async function start(action) {
     setError('')
     try {

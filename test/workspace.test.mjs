@@ -125,18 +125,18 @@ test('SSR review confirmation offers merging for own PRs only when the entire se
   for (const permission of ['WRITE', 'MAINTAIN', 'ADMIN']) {
     const html = renderChoice([pull(7, { repository: { nameWithOwner: project.canonical_repo, viewerPermission: permission } })])
     assert.match(html, /Merge when safe/, permission)
-    assert.match(html, /Start review/)
+    assert.match(html, /Start private review/)
     assert.doesNotMatch(html, /type="checkbox"[^>]*checked/)
   }
   for (const permission of ['READ', 'TRIAGE', null]) {
     const html = renderChoice([pull(), pull(8, { repository: { nameWithOwner: project.canonical_repo, viewerPermission: permission } })])
     assert.doesNotMatch(html, /Merge when safe/, String(permission))
-    assert.match(html, /Start review/)
+    assert.match(html, /Start private review/)
   }
   assert.doesNotMatch(renderChoice([pull(7, { isDraft: true })]), /Merge when safe/)
   const merge = renderChoice([pull()], 'review_merge', true)
   assert.match(merge, /type="checkbox"[^>]*checked/)
-  assert.match(merge, /version aaaaaaa → main \(bbbbbbb\)/)
+  assert.match(merge, /version <code>aaaaaaa → main \(bbbbbbb\)/)
   assert.match(merge, /exact versions/)
   assert.match(merge, /No branch edits or public review comments/)
   assert.match(merge, /disabled=""/)
@@ -148,7 +148,7 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
   assert.match(html, /Your local work/)
-  assert.match(html, /Prepare for sharing/)
+  assert.match(html, /Prepare a clear proposal before sharing/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
