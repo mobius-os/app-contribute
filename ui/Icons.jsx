@@ -11,6 +11,7 @@ import {
   Sparkle,
   DotsHorizontal,
   Trash,
+  X,
 } from '@openai/apps-sdk-ui/components/Icon'
 
 const SDK_ICONS = {
@@ -18,6 +19,7 @@ const SDK_ICONS = {
   send: ArrowUp,
   feedback: Chat,
   trash: Trash,
+  close: X,
   refresh: ArrowRotateCw,
   left: ArrowLeft,
   chevron: ChevronDown,

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { contributionCycleAction, projectUpdateAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
 import { projectBoardFacts } from '../source-map.js'
+import { runUnitRecords } from '../run.js'
+import { parseDiffStat } from '../diff.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
@@ -21,6 +23,10 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   const fullCycle = mayMerge(project.viewerPermission) ? contributionCycleAction(mergeRun, [project]) : null
   const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   const local = project.kind !== 'external'
+  const summaries = [...new Map([...(run?.decisions || []), ...(run?.working || [])]
+    .flatMap(runUnitRecords).filter(rec => rec.status === 'prepared' && (rec.summary || rec.plan?.body_draft))
+    .map(rec => [rec.id, rec])).values()]
+  const changedFiles = new Set([...(project.localOnlyPaths || []), ...(project.working?.paths || []).map(row => row.path)]).size || Math.max(project.localFiles || 0, project.workingFiles || 0)
   async function start(action) {
     setError('')
     try {
@@ -37,9 +43,22 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   return <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     {local ? <>
       <header><h3>Your local work</h3></header>
-      <button className="co-local-summary" onClick={() => task?.open('task:prepare')}>
-        <Icon name="prepare" size={22} /><span><strong>{project.builtHere ? 'Not shared yet' : project.localFiles || project.workingFiles ? `${project.localFiles || project.workingFiles} changed files` : 'No unprepared changes found'}</strong><small>{project.workingFiles ? `${project.workingFiles} being edited` : 'Prepare for sharing'}</small></span><Icon name="right" size={17} />
-      </button>
+      <div className="co-local-overview">
+        <div><strong>{project.builtHere ? 'Only on your Möbius' : changedFiles ? 'Changes only you have' : summaries.length ? 'Prepared for sharing' : 'No unprepared changes found'}</strong>
+          <p>{changedFiles ? `${changedFiles} changed ${changedFiles === 1 ? 'file' : 'files'}${project.workingFiles ? ` · ${project.workingFiles} being edited` : ''}. ` : ''}Prepare a clear proposal before sharing.</p>
+        </div>
+        <button className="co-btn co-btn-primary" disabled={loading || checking || active || !run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={18} /> Prepare changes</button>
+      </div>
+      {summaries.length ? <details className="co-saved-summaries"><summary>{summaries.length} saved {summaries.length === 1 ? 'summary' : 'summaries'} · private proposals</summary>
+        {summaries.map(rec => {
+          const current = !!project.head_sha && rec.plan?.source_sha === project.head_sha && !project.workingFiles
+          const totals = parseDiffStat(rec.plan?.diff_stat)
+          const date = rec.quality_review?.reviewed_at || rec.created_at
+          return <div className="co-saved-summary" key={rec.id}><strong>{rec.title || rec.plan?.title || 'Prepared change'}</strong><p>{rec.summary || 'Description available in the prepared proposal below.'}</p>
+            <div className="co-detail-stats"><span>{current ? 'Prepared from this source version' : 'Earlier source · prepare again to refresh'}</span>{totals ? <span>{totals.totalFiles} files · +{totals.additions} −{totals.deletions}</span> : null}{date && Number.isFinite(Date.parse(date)) ? <time dateTime={date}>{new Date(date).toLocaleDateString()}</time> : null}</div>
+          </div>
+        })}
+      </details> : null}
       <SourceConversations project={project} appId={appId} token={token} />
     </> : null}
     {progress ? <button className="co-work-progress-row" onClick={() => task?.open('task:prepare')}><Icon name={waiting ? 'feedback' : 'cycle'} size={18} />{waiting ? 'Your agent has a question' : paused ? 'Work paused' : 'Agent working'}<Icon name="right" size={16} /></button> : null}

@@ -154,16 +154,15 @@ function ProjectDetail({
   renderControls,
   sourceRevision,
 }) {
-  const [host, setHost] = useState(null)
   const [cycle, setCycle] = useState(null)
   const [publicKeys, setPublicKeys] = useState(new Set())
   const facts = projectBoardFacts(project)
-  const activeId = navigation.selectedId || (project.kind === 'external' ? 'task:pulls' : 'task:prepare')
-  const task = { cycle, setCycle, publicKeys, setPublicKeys, activeId, explicit: !!navigation.selectedId, host, open: navigation.onSelect, close: navigation.onBack }
+  const activeId = navigation.selectedId || ''
+  const task = { cycle, setCycle, publicKeys, setPublicKeys, activeId, explicit: !!navigation.selectedId, open: navigation.onSelect, close: navigation.onBack }
   const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   return (
     <TaskContext.Provider value={task}>
-      <article className={'co-workspace' + (navigation.selectedId ? ' has-task' : '')}>
+      <article className="co-workspace">
         <header className="co-workspace-head">
           <div className="co-workspace-title"><ProjectGlyph project={project} /><div>
             <h2>{project.name}</h2>
@@ -180,10 +179,6 @@ function ProjectDetail({
             {renderActivity?.(project, navigation)}
             <button className="co-quiet-action co-workspace-files" onClick={() => task.open('task:files')}>Files & technical details <Icon name="right" size={16} /></button>
           </div>
-          <aside className="co-task-pane" aria-label="Next action">
-            {navigation.selectedId ? <button className="co-task-back co-quiet-action" onClick={navigation.onBack}><Icon name="left" size={16} /> Back to {project.name}</button> : null}
-            <div className="co-task-outlet" ref={setHost} />
-          </aside>
         </div>
         <TaskPane id="task:files">
           <h3>Files & technical details</h3>
@@ -275,50 +270,19 @@ export function SourceMap({
   const projectNavRef = useRef(null)
   const handledFocusRef = useRef('')
   const [selectedWorkId, setSelectedWorkId] = useState('')
-  const workNavRef = useRef(null)
-  const workScrollRef = useRef(0)
+  const workTriggerRef = useRef(null)
   const [navigationError, setNavigationError] = useState('')
   const pageScroller = () => document.querySelector('.co-page')
 
   function closeWork() {
-    const handle = workNavRef.current
-    workNavRef.current = null
-    handle?.close?.()
     setSelectedWorkId('')
-    requestAnimationFrame(() => pageScroller()?.scrollTo({ top: workScrollRef.current, left: 0 }))
+    requestAnimationFrame(() => workTriggerRef.current?.isConnected && workTriggerRef.current.focus({ preventScroll: true }))
   }
 
-  function showWork(itemId) {
-    setSelectedWorkId(itemId)
-    requestAnimationFrame(() => pageScroller()?.scrollTo({ top: 0, left: 0 }))
-  }
-
-  async function openWork(itemId) {
+  function openWork(itemId) {
     if (!itemId || itemId === selectedWorkId) return
-    setNavigationError('')
-    if (workNavRef.current) closeWork()
-    workScrollRef.current = pageScroller()?.scrollTop || 0
-    if (!window.mobius?.nav?.open) { showWork(itemId); return }
-    const projectKey = selected
-    let handle = null
-    handle = window.mobius.nav.open('contribute-review', {
-      onBack: () => {
-        if (workNavRef.current !== handle) return
-        workNavRef.current = null
-        setSelectedWorkId('')
-        requestAnimationFrame(() => pageScroller()?.scrollTo({ top: workScrollRef.current, left: 0 }))
-      },
-      onForward: () => {
-        workNavRef.current = handle
-        setSelected(projectKey)
-        showWork(itemId)
-      },
-    })
-    workNavRef.current = handle
-    const outcome = await handle.outcome
-    if (workNavRef.current !== handle) { handle.close(); return }
-    if (outcome?.status !== 'owned') { workNavRef.current = null; setNavigationError('Could not open this contribution. Try again.'); return }
-    showWork(itemId)
+    workTriggerRef.current = document.activeElement
+    setSelectedWorkId(itemId)
   }
   const activityNavigation = { selectedId: selectedWorkId, onSelect: openWork, onBack: closeWork }
 
@@ -331,7 +295,7 @@ export function SourceMap({
   async function openProject(key) {
     if (!key || selected === key) return
     setNavigationError('')
-    if (workNavRef.current) closeWork()
+    closeWork()
     if (projectNavRef.current) closeProject()
     if (!window.mobius?.nav?.open) {
       showProject(key)
@@ -381,8 +345,6 @@ export function SourceMap({
   }
 
   useEffect(() => () => {
-    workNavRef.current?.close?.()
-    workNavRef.current = null
     try { projectNavRef.current?.close?.() } catch {}
     projectNavRef.current = null
   }, [])
@@ -438,7 +400,7 @@ export function SourceMap({
         <>
           {renderControls?.(null)}
           {renderActivity?.(null, activityNavigation)}
-          <div hidden={!!selectedWorkId}>
+          <div className="co-directory">
           <label className="co-project-search">
             <span className="co-visually-hidden">Find a project</span>
             <input
@@ -448,23 +410,14 @@ export function SourceMap({
               onChange={(event) => {
                 const value = event.target.value
                 setQuery(value)
-                if (value.trim()) setFilter('all')
               }}
             />
           </label>
-          <nav className="co-lens-nav" aria-label="Project views">
-            {FILTERS.map(([key, label]) => (
-              <button
-                type="button"
-                key={key}
-                className={filter === key ? 'is-active' : ''}
-                aria-pressed={filter === key}
-                onClick={() => { setFilter(key); closeProject() }}
-              >
-                <span>{label}</span><b>{filterCounts[key]}</b>
-              </button>
-            ))}
-          </nav>
+          <label className="co-directory-filter">Filter
+            <select value={filter} onChange={event => setFilter(event.target.value)}>
+              {FILTERS.map(([key, label]) => <option key={key} value={key}>{label}{key !== 'all' ? ` (${filterCounts[key]})` : ''}</option>)}
+            </select>
+          </label>
 
           {filtered.length === 0 ? (
             <div className="co-stage-empty">

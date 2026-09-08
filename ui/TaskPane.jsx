@@ -1,21 +1,30 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { Icon } from './Icons.jsx'
 
-// One task outlet; the owning workflow keeps its state and exact approvals.
-// The existing project/work navigation remains the only history owner.
+// A task is an inline disclosure, not another screen or history entry.
+// The project owns selection; each workflow owns its durable state and consent.
 export const TaskContext = createContext(null)
 export const useProjectTask = () => useContext(TaskContext)
+
+export function focusActionRegion(region, target = region) {
+  if (!region) return
+  const toolbar = region.closest('.co-public-work')?.querySelector('.co-pr-selection')
+  region.style.scrollMarginTop = `${(toolbar?.getBoundingClientRect().height || 0) + 16}px`
+  region.scrollIntoView({ block: 'start', behavior: 'instant' })
+  target?.focus({ preventScroll: true })
+}
 
 export function TaskPane({ id, children }) {
   const task = useProjectTask()
   const content = useRef(null)
   const visible = task?.activeId === id
   useLayoutEffect(() => {
-    if (!visible || !task?.explicit || !content.current) return
-    task.host?.scrollTo({ top: 0 })
-    content.current.focus({ preventScroll: true })
-  }, [visible, task?.explicit, task?.host])
+    if (visible && task?.explicit) focusActionRegion(content.current)
+  }, [visible, task?.explicit])
   if (!task) return children
-  if (!visible || !task.host) return null
-  return createPortal(<div ref={content} tabIndex={-1} className="co-task-content">{children}</div>, task.host)
+  if (!visible) return null
+  return <section ref={content} tabIndex={-1} className="co-task-content" data-task={id}>
+    <button className="co-quiet-action co-inline-close" aria-label="Close action" onClick={task.close}><Icon name="close" size={18} /></button>
+    {children}
+  </section>
 }
