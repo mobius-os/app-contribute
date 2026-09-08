@@ -28,6 +28,7 @@ function itemProject(item) {
 }
 
 function itemHeading(item) {
+  if (item?.unit?.type === 'stack') return item.label
   const record = runPrimaryRecord(item)
   return record ? recordTitle(record) : item.label
 }

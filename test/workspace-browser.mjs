@@ -251,6 +251,21 @@ window.runWorkspaceChecks = async () => {
       secondCheckbox.removeEventListener('keydown',capture)
       ensure(events.length === 2 && events.every(event => event.trusted && event.code === 'Space'),'Keyboard test was not native')
     })
+    await check('bottom selection tray remains visible, expands and removes only the chosen card', async () => {
+      const tray=query('.co-pr-selection'), scroller=query('.co-page')
+      const before=tray.getBoundingClientRect()
+      scroller.scrollTop=0; await new Promise(requestAnimationFrame)
+      const after=tray.getBoundingClientRect()
+      ensure(Math.abs(before.bottom-after.bottom)<2 && after.bottom<=innerHeight && after.top>=0,'Selection tray left the viewport while browsing')
+      ensure(query('.co-selected-cards').children.length===2,'Selected titles missing')
+      await click(query('.co-selection-toggle'))
+      ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='true','Selection list did not expand')
+      await click(query('[aria-label="Remove PR 8 from selection"]'))
+      ensure(firstCheckbox.checked && !secondCheckbox.checked,'Card removal changed the wrong PR')
+      await click(secondCheckbox)
+      await click(query('.co-selection-toggle'))
+      ensure(mutationRequests().length===0,'Selection tray mutated remote work')
+    })
     await check('opening an own assigned PR preserves batch selection and leads with description', async () => {
       await click(document.querySelectorAll('.co-pr-open')[1])
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
@@ -270,10 +285,12 @@ window.runWorkspaceChecks = async () => {
       ensure(!query('.co-file-disclosure'),'Files leaked into activity')
     })
     await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
+      const scrollBefore=query('.co-page').scrollTop
       await click(button('Assign…',query('.co-pr-selection')))
       await until(() => query('[aria-label="Assign to me"]'),'People did not load')
       ensure(mutationRequests().length === 0,'Opening picker assigned prematurely')
       ensure(document.activeElement === query('.co-person-search'),'People search did not receive focus')
+      ensure(Math.abs(query('.co-page').scrollTop-scrollBefore)<2,'Assignment jumped the project scroll position')
       window.failAssignment = 8
       await click(query('[aria-label="Assign to me"]'))
       await until(() => mutationRequests().length === 2 && text(query('.co-pr-assignment')).includes('Only remaining'),'Partial result missing')
@@ -309,7 +326,7 @@ window.runWorkspaceChecks = async () => {
       await click(button('Start private review'))
       await until(() => text(query('.co-pr-confirm')).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
-      window.failReview=false; await click(button('Cancel')); await click(button('',query('.co-pr-selection')) || query('[aria-label="Clear selection"]'))
+      window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
       await inventory(); await click(button('Review and send'))

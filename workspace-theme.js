@@ -82,7 +82,7 @@ export const WORKSPACE_CSS = `
 .co-selected-cards { display:flex; gap:8px; overflow:auto; padding:4px 2px 12px; scrollbar-width:thin; }
 .co-selected-card { display:flex; align-items:center; flex:0 0 248px; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:10px; }
 .co-selected-open { display:flex; align-items:center; gap:8px; flex:1; min-width:0; min-height:48px; padding:8px 0 8px 12px; color:var(--text); border:0; background:none; text-align:left; cursor:pointer; }
-.co-selected-open span { font-size:13px; color:var(--muted); }
+.co-selected-open span { font-size:14px; color:var(--muted); }
 .co-selected-open strong { font-size:14px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .co-selected-remove { display:grid; place-items:center; width:44px; min-height:44px; flex-shrink:0; border:0; background:none; color:var(--muted); cursor:pointer; }
 .co-selected-remove:hover,.co-selection-heading > button:hover { color:var(--text); background:var(--surface2); border-radius:8px; }
@@ -169,7 +169,7 @@ export const WORKSPACE_CSS = `
  .co-workspace .co-pr-side { padding-left:44px; width:100%; }
  .co-workspace .co-pr-selection,.co-workspace .co-task-dock { inset-inline:8px; width:calc(100% - 16px); bottom:max(8px,env(safe-area-inset-bottom)); border-radius:16px; }
  .co-workspace .co-task-dock { padding:20px; max-height:76dvh; }
- .co-selection-actions .co-btn { padding:9px 8px; font-size:13px; white-space:normal; }
+ .co-selection-actions .co-btn { padding:9px 8px; font-size:14px; white-space:normal; }
  .co-selected-card { flex-basis:228px; }
  .co-pr-list-controls input { flex-basis:100%; width:100%; }
  .co-directory { grid-template-columns:1fr; }
