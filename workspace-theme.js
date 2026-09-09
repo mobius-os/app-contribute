@@ -1,7 +1,9 @@
 // Approved continuous project workspace. Theme remains owned by the shell.
 export const WORKSPACE_CSS = `
 .co-header-shell { width:100%; max-width:none; }
-.co-header { width:100%; max-width:1108px; padding:14px 44px; border-bottom:0; }
+.co-header { width:100%; max-width:1108px; padding:8px 44px; border-bottom:0; }
+.co-title { font-size:18px; font-weight:600; letter-spacing:-.015em; }
+.co-brand-icon { width:26px; height:26px; }
 .co-page.is-sources { width:100%; max-width:none; padding:0; overflow:auto; }
 .co-projects-view { width:100%; max-width:1108px; margin:auto; padding:24px 44px 80px; }
 .co-projects-view.is-focus { height:auto; }
@@ -178,7 +180,8 @@ export const WORKSPACE_CSS = `
 @keyframes co-dock-arrive { from { transform:translateY(8px); } to { transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .co-workspace .co-task-dock { animation:none; } }
 @media(max-width:680px) {
- .co-header { padding:12px 18px; }
+ .co-header { padding:6px 18px; }
+ .co-project-switcher { padding-bottom:12px; }
  .co-projects-view { padding:20px 18px 60px; }
  .co-workspace-head { gap:14px; }
  .co-workspace-title h2 { font-size:28px; }
