@@ -6,12 +6,23 @@ const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.met
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../api.js', import.meta.url), 'utf8')
 const connectionSource = readFileSync(new URL('../ui/ConnectionCard.jsx', import.meta.url), 'utf8')
+const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
 const sourceMapSource = readFileSync(new URL('../ui/SourceMap.jsx', import.meta.url), 'utf8')
 const fileDiffListSource = readFileSync(new URL('../ui/FileDiffList.jsx', import.meta.url), 'utf8')
 const batchActionSource = readFileSync(new URL('../ui/BatchAction.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
 const themeSource = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
+const cycleSource = readFileSync(new URL('../ui/useProjectCycle.js', import.meta.url), 'utf8')
+const workspaceTheme = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
 const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
+
+test('choosing a contribution route stays a preference, not preparation or publication', () => {
+  const choose = appSource.slice(appSource.indexOf('const onChooseSubmissionMethod ='), appSource.indexOf('const onAssignIncomingReview ='))
+  assert.doesNotMatch(choose, /onSend|startAgentTask|onStartCycle|submitContribution/)
+  assert.match(choose, /if \(!saved\) setSubmissionError/)
+  assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
+  assert.doesNotMatch(connectionSource, /onChooseChanges|onOpenSetup/)
+})
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
@@ -80,15 +91,15 @@ test('global app handoffs stay durable while source-linked work returns to its c
   assert.match(batchActionSource, /function openAgentConversation\(chatId\)/)
   assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId,[\s\S]*}, '\*'\)/)
   assert.match(batchActionSource, /openAgentConversation\(started\?\.chatId\)/)
-  assert.match(appSource, /openAgentConversation\(cycle\.chatId\)/)
+  assert.match(cycleSource, /openAgentConversation\(cycle\.chatId\)/)
   assert.doesNotMatch(batchActionSource, /postMessage\([\s\S]*window\.location\.origin/)
   assert.doesNotMatch(appSource, /type: 'moebius:new-chat'/)
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
   assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
-  assert.match(sourceMapSource, /onViewReview\(rec, projectKey\)/)
+  assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.match(feedSource, /function SourceChatChoices/)
-  assert.match(feedSource, /Local work needs sorting/)
-  assert.match(feedSource, /Preparation chat total:/)
+  assert.match(controlsSource, /Prepare changes/)
+  assert.match(controlsSource, /Open conversation/)
   assert.match(appSource, /const onFeedback = useCallback/)
   assert.match(appSource, /type: 'moebius:open-chat', chatId: rec\.chat_id, draft \},[\s\S]{0,20}'\*'\)/)
   assert.doesNotMatch(appSource, /moebius:open-chat[\s\S]{0,200}window\.location\.origin/)
@@ -105,21 +116,15 @@ test('pull requests and requests share one decision-first Run', () => {
   assert.match(feedSource, /STATE_LABELS/)
 })
 
-test('project and review drill-downs own real shell Back entries', () => {
-  assert.match(sourceMapSource, /selectedProject \? <h2 className="co-visually-hidden">Project detail<\/h2>/)
-  assert.match(feedSource, /Back to the run/)
-  assert.match(appSource, /returnProjectKey: projectKey/)
-  assert.match(feedSource, /setFocusReturnProject\(String\(focusTarget\.returnProjectKey \|\| ''\)\)/)
-  assert.match(feedSource, /if \(returnProjectKey\) onViewProject\?\.\(returnProjectKey\)/)
-  assert.match(appSource, /window\.mobius\.nav\.open\('contribute-projects'/)
+test('only project drill-down owns reversible navigation; inline actions preserve the workspace', () => {
   assert.match(sourceMapSource, /window\.mobius\.nav\.open\('contribute-project'/)
-  assert.match(feedSource, /window\.mobius\.nav\.open\('contribute-review'/)
-  assert.match(sourceMapSource, /onBack:[\s\S]*?setSelected\(''\)/)
+  assert.doesNotMatch(sourceMapSource, /nav\.open\('contribute-review'/)
+  assert.match(appSource, /nav\.open\('contribute-approval'/)
   assert.match(sourceMapSource, /onForward:[\s\S]*?setSelected\(key\)/)
-  assert.match(sourceMapSource, /function closeProject\(\) \{[\s\S]*?handle\?\.close\?\.\(\)[\s\S]*?setSelected\(''\)/)
-  assert.match(sourceMapSource, /rows\.map\(\(rec\)/)
-  assert.doesNotMatch(sourceMapSource, /Open pull requests/)
-  assert.doesNotMatch(feedSource, /<ViewHeading/)
+  assert.match(sourceMapSource, /function closeProject\(\) \{\s*closeWork\(\)/)
+  assert.match(sourceMapSource, /outcome\?\.status !== 'owned'/)
+  assert.doesNotMatch(sourceMapSource, /co-task-outlet|co-task-pane/)
+  assert.match(sourceMapSource, /workTriggerRef\.current = document\.activeElement/)
 })
 
 test('an assigned incoming review stays recoverable until its conversation starts', () => {
@@ -129,16 +134,19 @@ test('an assigned incoming review stays recoverable until its conversation start
   )
 })
 
+test('contribution details retain their project parent and refresh only source diffs', () => {
+  assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
+  assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
+  assert.match(sourceMapSource, /<ProjectFileChanges key=\{sourceRevision\}/)
+  assert.match(sourceMapSource, /sourceRevision=\{snapshot\?\.generated_at\}/)
+  assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
+  assert.match(appSource, /selectedId=\{navigation.selectedId\}/)
+})
+
 test('preparation runs as one cycle while every public send stays explicit', () => {
-  assert.match(feedSource, /function PrivateRunAction/)
-  assert.match(feedSource, /Local work needs sorting/)
-  assert.match(feedSource, /Local work changed since the last preparation/)
-  assert.match(feedSource, />\s*Review\s*</)
-  assert.match(feedSource, />\s*Prepare\s*</)
-  assert.match(feedSource, />\s*Merge\s*</)
-  assert.match(feedSource, /contributionOutcomeAction\(action, 'merge'\)/)
-  assert.match(feedSource, /<PrivateRunAction/)
-  assert.doesNotMatch(sourceMapSource, /<AgentHandoffButton/)
+  assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
+  assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
+  assert.match(controlsSource, /Organize and review your local work/)
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing merges\./)
@@ -240,19 +248,17 @@ test('Projects owns vertical scrolling and makes every row visibly navigable', (
   assert.match(sourceMapSource, /className="co-source-row-cue"/)
   assert.match(sourceMapSource, /<Icon name="right" size=\{15\}/)
   assert.match(themeSource, /\.co-source-row \{[\s\S]*?cursor: pointer/)
-  assert.match(themeSource, /\.co-source-row-facts > small \{ display: none; \}/)
-  assert.match(themeSource, /\.co-source-row-facts > span \{[\s\S]*?-webkit-line-clamp: 2/)
+  assert.match(themeSource, /\.co-source-row-facts > small \{ display: block; \}/)
+  assert.doesNotMatch(themeSource, /\.co-source-row-facts > span \{[^}]*-webkit-line-clamp/)
 })
 
-test('a selected project with local work offers preparation in place', () => {
-  assert.match(sourceMapSource, /function ProjectPreparationAction/)
-  assert.match(sourceMapSource, /Resolve and prepare/)
-  assert.match(sourceMapSource, /Your local version stays in place/)
-  assert.match(sourceMapSource, /onPrepareProject\(project\)/)
-  assert.match(appSource, /event: 'prepare_source_project'/)
-  assert.match(appSource, /Keep Contribute as the owner-facing surface/)
-  assert.match(themeSource, /\.co-project-next-action \{/)
-  assert.doesNotMatch(sourceMapSource, /if \(project\.sourceComparisonRequired\) return 'Compare before preparing'/)
+test('one scoped control surface starts private preparation without leaving the project', () => {
+  assert.match(sourceMapSource, /renderControls\?\.\(project\)/)
+  assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
+  assert.match(controlsSource, /Organize and review your local work/)
+  assert.match(appSource, /recordsForProject\(records, project\)/)
+  assert.match(appSource, /onStart=\{startAgentTask\}/)
+  assert.match(themeSource, /\.co-project-controls \{/)
 })
 
 test('published-app handoffs finish automatically without a second owner action', () => {
@@ -305,21 +311,20 @@ test('GitHub setup defaults to full PR access and migrates older connections', (
   )
   assert.match(
     connectionSource,
-    /placement !== 'content'[\s\S]*?conn\?\.state !== 'connected'[\s\S]*?hasFullPrAccess\(conn\?\.scopes\)/,
+    /conn\?\.state !== 'connected'[\s\S]*?hasFullPrAccess\(conn\?\.scopes\)/,
   )
   assert.match(connectionSource, /migrateLimitedConnection\(\)/)
-  assert.match(connectionSource, /Reconnect GitHub to continue/)
+  assert.match(connectionSource, /Updating GitHub access/)
   assert.doesNotMatch(connectionSource, /use a token instead/)
   assert.doesNotMatch(connectionSource, /Workflow access is optional/)
 })
 
-test('Contribute settings live in the app toolbar', () => {
-  assert.match(appSource, /placement="toolbar"/)
-  assert.match(appSource, /placement="content"/)
-  assert.match(connectionSource, /className="co-github-menu"/)
+test('one on-demand settings surface owns account setup in the toolbar', () => {
+  assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
+  assert.match(connectionSource, /open \? <div className="co-settings-panel"/)
   assert.match(connectionSource, /Contribute settings/)
   assert.match(connectionSource, /className="co-autopilot-setting"/)
-  assert.match(themeSource, /\.co-conn-settings \{[\s\S]*?position: absolute/)
+  assert.match(themeSource, /\.co-settings-panel \{[\s\S]*?position: absolute/)
 })
 
 test('Follow sent PRs help opens as an anchored dismissible popover', () => {
@@ -369,5 +374,15 @@ test('the Projects summary reserves its row while source checks refresh', () => 
   assert.match(sourceMapSource, /function LoadingState\(\)/)
   assert.match(sourceMapSource, /className="co-source-loading" role="status"/)
   assert.match(sourceMapSource, /Checking projects…/)
-  assert.match(sourceMapSource, /Nothing here/)
+  assert.match(sourceMapSource, /No local work to prepare/)
+})
+
+test('project status and essential controls remain visible with a readable type floor', () => {
+  assert.doesNotMatch(controlsSource, /More actions|View reviews/)
+  assert.match(controlsSource, /className="co-btn co-btn-primary co-task-primary"/)
+  assert.match(sourceMapSource, /Get up to date/)
+  assert.match(sourceMapSource, /<span>\{facts.work\}<\/span>/)
+  assert.match(sourceMapSource, /className="co-source-shared">\{facts.shared\}/)
+  const sizes = [...(themeSource + workspaceTheme).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map(match => Number(match[1]))
+  assert.ok(sizes.every(size => size === 0 || size >= 14))
 })

@@ -1,81 +1,258 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-29T01:45:00Z",
+  "generatedAt": "2026-09-08T02:32:37.803202Z",
   "title": "Design System: Contribute",
   "extensions": {
     "colorMeta": {
-      "accent": { "role": "primary", "displayName": "Möbius Violet", "canonical": "var(--accent)", "tonalRamp": ["oklch(24% 0.09 295)", "oklch(34% 0.12 295)", "oklch(44% 0.15 295)", "oklch(54% 0.18 295)", "oklch(64% 0.16 295)", "oklch(74% 0.12 295)", "oklch(84% 0.07 295)", "oklch(94% 0.025 295)"] },
-      "caution": { "role": "tertiary", "displayName": "Quiet Amber", "canonical": "#cf9526", "tonalRamp": ["oklch(22% 0.06 75)", "oklch(32% 0.08 75)", "oklch(42% 0.10 75)", "oklch(52% 0.12 75)", "oklch(62% 0.12 75)", "oklch(72% 0.10 75)", "oklch(84% 0.06 75)", "oklch(95% 0.02 75)"] }
+      "accent": {
+        "role": "primary",
+        "displayName": "Inherited accent"
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Inherited action shade"
+      },
+      "accent-muted": {
+        "role": "primary",
+        "displayName": "Inherited selection tone"
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Continuous workspace"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Temporary work surface"
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "Quiet control surface"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Primary text"
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Explanatory text"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Structural divider"
+      },
+      "success": {
+        "displayName": "Successful outcome"
+      },
+      "caution": {
+        "displayName": "Advisory amber"
+      },
+      "danger": {
+        "displayName": "Failure or destructive action"
+      }
     },
     "typographyMeta": {
-      "headline": { "displayName": "Run Headline", "purpose": "Names the current contribution run and its clearest next state once." },
-      "body": { "displayName": "Quiet Explanation", "purpose": "Explains state and consequence without competing with the task." },
-      "label": { "displayName": "Working Label", "purpose": "Names compact actions and visible states without inventing workflow stages." },
-      "micro-label": { "displayName": "Micro Label", "purpose": "Terse file and project metadata." },
-      "mono": { "displayName": "Source Mono", "purpose": "Source paths, commits, file names, and diff statistics only." }
+      "headline": {
+        "displayName": "Project headline",
+        "purpose": "Names the selected project on desktop."
+      },
+      "headline-phone": {
+        "displayName": "Phone project headline",
+        "purpose": "Preserves headline authority below 680px."
+      },
+      "task-title": {
+        "displayName": "Task title",
+        "purpose": "Names an inline or docked action."
+      },
+      "section": {
+        "displayName": "Workspace section",
+        "purpose": "Separates local work, contributions, and decisions."
+      },
+      "row-title": {
+        "displayName": "Contribution title",
+        "purpose": "Keeps work titles prominent inside the inventory."
+      },
+      "body": {
+        "displayName": "Reading copy",
+        "purpose": "Descriptions, consequences, details, and activity."
+      },
+      "label": {
+        "displayName": "Control and metadata label",
+        "purpose": "Filters, counts, state, and secondary facts."
+      }
     },
     "shadows": [
-      { "name": "overlay-only", "value": "0 14px 36px color-mix(in srgb, #000 28%, transparent)", "purpose": "Transient settings and connection overlays only." }
+      {
+        "name": "bottom-work-surface",
+        "value": "0 8px 40px color-mix(in srgb, var(--text) 14%, transparent)",
+        "purpose": "Ambient separation for the temporary selection tray and review/assignment dock."
+      },
+      {
+        "name": "active-detail-tab",
+        "value": "0 1px 4px color-mix(in srgb, var(--text) 10%, transparent)",
+        "purpose": "Small lift for the selected Description, Files, or Activity tab."
+      }
     ],
     "motion": [
-      { "name": "state-change", "value": "140ms ease", "purpose": "Quiet hover and border transitions." },
-      { "name": "press", "value": "100ms ease", "purpose": "Small active contraction on buttons." }
+      {
+        "name": "state-change",
+        "value": "140ms ease",
+        "purpose": "Background and border changes on buttons, rows, and states."
+      },
+      {
+        "name": "button-press",
+        "value": "100ms ease",
+        "purpose": "Button contraction to scale(0.97)."
+      },
+      {
+        "name": "disclosure",
+        "value": "160ms ease",
+        "purpose": "Selection and detail disclosure icon rotation."
+      }
     ],
     "breakpoints": [
-      { "name": "compact", "value": "520px" },
-      { "name": "single-column", "value": "760px" }
+      {
+        "name": "phone-workspace",
+        "value": "680px"
+      }
     ]
   },
   "components": [
     {
-      "name": "Primary Action",
+      "name": "Primary action",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The selected item's single meaningful next action.",
-      "html": "<button class=\"ds-primary\">Continue</button>",
-      "css": ".ds-primary { min-height:44px; padding:9px 12px; border:1px solid var(--accent); border-radius:10px; background:var(--accent); color:var(--accent-fg); font:650 13px var(--font); cursor:pointer; transition:background .14s ease, transform .1s ease; } .ds-primary:hover { background:color-mix(in srgb,var(--accent) 90%,var(--text)); } .ds-primary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } .ds-primary:active { transform:scale(.97); }"
+      "description": "The current workflow’s main action, including Prepare and Start private review.",
+      "html": "<button type=\"button\" class=\"ds-primary\">Start private review</button>",
+      "css": ".ds-primary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--accent-hover,var(--accent)); border-radius:10px; background:var(--accent-hover,var(--accent)); color:var(--accent-fg); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-primary:hover { background:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); border-color:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); } .ds-primary:active { transform:scale(.97); } .ds-primary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } .ds-primary:disabled { opacity:.5; cursor:default; }"
     },
     {
-      "name": "Quiet Action",
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A visible alternative inside a review, assignment, or detail action group.",
+      "html": "<button type=\"button\" class=\"ds-secondary\">Review &amp; merge</button>",
+      "css": ".ds-secondary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-secondary:hover { background:var(--surface2,var(--surface)); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); } .ds-secondary:active { transform:scale(.97); } .ds-secondary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Quiet action",
       "kind": "button",
       "refersTo": "button-quiet",
-      "description": "A compact refresh, back, or secondary action that stays subordinate to content.",
-      "html": "<button class=\"ds-quiet\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 18l-6-6 6-6\"/></svg>Back</button>",
-      "css": ".ds-quiet { min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:6px 2px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:650 11.5px var(--font); cursor:pointer; } .ds-quiet svg { width:15px; fill:none; stroke:currentColor; stroke-width:2; } .ds-quiet:hover { color:var(--text); } .ds-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "description": "Back, refresh, close-adjacent, and secondary navigation remain directly visible.",
+      "html": "<button type=\"button\" class=\"ds-quiet\">All projects</button>",
+      "css": ".ds-quiet { min-height:44px; display:inline-flex; align-items:center; gap:6px; padding:8px 2px; border:0; background:transparent; color:var(--muted); font:650 14px var(--font); cursor:pointer; } .ds-quiet:hover { color:var(--text); } .ds-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
-      "name": "Run Summary",
+      "name": "Project directory filters",
       "kind": "custom",
-      "description": "One calm snapshot of what is ready, moving, and recently accepted, with no workflow rooms to navigate.",
-      "html": "<section class=\"ds-run\"><small>Current contribution run</small><h2>3 reviewed changes are ready</h2><div><span><b>3</b> ready</span><span><b>2</b> moving</span><span><b>5</b> accepted recently</span></div></section>",
-      "css": ".ds-run { display:grid; gap:9px; padding:3px 0 18px; border-bottom:1px solid var(--border); } .ds-run > small { color:var(--muted); font:650 10px var(--font); letter-spacing:.04em; text-transform:uppercase; } .ds-run h2 { margin:0; color:var(--text); font:700 22px/1.15 var(--font); letter-spacing:-.025em; } .ds-run div { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font:500 11px var(--font); } .ds-run span { display:inline-flex; align-items:baseline; gap:4px; } .ds-run b { color:var(--text); font-size:12px; }"
+      "refersTo": "directory-field",
+      "description": "Search plus a native factual filter; the pair stacks below 680px.",
+      "html": "<div class=\"ds-directory\"><input type=\"search\" aria-label=\"Find a project\" placeholder=\"Find a project\"><label>Filter<select><option>All projects</option><option>Local changes</option><option>Updates</option></select></label></div>",
+      "css": ".ds-directory { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:16px; color:var(--muted); font:400 14px var(--font); } .ds-directory input,.ds-directory select { min-height:44px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font:400 16px var(--font); } .ds-directory input { width:100%; min-height:46px; padding:10px 13px; border-radius:12px; caret-color:var(--accent); } .ds-directory label { display:flex; align-items:center; gap:10px; } .ds-directory :is(input,select):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-directory { grid-template-columns:1fr; } }"
     },
     {
-      "name": "Project Row",
-      "kind": "custom",
-      "description": "A project identity and its next meaningful local-work state.",
-      "html": "<button class=\"ds-project\"><span class=\"ds-project-icon\">M</span><span><strong>Memory</strong><small>21 local differences to prepare</small></span><i></i></button>",
-      "css": ".ds-project { width:100%; min-height:68px; display:grid; grid-template-columns:36px minmax(0,1fr) auto; align-items:center; gap:11px; padding:11px 14px; border:1px solid var(--border); border-radius:15px; background:var(--surface); color:var(--text); text-align:left; } .ds-project-icon { width:36px; height:36px; display:grid; place-items:center; border-radius:10px; background:color-mix(in srgb,var(--accent) 11%,var(--surface)); color:var(--accent); font-weight:750; } .ds-project span:nth-child(2) { display:flex; flex-direction:column; gap:3px; } .ds-project strong { font:650 12.5px var(--font); } .ds-project small { color:var(--muted); font:400 10.5px var(--font); } .ds-project i { width:7px; height:7px; border-radius:50%; background:var(--accent); } .ds-project:hover { background:color-mix(in srgb,var(--accent) 5%,transparent); } .ds-project:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
-    },
-    {
-      "name": "Decision Card",
+      "name": "Local work summary",
       "kind": "card",
-      "refersTo": "content-surface",
-      "description": "An airy owner-decision object used only when the current run genuinely needs a choice.",
-      "html": "<button class=\"ds-request\"><span class=\"ds-request-icon\">?</span><span><small>Issue · Möbius</small><strong>Review a prepared request</strong><em>Source conversation stays attached.</em></span><b>›</b></button>",
-      "css": ".ds-request { width:100%; min-height:88px; display:grid; grid-template-columns:38px minmax(0,1fr) 15px; align-items:center; gap:12px; padding:14px; border:1px solid var(--border); border-radius:15px; background:var(--surface); color:var(--text); text-align:left; transition:border-color .14s ease,transform .12s ease; } .ds-request-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:11px; background:color-mix(in srgb,var(--accent) 12%,transparent); color:var(--accent); } .ds-request span:nth-child(2) { display:flex; flex-direction:column; gap:4px; min-width:0; } .ds-request small,.ds-request em { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font:400 10px var(--font); } .ds-request strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:650 13px var(--font); } .ds-request:hover { border-color:color-mix(in srgb,var(--accent) 34%,var(--border)); transform:translateY(-1px); } .ds-request:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "refersTo": "local-work-summary",
+      "description": "One readable project summary leading to the private preparation workflow.",
+      "html": "<section class=\"ds-local\"><div><strong>Changes only you have</strong><p>6 changed files · 2 being edited. Prepare a clear proposal before sharing.</p></div><button type=\"button\">Prepare changes</button></section>",
+      "css": ".ds-local { display:flex; justify-content:space-between; align-items:center; gap:24px; padding:22px; border:1px solid var(--border); border-radius:12px; background:transparent; color:var(--text); font-family:var(--font); } .ds-local strong { display:block; font-size:19px; font-weight:600; } .ds-local p { margin:6px 0 0; color:var(--muted); font-size:15px; } .ds-local button { flex-shrink:0; min-height:44px; padding:10px 16px; border:1px solid var(--accent-hover,var(--accent)); border-radius:10px; background:var(--accent-hover,var(--accent)); color:var(--accent-fg); font:500 14px var(--font); } @media(max-width:680px) { .ds-local { align-items:flex-start; flex-direction:column; gap:18px; padding:20px; } .ds-local button { width:100%; } }"
+    },
+    {
+      "name": "Selectable contribution row",
+      "kind": "custom",
+      "description": "Native selection and detail opening remain separate controls.",
+      "html": "<article class=\"ds-pr is-selected\"><label class=\"ds-pr-select\"><input type=\"checkbox\" checked aria-label=\"Select contribution\"></label><button type=\"button\" class=\"ds-pr-open\"><strong>Prevent unfinished Goals from settling without an owner</strong><span>#1047 · You · 3 files · +637 −4</span></button><div class=\"ds-pr-side\"><span>Ready for review</span><b>Unassigned</b></div></article>",
+      "css": ".ds-pr { display:flex; flex-wrap:wrap; gap:8px; padding:18px 10px; border-bottom:1px solid var(--border); border-radius:10px; background:none; color:var(--text); font-family:var(--font); transition:background .14s ease; } .ds-pr.is-selected { background:var(--accent-dim); } .ds-pr-select { display:flex; align-items:flex-start; justify-content:center; min-width:44px; min-height:44px; padding-top:5px; } .ds-pr-select input { width:18px; height:18px; accent-color:var(--accent); } .ds-pr-open { flex:1; min-width:180px; min-height:44px; padding:0; border:0; background:none; color:var(--text); text-align:left; } .ds-pr-open strong { display:block; font:600 17px/1.45 var(--font); } .ds-pr-open span { display:block; margin-top:6px; color:var(--muted); font:400 14px/1.5 var(--font); } .ds-pr-side { display:flex; align-items:center; gap:10px; padding-left:44px; width:100%; } .ds-pr-side span { padding:3px 8px; border-radius:5px; background:var(--surface); color:var(--muted); font:400 14px var(--font); } .ds-pr-side b { color:var(--muted); font:650 14px var(--font); } .ds-pr :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Selected contributions tray",
+      "kind": "custom",
+      "refersTo": "selection-tray",
+      "description": "The fixed, nonmodal bottom stack for inspecting, removing, and acting on selected contributions.",
+      "html": "<section class=\"ds-tray\" aria-label=\"Selected contributions\"><header><button class=\"ds-tray-toggle\"><span class=\"ds-stack\">✓</span><strong>2 selected</strong><span>⌄</span></button><button class=\"ds-clear\" aria-label=\"Clear selection\">×</button></header><div class=\"ds-cards\"><article><button>#1077 <strong>Bump the frontend…</strong></button><button aria-label=\"Remove PR 1077\">×</button></article><article><button>#1047 <strong>Prevent unfinished…</strong></button><button aria-label=\"Remove PR 1047\">×</button></article></div><footer><button class=\"ds-review\">Review 2</button><button>Review &amp; merge</button><button>Assign…</button></footer></section>",
+      "css": ".ds-tray { width:min(920px,calc(100% - 48px)); padding:12px; border:1px solid var(--border); border-radius:18px; background:var(--surface); color:var(--text); box-shadow:0 8px 40px color-mix(in srgb,var(--text) 14%,transparent); font-family:var(--font); } .ds-tray header,.ds-tray footer { display:flex; align-items:center; gap:8px; } .ds-tray header { justify-content:space-between; } .ds-tray-toggle { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 8px; border:0; background:none; color:var(--text); } .ds-stack { display:grid; place-items:center; width:28px; height:28px; border:1px solid var(--border); border-radius:7px; background:var(--accent-dim); color:var(--accent); box-shadow:-3px -3px 0 var(--surface),-4px -4px 0 var(--border); } .ds-tray-toggle strong { font-size:15px; } .ds-clear { width:44px; min-height:44px; border:0; background:none; color:var(--muted); font-size:22px; } .ds-cards { display:flex; gap:8px; overflow:auto; padding:4px 2px 12px; } .ds-cards article { display:flex; align-items:center; flex:0 0 248px; border:1px solid var(--border); border-radius:10px; background:var(--bg); } .ds-cards button { min-height:48px; padding:8px 12px; border:0; background:none; color:var(--muted); font:400 14px var(--font); text-align:left; } .ds-cards button:first-child { flex:1; min-width:0; } .ds-cards strong { color:var(--text); font-weight:500; } .ds-tray footer { padding-top:10px; border-top:1px solid var(--border); } .ds-tray footer button { flex:1; min-height:44px; padding:9px 8px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-tray footer .ds-review { flex:1.4; border-color:var(--accent-hover,var(--accent)); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-tray :is(button):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-tray { width:calc(100% - 16px); border-radius:16px; } .ds-cards article { flex-basis:228px; } }"
+    },
+    {
+      "name": "Review task dock",
+      "kind": "custom",
+      "refersTo": "task-dock",
+      "description": "A scrollable bottom action surface that preserves project scroll and exact selected versions.",
+      "html": "<section class=\"ds-dock\" tabindex=\"-1\"><button class=\"ds-close\" aria-label=\"Close action\">×</button><h3>Review privately</h3><p>Review privately, in parallel where independent. Nothing is posted or merged.</p><ul><li><strong>Bump the frontend-minor-patch group</strong><span>mobius-os/mobius #1077</span></li><li><strong>Prevent unfinished Goals from settling without an owner</strong><span>mobius-os/mobius #1047</span></li></ul><details><summary>Exact versions covered by this approval</summary><p>#1077: version abc1234 → main (def5678)</p></details><label><input type=\"checkbox\"> Merge when safe</label><footer><button>Start private review</button><button>Cancel</button></footer></section>",
+      "css": ".ds-dock { position:relative; width:min(920px,calc(100% - 48px)); max-height:72dvh; overflow:auto; padding:24px; border:1px solid var(--border); border-radius:18px; background:var(--surface); color:var(--text); box-shadow:0 8px 40px color-mix(in srgb,var(--text) 14%,transparent); font-family:var(--font); } .ds-close { position:sticky; top:0; float:right; width:44px; min-height:44px; margin:-12px -10px 0 12px; border:0; background:var(--surface); color:var(--muted); font-size:22px; } .ds-dock h3 { margin:0 0 14px; padding-right:32px; font:650 22px/1.3 var(--font); letter-spacing:-.02em; } .ds-dock p { max-width:72ch; margin:10px 0 18px; color:var(--muted); font:400 16px/1.6 var(--font); } .ds-dock ul { padding:0; list-style:none; } .ds-dock li { padding:10px 0; } .ds-dock li span { display:block; color:var(--muted); font-size:14px; } .ds-dock details { margin-top:20px; padding-top:10px; border-top:1px solid var(--border); } .ds-dock summary,.ds-dock label { min-height:44px; color:var(--muted); font-size:14px; cursor:pointer; } .ds-dock label { display:flex; align-items:center; gap:12px; } .ds-dock label input { width:18px; height:18px; accent-color:var(--accent); } .ds-dock footer { display:flex; flex-wrap:wrap; gap:10px; margin-top:20px; } .ds-dock footer button { min-height:44px; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-dock footer button:first-child { border-color:var(--accent-hover,var(--accent)); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-dock :is(button,input,summary):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-dock { width:calc(100% - 16px); max-height:76dvh; padding:20px; border-radius:16px; } }"
+    },
+    {
+      "name": "Contribution detail tabs",
+      "kind": "nav",
+      "description": "Description-first detail with lazy Files and Activity views.",
+      "html": "<nav class=\"ds-detail-tabs\" aria-label=\"Contribution details\"><button aria-pressed=\"true\">Description</button><button aria-pressed=\"false\">Files 2</button><button aria-pressed=\"false\">Activity</button></nav>",
+      "css": ".ds-detail-tabs { display:flex; width:fit-content; max-width:100%; gap:4px; padding:4px; border-radius:10px; background:var(--bg); font-family:var(--font); } .ds-detail-tabs button { min-height:48px; padding:8px 14px; border:0; border-radius:7px; background:none; color:var(--muted); font:400 16px var(--font); cursor:pointer; } .ds-detail-tabs button[aria-pressed=true] { background:var(--surface); color:var(--text); box-shadow:0 1px 4px color-mix(in srgb,var(--text) 10%,transparent); } .ds-detail-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     }
   ],
   "narrative": {
-    "northStar": "One Quiet Run",
-    "overview": "Contribute feels like a calm collaboration run, not a Git client or an administrative dashboard. One current snapshot gathers related work across projects, keeps private preparation agent-owned, and asks the owner only for exact public decisions. Projects is a secondary lens into that same run; technical detail stays one selection away without competing with the first viewport.",
-    "keyCharacteristics": ["Centered reading canvas with generous negative space.", "One decision stream instead of rooms, queues, or workflow stages.", "Exact grouped approvals name every public effect before it happens.", "Projects refines the same run without creating another owner or hidden scope.", "Public and destructive actions remain explicit, truthful, and bound to the reviewed snapshot."],
-    "rules": [
-      { "name": "Rare Accent", "body": "Accent identifies current location or the single next decision; it does not decorate every card.", "section": "colors" },
-      { "name": "One Run", "body": "Every changed-work item has one visible owner and one place in the current run; filters and project detail refine that snapshot rather than creating competing queues.", "section": "layout" },
-      { "name": "Flat by Default", "body": "Persistent content surfaces use borders and tone, not floating trays or ambient dashboard shadows.", "section": "elevation" }
+    "northStar": "The Continuous Project Desk",
+    "overview": "Contribute is one calm, project-shaped workspace rather than a dashboard of competing panes. A project directory leads into a continuous vertical document: project position, local work, decisions that need attention, saved private proposals, public contributions, and history appear in one readable flow. Technical depth stays available without displacing the next meaningful action.\n\nSelection is a temporary working layer at the bottom of that document. Native checkboxes collect contributions without navigating; a compact stack of selected cards can expand, remove individual items, and launch review or assignment. Those workflows reuse the same bottom position as a focused, nonmodal dock while the project remains behind it. The shell owns both light and dark appearance, typography, icons, and semantic color.",
+    "keyCharacteristics": [
+      "One continuous workspace per project; no persistent split pane or second review room.",
+      "Directory filters reflect real local-change and update facts.",
+      "Selection accumulates independently from contribution detail.",
+      "Review and assignment occupy a fixed bottom dock without resetting project scroll.",
+      "Description leads; Files and Activity load only when opened.",
+      "Exact contribution versions remain the unit of approval and refresh safety."
     ],
-    "dos": ["Do summarize the current run before offering an exact action.", "Do put complete diffs and technical metadata one selection away.", "Do keep project and request language understandable without Git terminology.", "Do bind every grouped approval to the exact reviewed records and effects.", "Do preserve practical touch targets and visible focus states."],
-    "donts": ["Don't make the owner navigate stages or rooms before acting.", "Don't duplicate one item across a batch, row action, project action, and focused view.", "Don't let filters silently widen an action beyond what is visible.", "Don't turn private helper work into another owner-facing queue.", "Don't use red for drafts, uncertainty, or caution; reserve it for genuine failure or destruction."]
+    "rules": [
+      {
+        "name": "Inherited Theme",
+        "body": "Use the shell’s semantic color and font variables in both light and dark modes. Do not freeze the accent into a named hue, manufacture a tonal ramp, or introduce an app-owned light/dark palette.",
+        "section": "colors"
+      },
+      {
+        "name": "Written State",
+        "body": "Color may reinforce a state, but labels such as “Ready for review,” “Needs you,” and “Prepared · not shared” carry the meaning.",
+        "section": "colors"
+      },
+      {
+        "name": "Readable Floor",
+        "body": "Do not shrink workflow copy below the established 14px label and 16px body sizes to fit more controls. Let controls wrap and layouts stack instead.",
+        "section": "typography"
+      },
+      {
+        "name": "Stable Inventory",
+        "body": "Checkbox selection changes only selection. It never opens detail, changes filters, scrolls the page, or steals focus.",
+        "section": "layout"
+      },
+      {
+        "name": "Continuous Context",
+        "body": "Tasks may focus attention, but they do not replace the project with another room or discard its place in the document.",
+        "section": "layout"
+      },
+      {
+        "name": "Temporary Lift",
+        "body": "Persistent project content stays flat; elevation belongs to the bottom selection/task surface or a transient control state.",
+        "section": "elevation"
+      },
+      {
+        "name": "Purposeful Radius",
+        "body": "Radius signals interaction and temporary grouping. Do not turn every project section or contribution row into a floating card.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do keep each project as one continuous document from position through history.",
+      "Do make directory filters reflect the data conditions named by their labels.",
+      "Do keep native checkbox selection independent from row detail and keyboard focus.",
+      "Do preserve selected versions through refresh only when the exact head and base still match, and announce removals.",
+      "Do place selected work and review actions in the fixed bottom tray/dock while keeping the final inventory rows reachable.",
+      "Do preserve local-work and prepared-record summaries as readable text, not counts alone.",
+      "Do lead contribution detail with Description and defer Files and Activity until requested.",
+      "Do enumerate exact public effects and contribution versions before approval."
+    ],
+    "donts": [
+      "Don't restore the discarded split-pane workspace, persistent task rail, or separate Reviews room.",
+      "Don't treat a row checkbox as navigation or clear selection merely because detail opened.",
+      "Don't make the bottom tray modal, reset project scroll, or discard selection while the review/assignment dock is open.",
+      "Don't hide changed-version removal; announce that the current version must be selected again.",
+      "Don't shrink labels below 14px or body copy below 16px to make the phone layout fit.",
+      "Don't invent fixed colors, tonal ramps, icons, approval states, or workflow capabilities outside the implemented semantic theme and product contract."
+    ]
   }
 }

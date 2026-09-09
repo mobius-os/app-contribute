@@ -215,8 +215,8 @@ export async function fetchLiveStates(token, query) {
 
 export async function fetchIncomingReviews(token) {
   const query = `query ContributeIncomingReviews {
-    search(query: "is:pr is:open review-requested:@me -assignee:@me", type: ISSUE, first: 20) {
-      nodes { ... on PullRequest { number title url headRefOid author { login } repository { nameWithOwner } } }
+    search(query: "is:pr is:open involves:@me", type: ISSUE, first: 50) {
+      nodes { ... on PullRequest { id number title url headRefOid baseRefName baseRefOid isDraft author { login } assignees(first:100) { nodes { login } } repository { nameWithOwner viewerPermission } reviewDecision mergeable } }
     }
   }`
   const data = await fetchLiveStates(token, query)

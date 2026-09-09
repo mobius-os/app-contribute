@@ -161,6 +161,48 @@ export function contributionOutcomeAction(action, outcome = 'prepare') {
   }
 }
 
+// Public-only work still has a full cycle: review feedback, acceptance, and
+// local reconciliation do not disappear when there is nothing left to prepare.
+export function contributionCycleAction(run, projects) {
+  if (run?.privateAction) return contributionOutcomeAction(run.privateAction, 'merge')
+  const active = [...(run?.decisions || []), ...(run?.working || [])]
+  if (!active.length) return null
+  return contributionOutcomeAction({
+    title: 'Finish the contribution cycle',
+    revision: run?.revision || '',
+    count: active.length,
+    draft: [
+      'Read Contribute’s Finish the contribution cycle workflow and carry it through for only these projects:',
+      ...(projects || []).map(project => `- ${project.name}: ${project.key}; repository ${project.canonical_repo || 'not yet shared'}`),
+      'Refresh the exact current records and shared source. Review and repair privately; group coherent changes within each repository before submission, never one PR per chat. Do not combine unrelated work just to make a batch.',
+      'Keep working in place. Present the exact ready batch for approval; notify the owner of real blockers with a direct link to the conversation. Preserve local work through the reviewed update path.',
+    ].join('\n'),
+  }, 'merge')
+}
+
+// Get up to date is an owner-requested update journey, not publication or a
+// blind live rebase. The project adapter owns candidate construction and apply.
+export function projectUpdateAction(projects, requestId) {
+  const targets = (projects || []).filter(project => project.available && project.canonical_repo && project.kind !== 'external')
+  if (!targets.length) return null
+  const title = targets.length === 1 ? `Get ${targets[0].name} up to date` : 'Get projects up to date'
+  return {
+    title, event: 'update_source_projects', count: targets.length,
+    scopeLabel: title,
+    revision: `${targets.map(projectWorkRevision).sort().join('\u0001')}\u0001${requestId}`,
+    draft: [
+      title + '.',
+      'The owner requested this update from Contribute. Work only on these projects:',
+      ...targets.map(project => `- ${project.name}: ${project.key}; shared repository ${project.canonical_repo}`),
+      '',
+      'Read Contribute’s project-adapter workflow and the matching update procedure. Use the existing deterministic status, fetch, update, and landed-change recognition tools; use agent judgment for actual overlaps and unclear intent, not routine bookkeeping.',
+      'Fetch the latest accepted source read-only. Keep local changes on top of one exact accepted base, never interleaved. Build and test the candidate in isolation, preserving private work, uncommitted edits, and concurrent newer edits. Never reset, rebase, switch, or rewrite the shared live checkout by hand.',
+      'Use the project’s reviewed update path. Present any required update/apply approval and ask separately immediately before a server restart. Report unavailable adapters truthfully rather than improvising an updater.',
+      'This request does not authorize preparing or publishing contributions, pushing, commenting, or merging on GitHub. Return any real questions in the work chat and notify the owner with a direct link. Finish by verifying the accepted base, local overlay, and remaining differences.',
+    ].join('\n'),
+  }
+}
+
 // A quality verdict belongs to one immutable prepared head. Source freshness
 // and agent review are separate claims: the platform proves the former, while
 // the agent records the latter after its correctness/maintenance review.
@@ -409,7 +451,7 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
     ].filter(Boolean).join('\n')
   })
   const projectRows = projectList.map((project) => (
-    `- ${project.name || project.canonical_repo || project.key || 'Local project'}`
+    `- ${project.name || 'Local project'} [${project.key || 'unavailable'}; ${project.canonical_repo || 'local-only project'}]`
   ))
   const count = contributionList.length + projectList.length
   const includesPublicAttention = contributionList.some((rec) => rec.status !== 'prepared')
@@ -463,6 +505,7 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
       'Before preparing any branch, fetch its canonical upstream read-only. Never pull, rebase, reset, switch, or otherwise move a shared live checkout. Build the review checkout from the freshly fetched accepted base, then replay only the attributable local commits and working diff in isolation. Do not copy an older whole tree over newer upstream changes. If a three-way replay is ambiguous, stop with the exact conflict.',
       'Inspect untracked and generated-looking paths before staging. When a path is clearly repository-wide generated state, add the smallest reusable ignore rule to the owning .gitignore and settle the generated path locally. Do not silently ignore ambiguous files; leave one concrete owner decision instead.',
       'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
+      'Group cohesive changes within each repository before publication, not one pull request per chat. Keep unrelated work independent; use stacks only for genuine dependencies. Preserve all source-chat links when work is consolidated. A blocked group must not hold up unrelated ready work.',
       'Privately prepare every worthwhile change in scope and thoroughly review each exact head. CAS-update quality_review throughout; all_clear is valid only when reviewed_head_sha equals plan.head_sha.',
       'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',
       'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',

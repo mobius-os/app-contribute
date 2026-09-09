@@ -31,7 +31,8 @@ test('disconnected owners use the Möbius bot only for mobius-os', () => {
   )
 })
 
-test('connected owners default to GitHub but may choose the bot for mobius-os', () => {
+test('connected owners keep their chosen method; community repositories always use GitHub', () => {
+  assert.equal(contributionPathDecision(mobius, undefined, 'connected').method, 'mobius')
   assert.equal(
     contributionPathDecision(mobius, 'github', 'connected').method,
     'github',

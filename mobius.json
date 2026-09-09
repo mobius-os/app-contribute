@@ -1,8 +1,8 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.27",
-  "description": "See what your agent has proposed upstream — pull requests, issues, and comments across the Möbius ecosystem, from prepared to merged.",
+  "version": "0.5.29",
+  "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-contribute",
@@ -70,6 +70,20 @@
     "ui/diff/FileDiffList.jsx",
     "ui/diff/UnifiedDiff.jsx",
     "ui/diff/parseUnifiedDiff.js",
-    "ui/diff/styles.js"
+    "ui/diff/styles.js",
+    "ui/ProjectControls.jsx",
+    "collaboration.js",
+    "ui/PullRequests.jsx",
+    "ui/TaskPane.jsx",
+    "workspace-theme.js",
+    "ui/useProjectCycle.js",
+    "ui/SourceConversations.jsx",
+    "repositories.js",
+    "ui/RepositoryPicker.jsx",
+    "review-selection.js",
+    "ui/ReviewSelection.jsx",
+    "review_prs.py",
+    "pull-details.js",
+    "ui/PullRequestDetail.jsx"
   ]
 }

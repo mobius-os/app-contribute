@@ -12,12 +12,16 @@ const runRenderer = () => renderModule(`
     publicationRouteProblem,
   } from './ui/Feed.jsx'
 
+  import { TaskContext } from './ui/TaskPane.jsx'
   const noop = () => ({ ok: true })
   export { batchFingerprint, publicationRouteProblem }
   export function renderRun(run, options = {}) {
-    return renderToStaticMarkup(React.createElement(ContributionRun, {
+    return renderToStaticMarkup(React.createElement(TaskContext.Provider, { value: options.cycle ? { cycle: options.cycle } : null }, React.createElement(ContributionRun, {
       run,
       loading: false,
+      presentation: options.presentation || 'project',
+      selectedId: options.selectedId || '',
+      projectName: options.projectName || 'Project',
       reviewStatus: { byId: {} },
       cycle: options.cycle || { phase: 'idle' },
       publicationPreference: options.publicationPreference || 'github',
@@ -37,7 +41,7 @@ const runRenderer = () => renderModule(`
       onAssignIncomingReview: noop,
       onViewProject: noop,
       loadDiff: noop,
-    }))
+    })))
   }
   export function renderFocus(item) {
     return renderToStaticMarkup(React.createElement(FocusedItem, {
@@ -86,7 +90,7 @@ test('the Run renders one batch action without a duplicate publish row', async (
   assert.equal((html.match(/co-run-primary is-send/g) || []).length, 1)
   assert.doesNotMatch(html, /co-run-row is-publish/)
   assert.match(html, /Review and send/)
-  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
+  assert.doesNotMatch(html, /Needs you|No decisions waiting/)
 })
 
 test('exact publication copy is truthful per record in a mixed route batch', async (t) => {
@@ -201,14 +205,11 @@ test('the Run keeps project identity without duplicating Projects navigation', a
   }
   const html = renderRun(run)
 
-  assert.match(html, /Local work needs sorting/)
-  assert.match(html, />Review</)
-  assert.match(html, />Prepare</)
-  assert.match(html, />Merge</)
-  assert.match(html, /co-run-private-items/)
+  assert.match(html, /Prepared · not shared/)
+  assert.doesNotMatch(html, /Prepare &amp; review|Run full cycle|Inspect changes/)
   assert.match(html, /owner\/one/)
   assert.match(html, /owner\/two/)
-  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
+  assert.doesNotMatch(html, /Needs you|No decisions waiting/)
   assert.doesNotMatch(html, /co-run-row is-private_review/)
   assert.doesNotMatch(html, /projects represented in this snapshot/)
   assert.doesNotMatch(html, /Browse projects/)
@@ -230,12 +231,10 @@ test('private review groups move from the one Private Run into Working while it 
     privateAction: { label: 'Fix', count: 1, draft: 'Fix private work' },
   }, { cycle: { phase: 'running', runtime: { running: true } } })
 
-  assert.match(html, /Preparing local work/)
-  assert.match(html, /<summary><span>Working<\/span><b>1<\/b>/)
-  assert.match(html, /Working<\/span><b>1<\/b>/)
+  assert.match(html, /<h3>In progress<\/h3>/)
   assert.match(html, /is-review_in_progress/)
   assert.match(html, /Private run in progress/)
-  assert.match(html, /Other decisions<\/h3><span>0<\/span>/)
+  assert.doesNotMatch(html, /Needs you|No decisions waiting/)
   assert.doesNotMatch(html, /co-run-private-items/)
   assert.doesNotMatch(html, /co-run-row is-private_review/)
 })
@@ -266,8 +265,9 @@ test('focused stacks preserve every source chat and never expose an unreviewed s
     record: first, label: 'Related changes', detail: 'Private review needed',
   })
 
-  assert.match(html, /Open source chat 1/)
-  assert.match(html, /Open source chat 2/)
+  assert.equal((html.match(/>Open source chat</g) || []).length, 2)
+  assert.equal((html.match(/class="co-group-member"/g) || []).length, 2)
+  assert.match(html, /Address group in conversation/)
   assert.doesNotMatch(html, />Send PRs?</)
 })
 
@@ -358,4 +358,32 @@ test('dismissed work remains discoverable and focused history can restore it', a
 
   assert.match(runHtml, /History<\/span><b>1<\/b>/)
   assert.match(focusHtml, />Restore</)
+})
+
+test('the global workspace keeps exact ready batches without duplicating project inventories', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const rec = record('Ready change')
+  const publish = { id: 'publish:ready', kind: 'publish', record: rec, unit: { type: 'record', record: rec, records: [rec] }, label: rec.title, detail: rec.repo }
+  const run = { decisions: [publish], working: [], recent: [], archive: [] }
+  assert.match(renderRun(run, { presentation: 'overview' }), /Review and send/)
+  assert.doesNotMatch(renderRun(run, { presentation: 'overview' }), /Needs you|Prepared · not shared|In progress/)
+  assert.equal(renderRun({ decisions: [], working: [], recent: [], archive: [] }, { presentation: 'overview' }), '')
+  const focused = renderRun(run, { selectedId: publish.id, projectName: 'Example' })
+  assert.match(focused, /co-run-focus-detail/)
+  assert.match(focused, /Review and send/) // inventory remains beside the selected task
+  assert.match(focused, /Ready change/)
+})
+
+
+test('non-actionable batch records leave no empty overview spacing', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const sent = { ...record('Already sent'), status: 'open' }
+  const managedDraft = { ...record('Managed draft'), status: 'draft', submission_mode: 'mobius-bot' }
+  const item = (kind, rec) => ({ id: `${kind}:${rec.id}`, kind, record: rec,
+    unit: { type: 'record', record: rec, records: [rec] } })
+  const html = renderRun({ decisions: [item('publish', sent), item('mark_ready', managedDraft)],
+    working: [], recent: [], archive: [] }, { presentation: 'overview' })
+  assert.equal(html, '')
 })
