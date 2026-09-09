@@ -175,7 +175,7 @@ export const WORKSPACE_CSS = `
 .co-pr-list-controls .co-pr-search { display:flex; align-items:center; gap:8px; flex:1 1 100%; margin:4px 0; color:var(--muted); }
 .co-workspace .co-pr-search input { border:0; background:none; padding:8px 0; min-width:0; width:100%; }
 .co-workspace .co-pr-side > button[aria-label^="Assign PR"] { min-width:44px; justify-content:center; }
-.co-task-dock:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.co-task-dock:focus-visible,.co-task-dock [tabindex="-1"]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .co-workspace .co-task-dock { animation:co-dock-arrive .18s cubic-bezier(.16,1,.3,1); }
 @keyframes co-dock-arrive { from { transform:translateY(8px); } to { transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .co-workspace .co-task-dock { animation:none; } }

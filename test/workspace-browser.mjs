@@ -184,8 +184,12 @@ const ensure = (condition, message) => { if (!condition) throw new Error(message
 // CDP delivers the real browser key default; dispatchEvent would not toggle a
 // checkbox natively and must not be used as keyboard-selection evidence.
 const nativeSpace = () => new Promise((resolve, reject) => {
-  window.finishNativeSpace = error => error ? reject(new Error(error)) : resolve()
-  window.workspaceNativeSpace('Space')
+  window.finishNativeKey = error => error ? reject(new Error(error)) : resolve()
+  window.workspaceNativeKey(JSON.stringify({ key:' ', code:'Space', keyCode:32 }))
+})
+const nativeEscape = () => new Promise((resolve, reject) => {
+  window.finishNativeKey = error => error ? reject(new Error(error)) : resolve()
+  window.workspaceNativeKey(JSON.stringify({ key:'Escape', code:'Escape', keyCode:27 }))
 })
 async function until(predicate, message) {
   const deadline = performance.now() + 5000
@@ -198,6 +202,12 @@ async function until(predicate, message) {
 async function click(node, message = 'Expected enabled visible control') {
   ensure(node && !node.disabled && node.getClientRects().length, message)
   node.click()
+  await frame(); await frame()
+}
+async function fill(node, value) {
+  ensure(node && node.getClientRects().length, 'Expected visible input')
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,value)
+  node.dispatchEvent(new Event('input',{bubbles:true}))
   await frame(); await frame()
 }
 async function inventory() {
@@ -225,11 +235,30 @@ window.runWorkspaceChecks = async () => {
       ensure(query('.co-directory-filter select') && !query('.co-lens-nav'), 'Filters still look like views')
       await click(query('.co-source-row'))
       await until(() => document.querySelectorAll('.co-pr-row').length === 2 && !button('Prepare changes')?.disabled, 'Project did not settle')
-      ensure(query('.co-workspace-inventory') && !query('.co-task-pane'), 'Project still uses a separate action pane')
+      ensure(query('.co-workspace-inventory') && !query('.co-task-dock'), 'Opening a project displayed task work')
       ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
     })
     const originalInventory = query('.co-workspace-inventory'), originalList = query('.co-pr-list'), originalRow = query('.co-pr-row')
     const inventoryNavigationDepth = navigation.length
+    await check('PR filters are pressed buttons and change totals are an opt-in display choice', async () => {
+      const filters=query('.co-pr-filters'), filterButtons=[...filters.querySelectorAll('button')]
+      ensure(!query('.co-public-work select[aria-label="Filter pull requests"]'),'PR filters regressed to a native select')
+      ensure(filterButtons.map(node => text(node)).join('|')==='All|Unassigned|Assigned to me|My PRs','PR filter choices drifted')
+      ensure(button('All',filters).getAttribute('aria-pressed')==='true' && filterButtons.filter(node => node.getAttribute('aria-pressed')==='true').length===1,'Default filter is not exposed as one pressed button')
+      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => !text(node).includes('files ·')),'Change totals were visible by default')
+      await click(query('.co-display > summary'))
+      const totals=query('.co-display input[type="checkbox"]')
+      ensure(totals && !totals.checked,'Change totals did not default off')
+      await click(totals)
+      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => text(node).includes('1 files · +1 −0')),'Display choice did not reveal change totals')
+      await click(totals)
+      await click(query('.co-display > summary'))
+      await click(button('My PRs',filters))
+      ensure(button('My PRs',filters).getAttribute('aria-pressed')==='true' && button('All',filters).getAttribute('aria-pressed')==='false','Pressed filter state did not follow the choice')
+      ensure(document.querySelectorAll('.co-pr-row').length===2,'Authored filter hid matching fixture PRs')
+      await click(button('All',filters))
+      ensure(query('.co-workspace-inventory')===originalInventory && mutationRequests().length===0,'Display-only controls replaced inventory or mutated GitHub')
+    })
     const firstCheckbox = query('input[aria-label="Select owner/project #7"]')
     let secondCheckbox = query('input[aria-label="Select owner/project #8"]')
     function selectionStaysInInventory(focused) {
@@ -254,12 +283,16 @@ window.runWorkspaceChecks = async () => {
       secondCheckbox.removeEventListener('keydown',capture)
       ensure(events.length === 2 && events.every(event => event.trusted && event.code === 'Space'),'Keyboard test was not native')
     })
-    await check('bottom selection tray remains visible, expands and removes only the chosen card', async () => {
+    await check('compact selection tray keeps count and only the approved batch actions in one fixed header', async () => {
       const tray=query('.co-pr-selection'), scroller=query('.co-page')
+      const heading=query('.co-selection-heading')
+      ensure(heading && button('Assign…',heading) && button('Review 2',heading) && text(heading).includes('2 selected'),'Count and batch actions are not together in the tray header')
+      ensure(!button('Review & merge',tray),'Tray exposed a redundant merge action')
+      ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='false','Selection tray did not start compact')
       const before=tray.getBoundingClientRect()
-      scroller.scrollTop=0; await new Promise(requestAnimationFrame)
+      scroller.scrollTop=Math.min(160,Math.max(0,scroller.scrollHeight-scroller.clientHeight)); await new Promise(requestAnimationFrame)
       const after=tray.getBoundingClientRect()
-      ensure(Math.abs(before.bottom-after.bottom)<2 && after.bottom<=innerHeight && after.top>=0,'Selection tray left the viewport while browsing')
+      ensure(getComputedStyle(tray).position==='fixed' && Math.abs(before.bottom-after.bottom)<2 && after.bottom<=innerHeight && after.top>=0,'Selection tray left the viewport while browsing')
       ensure(query('.co-selected-cards').children.length===2,'Selected titles missing')
       await click(query('.co-selection-toggle'))
       ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='true','Selection list did not expand')
@@ -284,18 +317,29 @@ window.runWorkspaceChecks = async () => {
       await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Restored refresh did not finish')
       await click(secondCheckbox)
     })
-    await check('inspecting a filtered selected card restores its row and keyboard focus', async () => {
-      const filter=query('[aria-label="Filter pull requests"]')
-      filter.value='unassigned'; filter.dispatchEvent(new Event('change',{bubbles:true})); await frame(); await frame()
+    await check('PR detail opens in a nonmodal dock without clearing list state or selected versions', async () => {
+      const filters=query('.co-pr-filters'), search=query('input[aria-label="Find a pull request"]')
+      await click(button('Unassigned',filters)); await fill(search,'Contribution')
       ensure(!query('input[aria-label="Select owner/project #8"]'),'Fixture filter did not hide selected PR')
       const card=[...document.querySelectorAll('.co-selected-open')].find(node => text(node).startsWith('#8'))
+      const scroller=query('.co-page'), scrollBefore=scroller.scrollTop, listBefore=query('.co-pr-list')
+      card.focus()
       await click(card)
-      await until(() => query('input[aria-label="Select owner/project #8"]') && query('.co-pr-detail'),'Filtered selected card did not restore detail')
+      await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Filtered selected detail did not load')
+      const dock=query('.co-task-dock'), dockRect=dock.getBoundingClientRect()
+      ensure(dock.getAttribute('role')==='dialog' && dock.getAttribute('aria-modal')==='false','Dock is not exposed as a nonmodal dialog')
+      ensure(getComputedStyle(dock).position==='fixed' && dockRect.bottom<=innerHeight && dockRect.right<=innerWidth,'PR detail is not docked to the viewport edge')
+      ensure(query('.co-pr-detail').closest('.co-task-dock')===dock && !query('.co-pr-detail').closest('.co-pr-row'),'PR detail expanded a list row instead of using the dock')
+      ensure(button('Unassigned',filters).getAttribute('aria-pressed')==='true' && search.value==='Contribution','Opening detail cleared filter or search')
+      ensure(!query('input[aria-label="Select owner/project #8"]') && query('.co-pr-list')===listBefore && Math.abs(scroller.scrollTop-scrollBefore)<2,'Opening detail changed filtered list identity or scroll')
+      ensure([...document.querySelectorAll('.co-selected-open')].map(node => text(node).slice(0,2)).join(',')==='#7,#8','Opening detail changed the exact selection')
+      await nativeEscape()
+      await until(() => !query('.co-task-dock'),'Escape did not close the dock')
+      ensure(document.activeElement===card,'Escape did not return focus to the detail trigger')
+      await fill(search,''); await click(button('All',filters))
+      await until(() => document.querySelectorAll('.co-pr-row').length===2,'PR list did not restore after resetting filters')
       secondCheckbox=query('input[aria-label="Select owner/project #8"]')
-      const title=secondCheckbox.closest('.co-pr-row').querySelector('.co-pr-open'),rect=title.getBoundingClientRect()
-      ensure(document.activeElement===title && rect.bottom>0 && rect.top<innerHeight,'Restored selection detail stayed offscreen or unfocused')
-      ensure(firstCheckbox.checked && secondCheckbox.checked,'Inspecting hidden PR changed selection')
-      await click(title)
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Closing detail changed selected versions')
     })
     await check('cancelling batch actions restores their original keyboard trigger', async () => {
       for (const label of ['Review 2','Assign…']) {
@@ -307,12 +351,14 @@ window.runWorkspaceChecks = async () => {
       }
       ensure(mutationRequests().length===0,'Cancel submitted a workflow')
     })
-    await check('opening an own assigned PR preserves batch selection and leads with description', async () => {
+    await check('individual PR detail leads with Description and retains review and merge choices', async () => {
       await click(document.querySelectorAll('.co-pr-open')[1])
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Opening detail replaced batch selection')
       ensure(!query('.co-file-disclosure') && !calls.requests.some(call => call.url.includes('/files?')),'Diff loaded by default')
-      const row=query('.co-pr-detail').closest('.co-pr-row'); ensure(row.querySelector('.co-pr-side').getBoundingClientRect().bottom <= row.querySelector('.co-pr-detail').getBoundingClientRect().top + 1,'Status overlaps PR detail')
+      const tabs=query('.co-detail-tabs')
+      ensure(button('Description',tabs).getAttribute('aria-pressed')==='true' && button('Files 1',tabs) && button('Activity',tabs),'Description, Files, and Activity tabs were not maintained')
+      ensure(button('Review this PR',query('.co-task-dock')) && button('Review & merge',query('.co-task-dock')),'Individual review choices were lost')
       ensure(mutationRequests().length === 0 && navigation.length === inventoryNavigationDepth,'Opening PR changed work or screens')
     })
     await check('files load only on demand, remain collapsed, and activity is separate', async () => {
@@ -324,6 +370,18 @@ window.runWorkspaceChecks = async () => {
       await click(button('Activity',query('.co-pr-detail')))
       await until(() => text(query('.co-pr-detail')).includes('Please check this edge case'),'Activity did not load')
       ensure(!query('.co-file-disclosure'),'Files leaked into activity')
+      const title=document.querySelectorAll('.co-pr-open')[1]
+      await click(button('Review this PR',query('.co-task-dock')))
+      await until(() => query('.co-pr-confirm'),'Individual review confirmation did not open')
+      ensure(text(query('.co-pr-confirm')).includes('Contribution 8') && text(query('.co-pr-confirm')).includes('ccccccc') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Individual review changed PR scope or version')
+      const mergeOption=query('.co-pr-confirm input[type="checkbox"]')
+      ensure(mergeOption && !mergeOption.checked && button('Start private review'),'Individual review granted merge by default')
+      await click(mergeOption)
+      ensure(button('Allow review & merge'),'Individual merge choice did not require guarded approval')
+      ensure(mutationRequests().length===0,'Changing individual review mode mutated GitHub')
+      await click(button('Cancel',query('.co-task-dock')))
+      await until(() => !query('.co-task-dock'),'Individual review did not close')
+      ensure(document.activeElement===title,`Closing individual review did not return focus to its row trigger (focused ${document.activeElement?.className || document.activeElement?.tagName}: ${text(document.activeElement)})`)
     })
     await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
       const scrollBefore=query('.co-page').scrollTop
@@ -343,9 +401,10 @@ window.runWorkspaceChecks = async () => {
       ensure(assigned.map(call => call.body.number).join(',') === '7,8,8','Successful assignment was repeated')
       ensure(firstCheckbox.checked && secondCheckbox.checked && reviewRuns.length === 0,'Assignment started review or lost selection')
     })
-    await check('batch review remains inline, enumerates exact versions, and starts only after approval', async () => {
+    await check('batch review stays in a nonmodal dock, enumerates exact versions, and starts only after approval', async () => {
       await click(button('Review 2'))
       await until(() => query('.co-pr-confirm'),'No confirmation')
+      ensure(query('.co-pr-confirm').closest('.co-task-dock')?.getAttribute('aria-modal')==='false','Batch review did not use the nonmodal dock')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(query('.co-pr-confirm')).includes('aaaaaaa') && text(query('.co-pr-confirm')).includes('ccccccc'),'Exact heads absent')
       ensure(!query('.co-pr-confirm input').checked && reviewRuns.length === 0,'Private review granted merge')
@@ -401,7 +460,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => button('Open conversation'),'Saved conversation unavailable')
       ensure(calls.status.includes('prepare-1') && calls.starts.length===1,'Restore restarted work')
     })
-    await check('host Back leaves the project once; inline details add no hidden back steps', async () => {
+    await check('host Back leaves the project once; docked details add no hidden back steps', async () => {
       await inventory(); await click(query('.co-pr-open'))
       const before = navigation.length
       window.mobius.nav.back()
@@ -441,6 +500,13 @@ window.runWorkspaceChecks = async () => {
       await showSelection('selection-stale', stale)
       await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed version did not stop approval')
       ensure(!button('Allow review & merge') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
+    })
+    await check('changed base version also invalidates a link without silently advancing it', async () => {
+      await click(button('Back to projects'))
+      const stale = savedSelection('selection-stale-base'); stale.items[0].base_sha = 'd'.repeat(40)
+      await showSelection('selection-stale-base', stale)
+      await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed base did not stop approval')
+      ensure(!button('Allow review & merge') && mutationRequests().length === beforeLink + 1, 'Stale-base link mutated work')
     })
     await check('editing saved selection during confirmation never approves replacement work', async () => {
       await click(button('Back to projects'))
@@ -558,20 +624,21 @@ async function main() {
       const { sessionId } = await protocol.send('Target.attachToTarget', { targetId, flatten: true })
       const inputErrors = []
       const unsubscribeInput = protocol.onEvent(event => {
-        if (event.sessionId !== sessionId || event.method !== 'Runtime.bindingCalled' || event.params.name !== 'workspaceNativeSpace') return
+        if (event.sessionId !== sessionId || event.method !== 'Runtime.bindingCalled' || event.params.name !== 'workspaceNativeKey') return
         void (async () => {
           let error = ''
           try {
-            if (event.params.payload !== 'Space') throw new Error('Unknown native input request')
+            const input = JSON.parse(event.params.payload)
+            if (!['Space','Escape'].includes(input.code)) throw new Error('Unknown native input request')
             for (const type of ['keyDown', 'keyUp']) await protocol.send('Input.dispatchKeyEvent', {
-              type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32,
+              type, key: input.key, code: input.code, windowsVirtualKeyCode: input.keyCode, nativeVirtualKeyCode: input.keyCode,
             }, sessionId)
           } catch (failure) { error = failure.message }
-          await protocol.send('Runtime.evaluate', { expression: `window.finishNativeSpace(${JSON.stringify(error)})` }, sessionId)
+          await protocol.send('Runtime.evaluate', { expression: `window.finishNativeKey(${JSON.stringify(error)})` }, sessionId)
         })().catch(error => inputErrors.push(error.message))
       })
       await protocol.send('Runtime.enable', {}, sessionId)
-      await protocol.send('Runtime.addBinding', { name: 'workspaceNativeSpace' }, sessionId)
+      await protocol.send('Runtime.addBinding', { name: 'workspaceNativeKey' }, sessionId)
       await protocol.send('Network.enable', {}, sessionId)
       await protocol.send('Network.setBlockedURLs', { urls: ['http://*', 'https://*', 'ws://*', 'wss://*'] }, sessionId)
       await protocol.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.name === 'phone' }, sessionId)
