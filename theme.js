@@ -14,7 +14,7 @@ export const CSS = `
   -webkit-tap-highlight-color: transparent;
   /* Caution amber for advisory/attention states that are NOT errors, so real
      failures keep --danger to themselves and nothing benign shouts in red. */
-  --co-warn: #cf9526;
+  --co-warn: var(--warning, #b38235);
 }
 .co-root *, .co-root *::before, .co-root *::after { box-sizing: inherit; }
 .co-visually-hidden {
@@ -23,16 +23,11 @@ export const CSS = `
 }
 /* /mobius-ui:Root */
 
-/* mobius-ui:Scrollskin v2 — keep in sync; hidden by default, content stays scrollable. */
-.co-page {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.co-page::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
+/* mobius-ui:Scrollskin v1 — app-owned copy. */
+.co-page { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.co-page::-webkit-scrollbar { width: 8px; height: 8px; }
+.co-page::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.co-page::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
 /* /mobius-ui:Scrollskin */
 
 /* mobius-ui:Focus v1 — one keyboard-focus ring for every interactive
@@ -631,14 +626,14 @@ export const CSS = `
 /* mobius-ui:Button v1 — app-owned copy; library candidate. */
 .co-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 44px; padding: 10px 16px; border-radius: 10px;
+  min-height: 44px; padding: 8px 14px; border-radius: 7px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   font-family: var(--font); font-size: 14px; font-weight: 500; cursor: pointer;
-  transition: background .14s ease, border-color .14s ease, transform .1s ease;
+  transition: background .14s ease, border-color .14s ease;
 }
-.co-btn:active { transform: scale(0.97); }
+
 .co-btn:disabled { opacity: 0.5; cursor: default; }
-.co-btn-primary { background: var(--accent-hover, var(--accent)); border-color: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
+.co-btn-primary { background: var(--text); border-color: var(--text); color: var(--bg); }
 .co-btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .co-btn-sm { min-height: 44px; padding: 9px 12px; font-size: 14px; }
 .co-btn-block { width: 100%; }
@@ -648,8 +643,8 @@ export const CSS = `
     background: var(--surface2, var(--surface));
   }
   .co-btn-primary:not(:disabled):hover {
-    border-color: color-mix(in srgb, var(--accent-hover, var(--accent)) 90%, var(--text));
-    background: color-mix(in srgb, var(--accent-hover, var(--accent)) 90%, var(--text));
+    border-color: color-mix(in srgb, var(--text) 85%, var(--bg));
+    background: color-mix(in srgb, var(--text) 85%, var(--bg));
   }
   .co-btn-danger:not(:disabled):hover {
     border-color: color-mix(in srgb, var(--danger) 62%, var(--border));

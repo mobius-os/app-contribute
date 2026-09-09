@@ -24,17 +24,16 @@ function SelectionTray({ selection, busy, onClear, onRemove, onInspect, onReview
   return <section hidden={hidden} ref={tray} className={'co-pr-selection' + (expanded ? ' is-expanded' : '')} aria-label="Selected contributions">
     <div className="co-selection-heading">
       <button className="co-selection-toggle" aria-expanded={expanded} aria-controls="co-selected-cards" onClick={() => setExpanded(value => !value)}><span className="co-selection-stack" aria-hidden="true"><Icon name="check" size={18} /></span><strong>{selection.length} selected</strong><Icon name="chevron" size={16} /></button>
+      <div className="co-selection-actions">
+        {selection.every(pr => mayAssign(pr.repository.viewerPermission)) ? <button className="co-btn" disabled={busy || selection.length > 20} onClick={onAssign}>Assign…</button> : null}
+        <button className="co-btn co-btn-primary" disabled={selection.length > 20 || busy} onClick={() => onReview(selection, 'review')}><Icon name="prepare" size={18} />Review {selection.length}</button>
+      </div>
       <button className="co-quiet-action" aria-label="Clear selection" onClick={onClear}><Icon name="close" size={18} /></button>
     </div>
     <div id="co-selected-cards" className="co-selected-cards">{selection.map(pr => <div className="co-selected-card" key={prKey(pr)}>
       <button className="co-selected-open" onClick={() => onInspect(pr)} title={pr.title}><span>#{pr.number}</span><strong>{pr.title}</strong></button>
       <button className="co-selected-remove" aria-label={`Remove PR ${pr.number} from selection`} onClick={() => onRemove(pr)}><Icon name="close" size={16} /></button>
     </div>)}</div>
-    <div className="co-selection-actions">
-      <button className="co-btn co-btn-primary" disabled={selection.length > 20 || busy} onClick={() => onReview(selection, 'review')}><Icon name="prepare" size={18} />Review {selection.length}</button>
-      {selection.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft) ? <button className="co-btn" disabled={selection.length > 20 || busy} onClick={() => onReview(selection, 'review_merge')}>Review & merge</button> : null}
-      {selection.every(pr => mayAssign(pr.repository.viewerPermission)) ? <button className="co-btn" disabled={busy || selection.length > 20} onClick={onAssign}>Assign…</button> : null}
-    </div>
     {selection.length > 20 ? <p role="status">Choose up to 20 PRs per run.</p> : null}
   </section>
 }
@@ -131,16 +130,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const [selectionNotice, setSelectionNotice] = useState('')
   const currentSelection = useRef({ selected, pulls: data.pulls })
   currentSelection.current = { selected, pulls: data.pulls }
-  const pendingInspect = useRef('')
-  useLayoutEffect(() => {
-    if (!pendingInspect.current) return
-    const row = [...document.querySelectorAll('.co-pr-row')].find(node => node.dataset.pr === pendingInspect.current)
-    if (row) {
-      pendingInspect.current = ''
-      row.scrollIntoView({ block: 'center' })
-      row.querySelector('.co-pr-open')?.focus({ preventScroll: true })
-    }
-  }, [opened, filter, query])
+  const [showCounts, setShowCounts] = useState(false)
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -200,6 +190,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const selection = data.pulls.filter(pr => selected.has(prKey(pr)))
   const relevantRuns = runs.filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
   const statusFor = pr => reviewForPull(relevantRuns, pr)
+  const detailPr = data.pulls.find(pr => prKey(pr) === opened)
+  function inspect(pr) { setOpened(prKey(pr)); task?.open('task:detail') }
   function choose(pulls, mode) {
     task?.open('task:review')
     setAssigning(null)
@@ -228,14 +220,13 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     <header><h3>Contributions</h3><span>{data.loading ? 'Checking…' : `${data.total || 0} open PRs`}</span>
       <button className="co-quiet-action" aria-label="Refresh pull requests" disabled={data.loading} onClick={() => { void load(); void loadRuns() }}><Icon name="refresh" size={18} /></button>
     </header>
-    <div className="co-pr-list-controls"><input type="search" aria-label="Find a pull request" placeholder="Find a pull request" value={query} onChange={event => setQuery(event.target.value)} /><label>Show<select aria-label="Filter pull requests" value={filter} onChange={event => setFilter(event.target.value)}>{FILTERS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
-    {selection.length ? <SelectionTray selection={selection} busy={busy} hidden={['task:review', 'task:assign'].includes(task?.activeId)} onClear={() => setSelected(new Set())} onRemove={toggle} onReview={choose} onAssign={() => assignSelection()} onInspect={pr => {
-      pendingInspect.current = prKey(pr)
-      setOpened(prKey(pr)); setFilter('all'); setQuery('')
-      // Reopening an already visible detail need not trigger another render.
-      const row = [...document.querySelectorAll('.co-pr-row')].find(node => node.dataset.pr === prKey(pr))
-      if (row) { pendingInspect.current = ''; row.scrollIntoView({ block: 'center' }); row.querySelector('.co-pr-open')?.focus({ preventScroll: true }) }
-    }} /> : null}
+    <div className="co-pr-list-controls">
+      <div className="co-pr-filters" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>
+      <details className="co-display"><summary><Icon name="settings" size={16} /> Display</summary><label><input type="checkbox" checked={showCounts} onChange={event => setShowCounts(event.target.checked)} /> Show change totals</label></details>
+      <label className="co-pr-search"><Icon name="search" size={18} /><input type="search" aria-label="Find a pull request" placeholder="Search contributions…" value={query} onChange={event => setQuery(event.target.value)} /></label>
+    </div>
+    {selection.length ? <SelectionTray selection={selection} busy={busy} hidden={!!task?.activeId?.startsWith('task:')} onClear={() => setSelected(new Set())} onRemove={toggle} onReview={choose} onAssign={() => assignSelection()} onInspect={inspect} /> : null}
+    <TaskPane id="task:detail">{detailPr ? <><h3>{detailPr.title}</h3><div className="co-detail-stats"><span>#{detailPr.number} · {detailPr.author?.login || 'Contributor'}</span>{Number.isInteger(detailPr.changedFiles) ? <span>{detailPr.changedFiles} files · +{detailPr.additions} −{detailPr.deletions}</span> : null}</div><PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}`} pr={detailPr} token={token} onReview={mode => choose([detailPr], mode)} onAssign={() => assignSelection([detailPr])} onRefresh={() => load()} canMerge={mayMerge(detailPr.repository.viewerPermission) && !detailPr.isDraft} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={records.find(record => record.number === detailPr.number)} onRecord={onRecord} /></> : <p>This contribution is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane>
     <TaskPane id="task:review" dock><ReviewConfirmation choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
     <TaskPane id="task:assign" dock>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       setData(old => ({ ...old, pulls: old.pulls.map(item => keys.includes(prKey(item)) ? { ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } } : item) }))
@@ -251,16 +242,16 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       return <article className={'co-pr-row' + (selected.has(prKey(pr)) ? ' is-selected' : '')} key={prKey(pr)} data-pr={prKey(pr)}>
         <label className="co-pr-select"><input type="checkbox" checked={selected.has(prKey(pr))} onChange={() => toggle(pr)} aria-label={`Select ${pr.repository.nameWithOwner} #${pr.number}`} /></label>
         <div className="co-pr-content">
-          <button className="co-pr-open" aria-expanded={opened === prKey(pr)} onClick={() => setOpened(old => old === prKey(pr) ? '' : prKey(pr))}>
+          <button className="co-pr-open" aria-expanded={task?.activeId === 'task:detail' && opened === prKey(pr)} onClick={() => inspect(pr)}>
             <strong className="co-pr-title">{pr.title}</strong>
-            <span className="co-pr-meta"><span>#{pr.number} · {mine ? 'You' : pr.author?.login || 'Contributor'}</span><DateLabel value={pr.updatedAt} />{Number.isInteger(pr.changedFiles) ? <span>{pr.changedFiles} files · +{pr.additions} −{pr.deletions}</span> : null}</span>
+            <span className="co-pr-meta"><span>#{pr.number} · {mine ? 'You' : pr.author?.login || 'Contributor'}</span><DateLabel value={pr.updatedAt} />{showCounts && Number.isInteger(pr.changedFiles) ? <span>{pr.changedFiles} files · +{pr.additions} −{pr.deletions}</span> : null}</span>
           </button>
         </div>
         <div className="co-pr-side"><span className="co-work-state">{status ? STATE_NAMES[status.item.state] || status.item.state : pr.isDraft ? 'Draft' : 'Ready for review'}</span>
-          {mayAssign(pr.repository.viewerPermission) ? <button className="co-quiet-action" onClick={() => assignSelection([pr])} aria-label={`Assign PR ${pr.number}`}>{pr.assignees?.nodes?.length ? pr.assignees.nodes.map(user => user.login.toLowerCase() === conn.login?.toLowerCase() ? 'You' : user.login).join(', ') : 'Unassigned'}</button> : <span className="co-pr-meta">{pr.assignees?.nodes?.map(user => user.login).join(', ') || 'Unassigned'}</span>}
+          {mayAssign(pr.repository.viewerPermission) ? <button className="co-quiet-action" onClick={() => assignSelection([pr])} aria-label={`Assign PR ${pr.number}`}>{pr.assignees?.nodes?.length ? pr.assignees.nodes.map(user => user.login.toLowerCase() === conn.login?.toLowerCase() ? 'You' : user.login).join(', ') : <Icon name="person" size={18} />}</button> : <span className="co-pr-meta">{pr.assignees?.nodes?.map(user => user.login).join(', ') || 'Unassigned'}</span>}
           {status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown'].includes(status.item.state) ? <button className="co-quiet-action" onClick={() => task?.open(`task:run:${status.run.id}`)}>Needs you</button> : null}
         </div>
-        {opened === prKey(pr) ? <PullRequestDetail key={`${prKey(pr)}:${pr.headRefOid}:${pr.baseRefOid}`} pr={pr} token={token} onReview={mode => choose([pr], mode)} onAssign={() => assignSelection([pr])} onRefresh={() => load()} canMerge={mayMerge(pr.repository.viewerPermission) && !pr.isDraft} canAssign={mayAssign(pr.repository.viewerPermission)} status={status} onProgress={() => task?.open(`task:run:${status.run.id}`)} record={records.find(record => record.number === pr.number)} onRecord={onRecord} /> : null}
+
       </article>
     })}</div>
     {data.hasNextPage ? <button className="co-btn" disabled={data.loading} onClick={() => load(data.endCursor)}>Load more PRs</button> : null}

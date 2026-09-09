@@ -10,6 +10,8 @@ import {
   Settings,
   Sparkle,
   DotsHorizontal,
+  UserAdd,
+  Search,
   Trash,
   X,
 } from '@openai/apps-sdk-ui/components/Icon'
@@ -27,6 +29,8 @@ const SDK_ICONS = {
   info: InfoCircle,
   settings: Settings,
   more: DotsHorizontal,
+  person: UserAdd,
+  search: Search,
 }
 
 const PATHS = {

@@ -281,7 +281,7 @@ export function SourceMap({
 
   function openWork(itemId) {
     if (!itemId || itemId === selectedWorkId) return
-    workTriggerRef.current = document.activeElement
+    if (!document.activeElement?.closest('.co-task-content')) workTriggerRef.current = document.activeElement
     setSelectedWorkId(itemId)
   }
   const activityNavigation = { selectedId: selectedWorkId, onSelect: openWork, onBack: closeWork }
