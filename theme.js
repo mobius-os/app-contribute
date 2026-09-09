@@ -625,7 +625,7 @@ export const CSS = `
 
 /* mobius-ui:Button v1 — app-owned copy; library candidate. */
 .co-btn {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; gap:6px;
   min-height: 44px; padding: 8px 14px; border-radius: 7px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   font-family: var(--font); font-size: 14px; font-weight: 500; cursor: pointer;

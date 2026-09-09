@@ -1,5 +1,6 @@
 // Approved continuous project workspace. Theme remains owned by the shell.
 export const WORKSPACE_CSS = `
+.co-header-shell { width:100%; max-width:none; }
 .co-header { width:100%; max-width:1108px; padding:14px 44px; border-bottom:0; }
 .co-page.is-sources { width:100%; max-width:none; padding:0; overflow:auto; }
 .co-projects-view { width:100%; max-width:1108px; margin:auto; padding:24px 44px 80px; }
@@ -70,7 +71,7 @@ export const WORKSPACE_CSS = `
 .co-pr-list-controls label,.co-directory-filter { display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); }
 /* Non-modal selection shelf; fixed only within this mini-app iframe. */
 .co-page.is-sources { padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); scroll-padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); }
-.co-workspace .co-pr-selection,.co-workspace .co-task-dock { inset-inline:auto 24px; width:min(640px,calc(100% - 48px)); margin:0; padding:26px; max-height:72dvh; overflow:auto; overscroll-behavior:contain; border-radius:14px; }
+.co-workspace .co-pr-selection,.co-workspace .co-task-dock { position:fixed; inset:auto 24px max(16px,env(safe-area-inset-bottom)); width:calc(100% - 48px); max-width:800px; margin:0 auto; z-index:20; background:var(--surface); border:0; border-radius:13px; box-shadow:0 12px 48px color-mix(in srgb,var(--text) 16%,transparent); }
 .co-workspace .co-pr-selection { display:block; padding:9px 13px; }
 .co-workspace .co-pr-selection[hidden] { display:none; }
 .co-selection-heading { display:flex; align-items:center; gap:8px; }
@@ -93,7 +94,7 @@ export const WORKSPACE_CSS = `
 .co-selection-actions { display:flex; gap:8px; }
 .co-selection-actions .co-btn { font-size:14px; padding-inline:12px; }
 
-.co-workspace .co-task-dock { padding:24px; max-height:72dvh; overflow:auto; overscroll-behavior:contain; }
+.co-workspace .co-task-dock { inset-inline:auto 24px; width:min(640px,calc(100% - 48px)); margin:0; border-radius:14px; padding:26px; max-height:72dvh; overflow:auto; overscroll-behavior:contain; }
 .co-task-dock .co-inline-close { position:sticky; top:0; float:right; margin:-12px -10px 0 12px; background:var(--surface); z-index:1; }
 .co-workspace .co-btn { border-radius:7px; }
 .co-workspace .co-btn:not(.co-btn-primary):hover:not(:disabled) { background:var(--surface2); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); }
@@ -151,14 +152,20 @@ export const WORKSPACE_CSS = `
 .co-scope-row span { font-size:14px; color:var(--muted); grid-column:1; }
 .co-scope-row .co-icon { grid-column:2; grid-row:1 / 3; align-self:center; }
 .co-section-count { color:var(--muted); font-weight:400; font-size:14px; margin-left:6px; }
-.co-workspace .co-run-list { border:0; border-radius:0; }
-.co-workspace .co-run-row { background:none; border-bottom:1px solid var(--border); }
+.co-workspace .co-run-list { border:0; border-radius:0; background:none; }
+.co-workspace .co-run-row { background:none; border-bottom:1px solid var(--border); padding:12px 0; }
+.co-workspace .co-run-row-main { grid-template-columns:minmax(0,1fr) 14px; }
+.co-workspace .co-run-row-icon { display:none; }
+.co-workspace .co-run-row-main strong { font-size:15px; font-weight:500; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.co-workspace .co-run-row-main small { white-space:normal; }
+.co-workspace .co-run-row-action { min-height:44px; border-radius:7px; font-weight:500; }
+.co-workspace .co-run-fold { background:none; }
 .co-directory { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:16px; }
 .co-directory .co-project-search { margin:0; }
 .co-directory > :not(.co-project-search):not(.co-directory-filter) { grid-column:1/-1; }
 .co-directory-filter select { max-width:190px; }
 .co-pr-filters { display:flex; flex-wrap:wrap; gap:4px; margin-right:auto; }
-.co-pr-filters button { min-height:44px; padding:8px 10px; border:0; border-radius:7px; background:none; color:var(--muted); font:500 14px var(--font); cursor:pointer; }
+.co-pr-filters button { min-height:44px; padding:8px 10px; border:0; border-radius:7px; background:none; color:var(--muted); font:500 14px var(--font); text-decoration:none; cursor:pointer; }
 .co-pr-filters button[aria-pressed=true],.co-pr-filters button:hover { background:var(--surface2); color:var(--text); }
 .co-display { position:relative; }
 .co-display > summary { display:flex; align-items:center; gap:6px; color:var(--muted); cursor:pointer; font-size:14px; }
