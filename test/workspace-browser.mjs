@@ -352,7 +352,8 @@ window.runWorkspaceChecks = async () => {
       ensure(mutationRequests().length===0,'Cancel submitted a workflow')
     })
     await check('individual PR detail leads with Description and retains review and merge choices', async () => {
-      await click(document.querySelectorAll('.co-pr-open')[1])
+      const title=document.querySelectorAll('.co-pr-open')[1]
+      title.focus(); await click(title)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Opening detail replaced batch selection')
       ensure(!query('.co-file-disclosure') && !calls.requests.some(call => call.url.includes('/files?')),'Diff loaded by default')
@@ -381,7 +382,7 @@ window.runWorkspaceChecks = async () => {
       ensure(mutationRequests().length===0,'Changing individual review mode mutated GitHub')
       await click(button('Cancel',query('.co-task-dock')))
       await until(() => !query('.co-task-dock'),'Individual review did not close')
-      ensure(document.activeElement===title,`Closing individual review did not return focus to its row trigger (focused ${document.activeElement?.className || document.activeElement?.tagName}: ${text(document.activeElement)})`)
+      ensure(document.activeElement===title,'Closing individual review did not return focus to its row trigger (focused '+(document.activeElement?.className || document.activeElement?.tagName)+': '+text(document.activeElement)+')')
     })
     await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
       const scrollBefore=query('.co-page').scrollTop
