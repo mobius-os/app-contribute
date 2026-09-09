@@ -247,22 +247,26 @@ export function normalizeCycleState(raw) {
     chat_id: chatId.slice(0, 128),
     started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
     scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 128) : '',
+    ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
+    ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
   }
 }
 
-export async function loadCycleState() {
+function cycleKey(projectKey) { return projectKey ? `project-cycles/${encodeURIComponent(projectKey)}.json` : CYCLE_STATE }
+
+export async function loadCycleState(projectKey) {
   try {
-    return normalizeCycleState(await window.mobius.storage.get(CYCLE_STATE))
+    return normalizeCycleState(await window.mobius.storage.get(cycleKey(projectKey)))
   } catch {
     return null
   }
 }
 
-export async function saveCycleState(state) {
+export async function saveCycleState(state, projectKey) {
   const normalized = normalizeCycleState(state)
   if (!normalized) return false
   try {
-    await window.mobius.storage.set(CYCLE_STATE, {
+    await window.mobius.storage.set(cycleKey(projectKey), {
       schema: 1,
       ...normalized,
     })
@@ -282,7 +286,7 @@ export async function clearCycleState() {
 }
 
 const SETTINGS_FILE = 'settings.json'
-const DEFAULT_APP_SETTINGS = Object.freeze({ autopilot_default: true })
+const DEFAULT_APP_SETTINGS = Object.freeze({ autopilot_default: true, submission_method: 'mobius' })
 
 export function normalizeAppSettings(raw) {
   return raw && typeof raw === 'object'

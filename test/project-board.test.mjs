@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { attachSourceProjects, projectBoardFacts, recordsForProject } from '../source-map.js'
+import { contributionActionScope, contributionCycleAction, projectUpdateAction, organizePrivateWorkAction } from '../review.js'
+import { normalizeCycleState, normalizeAppSettings } from '../storage.js'
+import { frontendModules, renderModule } from './render-harness.mjs'
+
+const project = {
+  key: 'app:80', kind: 'app', name: 'Contribute', available: true,
+  viewerPermission: 'MAINTAIN', canonical_repo: 'mobius-os/app-contribute', head_sha: 'local', base_sha: 'accepted',
+  origin: { sha: 'accepted' }, localFiles: 2, workingFiles: 0,
+}
+
+test('new contribution settings default to Möbius without replacing a saved GitHub choice', () => {
+  assert.equal(normalizeAppSettings(null).submission_method, 'mobius')
+  assert.equal(normalizeAppSettings({ autopilot_default: false }).submission_method, 'mobius')
+  assert.equal(normalizeAppSettings({ submission_method: 'github' }).submission_method, 'github')
+})
+
+test('project facts never equate published review work with accepted or only-local work', () => {
+  const facts = projectBoardFacts({ ...project, contributions: [
+    { status: 'prepared' }, { status: 'open' }, { status: 'draft' }, { status: 'merged' },
+  ] })
+  assert.equal(facts.work, '2 files with local changes · 1 prepared · not shared · 2 shared for review')
+  assert.equal(facts.shared, 'No newer changes in last check')
+  assert.doesNotMatch(facts.shared, /Up to date|latest|linear/)
+})
+
+test('unknown comparison and installed baseline are not an online all-clear', () => {
+  assert.equal(projectBoardFacts({ ...project, origin: null }).shared, 'Compared with installed version')
+  assert.equal(projectBoardFacts({ ...project, origin: null, base_sha: null }).shared, 'Shared version not checked')
+  assert.equal(projectBoardFacts({ ...project, sourceComparisonRequired: true }).shared, 'Versions need comparing')
+  assert.equal(projectBoardFacts({ ...project, incomingFiles: 2 }).shared, 'Shared changes available')
+  assert.equal(projectBoardFacts({ ...project, conflictFiles: 1 }).shared, 'Update needs help')
+})
+
+test('local-only apps and missing source remain explicit, not false sync success', () => {
+  assert.equal(projectBoardFacts({ ...project, builtHere: true, canonical_repo: null }).shared, 'No shared version yet')
+  assert.equal(projectBoardFacts({ ...project, available: false }).shared, 'Local source unavailable')
+  assert.match(projectBoardFacts({ kind: 'external' }).work, /not checked/)
+})
+
+test('project scope includes its complete records and never another repository', () => {
+  const records = [
+    { id: 'a', repo: project.canonical_repo, plan: { stack: { id: 'stack', position: 1 } } },
+    { id: 'b', plan: { repo: project.canonical_repo.toUpperCase(), stack: { id: 'stack', position: 2 } } },
+    { id: 'other', repo: 'owner/other' },
+  ]
+  assert.deepEqual(recordsForProject(records, project).map(rec => rec.id), ['a', 'b'])
+  assert.deepEqual(recordsForProject(records, { key: 'private' }), [])
+  assert.equal(recordsForProject(records, null), records)
+})
+
+test('getting up to date preserves the reviewed update path and gives no public authority', () => {
+  const action = projectUpdateAction([project, { ...project, key: 'private', canonical_repo: null }], 'click-one')
+  assert.equal(action.count, 1)
+  assert.match(action.draft, /app:80; shared repository mobius-os\/app-contribute/)
+  assert.match(action.draft, /candidate in isolation/)
+  assert.match(action.draft, /Never reset, rebase, switch/)
+  assert.match(action.draft, /ask separately immediately before a server restart/)
+  assert.match(action.draft, /does not authorize preparing or publishing/)
+  assert.notEqual(contributionActionScope(action), contributionActionScope(projectUpdateAction([project], 'click-two')))
+  assert.equal(projectUpdateAction([{ ...project, kind: 'external' }], 'click'), null)
+})
+
+test('preparation names exact project scope and groups by coherent code rather than chat', () => {
+  const action = organizePrivateWorkAction([], { byId: {} }, [project])
+  assert.match(action.draft, /\[app:80; mobius-os\/app-contribute\]/)
+  assert.match(action.draft, /not one pull request per chat/)
+  assert.match(action.draft, /blocked group must not hold up unrelated ready work/)
+  assert.match(action.draft, /Do not push, publish/)
+})
+
+test('the saved work title survives reopening without changing the legacy cycle shape', () => {
+  assert.equal(normalizeCycleState({ chat_id: 'work', title: 'Get Contribute up to date' }).title, 'Get Contribute up to date')
+  assert.equal(normalizeCycleState({ chat_id: 'work' }).title, undefined)
+})
+
+test('project controls keep preparation and updating direct without a competing merge button', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { render } = await renderModule(`
+    import React from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { ProjectControls } from './ui/ProjectControls.jsx'
+    export function render(props) { return renderToStaticMarkup(React.createElement(ProjectControls, props)) }
+  `)
+  const props = {
+    projects: [project], project,
+    run: { decisions: [{ kind: 'publish' }], working: [], privateAction: { title: 'Prepare', draft: 'Prepare privately' } },
+    cycle: { phase: 'idle' }, onStart: () => {}, onReviews: () => {},
+  }
+  props.mergeRun = props.run
+  const html = render(props)
+  assert.match(html, /Actions for Contribute/)
+  assert.match(html, /Prepare changes/)
+  assert.match(html, /Get up to date/)
+  assert.doesNotMatch(html, /Prepare &amp; merge|Prepare all|Update all/)
+  assert.doesNotMatch(html, /More actions|View reviews/)
+  assert.match(html, /Options &amp; process/)
+  assert.doesNotMatch(html, /<details[^>]* open/)
+  const loading = render({ ...props, loading: true })
+  assert.match(loading, /disabled=""/)
+})
+
+test('incoming community reviews and historical replies remain within a discoverable project', () => {
+  const incoming = { number: 7, url: 'https://github.com/community/work/pull/7', repository: { nameWithOwner: 'Community/Work' } }
+  const projects = attachSourceProjects(null, [{ id: 'reply', type: 'issue_comment', status: 'commented', repo: 'other/project' }], [incoming])
+  assert.equal(projects.find(p => p.canonical_repo === 'community/work').incomingReviews[0], incoming)
+  assert.ok(projects.find(p => p.canonical_repo === 'other/project'))
+  assert.equal(projects.find(p => p.canonical_repo === 'community/work').attention, true)
+})
+
+test('full cycle remains available for public-only work without inventing publication approval', () => {
+  const run = { revision: 'reviewed', privateAction: null, decisions: [], working: [{ id: 'public:1' }] }
+  const action = contributionCycleAction(run, [project])
+  assert.match(action.draft, /only these projects/)
+  assert.match(action.draft, /repository mobius-os\/app-contribute/)
+  assert.match(action.draft, /group coherent changes within each repository/)
+  assert.match(action.draft, /does not pre-authorize any public action/)
+  assert.equal(contributionCycleAction({ decisions: [], working: [] }, [project]), null)
+})

@@ -64,7 +64,7 @@ export function runUnitKey(value) {
 }
 
 function recordTitle(record) {
-  return record?.plan?.title || record?.title || record?.summary || 'Untitled contribution'
+  return record?.summary || record?.plan?.title || record?.title || 'Untitled contribution'
 }
 
 function recordRepo(record) {

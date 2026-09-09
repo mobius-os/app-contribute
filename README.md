@@ -1,7 +1,7 @@
 # app-contribute — Contribute
 
-See what your agent has proposed upstream — pull requests, issues, and
-comments across the Möbius ecosystem, from prepared to merged.
+See your project changes, prepare them privately, and follow shared reviews
+through acceptance and local updates.
 
 A [Möbius](https://github.com/mobius-os) catalog mini-app. Install it from
 the in-app App Store.
@@ -13,29 +13,54 @@ a bug or adds a feature, it can offer to share that change upstream so it
 ships to every Möbius user — but only with your explicit go-ahead on each
 contribution. This app is the dashboard for that loop:
 
-- **Opening summary** — only projects with something useful to notice appear:
-  local edits, committed source differences, shared updates, conflicts, unusual
-  branches, or apps built only on this Möbius. Aligned projects stay quiet.
-  Selecting a row opens that project's full position and file detail.
-- **Repository map** — a fetch-free map of the platform and every installed app.
-  Each project keeps two relationships separate: the recorded update source
-  versus your live `main`, and the ready/open contribution branches attached
-  to that project. Tree-delta counts avoid treating installation bookkeeping
-  commits as source changes; staged, unstaged, untracked, and conflicted files
-  are shown independently. Filters surface attention, different trees, working
-  files, active PRs, or aligned projects. Origin, local main, configured forks,
-  and chained PR branches form one visual topology; installer-managed changes
-  are separated from authored differences. Active PRs for an uninstalled source
-  remain visible as contribution-only repositories; issues and comments stay
-  in the contribution feed rather than being mislabeled as PR branches. Apps
-  built locally without a GitHub source sit in a separate **Built here** group
-  at the bottom.
-- **Agent handoffs** — project detail can open a new chat already drafted for
-  the situation: prepare local changes for review, explain an available update,
-  resolve a two-sided change safely, or publish a locally built app. Publishing
-  prompts explicitly ask the agent to confirm the repository name and visibility
-  before creating or pushing anything public.
-- **Activity overview** — Merged / Open / Ready in one compact strip.
+- **One project workspace** — local changes, prepared work, incoming review
+  requests, public progress, questions and history belong to their project.
+  There is no separate Reviews destination. All projects, Local changes and
+  Updates filter the same searchable overview.
+- **Task-first controls** — open a project to see its work list beside one
+  contextual task, with a compact project switcher rather than another sidebar. **Prepare changes** is the main action; **Get up to date**
+  stays visible in the project header. A permitted maintainer can choose
+  **Continue through merge** without granting unknown future public actions.
+  Preparation stays private, and updates use the reviewed adapter rather than
+  blindly rebasing the live checkout. On phones, a task takes the screen and
+  **Back to project** restores the same inventory.
+- **Choose scope** — prepare all local work in a project, or find a source
+  conversation and continue in its existing **Changes** view. This metadata
+  picker requires the companion platform source-chats route; older runtimes
+  show an actionable error and leave project preparation available.
+- **Exact batches** — ready work can be inspected and approved together within
+  one project. Sending is not merging; stale heads and incomplete stacks
+  keep the existing guarded boundaries. Questions appear before optional work
+  inventories, with source and review conversation links available in detail.
+- **Deliberate project membership** — GitHub access alone does not add a project.
+  Local projects form the main list. Use **Add repository** to follow another
+  GitHub project; existing external contributions and incoming requests remain
+  discoverable under **Other repositories**, including when offline.
+- **One approval, either surface** — agents normally give an exact approval link
+  into Contribute. Explicit approval in the owning chat uses the same guarded
+  review-run path without a duplicate click. Opening a link is never consent;
+  stale versions, lost merge receipts, permissions and repository protections
+  still gate public actions. Chat consent requires the companion backend update.
+- **Honest shared status** — local work and shared-version status are visible,
+  not hidden inside file details. Ordinary refresh reads recorded source facts;
+  it does not fetch online or certify linear history. Missing source does not
+  hide saved contributions. Community review requests and historical replies
+  remain discoverable even for repositories not installed here.
+- **Möbius by default** — new users can prepare for supported Möbius projects
+  without a personal GitHub connection. GitHub adds personal control and
+  community collaboration beyond mobius-os. Account setup lives in one compact
+  settings panel. Connecting GitHub does not silently switch a saved sending
+  preference. Settings never prepare or publish changes.
+- **PR workflows** — each project shows all open PRs, with All, Unassigned,
+  Assigned to me and My PRs filters. Select individual PRs or a batch for
+  private Review or exact-version Review & merge. Independent reviews run in
+  parallel through existing agent delegation; questions stay in their review
+  conversation. Assignment uses GitHub's shared, additive assignee list.
+  Repo permissions control assignment/merge; admins manage access on GitHub.
+  The companion platform review-runs backend must be activated before actions
+  can start. No browser or agent-writable ledger can grant itself merge access.
+  Changed versions stop, normal repository protections still apply, and queued
+  work remains queued until GitHub confirms a merge.
 - **GitHub account menu** — connect GitHub right here with the GitHub **device
   flow**: tap Connect, then enter the one-time code at
   github.com/login/device. Full PR access is the default so reviewed workflow
@@ -47,8 +72,9 @@ contribution. This app is the dashboard for that loop:
   account and settings live in the top toolbar, while the Projects row reserves
   its space and reports its own refresh instead of making counts pop into the
   layout.
-- **Feed**, grouped:
-  - **Ready for review** — staged and waiting on your go-ahead. Each card
+- **Work list**, grouped:
+  - **Needs you** — actual blockers and questions, linked to their owning work.
+  - **Prepared · not shared** — private drafts waiting on your go-ahead. Each card
     shows high-level review context first: repo, branch, diff stat, summary,
     and the Möbius Agent co-author tag. Open the card to review exactly what
     would go public: the action ("New PR to…", "Comment on…"), the full
@@ -91,9 +117,10 @@ contribution. This app is the dashboard for that loop:
     Contribute re-reads the durable ledger before reporting failure or offering
     another send, so a PR that GitHub already accepted is recovered instead of
     shown as a raw network error.
-  - **Open** — PRs and issues live on GitHub, plus anything the agent is
-    submitting right now. State is refreshed on open; the daily background job
-    also checks for comments, reviews, and failing checks that need follow-up.
+  - **Contributions** — live PRs with shared responsibility and review status.
+    Saved public records remain visible if GitHub is unavailable; a row is
+    consolidated only when the live inventory represents every PR in its unit.
+    The scheduled job also checks for activity that needs follow-up.
   - **History** — merged, closed, commented, and abandoned, collapsed by
     default so active work remains the focus.
 
@@ -252,3 +279,38 @@ untrusted, and escalates rather than guessing.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+
+### Project-first controls
+
+The overview is now navigation only. Open one project for Prepare changes,
+reviewing PRs, Get up to date and its exact publication approvals. Select one or
+more PRs to Review or Assign; merge is an explicit option in review, conditional
+on repository permissions and the unchanged exact-version server grant.
+Preparation offers continuation toward merge without granting future unknown
+public actions. GitHub owns shared assignees/access; project admins have a
+People & access link. Partial batch assignments report each failed PR.
+
+Contract review: this simplifies presentation at the app-owned boundary, reuses
+existing action owners, and adds no alternate public authority or merge path.
+
+## Workspace checks
+
+Run the local unit, rendering and Python contracts:
+
+```bash
+MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules npm test
+```
+
+Run the real Chromium interaction fixture:
+
+```bash
+MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules npm run test:browser
+```
+
+The browser fixture uses the real workspace components with disposable local
+data and mocked requests, chat actions and publication. It checks desktop and
+phone journeys without GitHub writes or agent starts. It requires an installed
+Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
+cleans up its temporary profile. Live permission, activation and source-chat
+navigation checks are separate; passing this fixture is not a public merge.

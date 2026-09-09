@@ -16,19 +16,25 @@ Move changes from local work into private review, public collaboration, and safe
 
 ## Positioning
 
-A contribution run, not a Git client or project tracker. It gathers the work
-that belongs together, handles private preparation quietly, and brings back
-only the decisions the owner must make.
+A project control board, not a Git client. See what remains local, what is
+shared for review, and whether shared updates have been checked. Choose one project, then prepare or review its work; approve exact public actions when ready.
 
 ## Operating Context
 
-The common journey begins in the chat where work happened. One trusted action
-prepares and reviews that work without making the owner leave the conversation.
-Independent overlaps may run in attached background helpers, but their progress
-and result return to the source chat. Contribute shows the same cross-project
-run as one snapshot: decisions first, work already moving second, and recent
-outcomes last. Projects are a filter and inspection aid, never a prerequisite
-for acting.
+Changes still begin in their source chats. Chat-specific preparation remains
+there; Contribute is the cross-chat project overview. Current code establishes
+what needs preparation; chat diffs are provenance, not a second source tree.
+
+The landing view is a searchable project index, without global mutation controls. Each project shows
+local/private/public work and its last-known shared-version relationship.
+Selecting a project keeps those facts and scoped controls visible, with its
+questions, ready batch, incoming requests, progress and history underneath.
+A contribution opens within that project; Back and Forward preserve the same
+project and contribution. No separate Reviews room or second ledger exists.
+
+Main controls must not disappear into catch-all overflow menus. Simplicity
+means fewer steps and clearer information, not smaller type or hidden project
+position. Agent work progresses in place; only actual questions need the owner.
 
 ## Capabilities and Constraints
 
@@ -62,11 +68,11 @@ Live local project status, private contribution records and stored diffs, and co
 
 1. Lead with the next action.
 2. Never overstate certainty.
-3. Group the current run by decision; use projects only to orient or filter.
+3. Lead with project position; group the same review run by decision within the selected scope.
 4. Make detail and diffs immediate once an item is selected.
 5. Keep one deliberate owner checkpoint for public actions.
 6. Let the source chat start and complete its work, Changes preserve that
-   lifecycle, and Contribute project the cross-project run without inventing a
+   lifecycle, and Contribute project the project-scoped run without inventing a
    second workflow.
 7. Automate facts; reserve agent work for intent, grouping, review, and repair.
 8. Completed intent disappears; failures continue automatically unless a real

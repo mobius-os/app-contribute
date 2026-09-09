@@ -12,6 +12,7 @@ function renderMarkdown(markdown) {
 
 export function MarkdownView({ markdown }) {
   const html = useMemo(() => {
+    if (typeof DOMPurify.sanitize !== 'function') return null
     try {
       return renderMarkdown(markdown)
     } catch {
@@ -37,6 +38,8 @@ export function MarkdownView({ markdown }) {
     }
     event.preventDefault()
   }
+
+  if (html === null) return <div className="co-markdown">{String(markdown || '')}</div>
 
   return (
     <div

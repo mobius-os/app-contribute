@@ -67,7 +67,7 @@ export function activeContribution(rec) {
   return !!rec && (action === 'pr' || action === 'issue') && ACTIVE.has(rec.status)
 }
 
-export function attachSourceProjects(snapshot, records) {
+export function attachSourceProjects(snapshot, records, incomingReviews = [], repositories = [], followedRepositories = []) {
   const base = []
   if (snapshot?.platform) base.push(snapshot.platform)
   if (Array.isArray(snapshot?.apps)) {
@@ -89,6 +89,22 @@ export function attachSourceProjects(snapshot, records) {
     const bucket = byRepo.get(key) || []
     bucket.push(rec)
     byRepo.set(key, bucket)
+  }
+
+  for (const record of records || []) {
+    const key = repoKey(record.repo || record.plan?.repo)
+    if (key && !byRepo.has(key)) byRepo.set(key, [])
+  }
+  for (const incoming of incomingReviews) {
+    const key = repoKey(incoming.repository?.nameWithOwner)
+    if (key && !byRepo.has(key)) byRepo.set(key, [])
+  }
+
+  // Access supplies permissions, not project membership. Other repositories
+  // enter this workspace only by explicit choice or actual contribution work.
+  for (const repository of followedRepositories) {
+    const key = repoKey(repository)
+    if (key && !byRepo.has(key)) byRepo.set(key, [])
   }
 
   const seen = new Set()
@@ -116,6 +132,15 @@ export function attachSourceProjects(snapshot, records) {
     }, contributions))
   }
 
+  for (const project of projects) {
+    project.viewerPermission = repositories.find(repository =>
+      repoKey(repository.nameWithOwner) === repoKey(project.canonical_repo))?.viewerPermission
+      || incomingReviews.find(item => repoKey(item.repository?.nameWithOwner) === repoKey(project.canonical_repo))?.repository?.viewerPermission
+      || null
+    project.incomingReviews = incomingReviews.filter(item =>
+      repoKey(item.repository?.nameWithOwner) === repoKey(project.canonical_repo))
+    if (project.incomingReviews.length) project.attention = true
+  }
   return projects.sort((a, b) => {
     const aBuiltHere = a.builtHere
     const bBuiltHere = b.builtHere
@@ -172,6 +197,40 @@ export function projectReadyToPrepare(project) {
 
 export function projectNeedsSorting(project) {
   return projectPreparationState(project) === 'sorting'
+}
+
+// A source relationship and a publication state answer different questions.
+// Keep last-fetched evidence explicit: zero behind is not an online freshness
+// check, and neither commit counts nor file counts prove publication coverage.
+export function projectBoardFacts(project) {
+  const local = Number(project.localFiles || 0) + Number(project.compatibleFiles || 0) + Number(project.conflictFiles || 0)
+  const reviews = project.contributions || []
+  const publicReviews = reviews.filter(rec => ['draft', 'open', 'landing'].includes(rec.status)).length
+  const prepared = reviews.filter(rec => rec.status === 'prepared').length
+  const work = []
+  if (project.builtHere) work.push('Only on your Möbius')
+  else if (local > 0) work.push(`${fileCount(local)} with local changes`)
+  if (project.workingFiles > 0) work.push(`${fileCount(project.workingFiles)} being edited`)
+  if (prepared > 0) work.push(`${prepared} prepared · not shared`)
+  if (publicReviews > 0) work.push(`${publicReviews} shared for review`)
+  if (!work.length) work.push(project.available ? 'No unprepared changes found' : 'Local changes not checked')
+
+  let shared = 'Shared version not checked'
+  if (project.builtHere || !project.canonical_repo) shared = 'No shared version yet'
+  else if (project.kind === 'external') shared = 'Not installed here'
+  else if (!project.available) shared = 'Local source unavailable'
+  else if (project.conflictFiles > 0 || project.state === 'conflict') shared = 'Update needs help'
+  else if (project.incomingFiles > 0 || project.originBehind > 0) shared = 'Shared changes available'
+  else if (project.sourceComparisonRequired) shared = 'Versions need comparing'
+  else if (project.origin?.sha) shared = 'No newer changes in last check'
+  else if (project.base_sha) shared = 'Compared with installed version'
+  return { work: work.join(' · '), shared, publicReviews, prepared }
+}
+
+export function recordsForProject(records, project) {
+  if (!project) return records || []
+  const repo = repoKey(project.canonical_repo)
+  return repo ? (records || []).filter(rec => repoKey(rec.repo || rec.plan?.repo) === repo) : []
 }
 
 // The app-owned task scope must move when the represented source moves. Keep
