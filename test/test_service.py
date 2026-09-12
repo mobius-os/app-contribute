@@ -66,3 +66,19 @@ def test_changed_target_or_stale_review_is_not_eligible():
   stale = fixture()
   stale["record"]["quality_review"]["reviewed_at"] = "2026-09-12T09:59:59Z"
   assert call(stale) is False
+
+
+def test_only_a_clear_unattended_open_record_is_eligible():
+  cases = [
+    ("review state", ("quality_review", "state"), "reviewing"),
+    ("attention flag", ("needs_attention",), True),
+    ("attention detail", ("attention",), {"reason": "review"}),
+    ("terminal status", ("status",), "merged"),
+  ]
+  for label, path, value in cases:
+    body = fixture()
+    target = body["record"]
+    for key in path[:-1]:
+      target = target[key]
+    target[path[-1]] = value
+    assert call(body) is False, label

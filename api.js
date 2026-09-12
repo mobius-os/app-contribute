@@ -248,12 +248,12 @@ export async function assignIncomingReview({ appId, token, repo, number }) {
 // server-approved retry delay.
 export function connectStart(
   token,
-  { workflow = true, privateRepos = false, signal, timeoutMs = 45000 } = {},
+  { privateRepos = false, signal, timeoutMs = 45000 } = {},
 ) {
   return fetchWithDeadline('/api/github/connect/start', {
     method: 'POST',
     headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow, private_repos: privateRepos }),
+    body: JSON.stringify({ private_repos: privateRepos }),
     signal,
   }, timeoutMs)
 }
