@@ -38,7 +38,7 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   return <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     {local ? <>
       <div className="co-local-overview">
-        <div><strong>{project.builtHere ? 'Only on your Möbius' : changedFiles ? `${changedFiles} changed ${changedFiles === 1 ? 'file' : 'files'}` : 'No local changes'}</strong>
+        <div><strong>{project.builtHere ? 'Only on your Möbius' : changedFiles ? `${changedFiles} local ${changedFiles === 1 ? 'file' : 'files'}` : 'No local changes'}</strong>
           <p>{project.workingFiles ? `${project.workingFiles} ${project.workingFiles === 1 ? 'file is' : 'files are'} still being edited. ` : ''}{changedFiles ? 'Private until you prepare and approve sharing.' : 'Nothing new needs preparing.'}</p>
           <button type="button" className="co-quiet-action co-local-files" onClick={() => task?.open('task:files')}>{changedFiles ? 'Review changed files' : 'Review versions'} <Icon name="right" size={15} /></button>
         </div>
@@ -51,7 +51,7 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
       <h3>Prepare changes</h3>
       <p>Turn your local work into a clear proposal for private review.</p>
       {checking ? <p role="status">Checking existing work…</p> : null}
-      {local ? <button type="button" className="co-prepare-scope" onClick={() => task?.open('task:scope')}><span><small>Includes</small><strong>{changedFiles ? `${changedFiles} changed ${changedFiles === 1 ? 'file' : 'files'}` : 'All local changes'}</strong></span><Icon name="right" size={16} /></button> : null}
+      {local ? <button type="button" className="co-prepare-scope" onClick={() => task?.open('task:scope')}><span><small>Includes</small><strong>{changedFiles ? `${changedFiles} local ${changedFiles === 1 ? 'file' : 'files'}` : 'All local changes'}</strong></span><Icon name="right" size={16} /></button> : null}
       {fullCycle ? <label className={'co-follow-merge' + (merge ? ' is-selected' : '')}><input type="checkbox" checked={merge} onChange={event => setMerge(event.target.checked)} /><span><strong>Follow through to merge</strong><small>Keep the agent with this change through review. You still approve sharing and merging.</small></span></label> : null}
       {progress || <>
         <button type="button" className="co-btn co-btn-primary co-task-primary" disabled={loading || checking || active || !run?.privateAction} onClick={() => start(merge && fullCycle ? fullCycle : run.privateAction)}><Icon name="prepare" size={18} /> {merge && fullCycle ? 'Prepare and follow' : 'Prepare changes'}</button>

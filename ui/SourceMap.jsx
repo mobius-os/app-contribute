@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
+  projectHasSharedUpdates,
   projectNeedsSorting,
   projectReadyToPrepare,
   projectBoardFacts,
-  sourcePathRelationship,
 } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
+import { parseUnifiedDiff } from './diff/parseUnifiedDiff.js'
 import { TaskContext, TaskPane } from './TaskPane.jsx'
 
 const FILTERS = [
@@ -21,7 +22,7 @@ function projectMatchesJourney(project, filter) {
     projectReadyToPrepare(project)
     || projectNeedsSorting(project)
   )
-  if (filter === 'updates') return project.incomingFiles > 0 || project.originBehind > 0 || project.sourceComparisonRequired || project.conflictFiles > 0
+  if (filter === 'updates') return projectHasSharedUpdates(project) || project.sourceComparisonRequired || project.conflictFiles > 0
   return true
 }
 
@@ -56,91 +57,55 @@ function ProjectGlyph({ project }) {
   return <ProjectIcon project={project} className="co-source-glyph" />
 }
 
-function fileStateLabel(group) {
-  if (group === 'conflict') return 'Conflict'
-  if (group === 'untracked') return 'New'
-  if (group === 'staged') return 'Staged'
-  if (group === 'local') return 'Local'
-  if (group === 'incoming') return 'Incoming'
-  if (group === 'compatible') return 'Both · combines'
-  if (group === 'changed') return 'Differs'
-  return 'Editing'
-}
-
-function projectFileRows(project) {
-  const files = new Map()
-  for (const file of project.comparisonTree?.paths || []) {
-    if (file.group !== 'managed') files.set(file.path, { ...file })
-  }
-  for (const file of project.working?.paths || []) {
-    files.set(file.path, { ...(files.get(file.path) || {}), ...file, working: true })
-  }
-  return [...files.values()].sort((a, b) => {
-    if (a.working !== b.working) return a.working ? -1 : 1
-    return a.path.localeCompare(b.path)
-  })
-}
-
-function fileSummary(project, rows) {
-  const parts = []
-  if (project.localFiles) parts.push(`${project.localFiles} local`)
-  if (project.incomingFiles) parts.push(`${project.incomingFiles} incoming`)
-  if (project.conflictFiles) parts.push(`${project.conflictFiles} need a choice`)
-  if (project.workingFiles) parts.push(`${project.workingFiles} editing`)
-  return parts.join(' · ') || `${rows.length} ${rows.length === 1 ? 'file' : 'files'}`
-}
-
 function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
-  const rows = projectFileRows(project)
-  const [state, setState] = useState({ phase: 'idle', data: null })
+  const [state, setState] = useState({ phase: 'loading', data: null })
+  const [retry, setRetry] = useState(0)
   useEffect(() => {
-    setState({ phase: 'idle', data: null })
-  }, [project.head_sha])
-  if (!rows.length) return null
-
-  async function load() {
-    if (state.phase === 'loading') return
+    let cancelled = false
     setState({ phase: 'loading', data: null })
-    const result = await loadProjectDiff?.(project)
-    if (result?.ok) setState({ phase: 'ready', data: result.data })
-    else setState({ phase: result?.stale ? 'stale' : 'error', data: null })
-  }
+    Promise.resolve(loadProjectDiff?.(project))
+      .then((result) => {
+        if (cancelled) return
+        if (result?.ok) setState({ phase: 'ready', data: result.data })
+        else setState({ phase: result?.stale ? 'stale' : 'error', data: null })
+      })
+      .catch(() => {
+        if (!cancelled) setState({ phase: 'error', data: null })
+      })
+    return () => { cancelled = true }
+  }, [project.key, project.head_sha, project.comparison_sha, project.base_sha, loadProjectDiff, retry])
 
-  const preview = rows.slice(0, 4)
+  const files = state.phase === 'ready' ? parseUnifiedDiff(state.data?.diff) : []
+  const countLabel = state.phase === 'ready'
+    ? `${files.length} ${files.length === 1 ? 'file' : 'files'}${state.data?.diff_truncated ? ' shown' : ''}`
+    : null
 
   return (
     <section className="co-project-files">
-      <header><span>File changes</span><small>{fileSummary(project, rows)}</small></header>
+      <header><span>Changed files</span>{countLabel ? <small>{countLabel}</small> : null}</header>
       {state.phase === 'ready' ? (
-        <UnifiedDiff
-          diff={state.data?.diff}
-          diffTruncated={state.data?.diff_truncated === true}
-        />
+        files.length ? <>
+          {state.data?.diff_truncated ? (
+            <p className="co-project-diff-note">This is a large change, so only the available part of the diff is shown.</p>
+          ) : null}
+          <UnifiedDiff
+            diff={state.data?.diff}
+            diffTruncated={state.data?.diff_truncated === true}
+            initiallyOpenFirst
+          />
+        </> : <p className="co-project-diff-empty">No changed files in this comparison.</p>
+      ) : state.phase === 'loading' ? (
+        <div className="co-project-diff-loading" role="status"><span className="ma-spinner is-compact" aria-hidden="true" /> Loading file diffs…</div>
       ) : (
-        <div className="co-project-file-list">
-          {preview.map((file) => {
-            const relationship = file.working ? file.group : sourcePathRelationship(project, file.path)
-            return (
-              <div className="co-project-file" key={file.path} title={file.path}>
-                <code>{file.path}</code>
-                <span className="co-project-file-meta"><i className={'is-' + relationship}>{fileStateLabel(relationship)}</i></span>
-              </div>
-            )
-          })}
-          {rows.length > preview.length ? <p>+{rows.length - preview.length} more files</p> : null}
-        </div>
-      )}
-      {state.phase !== 'ready' ? (
         <button
           type="button"
           className="co-project-files-toggle"
-          onClick={state.phase === 'stale' ? onRefresh : load}
-          disabled={state.phase === 'loading'}
+          onClick={state.phase === 'stale' ? onRefresh : () => setRetry(value => value + 1)}
         >
-          {state.phase === 'loading' ? 'Loading diff…' : state.phase === 'stale' ? 'Project changed · check again' : state.phase === 'error' ? 'Try diff again' : 'Review file diffs'}
-          <Icon name="chevron" size={15} />
+          {state.phase === 'stale' ? 'Project changed · check again' : 'Could not load diffs · try again'}
+          <Icon name="refresh" size={15} />
         </button>
-      ) : null}
+      )}
     </section>
   )
 }
@@ -217,8 +182,7 @@ function ProjectRow({ project, selected, onSelect }) {
   const showShared = !!(
     project.conflictFiles
     || project.state === 'conflict'
-    || project.incomingFiles
-    || project.originBehind
+    || projectHasSharedUpdates(project)
     || project.sourceComparisonRequired
     || !project.available
     || (!project.builtHere && project.kind !== 'external' && project.canonical_repo && !project.origin?.sha && !project.base_sha)

@@ -349,33 +349,13 @@ export const CSS = `
   min-height: 48px; padding: 4px 2px; color: var(--muted); font-size: 14px; font-weight: 650;
 }
 .co-project-files > header small { font-size: 14px; font-weight: 500; }
-.co-project-file-list {
-  margin-bottom: 3px; border: 1px solid var(--border); border-radius: 9px;
-  overflow: hidden; background: var(--surface2, var(--bg));
+.co-project-diff-loading,
+.co-project-diff-empty,
+.co-project-diff-note {
+  margin: 0; padding: 14px 2px; color: var(--muted); font-size: 14px; line-height: 1.5;
 }
-.co-project-file {
-  display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 9px;
-}
-.co-project-file + .co-project-file { border-top: 1px solid var(--border); }
-.co-project-file code {
-  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text); font-family: var(--mono, var(--font)); font-size: 14px;
-}
-.co-project-file-meta { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; }
-.co-project-file-meta > i {
-  padding: 3px 5px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent); font-size: 14px; font-style: normal;
-}
-.co-project-file-meta > i.is-conflict { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.co-project-file-meta > i.is-incoming { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
-.co-project-file-meta > i.is-compatible { color: var(--text); background: var(--surface); }
-.co-project-file-meta > span { display: inline-flex; gap: 5px; color: var(--muted); font-size: 14px; }
-.co-project-file-meta b { color: var(--green); font-weight: 600; }
-.co-project-file-meta em { color: var(--danger); font-style: normal; }
-.co-project-file-list > p {
-  margin: 0; padding: 9px; border-top: 1px solid var(--border);
-  color: var(--muted); font-size: 14px; text-align: center;
-}
+.co-project-diff-loading { display: flex; align-items: center; gap: 9px; }
+.co-project-diff-note { padding-top: 4px; }
 .co-project-files-toggle {
   display: flex; align-items: center; justify-content: center; gap: 7px;
   width: 100%; min-height: 44px; margin-top: 3px; padding: 7px;

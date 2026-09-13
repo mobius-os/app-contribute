@@ -138,6 +138,8 @@ test('contribution details retain their project parent and refresh only source d
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
   assert.match(sourceMapSource, /<ProjectFileChanges key=\{sourceRevision\}/)
+  assert.match(sourceMapSource, /initiallyOpenFirst/)
+  assert.doesNotMatch(sourceMapSource, /Review file diffs|\+\{rows\.length - preview\.length\} more files/)
   assert.match(sourceMapSource, /sourceRevision=\{snapshot\?\.generated_at\}/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.match(appSource, /selectedId=\{navigation.selectedId\}/)
@@ -164,9 +166,11 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(appSource, /resolveUncertainSubmission/)
 })
 
-test('diffs stay collapsed until the owner opens a file', () => {
-  assert.doesNotMatch(sourceMapSource, /initiallyOpenFirst/)
+test('project changed-file review loads the real diff and opens its first file immediately', () => {
+  assert.match(sourceMapSource, /initiallyOpenFirst/)
   assert.doesNotMatch(fileDiffListSource, /initiallyOpenFirst/)
+  assert.match(sourceMapSource, /Promise\.resolve\(loadProjectDiff\?\.\(project\)\)/)
+  assert.doesNotMatch(sourceMapSource, /Review file diffs|projectFileRows/)
 })
 
 test('blocked contributions have one calm recovery action', () => {

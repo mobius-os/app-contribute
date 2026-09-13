@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { attachSourceProjects, projectBoardFacts, recordsForProject } from '../source-map.js'
+import { attachSourceProjects, projectBoardFacts, projectHasSharedUpdates, recordsForProject } from '../source-map.js'
 import { contributionActionScope, contributionCycleAction, projectUpdateAction, organizePrivateWorkAction } from '../review.js'
 import { normalizeCycleState, normalizeAppSettings } from '../storage.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
@@ -32,6 +32,14 @@ test('unknown comparison and installed baseline are not an online all-clear', ()
   assert.equal(projectBoardFacts({ ...project, sourceComparisonRequired: true }).shared, 'Check for shared updates')
   assert.equal(projectBoardFacts({ ...project, incomingFiles: 2 }).shared, 'Shared updates are available')
   assert.equal(projectBoardFacts({ ...project, conflictFiles: 1 }).shared, 'Shared update needs attention')
+})
+
+test('semantic comparison outranks a behind commit count when reporting shared updates', () => {
+  const reconciled = { ...project, semanticAvailable: true, incomingFiles: 0, originBehind: 5 }
+  assert.equal(projectHasSharedUpdates(reconciled), false)
+  assert.equal(projectBoardFacts(reconciled).shared, 'Last check found no shared updates')
+  assert.equal(projectHasSharedUpdates({ ...reconciled, incomingFiles: 1 }), true)
+  assert.equal(projectHasSharedUpdates({ ...reconciled, semanticAvailable: false }), true)
 })
 
 test('local-only apps and missing source remain explicit, not false sync success', () => {
