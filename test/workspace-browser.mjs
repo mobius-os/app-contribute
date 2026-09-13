@@ -445,7 +445,7 @@ window.runWorkspaceChecks = async () => {
       await click(button('Prepare changes'))
       await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
       const scope = query('.co-prepare-scope')
-      ensure(text(scope).includes('1 changed file'),'Preparation did not show the collocated file scope')
+      ensure(text(scope).includes('1 local file'),'Preparation did not show the collocated file scope')
       await click(scope)
       await until(() => text(query('[data-task="task:scope"]')).includes('No source conversations'),'Scope did not load')
       ensure(calls.starts.length===0,'Choosing scope started work')

@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.35",
+  "version": "0.5.36",
   "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
