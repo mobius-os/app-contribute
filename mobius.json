@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.29",
+  "version": "0.5.30",
   "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
@@ -33,6 +33,10 @@
   "schedule": {
     "default": "*/15 * * * *",
     "job": "job.sh"
+  },
+  "service": {
+    "entry": "service.py",
+    "access": "self"
   },
   "skills": [
     "contributing.md",
@@ -84,6 +88,7 @@
     "ui/ReviewSelection.jsx",
     "review_prs.py",
     "pull-details.js",
+    "service.py",
     "ui/PullRequestDetail.jsx"
   ]
 }

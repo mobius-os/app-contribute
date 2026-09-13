@@ -303,8 +303,8 @@ test('GitHub device flow copies the code before opening the login link', () => {
   assert.match(themeSource, /user-select: text; -webkit-user-select: text/)
 })
 
-test('GitHub setup defaults to full PR access and migrates older connections', () => {
-  assert.match(connectionSource, /workflow: true/)
+test('GitHub setup uses the current device-flow contract and migrates older connections', () => {
+  assert.doesNotMatch(connectionSource, /workflow: true/)
   assert.match(
     connectionSource,
     /onStart=\{\(\) => startDeviceFlow\(null, \{ privateRepos: includePrivate \}\)\}/,

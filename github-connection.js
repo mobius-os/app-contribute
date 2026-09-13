@@ -101,9 +101,8 @@ export function createGithubDeviceTransport(
   { requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
 ) {
   return {
-    async start({ workflow = true, privateRepos = false, signal } = {}) {
+    async start({ privateRepos = false, signal } = {}) {
       const response = await connectStart(token, {
-        workflow,
         privateRepos,
         signal,
         timeoutMs: requestTimeoutMs,
@@ -226,7 +225,6 @@ function issueFromError(error, fallback) {
 export async function runDeviceConnection({
   transport,
   existingAttempt = null,
-  workflow = true,
   privateRepos = false,
   signal,
   onPending = () => {},
@@ -237,7 +235,7 @@ export async function runDeviceConnection({
 }) {
   try {
     const started = existingAttempt
-      || await transport.start({ workflow, privateRepos, signal })
+      || await transport.start({ privateRepos, signal })
     if (signal?.aborted) {
       return { status: 'cancelled', issue: null }
     }

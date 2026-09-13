@@ -337,14 +337,12 @@ export function ConnectionCard({
     setFlow('starting')
     window.mobius?.signal?.('github_connect_started', {
       method: 'device',
-      workflow: true,
       private_repos: privateRepos,
     })
 
     const result = await runDeviceConnection({
       transport,
       existingAttempt,
-      workflow: true,
       privateRepos,
       signal: controller.signal,
       onPending: (started) => {

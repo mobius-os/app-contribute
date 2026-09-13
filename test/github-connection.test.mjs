@@ -47,17 +47,16 @@ test('private repository access is explicit and reaches the connection request',
   await connectStart('test-token', { privateRepos: true })
   assert.equal(request.url, '/api/github/connect/start')
   assert.deepEqual(JSON.parse(request.options.body), {
-    workflow: true,
     private_repos: true,
   })
 })
 
-test('new device connections request workflow access by default', async () => {
-  let requestedWorkflow = null
+test('new device connections send only current connection choices', async () => {
+  let requestedOptions = null
   const result = await runDeviceConnection({
     transport: {
-      async start({ workflow }) {
-        requestedWorkflow = workflow
+      async start(options) {
+        requestedOptions = options
         return started()
       },
       async poll() {
@@ -67,7 +66,7 @@ test('new device connections request workflow access by default', async () => {
     wait: async () => {},
   })
 
-  assert.equal(requestedWorkflow, true)
+  assert.equal('workflow' in requestedOptions, false)
   assert.equal(result.status, 'complete')
 })
 
