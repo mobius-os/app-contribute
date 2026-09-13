@@ -74,7 +74,7 @@ contribution. This app is the dashboard for that loop:
   layout.
 - **Work list**, grouped:
   - **Needs you** — actual blockers and questions, linked to their owning work.
-  - **Prepared · not shared** — private drafts waiting on your go-ahead. Each card
+  - **Prepared proposals · not shared** — private drafts waiting on your go-ahead. Each card
     shows high-level review context first: repo, branch, diff stat, summary,
     and the Möbius Agent co-author tag. Open the card to review exactly what
     would go public: the action ("New PR to…", "Comment on…"), the full

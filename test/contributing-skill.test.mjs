@@ -87,3 +87,13 @@ test('attached helpers use one private bounded playbook', () => {
   assert.match(attached, /Public actions: none/)
   assert.doesNotMatch(attached, /Read and follow .*contributing/)
 })
+
+
+test('private publication and local installation have separate ownership', () => {
+  assert.match(prose, /An ordinary PR may remain uninstalled/)
+  assert.match(prose, /Never install private work or invent a source witness/)
+  assert.match(prose, /Missing proof means no witness/)
+  assert.match(prose, /Exact head, diff, approval, public target and retry checks remain mandatory/)
+  assert.match(prose, /app-connection promise still requires its installed-source proof/)
+  assert.doesNotMatch(prose, /The submit path proves `base_sha\.\.head_sha` is present in that source commit/)
+})

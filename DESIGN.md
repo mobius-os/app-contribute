@@ -154,7 +154,7 @@ The palette is entirely semantic and theme-responsive. Accent marks action, sele
 
 **The Inherited Theme Rule.** Use the shell’s semantic color and font variables in both light and dark modes. Do not freeze the accent into a named hue, manufacture a tonal ramp, or introduce an app-owned light/dark palette.
 
-**The Written State Rule.** Color may reinforce a state, but labels such as “Ready for review,” “Needs you,” and “Prepared · not shared” carry the meaning.
+**The Written State Rule.** Color may reinforce a state, but labels such as “Ready for review,” “Needs you,” and “Prepared proposals · not shared” carry the meaning.
 
 ## Typography
 
@@ -164,9 +164,9 @@ Use the inherited shell/system font throughout; source versions, paths, and patc
 
 ## Layout
 
-- **Project directory:** Search and the native All projects / Local changes / Updates filter narrow the same real project inventory. Local changes means work that is ready to prepare or needs sorting; Updates means incoming, behind, comparison-required, or conflicting work. External repositories remain under Other repositories.
-- **Selected project:** A compact All projects control and native project switcher precede one continuous, maximum-1192px workspace. Project position, local work, contribution runs, public contributions, and technical detail flow vertically; there is no desktop inventory/task split.
-- **Local work:** One bordered summary presents the current file count and primary Prepare changes action. Stored prepared records appear below as written summaries with source freshness, file totals, and date.
+- **Project directory:** Search and wrapped All projects / Local changes / Updates chips narrow the same real project inventory. Local changes means work that is ready to prepare or needs sorting; Updates means incoming, behind, comparison-required, or conflicting work. Repositories remembered through contribution history or incoming review appear under “On GitHub, not installed here”; GitHub access alone does not import every repository.
+- **Selected project:** The header logo becomes a compact Projects back control above one continuous, maximum-1192px workspace. Project position, local work, contribution runs, public contributions, and technical detail flow vertically; there is no project switcher and no desktop inventory/task split.
+- **Local work:** One line-separated summary presents the current file count, a single files-and-versions path, and the primary Prepare changes action. Prepared proposals live once in the contribution inventory below rather than being repeated as inert summaries.
 - **Needs you:** Grouped work reports groups, individual decisions, and total contributions; a single item keeps the simpler count. These counts describe the same project-scoped run rather than a separate ledger.
 - **Contribution inventory:** Search and assignment/authorship filters narrow the existing rows. Each row keeps a 44px checkbox target separate from its title/detail button. Opening a row reveals detail in place and does not change selection.
 - **Bottom selection:** Any nonempty selection creates a fixed, nonmodal tray within the app, inset 24px on wide screens and 8px on phones. Selected cards stack horizontally by default, expand into a vertical list, and may be opened or removed individually. Measured bottom padding and scroll padding keep the final rows reachable above the tray.
@@ -201,17 +201,19 @@ Line-separated inventory rows sit inside a gently curved control language. Writt
 
 Primary, secondary, and quiet actions all preserve practical 44px targets. Primary actions use the inherited action shade; secondary actions use surface and border; quiet actions keep muted text on a transparent background. Buttons press to 0.97 scale and disabled controls remain visible at half opacity. Keyboard focus uses a 2px accent outline with a 2px offset.
 
-Directory and contribution search inputs use 16px text, semantic surface fill, and visible borders. Native selects preserve platform keyboard and phone behavior. Search stacks above its filter on phones rather than becoming narrower or smaller.
+Directory and contribution search inputs use 16px text, semantic surface fill, and visible borders. Directory filter chips wrap rather than scroll, preserve 44px targets, and show their result counts. Search stacks above its filters on phones rather than becoming narrower or smaller.
 
-### Local work and saved summaries
+Agent settings use a searchable in-app model picker rather than a browser-native select. The shorter effort scale stays directly visible as a segmented choice.
 
-The local-work summary is the project’s main preparation entry: current state and file facts on the left, Prepare changes on the right, then stacked on phones. Prepared work is preserved as expandable written summaries with title, description, source freshness, totals, and date; it is not reduced to an opaque count.
+### Local work and prepared proposals
+
+The local-work summary is the project’s main preparation entry: current state and file facts on the left, Prepare changes on the right, then stacked on phones. A files-and-versions action opens the one technical view. Prepared work remains actionable in one expandable contribution section; it is never repeated as an inert count or second summary block.
 
 ### Contribution rows and selection tray
 
 Each contribution row has a native checkbox and a separate title button. Title, number, author, date, file totals, written review state, and assignment remain visible. Selected rows use the inherited muted accent, but the checkbox remains the authoritative selection control.
 
-The bottom tray summarizes the count, previews selected contribution cards, and exposes Review, Review & merge when eligible, and Assign when eligible. Its disclosure changes card layout, not task ownership. The clear action empties the selection; each card also has its own remove action.
+The bottom tray summarizes the count, previews selected contribution cards, and exposes Review and Assign when eligible. Merge follow-through is chosen inside the review confirmation, where its consequences are visible. The tray disclosure changes card layout, not task ownership. The clear action empties the selection; each card also has its own remove action.
 
 ### Review and assignment dock
 

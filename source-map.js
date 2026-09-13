@@ -212,19 +212,30 @@ export function projectBoardFacts(project) {
   else if (local > 0) work.push(`${fileCount(local)} with local changes`)
   if (project.workingFiles > 0) work.push(`${fileCount(project.workingFiles)} being edited`)
   if (prepared > 0) work.push(`${prepared} prepared · not shared`)
-  if (publicReviews > 0) work.push(`${publicReviews} shared for review`)
-  if (!work.length) work.push(project.available ? 'No unprepared changes found' : 'Local changes not checked')
+  if (publicReviews > 0) work.push(`${publicReviews} in review`)
+  if (!work.length) work.push(project.available ? 'No local changes to prepare' : 'Local changes not checked')
 
   let shared = 'Shared version not checked'
   if (project.builtHere || !project.canonical_repo) shared = 'No shared version yet'
   else if (project.kind === 'external') shared = 'Not installed here'
   else if (!project.available) shared = 'Local source unavailable'
-  else if (project.conflictFiles > 0 || project.state === 'conflict') shared = 'Update needs help'
-  else if (project.incomingFiles > 0 || project.originBehind > 0) shared = 'Shared changes available'
-  else if (project.sourceComparisonRequired) shared = 'Versions need comparing'
-  else if (project.origin?.sha) shared = 'No newer changes in last check'
+  else if (project.conflictFiles > 0 || project.state === 'conflict') shared = 'Shared update needs attention'
+  else if (projectHasSharedUpdates(project)) shared = 'Shared updates are available'
+  else if (project.sourceComparisonRequired) shared = 'Check for shared updates'
+  else if (project.origin?.sha) shared = 'Last check found no shared updates'
   else if (project.base_sha) shared = 'Compared with installed version'
   return { work: work.join(' · '), shared, publicReviews, prepared }
+}
+
+// Reconciliation owns the file-level answer once it is available. A branch
+// can be commits behind while producing no incoming files for the installed
+// release projection; falling back to ancestry in that case overstates an
+// update the project detail cannot show.
+export function projectHasSharedUpdates(project) {
+  return Number(project?.incomingFiles || 0) > 0 || (
+    project?.semanticAvailable !== true
+    && Number(project?.originBehind || 0) > 0
+  )
 }
 
 export function recordsForProject(records, project) {

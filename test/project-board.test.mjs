@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { attachSourceProjects, projectBoardFacts, recordsForProject } from '../source-map.js'
+import { attachSourceProjects, projectBoardFacts, projectHasSharedUpdates, recordsForProject } from '../source-map.js'
 import { contributionActionScope, contributionCycleAction, projectUpdateAction, organizePrivateWorkAction } from '../review.js'
 import { normalizeCycleState, normalizeAppSettings } from '../storage.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
@@ -21,17 +21,25 @@ test('project facts never equate published review work with accepted or only-loc
   const facts = projectBoardFacts({ ...project, contributions: [
     { status: 'prepared' }, { status: 'open' }, { status: 'draft' }, { status: 'merged' },
   ] })
-  assert.equal(facts.work, '2 files with local changes · 1 prepared · not shared · 2 shared for review')
-  assert.equal(facts.shared, 'No newer changes in last check')
+  assert.equal(facts.work, '2 files with local changes · 1 prepared · not shared · 2 in review')
+  assert.equal(facts.shared, 'Last check found no shared updates')
   assert.doesNotMatch(facts.shared, /Up to date|latest|linear/)
 })
 
 test('unknown comparison and installed baseline are not an online all-clear', () => {
   assert.equal(projectBoardFacts({ ...project, origin: null }).shared, 'Compared with installed version')
   assert.equal(projectBoardFacts({ ...project, origin: null, base_sha: null }).shared, 'Shared version not checked')
-  assert.equal(projectBoardFacts({ ...project, sourceComparisonRequired: true }).shared, 'Versions need comparing')
-  assert.equal(projectBoardFacts({ ...project, incomingFiles: 2 }).shared, 'Shared changes available')
-  assert.equal(projectBoardFacts({ ...project, conflictFiles: 1 }).shared, 'Update needs help')
+  assert.equal(projectBoardFacts({ ...project, sourceComparisonRequired: true }).shared, 'Check for shared updates')
+  assert.equal(projectBoardFacts({ ...project, incomingFiles: 2 }).shared, 'Shared updates are available')
+  assert.equal(projectBoardFacts({ ...project, conflictFiles: 1 }).shared, 'Shared update needs attention')
+})
+
+test('semantic comparison outranks a behind commit count when reporting shared updates', () => {
+  const reconciled = { ...project, semanticAvailable: true, incomingFiles: 0, originBehind: 5 }
+  assert.equal(projectHasSharedUpdates(reconciled), false)
+  assert.equal(projectBoardFacts(reconciled).shared, 'Last check found no shared updates')
+  assert.equal(projectHasSharedUpdates({ ...reconciled, incomingFiles: 1 }), true)
+  assert.equal(projectHasSharedUpdates({ ...reconciled, semanticAvailable: false }), true)
 })
 
 test('local-only apps and missing source remain explicit, not false sync success', () => {
@@ -93,10 +101,11 @@ test('project controls keep preparation and updating direct without a competing 
   const html = render(props)
   assert.match(html, /Actions for Contribute/)
   assert.match(html, /Prepare changes/)
-  assert.match(html, /Get up to date/)
+  assert.match(html, /Check for shared updates/)
   assert.doesNotMatch(html, /Prepare &amp; merge|Prepare all|Update all/)
   assert.doesNotMatch(html, /More actions|View reviews/)
-  assert.match(html, /Options &amp; process/)
+  assert.match(html, /Follow through to merge/)
+  assert.doesNotMatch(html, /Options &amp; process/)
   assert.doesNotMatch(html, /<details[^>]* open/)
   const loading = render({ ...props, loading: true })
   assert.match(loading, /disabled=""/)

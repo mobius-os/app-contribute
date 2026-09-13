@@ -138,6 +138,8 @@ test('contribution details retain their project parent and refresh only source d
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
   assert.match(sourceMapSource, /<ProjectFileChanges key=\{sourceRevision\}/)
+  assert.match(sourceMapSource, /initiallyOpenFirst/)
+  assert.doesNotMatch(sourceMapSource, /Review file diffs|\+\{rows\.length - preview\.length\} more files/)
   assert.match(sourceMapSource, /sourceRevision=\{snapshot\?\.generated_at\}/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.match(appSource, /selectedId=\{navigation.selectedId\}/)
@@ -146,10 +148,12 @@ test('contribution details retain their project parent and refresh only source d
 test('preparation runs as one cycle while every public send stays explicit', () => {
   assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
   assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
-  assert.match(controlsSource, /Organize and review your local work/)
+  assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing merges\./)
+  assert.match(appSource, /provider: chosenAgent\.provider/)
+  assert.match(appSource, /\.\.\.\(chosenAgent\.effort \? \{ effort: chosenAgent\.effort \} : \{\}\)/)
   assert.match(feedSource, /Personal pull requests open ready for review/)
   assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
   assert.match(feedSource, /outcome = await onSendStack\?\.\(runUnitRecords\(item\)\)/)
@@ -162,9 +166,11 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(appSource, /resolveUncertainSubmission/)
 })
 
-test('diffs stay collapsed until the owner opens a file', () => {
-  assert.doesNotMatch(sourceMapSource, /initiallyOpenFirst/)
+test('project changed-file review loads the real diff and opens its first file immediately', () => {
+  assert.match(sourceMapSource, /initiallyOpenFirst/)
   assert.doesNotMatch(fileDiffListSource, /initiallyOpenFirst/)
+  assert.match(sourceMapSource, /Promise\.resolve\(loadProjectDiff\?\.\(project\)\)/)
+  assert.doesNotMatch(sourceMapSource, /Review file diffs|projectFileRows/)
 })
 
 test('blocked contributions have one calm recovery action', () => {
@@ -255,7 +261,7 @@ test('Projects owns vertical scrolling and makes every row visibly navigable', (
 test('one scoped control surface starts private preparation without leaving the project', () => {
   assert.match(sourceMapSource, /renderControls\?\.\(project\)/)
   assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
-  assert.match(controlsSource, /Organize and review your local work/)
+  assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
   assert.match(appSource, /recordsForProject\(records, project\)/)
   assert.match(appSource, /onStart=\{startAgentTask\}/)
   assert.match(themeSource, /\.co-project-controls \{/)
@@ -371,7 +377,9 @@ test('GitHub connection failures stay visible and recoverable', () => {
 
 test('the Projects summary reserves its row while source checks refresh', () => {
   assert.match(appSource, /loading=\{sourceLoading\}/)
+  assert.match(appSource, /if \(!quiet\) setSourceLoading\(true\)/)
   assert.match(sourceMapSource, /function LoadingState\(\)/)
+  assert.match(sourceMapSource, /Updated just now/)
   assert.match(sourceMapSource, /className="co-source-loading" role="status"/)
   assert.match(sourceMapSource, /Checking projects…/)
   assert.match(sourceMapSource, /No local work to prepare/)
@@ -380,9 +388,39 @@ test('the Projects summary reserves its row while source checks refresh', () => 
 test('project status and essential controls remain visible with a readable type floor', () => {
   assert.doesNotMatch(controlsSource, /More actions|View reviews/)
   assert.match(controlsSource, /className="co-btn co-btn-primary co-task-primary"/)
-  assert.match(sourceMapSource, /Get up to date/)
-  assert.match(sourceMapSource, /<span>\{facts.work\}<\/span>/)
+  assert.match(sourceMapSource, /Check for updates/)
+  assert.match(sourceMapSource, /visibleWork \? <span>\{visibleWork\}<\/span>/)
   assert.match(sourceMapSource, /className="co-source-shared">\{facts.shared\}/)
   const sizes = [...(themeSource + workspaceTheme).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map(match => Number(match[1]))
   assert.ok(sizes.every(size => size === 0 || size >= 14))
+})
+
+test('bottom work surfaces stay content-sized and avoid nested approval cards', () => {
+  assert.match(workspaceTheme, /\.co-workspace \.co-pr-selection,\.co-workspace \.co-task-dock \{[^}]*top:auto;/)
+  assert.match(workspaceTheme, /> \.co-run-approval \{[^}]*border:0;/)
+})
+
+test('confirmed contribution summary uses the workspace row treatment', () => {
+  assert.match(workspaceTheme, /\.co-workspace \.co-local-summary \{[^}]*display:grid;[^}]*background:none;[^}]*text-align:left;/)
+  assert.match(workspaceTheme, /\.co-workspace \.co-local-summary small \{[^}]*text-overflow:ellipsis;[^}]*white-space:nowrap;/)
+})
+
+test('project chrome consolidates navigation, refresh, files, and preparation choices', () => {
+  assert.match(appSource, /className="co-header-back"/)
+  assert.match(appSource, /onProjectOpenChange=\{setProjectOpen\}/)
+  assert.doesNotMatch(sourceMapSource, /className="co-project-switcher"/)
+  assert.match(sourceMapSource, /aria-label=\{loading \|\| manualRefresh === 'running' \? 'Refreshing projects'/)
+  assert.match(sourceMapSource, /aria-label=\{`Check for updates\. \$\{facts\.shared\}`\}/)
+  assert.doesNotMatch(sourceMapSource, /Files, branch and versions <Icon/)
+  assert.match(controlsSource, /Review changed files/)
+  assert.match(controlsSource, /Review versions/)
+})
+
+test('prepared proposals have one actionable home and merge follow-through is visible', () => {
+  assert.doesNotMatch(controlsSource, /co-saved-summaries|Draft descriptions saved/)
+  assert.match(feedSource, /Prepared proposals · not shared/)
+  assert.match(controlsSource, /co-follow-merge/)
+  assert.match(controlsSource, /Follow through to merge/)
+  assert.match(controlsSource, /You still approve sharing and merging/)
+  assert.doesNotMatch(controlsSource, /Options & process/)
 })

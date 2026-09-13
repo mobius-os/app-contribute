@@ -76,26 +76,32 @@ import { discoverRepositories, mayMerge } from './collaboration.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
-function Header({ appId, fromCache, checking, children }) {
+function Header({ appId, fromCache, checking, onBack, children }) {
   const [iconFailed, setIconFailed] = useState(false)
   return (
     <header className="co-header">
       <div className="co-header-main">
-        {iconFailed ? (
-          <span className="co-brand-fallback" aria-hidden="true">C</span>
+        {onBack ? (
+          <button type="button" className="co-header-back" onClick={onBack} aria-label="Back to projects"><Icon name="left" size={18} /><span>Projects</span></button>
         ) : (
-          <img
-            src={`/api/apps/${appId}/icon?size=64`}
-            alt=""
-            width={34}
-            height={34}
-            className="co-brand-icon"
-            onError={() => setIconFailed(true)}
-          />
+          <>
+            {iconFailed ? (
+              <span className="co-brand-fallback" aria-hidden="true">C</span>
+            ) : (
+              <img
+                src={`/api/apps/${appId}/icon?size=64`}
+                alt=""
+                width={34}
+                height={34}
+                className="co-brand-icon"
+                onError={() => setIconFailed(true)}
+              />
+            )}
+            <div className="co-brand-copy">
+              <h1 className="co-title">Contribute</h1>
+            </div>
+          </>
         )}
-        <div className="co-brand-copy">
-          <h1 className="co-title">Contribute</h1>
-        </div>
       </div>
       <div className="co-toolbar">
         {checking && (
@@ -122,6 +128,7 @@ export default function ContributeApp({ appId, token }) {
   const [omittedCount, setOmittedCount] = useState(0)
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [projectFocus, setProjectFocus] = useState(null)
+  const [projectOpen, setProjectOpen] = useState(false)
   const [sourceLoading, setSourceLoading] = useState(true)
   const [sourceError, setSourceError] = useState('')
   const [reviewStatus, setReviewStatus] = useState({
@@ -179,6 +186,7 @@ export default function ContributeApp({ appId, token }) {
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const [submissionMethod, setSubmissionMethod] = useState('mobius')
   const [submissionError, setSubmissionError] = useState('')
+  const [agentChoice, setAgentChoice] = useState({ provider: '', model: '', effort: '' })
   const [earlierCycle, setEarlierCycle] = useState(null)
   useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
   const pageRef = useRef(null)
@@ -191,10 +199,12 @@ export default function ContributeApp({ appId, token }) {
   const reviewStatusRequestRef = useRef(0)
   const incomingReviewsRequestRef = useRef(0)
   const agentStartRef = useRef(false)
+  const agentChoiceRef = useRef(agentChoice)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
   const ledgerReadyRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
+  useEffect(() => { agentChoiceRef.current = agentChoice }, [agentChoice])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
 
   const signalReady = useCallback((details = {}) => {
@@ -219,11 +229,17 @@ export default function ContributeApp({ appId, token }) {
     }
     agentStartRef.current = true
     try {
+      const chosenAgent = agentChoiceRef.current
       const started = await window.mobius.chat.start({
         title: action.title,
         draft: action.draft,
         scope: contributionActionScope(action),
         scopeLabel: action.scopeLabel,
+        ...(chosenAgent.model ? {
+          provider: chosenAgent.provider,
+          model: chosenAgent.model,
+          ...(chosenAgent.effort ? { effort: chosenAgent.effort } : {}),
+        } : {}),
       })
       if (!started?.chatId) throw new Error('Missing chat id')
       window.mobius?.signal?.(action.event || 'contribute_agent_handoff', {
@@ -317,7 +333,7 @@ export default function ContributeApp({ appId, token }) {
   // A 404 specifically means this app source arrived before the companion
   // backend route was restarted into the running server, so say that plainly.
   const refreshSources = useCallback(async ({ quiet = false } = {}) => {
-    if (!quiet && !sourceSnapshotRef.current) setSourceLoading(true)
+    if (!quiet) setSourceLoading(true)
     const result = await fetchSourceStatus(token)
     if (result.ok) {
       sourceSnapshotRef.current = result.data
@@ -327,10 +343,11 @@ export default function ContributeApp({ appId, token }) {
       window.mobius?.signal?.('source_map_viewed', {
         source_count: 1 + (result.data?.apps?.length || 0),
       })
-    } else if (!sourceSnapshotRef.current) {
+    } else if (!quiet || !sourceSnapshotRef.current) {
       setSourceError(result.unsupported ? 'restart' : 'unavailable')
     }
     setSourceLoading(false)
+    return result.ok
   }, [token])
 
   useEffect(() => {
@@ -427,6 +444,11 @@ export default function ContributeApp({ appId, token }) {
           ? savedMethod
           : 'mobius',
       )
+      setAgentChoice({
+        provider: typeof appSettings.agent_provider === 'string' ? appSettings.agent_provider : '',
+        model: typeof appSettings.agent_model === 'string' ? appSettings.agent_model : '',
+        effort: typeof appSettings.agent_effort === 'string' ? appSettings.agent_effort : '',
+      })
       connRef.current = status
       setConn(status)
 
@@ -1033,6 +1055,29 @@ export default function ContributeApp({ appId, token }) {
     window.mobius?.signal?.('contribution_method_changed', { method: next })
   }, [])
 
+  const onChooseAgent = useCallback(async (next) => {
+    const normalized = {
+      provider: typeof next?.provider === 'string' ? next.provider : '',
+      model: typeof next?.model === 'string' ? next.model : '',
+      effort: typeof next?.effort === 'string' ? next.effort : '',
+    }
+    const previous = agentChoiceRef.current
+    agentChoiceRef.current = normalized
+    setAgentChoice(normalized)
+    const settings = await loadAppSettings()
+    const saved = await saveAppSettings({
+      ...settings,
+      agent_provider: normalized.provider,
+      agent_model: normalized.model,
+      agent_effort: normalized.effort,
+    })
+    if (!saved) {
+      agentChoiceRef.current = previous
+      setAgentChoice(previous)
+    }
+    return saved
+  }, [])
+
   const onAssignIncomingReview = useCallback(async (item) => {
     const repo = item?.repository?.nameWithOwner || ''
     const outcome = await assignIncomingReview({ appId, token, repo, number: item?.number })
@@ -1357,12 +1402,13 @@ export default function ContributeApp({ appId, token }) {
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       <div className="co-header-shell">
-        <Header appId={appId} fromCache={fromCache} checking={checking}>
+        <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <ConnectionSettings
             conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
             submissionMethod={submissionMethod} onChooseSubmissionMethod={onChooseSubmissionMethod}
             submissionError={submissionError}
+            agentChoice={agentChoice} onChooseAgent={onChooseAgent}
           />
         </Header>
       </div>
@@ -1370,8 +1416,13 @@ export default function ContributeApp({ appId, token }) {
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
         {selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} /> : <SourceMap
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus}
+          onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}
-          onRetry={() => { void refreshSources(); if (conn.state === 'connected') void loadRepositories() }} loadProjectDiff={loadProjectDiff}
+          onRetry={async () => {
+            const sourceOk = await refreshSources()
+            if (conn.state === 'connected') await Promise.all([loadRepositories(), refreshIncomingReviews()])
+            return sourceOk
+          }} loadProjectDiff={loadProjectDiff}
           repositoryPicker={<RepositoryPicker token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))

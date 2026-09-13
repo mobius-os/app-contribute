@@ -3,11 +3,19 @@ import test from 'node:test'
 
 import {
   buildContributionRun,
+  contributionTitle,
   findRunItemByRecord,
   runUnitRecords,
 } from '../run.js'
 
 const HEAD = 'a'.repeat(40)
+
+test('pull request numbers lead every contribution identity exactly once', () => {
+  assert.equal(contributionTitle({ type: 'pr', number: 1124, title: 'Keep pinned drawer' }), '#1124 Keep pinned drawer')
+  assert.equal(contributionTitle({ type: 'pr', number: 1124, title: '#1124 Keep pinned drawer' }), '#1124 Keep pinned drawer')
+  assert.equal(contributionTitle({ type: 'issue', number: 1124, title: 'Keep pinned drawer' }), 'Keep pinned drawer')
+  assert.equal(contributionTitle({ plan: { action: 'pr_update', pr_number: 1124, title: 'Keep pinned drawer' } }), '#1124 Keep pinned drawer')
+})
 
 function prepared(id, extra = {}) {
   const { plan: planExtra = {}, quality_review: reviewExtra = {}, ...rest } = extra
