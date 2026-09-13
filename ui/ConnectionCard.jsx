@@ -7,13 +7,16 @@ import {
   runDeviceConnection,
 } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
+import { AgentModelSettings } from './AgentModelSettings.jsx'
 
 // One account surface, opened on demand. Closing it never cancels the
 // server-owned sign-in attempt; reopening refreshes and resumes that attempt.
 export function ConnectionSettings(props) {
   const ref = useRef(null)
   const [open, setOpen] = useState(false)
-  const accountLabel = props.conn?.state === 'disconnected' ? 'Connect GitHub' : 'GitHub'
+  const accountLabel = props.conn?.state === 'connected' && props.conn?.login
+    ? props.conn.login
+    : props.conn?.state === 'disconnected' ? 'Connect GitHub' : 'GitHub'
   const accountStatus = props.conn?.state === 'connected' ? 'GitHub connected' : accountLabel
   useEffect(() => {
     if (!open) return
@@ -33,6 +36,7 @@ export function ConnectionSettings(props) {
     </summary>
     {open ? <div className="co-settings-panel">
       <header><h2>Settings</h2><button type="button" className="co-quiet-action" onClick={() => { ref.current.open = false; ref.current.querySelector('summary')?.focus() }}>Done</button></header>
+      <AgentModelSettings token={props.token} choice={props.agentChoice} onChange={props.onChooseAgent} />
       <ConnectionCard {...props} />
     </div> : null}
   </details>

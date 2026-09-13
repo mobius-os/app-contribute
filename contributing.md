@@ -623,16 +623,19 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   longer displayed; you may omit it. Record `base_sha`/`head_sha`/`diff_sha256`
   so the submit button can recompute the exact branch diff before pushing (Hard
   stop #3). Compute the hash from the exact `.diff` bytes you store.
-- For every review originating from an installed app or the platform, record
-  `source_repo_path` (the live source checkout) and `source_sha` (its exact
-  commit when the reviewed diff was captured). The submit path proves
-  `base_sha..head_sha` is present in that source commit and keeps the witness
-  only after the owner sends the PR. If GitHub later merges the reviewed change
-  under a squash/rebase identity, both shell and App Store updates can recognize
-  it as shared history without guessing or dropping later local edits. A linked
-  review already shares the Git objects; for a standalone app review, Contribute
-  imports only the two hash-verified reviewed commits into the installed repo
-  without moving its branch or worktree.
+- Publication reviews the exact committed candidate, not its installation.
+  An ordinary PR may remain uninstalled, and unrelated live edits do not make
+  that review stale. Never install private work or invent a source witness to
+  make Send available. Older platforms may still require installation; leave
+  the candidate private and report that platform limitation rather than bypass
+  its guard.
+- For work originating from an installed app or platform, record truthful
+  `source_repo_path` and captured `source_sha` as provenance. After Send, the
+  platform records an optional local equivalence witness only if the current
+  clean source proves it contains the reviewed change. Missing proof means no
+  witness; later local updates retain their ordinary conservative
+  reconciliation/resolver path. Exact head, diff, approval, public target and
+  retry checks remain mandatory regardless of installation.
 - When the contribution publishes a local app into its own canonical
   `mobius-os/app-<id>` repository, add one reviewed `after_merge` handoff:
   `{"action":"connect_app","app_id":<live numeric app id>,
@@ -1017,9 +1020,11 @@ explicitly approves the exact update in chat or presses **Update PR**.
    publication precondition rather than a request to edit public metadata.
 3. Re-run the full private review on the new head and pin
    `quality_review.reviewed_head_sha` to it. The ordinary local review-status
-   endpoint understands both `pr` and `pr_update`; a changed checkout, source
-   witness, diff, ancestry, or upstream conflict blocks the action before the
-   public action regardless of where the owner approved it.
+   endpoint understands both `pr` and `pr_update`; a changed review checkout,
+   diff, ancestry, or upstream conflict blocks the public action regardless of
+   where the owner approved it. An ordinary PR does not require its changes to
+   be installed locally. A reviewed app-connection promise still requires its
+   installed-source proof.
 4. Stop for explicit public approval. **Update PR** in Contribute is one
    approval surface; an explicit, unambiguous chat instruction approving this
    same record and exact new head is equally valid. Do not require both. The

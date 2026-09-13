@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   InfoCircle,
+  Plus,
   Settings,
   Sparkle,
   DotsHorizontal,
@@ -31,6 +32,7 @@ const SDK_ICONS = {
   more: DotsHorizontal,
   person: UserAdd,
   search: Search,
+  plus: Plus,
 }
 
 const PATHS = {

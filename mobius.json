@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.30",
+  "version": "0.5.31",
   "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
@@ -63,6 +63,7 @@
     "ui/Icons.jsx",
     "ui/BatchAction.jsx",
     "ui/ConnectionCard.jsx",
+    "ui/AgentModelSettings.jsx",
     "ui/MarkdownView.jsx",
     "ui/FileDiffList.jsx",
     "ui/ContributionCard.jsx",

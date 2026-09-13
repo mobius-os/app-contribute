@@ -286,7 +286,13 @@ export async function clearCycleState() {
 }
 
 const SETTINGS_FILE = 'settings.json'
-const DEFAULT_APP_SETTINGS = Object.freeze({ autopilot_default: true, submission_method: 'mobius' })
+const DEFAULT_APP_SETTINGS = Object.freeze({
+  autopilot_default: true,
+  submission_method: 'mobius',
+  agent_provider: '',
+  agent_model: '',
+  agent_effort: '',
+})
 
 export function normalizeAppSettings(raw) {
   return raw && typeof raw === 'object'
@@ -294,9 +300,9 @@ export function normalizeAppSettings(raw) {
     : { ...DEFAULT_APP_SETTINGS }
 }
 
-// App-level preferences (not per-contribution). Currently just the global
-// "grant autopilot on new sends" default, consulted only at Send time — job.sh
-// keys off each record's grant, never this file. Missing/unreadable → defaults.
+// App-level preferences (not per-contribution): publication, Autopilot, and the
+// optional model used for new agent work started here. Missing/unreadable →
+// defaults; existing conversations retain the model they already use.
 export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)

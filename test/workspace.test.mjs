@@ -147,8 +147,9 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /Your local work/)
-  assert.match(html, /Prepare a clear proposal before sharing/)
+  assert.match(html, /1 changed file/)
+  assert.match(html, /Private until you prepare and approve sharing/)
+  assert.match(html, /Review changed files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
@@ -218,8 +219,8 @@ test('SSR public review inventory replaces duplicate public rows but retains pri
     appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
   }, { activeId: 'task:review', host: null, publicKeys: new Set(['owner/project#7', 'owner/project#8']) })
   assert.match(html, /aria-label="Pull requests"/)
-  assert.match(html, /My PRs/)
-  assert.match(html, /Assigned to me/)
+  assert.match(html, />Mine<\/button>/)
+  assert.match(html, />Assigned<\/button>/)
   for (const label of ['Private work', 'Still preparing', 'Accepted work', 'Unfetched PR', 'Different repository']) assert.match(html, new RegExp(label))
   assert.doesNotMatch(html, /Duplicate open row|Duplicate draft row|This contribution moved/)
 })

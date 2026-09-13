@@ -5,7 +5,7 @@ import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 
-const FILTERS = [['all', 'All'], ['unassigned', 'Unassigned'], ['assigned', 'Assigned to me'], ['authored', 'My PRs']]
+const FILTERS = [['all', 'All'], ['unassigned', 'Unassigned'], ['assigned', 'Assigned'], ['authored', 'Mine']]
 const STATE_NAMES = { reviewing: 'Reviewing', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Needs you', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', complete: 'Complete', stopped: 'Stopped', paused: 'Paused' }
 
 // A non-modal shelf: selection never moves focus or interrupts browsing.
@@ -25,7 +25,7 @@ function SelectionTray({ selection, busy, onClear, onRemove, onInspect, onReview
     <div className="co-selection-heading">
       <button className="co-selection-toggle" aria-expanded={expanded} aria-controls="co-selected-cards" onClick={() => setExpanded(value => !value)}><span className="co-selection-stack" aria-hidden="true"><Icon name="check" size={18} /></span><strong>{selection.length} selected</strong><Icon name="chevron" size={16} /></button>
       <div className="co-selection-actions">
-        {selection.every(pr => mayAssign(pr.repository.viewerPermission)) ? <button className="co-btn" disabled={busy || selection.length > 20} onClick={onAssign}>Assign…</button> : null}
+        {selection.every(pr => mayAssign(pr.repository.viewerPermission)) ? <button className="co-btn" disabled={busy || selection.length > 20} onClick={onAssign}>Assign</button> : null}
         <button className="co-btn co-btn-primary" disabled={selection.length > 20 || busy} onClick={() => onReview(selection, 'review')}><Icon name="prepare" size={18} />Review {selection.length}</button>
       </div>
       <button className="co-quiet-action" aria-label="Clear selection" onClick={onClear}><Icon name="close" size={18} /></button>
@@ -106,7 +106,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
     <p>{merge
       ? 'Allow the agent to merge or queue these exact versions after a thorough review and required checks. Changed versions and questions come back to you. No branch edits or public review comments.'
       : 'Review privately, in parallel where independent. Nothing is posted or merged.'}</p>
-    <ul>{choice.pulls.map(pr => <li key={prKey(pr)}><strong>{pr.title}</strong><span>{pr.repository.nameWithOwner} #{pr.number}</span></li>)}</ul>
+    <ul>{choice.pulls.map(pr => <li key={prKey(pr)}><strong>#{pr.number} {pr.title}</strong><span>{pr.repository.nameWithOwner}</span></li>)}</ul>
     <details className="co-task-details"><summary>Exact versions covered by this approval</summary>{choice.pulls.map(pr => <p key={prKey(pr)}>#{pr.number}: version <code>{pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({pr.baseRefOid?.slice(0, 7)})</code></p>)}<p>Changed versions require a fresh approval.</p></details>
     {onModeChange && choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft) ? <label className="co-workflow-option"><input type="checkbox" checked={merge} disabled={busy} onChange={event => onModeChange(event.target.checked ? 'review_merge' : 'review')} /> Merge when safe</label> : null}
     <div className="co-board-actions">
@@ -130,7 +130,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const [selectionNotice, setSelectionNotice] = useState('')
   const currentSelection = useRef({ selected, pulls: data.pulls })
   currentSelection.current = { selected, pulls: data.pulls }
-  const [showCounts, setShowCounts] = useState(false)
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -217,16 +216,15 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     task?.open('task:assign')
   }
   return <section className="co-public-work" aria-label="Pull requests">
-    <header><h3>Contributions</h3><span>{data.loading ? 'Checking…' : `${data.total || 0} open PRs`}</span>
-      <button className="co-quiet-action" aria-label="Refresh pull requests" disabled={data.loading} onClick={() => { void load(); void loadRuns() }}><Icon name="refresh" size={18} /></button>
+    <header><h3>Contributions</h3><span>{data.loading ? 'Checking…' : `${data.total || 0} open ${data.total === 1 ? 'PR' : 'PRs'}`}</span>
+      <button className="co-quiet-action" aria-label="Refresh pull requests" disabled={data.loading} onClick={() => { void load(); void loadRuns() }}><Icon name="refresh" size={17} /><span>Refresh</span></button>
     </header>
     <div className="co-pr-list-controls">
       <div className="co-pr-filters" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>
-      <details className="co-display"><summary><Icon name="settings" size={16} /> Display</summary><label><input type="checkbox" checked={showCounts} onChange={event => setShowCounts(event.target.checked)} /> Show change totals</label></details>
       <label className="co-pr-search"><Icon name="search" size={18} /><input type="search" aria-label="Find a pull request" placeholder="Search contributions…" value={query} onChange={event => setQuery(event.target.value)} /></label>
     </div>
     {selection.length ? <SelectionTray selection={selection} busy={busy} hidden={!!task?.activeId} onClear={() => setSelected(new Set())} onRemove={toggle} onReview={choose} onAssign={() => assignSelection()} onInspect={inspect} /> : null}
-    <TaskPane id="task:detail">{detailPr ? <><h3>{detailPr.title}</h3><div className="co-detail-stats"><span>#{detailPr.number} · {detailPr.author?.login || 'Contributor'}</span>{Number.isInteger(detailPr.changedFiles) ? <span>{detailPr.changedFiles} files · +{detailPr.additions} −{detailPr.deletions}</span> : null}</div><PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}`} pr={detailPr} token={token} onReview={mode => choose([detailPr], mode)} onAssign={() => assignSelection([detailPr])} onRefresh={() => load()} canMerge={mayMerge(detailPr.repository.viewerPermission) && !detailPr.isDraft} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={records.find(record => record.number === detailPr.number)} onRecord={onRecord} /></> : <p>This contribution is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane>
+    <TaskPane id="task:detail">{detailPr ? <><h3>#{detailPr.number} {detailPr.title}</h3><div className="co-detail-stats"><span>{detailPr.author?.login || 'Contributor'}</span>{Number.isInteger(detailPr.changedFiles) ? <span className="co-change-total"><span>{detailPr.changedFiles} {detailPr.changedFiles === 1 ? 'file' : 'files'}</span><b>+{detailPr.additions}</b><em>−{detailPr.deletions}</em></span> : null}</div><PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}`} pr={detailPr} token={token} onReview={mode => choose([detailPr], mode)} onAssign={() => assignSelection([detailPr])} onRefresh={() => load()} canMerge={mayMerge(detailPr.repository.viewerPermission) && !detailPr.isDraft} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={records.find(record => record.number === detailPr.number)} onRecord={onRecord} /></> : <p>This contribution is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane>
     <TaskPane id="task:review" dock><ReviewConfirmation choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
     <TaskPane id="task:assign" dock>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       setData(old => ({ ...old, pulls: old.pulls.map(item => keys.includes(prKey(item)) ? { ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } } : item) }))
@@ -242,14 +240,16 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       return <article className={'co-pr-row' + (selected.has(prKey(pr)) ? ' is-selected' : '')} key={prKey(pr)} data-pr={prKey(pr)}>
         <label className="co-pr-select"><input type="checkbox" checked={selected.has(prKey(pr))} onChange={() => toggle(pr)} aria-label={`Select ${pr.repository.nameWithOwner} #${pr.number}`} /></label>
         <div className="co-pr-content">
-          <button className="co-pr-open" aria-expanded={task?.activeId === 'task:detail' && opened === prKey(pr)} onClick={() => inspect(pr)}>
-            <strong className="co-pr-title">{pr.title}</strong>
-            <span className="co-pr-meta"><span>#{pr.number} · {mine ? 'You' : pr.author?.login || 'Contributor'}</span><DateLabel value={pr.updatedAt} />{showCounts && Number.isInteger(pr.changedFiles) ? <span>{pr.changedFiles} files · +{pr.additions} −{pr.deletions}</span> : null}</span>
+          <button className="co-pr-open" aria-expanded={task?.activeId === 'task:detail' && opened === prKey(pr)} onClick={() => {
+            if (window.getSelection?.()?.toString().trim()) return
+            inspect(pr)
+          }}>
+            <strong className="co-pr-title">#{pr.number} {pr.title}</strong>
+            <span className="co-pr-meta"><span>{mine ? 'You' : pr.author?.login || 'Contributor'}</span><DateLabel value={pr.updatedAt} />{Number.isInteger(pr.changedFiles) ? <span className="co-change-total"><span>{pr.changedFiles} {pr.changedFiles === 1 ? 'file' : 'files'}</span><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}</span>
           </button>
         </div>
-        <div className="co-pr-side"><span className="co-work-state">{status ? STATE_NAMES[status.item.state] || status.item.state : pr.isDraft ? 'Draft' : 'Ready for review'}</span>
+        <div className="co-pr-side">{status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown'].includes(status.item.state) ? <button className="co-attention-action" onClick={() => task?.open(`task:run:${status.run.id}`)}>{status.item.state === 'merge_unknown' ? 'Check outcome' : 'Address'} <Icon name="right" size={14} /></button> : <span className="co-work-state">{status ? STATE_NAMES[status.item.state] || status.item.state : pr.isDraft ? 'Draft' : 'Ready for review'}</span>}
           {mayAssign(pr.repository.viewerPermission) ? <button className="co-quiet-action" onClick={() => assignSelection([pr])} aria-label={`Assign PR ${pr.number}`}>{pr.assignees?.nodes?.length ? pr.assignees.nodes.map(user => user.login.toLowerCase() === conn.login?.toLowerCase() ? 'You' : user.login).join(', ') : <Icon name="person" size={18} />}</button> : <span className="co-pr-meta">{pr.assignees?.nodes?.map(user => user.login).join(', ') || 'Unassigned'}</span>}
-          {status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown'].includes(status.item.state) ? <button className="co-quiet-action" onClick={() => task?.open(`task:run:${status.run.id}`)}>Needs you</button> : null}
         </div>
 
       </article>

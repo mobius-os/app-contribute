@@ -93,7 +93,7 @@ test('the Run renders one batch action without a duplicate publish row', async (
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
 })
 
-test('exact publication copy is truthful per record in a mixed route batch', async (t) => {
+test('a mixed-route publication batch stays behind one exact preflight', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun } = await runRenderer()
   const relay = record('Möbius change')
@@ -109,9 +109,9 @@ test('exact publication copy is truthful per record in a mixed route batch', asy
     privateAction: null,
   }, { publicationPreference: 'mobius', githubState: 'connected' })
 
-  assert.match(html, /Open as a draft through Möbius/)
-  assert.match(html, /Open ready for review/)
-  assert.match(html, /Update the existing pull request/)
+  assert.match(html, /3 reviewed and ready to send/)
+  assert.match(html, /Choose the exact changes before anything is sent/)
+  assert.match(html, /Review and send 3/)
 })
 
 test('known route failures leave the public batch before approval', async (t) => {
@@ -205,7 +205,7 @@ test('the Run keeps project identity without duplicating Projects navigation', a
   }
   const html = renderRun(run)
 
-  assert.match(html, /Prepared · not shared/)
+  assert.match(html, /Prepared proposals · not shared/)
   assert.doesNotMatch(html, /Prepare &amp; review|Run full cycle|Inspect changes/)
   assert.match(html, /owner\/one/)
   assert.match(html, /owner\/two/)
@@ -367,7 +367,7 @@ test('the global workspace keeps exact ready batches without duplicating project
   const publish = { id: 'publish:ready', kind: 'publish', record: rec, unit: { type: 'record', record: rec, records: [rec] }, label: rec.title, detail: rec.repo }
   const run = { decisions: [publish], working: [], recent: [], archive: [] }
   assert.match(renderRun(run, { presentation: 'overview' }), /Review and send/)
-  assert.doesNotMatch(renderRun(run, { presentation: 'overview' }), /Needs you|Prepared · not shared|In progress/)
+  assert.doesNotMatch(renderRun(run, { presentation: 'overview' }), /Needs you|Prepared proposals · not shared|In progress/)
   assert.equal(renderRun({ decisions: [], working: [], recent: [], archive: [] }, { presentation: 'overview' }), '')
   const focused = renderRun(run, { selectedId: publish.id, projectName: 'Example' })
   assert.match(focused, /co-run-focus-detail/)

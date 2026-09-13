@@ -63,8 +63,12 @@ export function runUnitKey(value) {
   return `${unit?.type || 'record'}:${unit?.id || record?.id || 'unknown'}`
 }
 
-function recordTitle(record) {
-  return record?.summary || record?.plan?.title || record?.title || 'Untitled contribution'
+export function contributionTitle(record, title = record?.plan?.title || record?.title || record?.summary || 'Untitled contribution') {
+  const number = Number(record?.number || record?.pr_number || record?.plan?.pr_number || 0)
+  const kind = String(record?.type || '').toLowerCase()
+  const action = String(record?.plan?.action || '').toLowerCase()
+  const publicPullRequest = number > 0 && (['pr', 'pull_request'].includes(kind) || ['pr', 'pr_update'].includes(action))
+  return publicPullRequest && !String(title).startsWith(`#${number}`) ? `#${number} ${title}` : title
 }
 
 function recordRepo(record) {
@@ -74,7 +78,7 @@ function recordRepo(record) {
 function unitTitle(unit) {
   return unit?.type === 'stack'
     ? (unit.name || 'Related pull requests')
-    : recordTitle(runPrimaryRecord(unit))
+    : contributionTitle(runPrimaryRecord(unit))
 }
 
 function unitRepo(unit) {
@@ -353,7 +357,7 @@ export function buildContributionRun({
     if (human) {
       decisions.push(decision('public_attention', unit, byRepo, {
         record: human,
-        label: recordTitle(human),
+        label: contributionTitle(human),
         detail: human?.attention?.message || `Public follow-up · ${recordRepo(human)}`,
       }))
       continue
@@ -401,7 +405,7 @@ export function buildContributionRun({
     if (human) {
       decisions.push(decision('public_attention', unit, byRepo, {
         record: human,
-        label: recordTitle(human),
+        label: contributionTitle(human),
         detail: human?.attention?.message || `Your input is needed · ${recordRepo(human)}`,
       }))
     } else {
@@ -435,7 +439,7 @@ export function buildContributionRun({
     const record = runUnitRecords(unit).find(awaitingAppConnection)
     working.push(decision('connecting', unit, byRepo, {
       record,
-      label: recordTitle(record),
+      label: contributionTitle(record),
       detail: `Finishing the local publication link · ${recordRepo(record)}`,
     }))
   }

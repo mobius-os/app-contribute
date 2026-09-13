@@ -13,6 +13,7 @@ import {
 } from '../contribution-policy.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
+  contributionTitle,
   findRunItemByRecord,
   runPrimaryRecord,
   runUnitKey,
@@ -30,7 +31,7 @@ function itemProject(item) {
 function itemHeading(item) {
   if (item?.unit?.type === 'stack') return item.label
   const record = runPrimaryRecord(item)
-  return record ? recordTitle(record) : item.label
+  return record ? contributionTitle(record) : item.label
 }
 
 function itemPublicationRecords(item) {
@@ -92,10 +93,6 @@ function captureBatchItems(items) {
       } : item?.unit,
     }
   })
-}
-
-function recordTitle(record) {
-  return record?.plan?.title || record?.title || record?.summary || 'Untitled contribution'
 }
 
 function publicationLine(record, publicationPreference, githubState) {
@@ -165,7 +162,7 @@ function ExactActionList({
             return (
               <li key={record.id}>
                 <span>
-                  <strong>{recordTitle(record)}</strong>
+                  <strong>{contributionTitle(record)}</strong>
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
                 </span>
                 <em>{mode === 'ready'
@@ -205,6 +202,7 @@ function ExactBatchAction({
   const confirming = !!approval && approval.fingerprint === fingerprint
   const activeItems = confirming ? approval.items : items
   const count = mode === 'ready' ? readyCount(activeItems) : actionCount(activeItems)
+  const singleRecord = count === 1 ? runPrimaryRecord(activeItems[0]) : null
 
   useEffect(() => {
     if (confirming) safeRef.current?.focus()
@@ -269,8 +267,8 @@ function ExactBatchAction({
         </span>
         <div>
           <strong>{mode === 'ready'
-            ? `${count} ${count === 1 ? 'pull request is' : 'pull requests are'} ready to request review`
-            : `${count} reviewed ${count === 1 ? 'pull request is' : 'pull requests are'} ready to send`}</strong>
+            ? `${count} ready to request review`
+            : `${count} reviewed and ready to send`}</strong>
           <p>{mode === 'ready'
             ? 'Requesting review does not merge these changes.'
             : 'Choose the exact changes before anything is sent.'}</p>
@@ -287,23 +285,13 @@ function ExactBatchAction({
         >
           {mode === 'ready' ? 'Request review' : count === 1 ? 'Review and send' : `Review and send ${count}`}
         </button>
-        <details className="co-run-primary-details">
-          <summary>Review exact set <Icon name="chevron" size={14} /></summary>
-          <ExactActionList
-            items={activeItems}
-            mode={mode}
-            publicationPreference={publicationPreference}
-            githubState={githubState}
-            onSelect={onSelect}
-          />
-        </details>
       </section>
     )
   }
 
   return (
     <>
-    {task ? <button className="co-local-summary" onClick={() => task.open(`task:${mode}`)}><Icon name="send" size={20} /><span><strong>{count} ready to share</strong><small>Review the exact public actions</small></span><Icon name="right" size={16} /></button> : null}
+    {task ? <button className="co-local-summary" onClick={() => task.open(`task:${mode}`)}><Icon name={mode === 'ready' ? 'review' : 'send'} size={20} /><span><strong>{singleRecord?.number ? `#${singleRecord.number} ${mode === 'ready' ? 'ready for review' : 'ready to share'}` : `${count} ${mode === 'ready' ? 'ready for review' : 'ready to share'}`}</strong><small>{singleRecord?.title || (mode === 'ready' ? 'Review the exact request' : 'Review the exact public actions')}</small></span><Icon name="right" size={16} /></button> : null}
     <TaskPane id={`task:${mode}`}>
     <section
       className="co-run-approval"
@@ -316,8 +304,9 @@ function ExactBatchAction({
           ? `Request review for ${count} ${count === 1 ? 'pull request' : 'pull requests'}?`
           : `Send ${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'}?`}</h3>
         <p id={descriptionId}>{mode === 'ready'
-          ? 'Each named draft becomes ready for review on its current public head. Nothing merges.'
-          : 'Each line below names its exact publication route. Personal pull requests open ready for review; Möbius relay pull requests open as drafts; existing pull requests receive only the reviewed update. Nothing merges.'}</p>
+          ? 'Makes the named drafts ready for review. Nothing merges.'
+          : 'Publishes the reviewed changes exactly as listed below. Nothing merges.'}</p>
+        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>Personal pull requests open ready for review. Möbius relay pull requests open as drafts. Existing pull requests receive only the reviewed update.</p></details> : null}
       </header>
       <ExactActionList
         items={activeItems}
@@ -463,7 +452,7 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
     const owner = records.find(record => record.quality_review?.chat_id || record.chat_id)
     if (!owner) { setNote('No source conversation is saved for this group. Open a contribution below for its available actions.'); return }
     const draft = ['Help me address these related contributions together. Treat each finding independently and preserve their dependency order.',
-      ...records.map(record => `${record.id}: ${recordTitle(record)}${record.attention?.message ? ` — ${record.attention.message}` : ''}`),
+      ...records.map(record => `${record.id}: ${contributionTitle(record)}${record.attention?.message ? ` — ${record.attention.message}` : ''}`),
       'Resolve what you can safely, ask me about remaining decisions, and return updated results for each contribution. This does not approve any public action.',
     ].join('\n')
     const result = onFeedback?.({ ...owner, chat_id: owner.quality_review?.chat_id || owner.chat_id }, { draft })
@@ -479,7 +468,7 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
       {note ? <p role="status">{note}</p> : null}
     </section>
     <div className="co-group-members">{records.map(record => <details className="co-group-member" key={record.id}>
-      <summary>{recordTitle(record)}<span className="co-group-count"> · {needsAnswer(record) ? 'Needs attention' : record.status === 'prepared' ? 'Private proposal' : record.status}</span></summary>
+      <summary>{contributionTitle(record)}<span className="co-group-count"> · {needsAnswer(record) ? 'Needs attention' : record.status === 'prepared' ? 'Private proposal' : record.status}</span></summary>
       {record?.status === 'abandoned' || needsAnswer(record) ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} onFeedback={onFeedback} onRestore={onRestore} /> : null}
       <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} initialExpanded showDecision={false} />
       <SourceChatChoices records={[record]} onFeedback={onFeedback} />
@@ -818,7 +807,7 @@ export function ContributionRun({
       </section> : null}
       {privateProposals.length ? (
         <details className="co-run-fold">
-          <summary><span>Prepared · not shared</span><b>{privateProposals.length}</b><Icon name="chevron" size={14} /></summary>
+          <summary><span>Prepared proposals · not shared</span><b>{privateProposals.length}</b><Icon name="chevron" size={14} /></summary>
           <div>{privateProposals.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
       ) : null}

@@ -222,7 +222,9 @@ async function chooseProject(name) {
     switcher.dispatchEvent(new Event('change', { bubbles:true }))
     await frame(); await frame(); return
   }
-  await click(button('All projects'))
+  const back = query('[aria-label="Back to projects"]')
+  if (back) await click(back)
+  else { window.mobius.nav.back(); await frame(); await frame() }
   await until(() => query('.co-source-row'), 'Project list did not return')
   await click([...document.querySelectorAll('.co-source-row')].find(node => text(node.querySelector('strong')) === name))
 }
@@ -231,8 +233,11 @@ window.runWorkspaceChecks = async () => {
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
     await until(() => query('.co-source-row'), 'Project list did not render')
-    await check('project directory labels filters instead of pretending they are screens', async () => {
-      ensure(query('.co-directory-filter select') && !query('.co-lens-nav'), 'Filters still look like views')
+    await check('project directory uses wrapped filter buttons instead of a dropdown or scroller', async () => {
+      const filters=query('.co-directory-filters'), filterButtons=[...filters.querySelectorAll('button')]
+      ensure(filters && !query('.co-directory-filter select') && !query('.co-lens-nav'), 'Project filters did not use the compact button group')
+      ensure(filterButtons.map(node => text(node)).join('|')==='All|Changes2|Updates0', 'Project filter choices or counts drifted')
+      ensure(button('All',filters).getAttribute('aria-pressed')==='true', 'The active project filter is not exposed')
       await click(query('.co-source-row'))
       await until(() => document.querySelectorAll('.co-pr-row').length === 2 && !button('Prepare changes')?.disabled, 'Project did not settle')
       ensure(query('.co-workspace-inventory') && !query('.co-task-dock'), 'Opening a project displayed task work')
@@ -240,21 +245,15 @@ window.runWorkspaceChecks = async () => {
     })
     const originalInventory = query('.co-workspace-inventory'), originalList = query('.co-pr-list'), originalRow = query('.co-pr-row')
     const inventoryNavigationDepth = navigation.length
-    await check('PR filters are pressed buttons and change totals are an opt-in display choice', async () => {
+    await check('PR filters are pressed buttons and change totals stay visible', async () => {
       const filters=query('.co-pr-filters'), filterButtons=[...filters.querySelectorAll('button')]
       ensure(!query('.co-public-work select[aria-label="Filter pull requests"]'),'PR filters regressed to a native select')
-      ensure(filterButtons.map(node => text(node)).join('|')==='All|Unassigned|Assigned to me|My PRs','PR filter choices drifted')
+      ensure(filterButtons.map(node => text(node)).join('|')==='All|Unassigned|Assigned|Mine','PR filter choices drifted')
       ensure(button('All',filters).getAttribute('aria-pressed')==='true' && filterButtons.filter(node => node.getAttribute('aria-pressed')==='true').length===1,'Default filter is not exposed as one pressed button')
-      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => !text(node).includes('files ·')),'Change totals were visible by default')
-      await click(query('.co-display > summary'))
-      const totals=query('.co-display input[type="checkbox"]')
-      ensure(totals && !totals.checked,'Change totals did not default off')
-      await click(totals)
-      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => text(node).includes('1 files · +1 −0')),'Display choice did not reveal change totals')
-      await click(totals)
-      await click(query('.co-display > summary'))
-      await click(button('My PRs',filters))
-      ensure(button('My PRs',filters).getAttribute('aria-pressed')==='true' && button('All',filters).getAttribute('aria-pressed')==='false','Pressed filter state did not follow the choice')
+      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => text(node).includes('1 file+1−0')),'Change totals were not visible by default')
+      ensure(!query('.co-display'), 'The retired display menu returned')
+      await click(button('Mine',filters))
+      ensure(button('Mine',filters).getAttribute('aria-pressed')==='true' && button('All',filters).getAttribute('aria-pressed')==='false','Pressed filter state did not follow the choice')
       ensure(document.querySelectorAll('.co-pr-row').length===2,'Authored filter hid matching fixture PRs')
       await click(button('All',filters))
       ensure(query('.co-workspace-inventory')===originalInventory && mutationRequests().length===0,'Display-only controls replaced inventory or mutated GitHub')
@@ -286,13 +285,14 @@ window.runWorkspaceChecks = async () => {
     await check('compact selection tray keeps count and only the approved batch actions in one fixed header', async () => {
       const tray=query('.co-pr-selection'), scroller=query('.co-page')
       const heading=query('.co-selection-heading')
-      ensure(heading && button('Assign…',heading) && button('Review 2',heading) && text(heading).includes('2 selected'),'Count and batch actions are not together in the tray header')
+      ensure(heading && button('Assign',heading) && button('Review 2',heading) && text(heading).includes('2 selected'),'Count and batch actions are not together in the tray header')
       ensure(!button('Review & merge',tray),'Tray exposed a redundant merge action')
       ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='false','Selection tray did not start compact')
       const before=tray.getBoundingClientRect()
       scroller.scrollTop=Math.min(160,Math.max(0,scroller.scrollHeight-scroller.clientHeight)); await new Promise(requestAnimationFrame)
       const after=tray.getBoundingClientRect()
       ensure(getComputedStyle(tray).position==='fixed' && Math.abs(before.bottom-after.bottom)<2 && after.bottom<=innerHeight && after.top>=0,'Selection tray left the viewport while browsing')
+      ensure(after.height < innerHeight * 0.5,'Compact selection tray stretched into an empty full-height panel')
       ensure(query('.co-selected-cards').children.length===2,'Selected titles missing')
       await click(query('.co-selection-toggle'))
       ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='true','Selection list did not expand')
@@ -331,7 +331,7 @@ window.runWorkspaceChecks = async () => {
       ensure(getComputedStyle(dock).position==='fixed' && dockRect.bottom<=innerHeight && dockRect.right<=innerWidth,'PR detail is not docked to the viewport edge')
       ensure(query('.co-pr-detail').closest('.co-task-dock')===dock && !query('.co-pr-detail').closest('.co-pr-row'),'PR detail expanded a list row instead of using the dock')
       ensure(button('Unassigned',filters).getAttribute('aria-pressed')==='true' && search.value==='Contribution','Opening detail cleared filter or search')
-      ensure(!query('input[aria-label="Select owner/project #8"]') && query('.co-pr-list')===listBefore && Math.abs(scroller.scrollTop-scrollBefore)<2,'Opening detail changed filtered list identity or scroll')
+      ensure(!query('input[aria-label="Select owner/project #8"]') && query('.co-pr-list')===listBefore && Math.abs(scroller.scrollTop-scrollBefore)<2,'Opening detail changed filtered list identity or scroll ('+scrollBefore+' -> '+scroller.scrollTop+')')
       ensure([...document.querySelectorAll('.co-selected-open')].map(node => text(node).slice(0,2)).join(',')==='#7,#8','Opening detail changed the exact selection')
       await nativeEscape()
       await until(() => !query('.co-task-dock'),'Escape did not close the dock')
@@ -342,7 +342,7 @@ window.runWorkspaceChecks = async () => {
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Closing detail changed selected versions')
     })
     await check('cancelling batch actions restores their original keyboard trigger', async () => {
-      for (const label of ['Review 2','Assign…']) {
+      for (const label of ['Review 2','Assign']) {
         const trigger=button(label,query('.co-pr-selection')); trigger.focus(); await click(trigger)
         await until(() => query('.co-task-dock'),'Dock did not open')
         await click(button('Cancel',query('.co-task-dock')))
@@ -386,7 +386,7 @@ window.runWorkspaceChecks = async () => {
     })
     await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
       const scrollBefore=query('.co-page').scrollTop
-      await click(button('Assign…',query('.co-pr-selection')))
+      await click(button('Assign',query('.co-pr-selection')))
       await until(() => query('[aria-label="Assign to me"]'),'People did not load')
       ensure(mutationRequests().length === 0,'Opening picker assigned prematurely')
       ensure(document.activeElement === query('.co-person-search'),'People search did not receive focus')
@@ -444,7 +444,9 @@ window.runWorkspaceChecks = async () => {
     await check('source conversation scope loads lazily and remains separate from project preparation', async () => {
       await click(button('Prepare changes'))
       await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
-      await click(button('All local changes'))
+      const scope = query('.co-prepare-scope')
+      ensure(text(scope).includes('1 changed file'),'Preparation did not show the collocated file scope')
+      await click(scope)
       await until(() => text(query('[data-task="task:scope"]')).includes('No source conversations'),'Scope did not load')
       ensure(calls.starts.length===0,'Choosing scope started work')
       await click([...document.querySelectorAll('.co-scope-row')][0])
@@ -531,7 +533,7 @@ window.runWorkspaceChecks = async () => {
     })
     await check('adding an external repository is an explicit saved choice, not a GitHub mutation', async () => {
       await click(button('Back to projects'))
-      await click(query('.co-repository-picker summary'))
+      await click(query('[aria-label="Add repository"]'))
       const input = query('#co-repository-name')
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'team/community')
       input.dispatchEvent(new Event('input',{bubbles:true}))

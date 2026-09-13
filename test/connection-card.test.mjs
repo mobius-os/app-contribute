@@ -83,11 +83,11 @@ test('reduced access shows the reconnect migration state', async (t) => {
 })
 
 
-test('the header keeps GitHub visible without claiming an unchecked connection', async t => {
+test('the header shows the connected handle without claiming an unchecked connection', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderSettings } = await connectionRenderer()
   const connected = renderSettings({ state: 'connected', login: 'octocat' })
-  assert.match(connected, /<span>GitHub<\/span>/)
+  assert.match(connected, /<span>octocat<\/span>/)
   assert.match(connected, /GitHub connected — Contribute settings/)
   assert.doesNotMatch(connected, /Connect GitHub|co-settings-panel/)
   for (const state of ['checking', 'unknown', 'unsupported']) {

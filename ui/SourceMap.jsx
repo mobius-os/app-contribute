@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   projectNeedsSorting,
   projectReadyToPrepare,
@@ -11,8 +11,8 @@ import UnifiedDiff from './diff/UnifiedDiff.jsx'
 import { TaskContext, TaskPane } from './TaskPane.jsx'
 
 const FILTERS = [
-  ['all', 'All projects'],
-  ['local', 'Local changes'],
+  ['all', 'All'],
+  ['local', 'Changes'],
   ['updates', 'Updates'],
 ]
 
@@ -36,7 +36,7 @@ function ProjectPosition({ project }) {
   const comparesWithRelease = installedRelease && comparisonRef === project.base_ref
   return (
     <details className="co-position-details">
-      <summary><span>Technical details</span><Icon name="chevron" size={15} /></summary>
+      <summary><span>Branch and version</span><Icon name="chevron" size={15} /></summary>
       <dl>
         <div><dt>Your branch</dt><dd><code>{project.detached ? 'Detached' : project.branch || 'Unknown'}</code></dd></div>
         <div><dt>Your commit</dt><dd><code>{shortCommit(project.head_sha)}</code></dd></div>
@@ -156,33 +156,50 @@ function ProjectDetail({
 }) {
   const [cycle, setCycle] = useState(null)
   const [publicKeys, setPublicKeys] = useState(new Set())
+  const projectView = useRef(null)
+  const pendingScroll = useRef(null)
   const facts = projectBoardFacts(project)
   const activeId = navigation.selectedId || ''
-  const task = { cycle, setCycle, publicKeys, setPublicKeys, activeId, explicit: !!navigation.selectedId, open: navigation.onSelect, close: navigation.onBack }
+  function preservingScroll(change) {
+    const page = projectView.current?.closest('.co-page')
+    if (page) pendingScroll.current = { page, top: page.scrollTop }
+    change()
+  }
+  useLayoutEffect(() => {
+    const saved = pendingScroll.current
+    if (!saved) return
+    saved.page.scrollTop = saved.top
+    pendingScroll.current = null
+  }, [activeId])
+  const task = {
+    cycle, setCycle, publicKeys, setPublicKeys, activeId,
+    explicit: !!navigation.selectedId,
+    open: id => preservingScroll(() => navigation.onSelect(id)),
+    close: () => preservingScroll(navigation.onBack),
+  }
   const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   return (
     <TaskContext.Provider value={task}>
-      <article className="co-workspace">
+      <article ref={projectView} className="co-workspace">
         <header className="co-workspace-head">
           <div className="co-workspace-title"><ProjectGlyph project={project} /><div>
-            <h2>{project.name}</h2>
-            <p>{project.canonical_repo || 'Only on your Möbius'}{project.viewerPermission ? ` · ${['ADMIN', 'MAINTAIN', 'WRITE'].includes(project.viewerPermission) ? 'Maintainer' : 'Contributor'}` : ''}</p>
+            <div className="co-workspace-name-row"><h2>{project.name}</h2>
+              {canUpdate ? <button className="co-icon-action" aria-label={`Check for updates. ${facts.shared}`} title="Check for updates" onClick={() => task.open('task:update')}><Icon name="refresh" size={17} /></button> : null}
+            </div>
+            <p><span>{project.canonical_repo || 'Only on your Möbius'}{project.viewerPermission ? ` · ${['ADMIN', 'MAINTAIN', 'WRITE'].includes(project.viewerPermission) ? 'Maintainer' : 'Contributor'}` : ''}</span>
+              {project.viewerPermission === 'ADMIN' ? <a className="co-workspace-access" href={`https://github.com/${project.canonical_repo}/settings/access`} target="_blank" rel="noopener noreferrer">People &amp; access</a> : null}
+            </p>
           </div></div>
-          {project.viewerPermission === 'ADMIN' ? <a className="co-quiet-action" href={`https://github.com/${project.canonical_repo}/settings/access`} target="_blank" rel="noopener noreferrer">People & access</a> : null}
-          <div className="co-workspace-position"><span>{facts.shared}</span>
-            {canUpdate ? <button className="co-quiet-action" onClick={() => task.open('task:update')}><Icon name="refresh" size={17} /> Get up to date</button> : null}
-          </div>
         </header>
         <div className="co-workspace-body">
           <div className="co-workspace-inventory">
             {renderControls?.(project)}
             {renderActivity?.(project, navigation)}
-            <button className="co-quiet-action co-workspace-files" onClick={() => task.open('task:files')}>Files & technical details <Icon name="right" size={16} /></button>
           </div>
         </div>
         <TaskPane id="task:files">
-          <h3>Files & technical details</h3>
-          <p>Current source, not a sum of past chat edits.</p>
+          <h3>Files, branch and versions</h3>
+          <p>See changed files and the exact versions being compared. Most work doesn’t need this view.</p>
           <ProjectFileChanges key={sourceRevision} project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
           <ProjectPosition project={project} />
           {!project.available ? <p>No inspectable local source is available.</p> : null}
@@ -195,21 +212,35 @@ function ProjectDetail({
 function ProjectRow({ project, selected, onSelect }) {
   const facts = projectBoardFacts(project)
   const next = `${facts.work}; ${facts.shared}`
+  const incomingReviews = project.incomingReviews?.length || 0
+  const visibleWork = incomingReviews ? facts.work.replace(/(?: · )?\d+ in review$/, '') : facts.work
+  const showShared = !!(
+    project.conflictFiles
+    || project.state === 'conflict'
+    || project.incomingFiles
+    || project.originBehind
+    || project.sourceComparisonRequired
+    || !project.available
+    || (!project.builtHere && project.kind !== 'external' && project.canonical_repo && !project.origin?.sha && !project.base_sha)
+  )
   return (
     <div className={'co-source-row-wrap' + (selected ? ' is-selected' : '')}>
       <button
         type="button"
         className="co-source-row"
-        onClick={() => onSelect(project.key)}
+        onClick={() => {
+          if (window.getSelection?.()?.toString().trim()) return
+          onSelect(project.key)
+        }}
         aria-expanded={selected}
         aria-label={`Open ${project.name}: ${next}`}
       >
         <ProjectGlyph project={project} />
         <span className="co-source-row-id"><strong>{project.name}</strong></span>
         <span className="co-source-row-facts">
-          <span>{facts.work}</span>
-          <span className="co-source-shared">{facts.shared}</span>
-          {project.incomingReviews?.length ? <span className="co-source-attention">{project.incomingReviews.length} incoming {project.incomingReviews.length === 1 ? 'review' : 'reviews'}</span> : null}
+          {visibleWork ? <span>{visibleWork}</span> : null}
+          {showShared ? <span className="co-source-shared">{facts.shared}</span> : null}
+          {incomingReviews ? <span className="co-source-attention">{incomingReviews} incoming {incomingReviews === 1 ? 'review' : 'reviews'}</span> : null}
         </span>
         <span className="co-source-row-cue" aria-hidden="true">
 
@@ -246,7 +277,9 @@ export function SourceMap({
   renderActivity,
   renderControls,
   repositoryPicker,
+  onProjectOpenChange,
 }) {
+  const [manualRefresh, setManualRefresh] = useState('idle')
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const filtered = useMemo(
@@ -273,6 +306,17 @@ export function SourceMap({
   const workTriggerRef = useRef(null)
   const [navigationError, setNavigationError] = useState('')
   const pageScroller = () => document.querySelector('.co-page')
+
+  async function refreshProjects() {
+    if (loading || manualRefresh === 'running') return
+    setManualRefresh('running')
+    try {
+      const ok = await onRetry?.()
+      setManualRefresh(ok ? 'done' : 'failed')
+    } catch {
+      setManualRefresh('failed')
+    }
+  }
 
   function closeWork() {
     setSelectedWorkId('')
@@ -361,6 +405,7 @@ export function SourceMap({
   const selectedProject = selected
     ? projects.find((project) => project.key === selected) || null
     : null
+  useEffect(() => { onProjectOpenChange?.(!!selectedProject) }, [selectedProject, onProjectOpenChange])
   const builtHere = filtered.filter((project) => project.builtHere)
   const tracked = filtered.filter((project) => !project.builtHere && project.kind !== 'external')
   const external = filtered.filter((project) => project.kind === 'external')
@@ -377,12 +422,14 @@ export function SourceMap({
             {repositoryPicker}
             <button
               type="button"
-              className="co-quiet-action"
-              onClick={onRetry}
-              disabled={loading}
+              className="co-icon-action"
+              aria-label={loading || manualRefresh === 'running' ? 'Refreshing projects' : manualRefresh === 'done' ? 'Projects updated just now' : manualRefresh === 'failed' ? 'Try refreshing projects again' : 'Refresh projects'}
+              title={manualRefresh === 'failed' ? 'Try refreshing projects again' : 'Refresh projects'}
+              onClick={refreshProjects}
+              disabled={loading || manualRefresh === 'running'}
             >
-              <Icon name="refresh" size={15} />
-              {loading ? 'Refreshing…' : 'Refresh status'}
+              <Icon name={manualRefresh === 'done' ? 'check' : 'refresh'} size={15} />
+              <span className="co-visually-hidden">{loading || manualRefresh === 'running' ? 'Refreshing…' : manualRefresh === 'done' ? 'Updated just now' : manualRefresh === 'failed' ? 'Try refresh again' : 'Refresh projects'}</span>
             </button>
           </div>
         </header>
@@ -413,11 +460,9 @@ export function SourceMap({
               }}
             />
           </label>
-          <label className="co-directory-filter">Filter
-            <select value={filter} onChange={event => setFilter(event.target.value)}>
-              {FILTERS.map(([key, label]) => <option key={key} value={key}>{label}{key !== 'all' ? ` (${filterCounts[key]})` : ''}</option>)}
-            </select>
-          </label>
+          <div className="co-directory-filters" role="group" aria-label="Filter projects">
+            {FILTERS.map(([key, label]) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}{key !== 'all' ? <span>{filterCounts[key]}</span> : null}</button>)}
+          </div>
 
           {filtered.length === 0 ? (
             <div className="co-stage-empty">
@@ -442,22 +487,14 @@ export function SourceMap({
             </div>
           )}
           {external.length ? <details className="co-other-repositories" open={query.trim() ? true : undefined}>
-            <summary>Other repositories <span>{external.length}{externalQuestions ? ` · ${externalQuestions} review requests` : ''}</span></summary>
+            <summary>On GitHub, not installed here <span>{external.length}{externalQuestions ? ` · ${externalQuestions} review requests` : ''}</span></summary>
+            <p>Shown because Contribute has saved history here, you added the repository, or a pull request currently involves you. Other repositories stay on GitHub until you add or work on them.</p>
             <ProjectGroup label="" projects={external} selectedKey="" onSelect={openProject} />
           </details> : null}
           </div>
         </>
       ) : (
         <div className="co-project-layout">
-          <nav className="co-project-switcher" aria-label="Project navigation">
-            <button type="button" className="co-quiet-action" onClick={closeProject}><Icon name="left" size={16} /> All projects</button>
-            <label><span className="co-visually-hidden">Switch project</span>
-              <select aria-label="Switch project" value={selected} onChange={event => openProject(event.target.value)}>
-                <optgroup label="Your projects">{projects.filter(project => project.kind !== 'external').map(project => <option key={project.key} value={project.key}>{project.name}</option>)}</optgroup>
-                {projects.some(project => project.kind === 'external') ? <optgroup label="Other repositories">{projects.filter(project => project.kind === 'external').map(project => <option key={project.key} value={project.key}>{project.name}</option>)}</optgroup> : null}
-              </select>
-            </label>
-          </nav>
           <ProjectDetail
             key={selectedProject.key}
             project={selectedProject}

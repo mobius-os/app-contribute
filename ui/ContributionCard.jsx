@@ -10,6 +10,7 @@ import {
 } from '../domain.js'
 import { parseDiffStat } from '../diff.js'
 import { contributionLabelOutcome } from '../labels.js'
+import { contributionTitle } from '../run.js'
 import {
   contributionFailureOwner,
   qualityReviewFor,
@@ -1103,7 +1104,8 @@ export function ContributionCard({
   const reviewable = status === 'prepared' &&
     typeof onSend === 'function' && typeof onDismiss === 'function'
   const hasPlan = !!(rec.plan && typeof rec.plan === 'object' && (reviewable || initialExpanded))
-  const displayTitle = hasPlan ? (rec.plan.title || title) : title
+  const plainTitle = hasPlan ? (rec.plan.title || title) : title
+  const displayTitle = contributionTitle(rec, plainTitle)
   const planSummary = hasPlan && rec.summary && rec.summary !== displayTitle
     ? rec.summary
     : ''
