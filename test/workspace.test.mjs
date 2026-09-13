@@ -147,7 +147,7 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 changed file/)
+  assert.match(html, /1 local file/)
   assert.match(html, /Private until you prepare and approve sharing/)
   assert.match(html, /Review changed files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
