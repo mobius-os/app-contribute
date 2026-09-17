@@ -322,11 +322,11 @@ Never stretch a local preparation request into an unenumerated public action.
 ## Check the available public paths
 
 ```bash
-curl -s -H "Authorization: Bearer $AGENT_TOKEN" "$API_BASE_URL/api/github/status" | python3 -m json.tool
+mapi /api/github/status | python3 -m json.tool
 ```
 
-Use the `$API_BASE_URL` + `$AGENT_TOKEN` idiom for every chat-context command in
-this file — never hardcode localhost. This status is for the optional personal
+Use `mapi` for every chat-context command in this file — it fills in
+`$API_BASE_URL` + `$AGENT_TOKEN`; never hardcode localhost. This status is for the optional personal
 GitHub path; a linked Möbius account can use the bot path without connecting a
 personal GitHub account. The payload:
 
@@ -1116,7 +1116,7 @@ The Contribute app tracks every contribution so the partner sees status at a
 glance. Find its id (slug `contribute`):
 
 ```bash
-curl -s -H "Authorization: Bearer $AGENT_TOKEN" "$API_BASE_URL/api/apps/" \
+mapi /api/apps/ \
   | python3 -c 'import sys,json;[print(a["id"]) for a in json.load(sys.stdin) if a.get("slug")=="contribute"]'
 ```
 
@@ -1131,8 +1131,8 @@ exists (then pick a new id). A prepared record carries a `plan` and has NO publi
 url/number yet:
 
 ```bash
-curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.json" \
-  -H "Authorization: Bearer $AGENT_TOKEN" -H "Content-Type: application/json" \
+mapi -X PUT /api/storage/apps/<id>/contributions/<record-id>.json \
+  -H "Content-Type: application/json" \
   -H "If-None-Match: *" -d '{
   "id": "<record-id>", "type": "pr", "repo": "<owner>/<repo>",
   "status": "prepared", "title": "<title>", "branch": "fix/<slug>-<short>",
@@ -1165,8 +1165,8 @@ to GitHub.
 Store the full diff beside it as raw text (the once-only write named above):
 
 ```bash
-curl -s -X PUT "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.diff" \
-  -H "Authorization: Bearer $AGENT_TOKEN" -H "Content-Type: text/plain" \
+mapi -X PUT /api/storage/apps/<id>/contributions/<record-id>.diff \
+  -H "Content-Type: text/plain" \
   --data-binary @/tmp/<record-id>.diff
 ```
 
@@ -1177,8 +1177,8 @@ record changed under you: re-read, check the fresh status still allows your
 change, reconcile, then retry with the new ETag:
 
 ```bash
-curl -si -H "Authorization: Bearer $AGENT_TOKEN" -H "x-mobius-version: 1" \
-  "$API_BASE_URL/api/storage/apps/<id>/contributions/<record-id>.json"
+mapi -si -H "x-mobius-version: 1" \
+  /api/storage/apps/<id>/contributions/<record-id>.json
 # note the ETag, edit the JSON, then PUT with -H 'If-Match: <etag>' -d '{ ...full record... }'
 ```
 
