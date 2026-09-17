@@ -326,9 +326,9 @@ curl -s -H "Authorization: Bearer $AGENT_TOKEN" "$API_BASE_URL/api/github/status
 ```
 
 Use the `$API_BASE_URL` + `$AGENT_TOKEN` idiom for every chat-context command in
-this file — never hardcode localhost. This status is for the optional personal
-GitHub path; a linked Möbius account can use the bot path without connecting a
-personal GitHub account. The payload:
+this file — never hardcode localhost. This status determines the required personal GitHub path for new contributions.
+Legacy Möbius-bot records remain recoverable without a personal connection, but
+new contributions use the connected owner account. The payload:
 
 - `connected: true` with a `login` — `gh` is authenticated as the owner. You
   never see the token (`gh` resolves it from the platform store — don't dig for
