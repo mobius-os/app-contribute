@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { contributionCycleAction, projectUpdateAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
-import { projectBoardFacts } from '../source-map.js'
+import { acceptedUpdateCount, projectBoardFacts } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
@@ -22,7 +22,7 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   const local = project.kind !== 'external'
   const changedFiles = Math.max(project.localFiles || 0, project.workingFiles || 0)
-  const acceptedCount = (mergeRun?.items || []).filter(item => item?.state === 'merged').length
+  const acceptedCount = acceptedUpdateCount(project)
   async function start(action) {
     setError('')
     try {

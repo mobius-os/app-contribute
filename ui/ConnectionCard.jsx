@@ -804,10 +804,10 @@ export function ConnectionCard({
   const deviceFlowAvailable = !!conn?.deviceFlowAvailable
   return (
     <div className="co-conn is-column">
-      <div className="co-account-default"><Icon name="check" size={18} /><div><strong>Möbius</strong><small>For Möbius projects. No GitHub needed.</small></div></div>
+      <div className="co-account-default"><Icon name="check" size={18} /><div><strong>Möbius</strong><small>Legacy Möbius drafts only. New contributions use GitHub.</small></div></div>
       <div className="co-github-upgrade">
         <strong>Connect GitHub</strong>
-        <p className="co-conn-note">Collaborate on community projects and send as yourself.</p>
+        <p className="co-conn-note">Connect to contribute to projects as yourself.</p>
       </div>
       {accessMigration === 'required' ? <p className="co-conn-note">Reconnect to approve the updated access.</p> : null}
       {deviceFlowAvailable ? (
