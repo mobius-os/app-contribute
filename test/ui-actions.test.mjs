@@ -56,11 +56,6 @@ test('disconnect is a centered red action and stays explicit on confirmation', (
   assert.match(connectionSource, /className="co-btn co-btn-sm co-btn-danger"[\s\S]*Disconnecting/)
 })
 
-test('empty overview shows a compact up-to-date state instead of a blank region', () => {
-  assert.match(feedSource, /co-run-empty-overview/)
-  assert.match(feedSource, /You’re up to date/)
-})
-
 test('send actions keep a visible label instead of relying on the icon alone', () => {
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /count === 1 \? 'Review and send' : `Review and send \$\{count\}`/)

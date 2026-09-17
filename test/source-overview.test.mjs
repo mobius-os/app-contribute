@@ -133,9 +133,9 @@ test('known route failures leave the public batch before approval', async (t) =>
     unit: { type: 'record', id: draft.id, record: draft, records: [draft] },
   }
 
-  assert.match(publicationRouteProblem(standalone, 'mobius', 'disconnected'), /outside mobius-os/)
-  assert.match(publicationRouteProblem(updateItem, 'mobius', 'disconnected'), /Connect Personal GitHub/)
-  assert.match(publicationRouteProblem(readyItem, 'github', 'disconnected'), /Reconnect Personal GitHub/)
+  assert.match(publicationRouteProblem(standalone, 'mobius', 'disconnected'), /contribute as your account/)
+  assert.match(publicationRouteProblem(updateItem, 'mobius', 'disconnected'), /Connect GitHub/)
+  assert.match(publicationRouteProblem(readyItem, 'github', 'disconnected'), /Reconnect GitHub/)
 
   const common = { id: 'stack', name: 'Stack', total: 2 }
   const layers = [1, 2].map(position => record(`Layer ${position}`, { plan: {

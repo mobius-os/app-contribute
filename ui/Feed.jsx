@@ -771,9 +771,7 @@ export function ContributionRun({
       </TaskPane>
     ) : null
 
-  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount) {
-    return <section className="co-run-empty-overview" aria-label="Contribution status"><Icon name="check" size={18} /><span><strong>You’re up to date</strong><small>No contribution actions need your attention right now.</small></span></section>
-  }
+  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount) return null
 
   return (
     <section className="co-run" aria-label="Contributions">

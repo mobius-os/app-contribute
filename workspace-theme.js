@@ -60,11 +60,6 @@ export const WORKSPACE_CSS = `
 .co-task-content .co-task-primary { width:100%; justify-content:center; margin-top:18px; }
 .co-work-progress-row { display:flex; width:100%; align-items:center; gap:10px; padding:14px 0; background:none; color:var(--accent); border:0; font-size:15px; cursor:pointer; }
 .co-workspace .co-run { margin-top:24px; }
-.co-run-empty-overview { display:flex; align-items:center; gap:10px; margin:18px 0; padding:14px 0; color:var(--muted); border-bottom:1px solid var(--border); }
-.co-run-empty-overview > .co-icon { color:var(--green); flex:0 0 auto; }
-.co-run-empty-overview span { display:grid; gap:2px; }
-.co-run-empty-overview strong { color:var(--text); font-size:15px; font-weight:650; }
-.co-run-empty-overview small { font-size:14px; }
 .co-workspace .co-run-primary { border:0; border-radius:0; border-bottom:1px solid var(--border); background:none; padding:16px 0; }
 .co-workspace .co-local-summary { display:grid; grid-template-columns:24px minmax(0,1fr) 16px; align-items:center; gap:10px; width:100%; min-height:62px; padding:10px 0; border:0; border-bottom:1px solid var(--border); background:none; color:var(--text); text-align:left; cursor:pointer; }
 .co-workspace .co-local-summary > span { min-width:0; }
