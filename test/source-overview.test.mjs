@@ -149,7 +149,7 @@ test('known route failures leave the public batch before approval', async (t) =>
     id: 'publish:stack', kind: 'publish',
     unit: { type: 'stack', id: 'stack', records: layers }, record: layers[0],
   }
-  assert.match(publicationRouteProblem(stack, 'mobius', 'connected'), /relay supports standalone/)
+  assert.match(publicationRouteProblem(stack, 'mobius', 'connected'), /send this related group as your account/)
 })
 
 test('an exact approval fingerprint changes with head, route, and review stage', async (t) => {
