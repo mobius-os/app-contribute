@@ -17,29 +17,29 @@ test('recognizes only mobius-os repositories as bot-eligible', () => {
   assert.equal(isMobiusRepository({ repo: 'mobius-os' }), false)
 })
 
-test('disconnected owners use the Möbius bot only for mobius-os', () => {
+test('new contributions require the connected owner GitHub identity', () => {
   assert.deepEqual(
     contributionPathDecision(mobius, 'github', 'disconnected'),
-    { method: 'mobius', error: '' },
+    { method: 'github', error: 'Connect GitHub to contribute as your account.' },
   )
   assert.deepEqual(
     contributionPathDecision(external, 'mobius', 'disconnected'),
     {
       method: 'github',
-      error: 'Connect GitHub to contribute to repositories outside mobius-os.',
+      error: 'Connect GitHub to contribute as your account.',
     },
   )
 })
 
-test('connected owners keep their chosen method; community repositories always use GitHub', () => {
-  assert.equal(contributionPathDecision(mobius, undefined, 'connected').method, 'mobius')
+test('connected owners always use GitHub for new contributions', () => {
+  assert.equal(contributionPathDecision(mobius, undefined, 'connected').method, 'github')
   assert.equal(
     contributionPathDecision(mobius, 'github', 'connected').method,
     'github',
   )
   assert.equal(
     contributionPathDecision(mobius, 'mobius', 'connected').method,
-    'mobius',
+    'github',
   )
   assert.equal(
     contributionPathDecision(external, 'mobius', 'connected').method,
@@ -54,6 +54,13 @@ test('a stack follows personal GitHub if any layer is outside mobius-os', () => 
   )
   assert.equal(
     contributionStackDecision([mobius], 'mobius', 'connected').method,
+    'github',
+  )
+})
+
+test('legacy Möbius-bot records retain their compatibility route', () => {
+  assert.equal(
+    contributionPathDecision({ ...mobius, submission_mode: 'mobius-bot' }, undefined, 'connected').method,
     'mobius',
   )
 })

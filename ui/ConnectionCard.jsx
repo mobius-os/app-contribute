@@ -26,6 +26,15 @@ export function ConnectionSettings(props) {
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) }
   }, [open])
+  useEffect(() => {
+    const openSettings = () => {
+      if (!ref.current) return
+      ref.current.open = true
+      setOpen(true)
+    }
+    window.addEventListener('mobius:open-contribute-settings', openSettings)
+    return () => window.removeEventListener('mobius:open-contribute-settings', openSettings)
+  }, [])
   return <details className="co-settings" ref={ref} onToggle={event => {
     const next = event.currentTarget.open
     setOpen(next)
@@ -251,9 +260,6 @@ export function ConnectionCard({
   deviceTransport,
   autopilotDefault = true,
   onToggleAutopilotDefault,
-  submissionMethod = 'mobius',
-  onChooseSubmissionMethod,
-  submissionError = '',
 }) {
   // Device-flow machine: idle | starting | pending | failed | cancelled |
   // complete.
@@ -694,7 +700,7 @@ export function ConnectionCard({
       <div className="co-conn is-connected">
         <p className="co-account-login"><Icon name="github" size={18} /> {justConnected ? 'Connected' : login}</p>
         <div className="co-conn-settings" role="group" aria-label="Contribution settings">
-            {submissionMethod === 'github' && conn?.autopilotAvailable &&
+            {conn?.autopilotAvailable &&
               typeof onToggleAutopilotDefault === 'function' && (
               <div className="co-autopilot-setting">
                 <label htmlFor="co-follow-sent-prs">Follow sent PRs</label>
@@ -735,37 +741,7 @@ export function ConnectionCard({
                 </span>
               </div>
             )}
-            {typeof onChooseSubmissionMethod === 'function' && (
-              <div className="co-method-setting">
-                <strong>Send Möbius contributions as</strong>
-                <div
-                  className="co-method-options"
-                  role="group"
-                  aria-label="Contribution path"
-                >
-                  <button
-                    type="button"
-                    className={submissionMethod === 'mobius' ? 'is-active' : ''}
-                    aria-pressed={submissionMethod === 'mobius'}
-                    onClick={() => onChooseSubmissionMethod('mobius')}
-                  >
-                    <Icon name="merge" size={14} />
-                    <span>Möbius</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={submissionMethod === 'github' ? 'is-active' : ''}
-                    aria-pressed={submissionMethod === 'github'}
-                    onClick={() => onChooseSubmissionMethod('github')}
-                  >
-                    <Icon name="github" size={14} />
-                    <span>{login}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-            {submissionError ? <div role="alert"><p className="co-conn-error">{submissionError}</p><button type="button" className="co-btn co-btn-sm" onClick={() => onChooseSubmissionMethod(submissionMethod)}>Save choice again</button></div> : null}
-            {submissionMethod === 'github' && workflowEnabled && (
+            {workflowEnabled && (
               !privateEnabled ? (
                 <div className="co-private-setting">
                   <strong>Private repositories</strong>
@@ -813,7 +789,7 @@ export function ConnectionCard({
               ) : (
                 <button
                   type="button"
-                  className="co-btn co-btn-sm co-btn-danger"
+                  className="co-btn co-btn-sm co-btn-danger co-disconnect-trigger"
                   onClick={() => { setDisconnectError(''); setDisconnectConfirm(true) }}
                 >
                   Disconnect GitHub

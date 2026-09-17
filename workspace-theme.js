@@ -60,6 +60,11 @@ export const WORKSPACE_CSS = `
 .co-task-content .co-task-primary { width:100%; justify-content:center; margin-top:18px; }
 .co-work-progress-row { display:flex; width:100%; align-items:center; gap:10px; padding:14px 0; background:none; color:var(--accent); border:0; font-size:15px; cursor:pointer; }
 .co-workspace .co-run { margin-top:24px; }
+.co-run-empty-overview { display:flex; align-items:center; gap:10px; margin:18px 0; padding:14px 0; color:var(--muted); border-bottom:1px solid var(--border); }
+.co-run-empty-overview > .co-icon { color:var(--green); flex:0 0 auto; }
+.co-run-empty-overview span { display:grid; gap:2px; }
+.co-run-empty-overview strong { color:var(--text); font-size:15px; font-weight:650; }
+.co-run-empty-overview small { font-size:14px; }
 .co-workspace .co-run-primary { border:0; border-radius:0; border-bottom:1px solid var(--border); background:none; padding:16px 0; }
 .co-workspace .co-local-summary { display:grid; grid-template-columns:24px minmax(0,1fr) 16px; align-items:center; gap:10px; width:100%; min-height:62px; padding:10px 0; border:0; border-bottom:1px solid var(--border); background:none; color:var(--text); text-align:left; cursor:pointer; }
 .co-workspace .co-local-summary > span { min-width:0; }
@@ -201,6 +206,14 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-pr-side > button[aria-label^="Assign PR"] { min-width:44px; justify-content:center; }
 .co-task-dock:focus-visible,.co-task-dock [tabindex="-1"]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .co-workspace .co-task-dock { animation:co-dock-arrive .18s cubic-bezier(.16,1,.3,1); }
+.co-connect-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:0 0 20px; padding:16px 18px; border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border)); border-radius:12px; background:color-mix(in srgb,var(--accent-dim) 42%,var(--surface)); }
+.co-connect-banner strong { display:block; font-size:16px; font-weight:650; }
+.co-connect-banner p { margin:4px 0 0; max-width:64ch; color:var(--muted); font-size:14px; line-height:1.5; }
+.co-accepted-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:0 0 18px; padding:16px 18px; border:1px solid color-mix(in srgb,var(--green) 35%,var(--border)); border-radius:12px; background:color-mix(in srgb,var(--green) 10%,var(--surface)); }
+.co-accepted-banner strong { display:block; font-size:16px; font-weight:650; }
+.co-accepted-banner p { margin:4px 0 0; max-width:64ch; color:var(--muted); font-size:14px; line-height:1.5; }
+@media(max-width:680px) { .co-connect-banner { align-items:stretch; flex-direction:column; gap:12px; margin-bottom:16px; } .co-connect-banner .co-btn { width:100%; justify-content:center; } }
+@media(max-width:680px) { .co-accepted-banner { align-items:stretch; flex-direction:column; gap:12px; margin-bottom:16px; } .co-accepted-banner .co-btn { width:100%; justify-content:center; } }
 @keyframes co-dock-arrive { from { transform:translate(-50%,12px); } to { transform:translate(-50%,0); } }
 @keyframes co-dock-arrive-mobile { from { transform:translateY(12px); } to { transform:translateY(0); } }
 @media(prefers-reduced-motion:reduce) { .co-workspace .co-task-dock { animation:none; } }

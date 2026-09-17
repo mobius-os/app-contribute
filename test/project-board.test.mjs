@@ -11,10 +11,11 @@ const project = {
   origin: { sha: 'accepted' }, localFiles: 2, workingFiles: 0,
 }
 
-test('new contribution settings default to Möbius without replacing a saved GitHub choice', () => {
-  assert.equal(normalizeAppSettings(null).submission_method, 'mobius')
-  assert.equal(normalizeAppSettings({ autopilot_default: false }).submission_method, 'mobius')
+test('new contribution settings always use the connected GitHub identity', () => {
+  assert.equal(normalizeAppSettings(null).submission_method, 'github')
+  assert.equal(normalizeAppSettings({ autopilot_default: false }).submission_method, 'github')
   assert.equal(normalizeAppSettings({ submission_method: 'github' }).submission_method, 'github')
+  assert.equal(normalizeAppSettings({ submission_method: 'mobius' }).submission_method, 'github')
 })
 
 test('project facts never equate published review work with accepted or only-local work', () => {

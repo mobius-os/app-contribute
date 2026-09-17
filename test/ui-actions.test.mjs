@@ -16,12 +16,49 @@ const cycleSource = readFileSync(new URL('../ui/useProjectCycle.js', import.meta
 const workspaceTheme = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
 const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
 
-test('choosing a contribution route stays a preference, not preparation or publication', () => {
-  const choose = appSource.slice(appSource.indexOf('const onChooseSubmissionMethod ='), appSource.indexOf('const onAssignIncomingReview ='))
-  assert.doesNotMatch(choose, /onSend|startAgentTask|onStartCycle|submitContribution/)
-  assert.match(choose, /if \(!saved\) setSubmissionError/)
+test('new contributions use GitHub automatically without a route picker', () => {
+  assert.doesNotMatch(appSource, /onChooseSubmissionMethod|submissionError|setSubmissionError/)
+  assert.doesNotMatch(connectionSource, /co-method-setting|Send Möbius contributions as|onChooseSubmissionMethod/)
+  assert.match(appSource, /publicationPreference="github"/)
   assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
   assert.doesNotMatch(connectionSource, /onChooseChanges|onOpenSetup/)
+})
+
+test('disconnected projects offer a prominent GitHub connection action', () => {
+  assert.match(sourceMapSource, /co-connect-banner/)
+  assert.match(sourceMapSource, /Connect GitHub to contribute as yourself/)
+  assert.match(sourceMapSource, /mobius:open-contribute-settings/)
+  assert.match(connectionSource, /mobius:open-contribute-settings/)
+})
+
+test('publication copy describes automatic GitHub identity without picker language', () => {
+  assert.doesNotMatch(feedSource, /Choose Personal GitHub|Möbius relay supports standalone drafts/)
+  assert.match(feedSource, /your connected GitHub account/)
+  assert.match(sourceMapSource, /Local changes/)
+  assert.match(sourceMapSource, /Updates available/)
+})
+
+test('accepted merged work is surfaced at project level with the safe update action', () => {
+  const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
+  assert.match(controlsSource, /co-accepted-banner/)
+  assert.match(controlsSource, /Bring accepted changes here/)
+  assert.match(controlsSource, /task\?\.open\('task:update'\)/)
+})
+
+test('settings place the connection controls after optional agent preferences', () => {
+  const settings = connectionSource.indexOf('<ConnectionCard {...props} />')
+  const agent = connectionSource.indexOf('<AgentModelSettings')
+  assert.ok(settings > agent)
+})
+
+test('disconnect is a centered red action and stays explicit on confirmation', () => {
+  assert.match(connectionSource, /className="co-btn co-btn-sm co-btn-danger co-disconnect-trigger"[\s\S]*?>\s*Disconnect GitHub\s*<\/button>/)
+  assert.match(connectionSource, /className="co-btn co-btn-sm co-btn-danger"[\s\S]*Disconnecting/)
+})
+
+test('empty overview shows a compact up-to-date state instead of a blank region', () => {
+  assert.match(feedSource, /co-run-empty-overview/)
+  assert.match(feedSource, /You’re up to date/)
 })
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
@@ -154,7 +191,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(feedSource, /Nothing merges\./)
   assert.match(appSource, /provider: chosenAgent\.provider/)
   assert.match(appSource, /\.\.\.\(chosenAgent\.effort \? \{ effort: chosenAgent\.effort \} : \{\}\)/)
-  assert.match(feedSource, /Personal pull requests open ready for review/)
+  assert.match(feedSource, /New pull requests use your connected GitHub account and open ready for review/)
   assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
   assert.match(feedSource, /outcome = await onSendStack\?\.\(runUnitRecords\(item\)\)/)
   assert.doesNotMatch(batchActionSource, /role="alertdialog"/)

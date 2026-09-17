@@ -98,7 +98,7 @@ function captureBatchItems(items) {
 function publicationLine(record, publicationPreference, githubState) {
   if (record?.plan?.action === 'pr_update') return 'Update the existing pull request'
   return contributionPath(record, publicationPreference, githubState) === 'mobius'
-    ? 'Open as a draft through Möbius'
+    ? 'Open as a legacy draft'
     : 'Open ready for review'
 }
 
@@ -106,7 +106,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (item?.kind === 'mark_ready') {
     return githubState === 'connected'
       ? ''
-      : 'Reconnect Personal GitHub before requesting review for these drafts.'
+      : 'Reconnect GitHub before requesting review for these drafts.'
   }
   if (item?.kind !== 'publish') return ''
   const records = item?.unit?.type === 'stack'
@@ -118,7 +118,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (updating) {
     return githubState === 'connected'
       ? ''
-      : 'Connect Personal GitHub before updating these pull requests.'
+      : 'Connect GitHub before updating these pull requests.'
   }
   if (item?.unit?.type === 'stack') {
     const route = contributionStackDecision(
@@ -126,7 +126,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
     )
     if (route.error) return route.error
     if (route.method === 'mobius') {
-      return 'Related pull requests need Personal GitHub; the Möbius relay supports standalone drafts only.'
+      return 'Connect GitHub to send this related group as your account.'
     }
     return ''
   }
@@ -306,7 +306,7 @@ function ExactBatchAction({
         <p id={descriptionId}>{mode === 'ready'
           ? 'Makes the named drafts ready for review. Nothing merges.'
           : 'Publishes the reviewed changes exactly as listed below. Nothing merges.'}</p>
-        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>Personal pull requests open ready for review. Möbius relay pull requests open as drafts. Existing pull requests receive only the reviewed update.</p></details> : null}
+        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>New pull requests use your connected GitHub account and open ready for review. Existing pull requests receive only the reviewed update.</p></details> : null}
       </header>
       <ExactActionList
         items={activeItems}
@@ -463,7 +463,7 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
       <h3>{itemHeading(item)}</h3>
       <p className="co-group-count">1 group · {records.length} contributions{questions.length ? ` · ${questions.length} need attention` : ''}</p>
       <p>{item.detail}</p>
-      {item.kind === 'route_attention' ? <p>Choose Personal GitHub in Contribute settings to send this related group together.</p> : null}
+      {item.kind === 'route_attention' ? <p>Connect GitHub to send this related group as your account.</p> : null}
       {onFeedback ? <button className="co-btn co-btn-primary" onClick={addressTogether}>Address group in conversation</button> : null}
       {note ? <p role="status">{note}</p> : null}
     </section>
@@ -607,7 +607,7 @@ export function FocusedItem({
         <small>Choose a publication route</small>
         <h3>{itemHeading(item)}</h3>
         <p>{item.detail}</p>
-        <p>Choose Personal GitHub from Contribute settings, then return to the exact Send batch.</p>
+        <p>Connect GitHub, then return to the exact Send batch.</p>
         <SourceChatChoices records={records} onFeedback={onFeedback} />
       </section>
     )
@@ -771,7 +771,9 @@ export function ContributionRun({
       </TaskPane>
     ) : null
 
-  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount) return null
+  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount) {
+    return <section className="co-run-empty-overview" aria-label="Contribution status"><Icon name="check" size={18} /><span><strong>You’re up to date</strong><small>No contribution actions need your attention right now.</small></span></section>
+  }
 
   return (
     <section className="co-run" aria-label="Contributions">

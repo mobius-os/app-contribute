@@ -22,6 +22,7 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
   const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   const local = project.kind !== 'external'
   const changedFiles = Math.max(project.localFiles || 0, project.workingFiles || 0)
+  const acceptedCount = (mergeRun?.items || []).filter(item => item?.state === 'merged').length
   async function start(action) {
     setError('')
     try {
@@ -36,6 +37,10 @@ export function ProjectControls({ appId, token, project, run, mergeRun, onStart,
     {cycle?.phase === 'running' ? <button className="co-quiet-action" onClick={workflow.stop}>Stop</button> : null}
   </div> : null
   return <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
+    {acceptedCount > 0 && canUpdate ? <div className="co-accepted-banner" role="status">
+      <div><strong>{acceptedCount} accepted {acceptedCount === 1 ? 'change is' : 'changes are'} ready to pull</strong><p>Bring the merged work into this project without replacing unfinished local changes.</p></div>
+      <button type="button" className="co-btn co-btn-primary" onClick={() => task?.open('task:update')}>Bring accepted changes here</button>
+    </div> : null}
     {local ? <>
       <div className="co-local-overview">
         <div><strong>{project.builtHere ? 'Only on your Möbius' : changedFiles ? `${changedFiles} local ${changedFiles === 1 ? 'file' : 'files'}` : 'No local changes'}</strong>
