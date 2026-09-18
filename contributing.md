@@ -328,6 +328,14 @@ mapi /api/github/status | python3 -m json.tool
 Use `mapi` for every chat-context command in this file — it fills in
 `$API_BASE_URL` + `$AGENT_TOKEN`; never hardcode localhost. This status is for the optional personal
 GitHub path; a linked Möbius account can use the bot path without connecting a
+personal GitHub account.
+
+Two habits prevent the most common `mapi` debugging detours here. A successful
+write often returns **204 No Content**, so `mapi` prints nothing — that silence
+is success, not failure: verify with a follow-up GET, or show the status with
+`mapi -o /dev/null -w '%{http_code}' -X PUT /api/... -d '...'`. And use the
+exact documented path including its trailing slash (`/api/apps/`): slash-less
+variants are a plain 404, not a redirect curl could follow. a linked Möbius account can use the bot path without connecting a
 personal GitHub account. The payload:
 
 - `connected: true` with a `login` — `gh` is authenticated as the owner. You
