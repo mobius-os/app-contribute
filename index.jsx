@@ -184,8 +184,7 @@ export default function ContributeApp({ appId, token }) {
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
-  const [submissionMethod, setSubmissionMethod] = useState('mobius')
-  const [submissionError, setSubmissionError] = useState('')
+  const submissionMethod = 'github'
   const [agentChoice, setAgentChoice] = useState({ provider: '', model: '', effort: '' })
   const [earlierCycle, setEarlierCycle] = useState(null)
   useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
@@ -265,9 +264,9 @@ export default function ContributeApp({ appId, token }) {
   // key to the shell, which fans it out to every mounted app frame,
   // including the App Store's.
   useEffect(() => {
-    const setupState = submissionMethod === 'mobius' ? 'connected' : conn.state
+    const setupState = conn.state
     try { syncSetupCompletion(appId, setupState, window.localStorage) } catch {}
-  }, [appId, conn.state, submissionMethod])
+  }, [appId, conn.state])
 
   // Every local ledger result must update the render, the callback mirror, and
   // the offline cache together. Keeping that write in one place prevents a
@@ -438,12 +437,6 @@ export default function ContributeApp({ appId, token }) {
       if (typeof appSettings.autopilot_default === 'boolean') {
         setAutopilotDefault(appSettings.autopilot_default)
       }
-      const savedMethod = appSettings.submission_method
-      setSubmissionMethod(
-        savedMethod === 'mobius' || savedMethod === 'github'
-          ? savedMethod
-          : 'mobius',
-      )
       setAgentChoice({
         provider: typeof appSettings.agent_provider === 'string' ? appSettings.agent_provider : '',
         model: typeof appSettings.agent_model === 'string' ? appSettings.agent_model : '',
@@ -708,8 +701,8 @@ export default function ContributeApp({ appId, token }) {
     [token],
   )
 
-  // New PRs use the owner's selected publication path. An existing-PR update
-  // stays on the personal GitHub identity that owns its public branch. Both
+  // New PRs use the connected owner's GitHub identity. Existing-PR updates
+  // stay on the personal GitHub identity that owns their public branch. Both
   // actions consume one exact reviewed record and remain explicit clicks.
   const onSend = useCallback(async (rec) => {
     let canonical = null
@@ -1045,16 +1038,6 @@ export default function ContributeApp({ appId, token }) {
     saveAppSettings({ ...settings, autopilot_default: next })
   }, [])
 
-  const onChooseSubmissionMethod = useCallback(async (next) => {
-    if (next !== 'mobius' && next !== 'github') return
-    setSubmissionMethod(next)
-    setSubmissionError('')
-    const settings = await loadAppSettings()
-    const saved = await saveAppSettings({ ...settings, submission_method: next })
-    if (!saved) setSubmissionError('Selected for this session, but your choice could not be saved. Check your connection and try again.')
-    window.mobius?.signal?.('contribution_method_changed', { method: next })
-  }, [])
-
   const onChooseAgent = useCallback(async (next) => {
     const normalized = {
       provider: typeof next?.provider === 'string' ? next.provider : '',
@@ -1148,7 +1131,7 @@ export default function ContributeApp({ appId, token }) {
     )
     if (updating && connRef.current.state !== 'connected') {
       return {
-        error: 'Connect Personal GitHub before updating these pull requests.',
+        error: 'Connect GitHub before updating these pull requests.',
         failure: { owner: 'owner', code: 'github_not_connected' },
       }
     }
@@ -1164,7 +1147,7 @@ export default function ContributeApp({ appId, token }) {
       }
       if (decision.method === 'mobius') {
         return {
-          error: 'Related PR stacks use Personal GitHub; the Möbius relay supports standalone drafts only.',
+          error: 'Connect GitHub to send this related group as your account.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
@@ -1406,8 +1389,6 @@ export default function ContributeApp({ appId, token }) {
           <ConnectionSettings
             conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
-            submissionMethod={submissionMethod} onChooseSubmissionMethod={onChooseSubmissionMethod}
-            submissionError={submissionError}
             agentChoice={agentChoice} onChooseAgent={onChooseAgent}
           />
         </Header>
@@ -1444,7 +1425,7 @@ export default function ContributeApp({ appId, token }) {
               projectName={project?.name || 'all projects'}
               selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack}
               loading={loading} omittedCount={fromCache ? 0 : omittedCount}
-              publicationPreference={submissionMethod} githubState={conn.state}
+              publicationPreference="github" githubState={conn.state}
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               onFeedback={onFeedback} onDismiss={onDismiss} onRestore={onRestore}

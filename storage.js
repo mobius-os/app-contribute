@@ -288,7 +288,7 @@ export async function clearCycleState() {
 const SETTINGS_FILE = 'settings.json'
 const DEFAULT_APP_SETTINGS = Object.freeze({
   autopilot_default: true,
-  submission_method: 'mobius',
+  submission_method: 'github',
   agent_provider: '',
   agent_model: '',
   agent_effort: '',
@@ -296,7 +296,7 @@ const DEFAULT_APP_SETTINGS = Object.freeze({
 
 export function normalizeAppSettings(raw) {
   return raw && typeof raw === 'object'
-    ? { ...DEFAULT_APP_SETTINGS, ...raw }
+    ? { ...DEFAULT_APP_SETTINGS, ...raw, submission_method: 'github' }
     : { ...DEFAULT_APP_SETTINGS }
 }
 

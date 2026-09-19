@@ -231,6 +231,16 @@ export function projectBoardFacts(project) {
 // can be commits behind while producing no incoming files for the installed
 // release projection; falling back to ancestry in that case overstates an
 // update the project detail cannot show.
+export function acceptedUpdateCount(project) {
+  if (!projectHasSharedUpdates(project)) return 0
+  return (Array.isArray(project?.contributions) ? project.contributions : [])
+    .filter(record => record?.type === 'pr' && record?.status === 'merged').length
+}
+
+// Reconciliation owns the file-level answer once it is available. A branch
+// can be commits behind while producing no incoming files for the installed
+// release projection; falling back to ancestry in that case overstates an
+// update the project detail cannot show.
 export function projectHasSharedUpdates(project) {
   return Number(project?.incomingFiles || 0) > 0 || (
     project?.semanticAvailable !== true

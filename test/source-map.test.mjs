@@ -820,3 +820,17 @@ test('tracked app work needs sorting when no current shared position is availabl
   assert.equal(projectNeedsPreparation(notes), true)
   assert.equal(projectPreparationState(notes), 'sorting')
 })
+
+test('accepted update count uses merged contributions only when shared files are available', async () => {
+  const { acceptedUpdateCount } = await import('../source-map.js')
+  const project = installedApp({
+    contributions: [
+      { type: 'pr', status: 'merged' },
+      { type: 'pr', status: 'open' },
+    ],
+    incomingFiles: 2,
+    reconciliation: { available: true, new_upstream_count: 2 },
+  })
+  assert.equal(acceptedUpdateCount(project), 1)
+  assert.equal(acceptedUpdateCount({ ...project, incomingFiles: 0, reconciliation: { available: true, new_upstream_count: 0 } }), 0)
+})

@@ -544,6 +544,8 @@ export const CSS = `
 .co-private-setting .co-btn { min-height: 44px; padding: 8px 10px; font-size: 14px; }
 .co-conn-settings > .co-conn-actions { padding: 7px 8px 2px; }
 .co-conn-settings > .co-conn-actions .co-btn { min-height: 44px; padding: 8px 10px; font-size: 14px; }
+.co-disconnect-trigger { width:100%; justify-content:center; margin-top:6px; color:color-mix(in srgb,var(--danger) 82%,var(--text)); border-color:color-mix(in srgb,var(--danger) 34%,var(--border)); background:color-mix(in srgb,var(--danger) 8%,transparent); }
+.co-disconnect-trigger:hover:not(:disabled) { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 58%,var(--border)); background:color-mix(in srgb,var(--danger) 14%,transparent); }
 .co-disconnect-confirm { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .co-disconnect-confirm > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; text-wrap: pretty; }
 

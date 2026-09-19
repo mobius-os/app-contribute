@@ -9,9 +9,9 @@ export function isMobiusRepository(record) {
 }
 
 export function contributionPath(record, preference, githubState) {
+  if (record?.submission_mode === 'mobius-bot') return 'mobius'
   if (!isMobiusRepository(record)) return 'github'
-  if (githubState !== 'connected') return 'mobius'
-  return preference === 'github' ? 'github' : 'mobius'
+  return 'github'
 }
 
 export function contributionPathDecision(record, preference, githubState) {
@@ -19,7 +19,7 @@ export function contributionPathDecision(record, preference, githubState) {
   if (method === 'github' && githubState !== 'connected') {
     return {
       method,
-      error: 'Connect GitHub to contribute to repositories outside mobius-os.',
+      error: 'Connect GitHub to contribute as your account.',
     }
   }
   return { method, error: '' }

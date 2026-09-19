@@ -196,7 +196,7 @@ test('the Run owns one exact grouped action across standalone and stacked work',
   assert.match(feedSource, /Review and send \$\{count\}/)
   assert.match(feedSource, /Send \$\{count\} to GitHub/)
   assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
-  assert.match(feedSource, /Personal pull requests open ready for review/)
+  assert.match(feedSource, /New pull requests use your connected GitHub account and open ready for review/)
   assert.match(feedSource, /Nothing merges\./)
   assert.doesNotMatch(feedSource, /unit\.type !== 'stack'/)
   assert.match(runSource, /decisions\.push\(decision\('publish'/)
@@ -256,7 +256,7 @@ test('projects contain their contribution flow without a separate Reviews destin
   assert.match(feedSource, />Done recently</)
   assert.match(feedSource, /DECISION_ACTION_LABELS/)
   assert.match(sourceMapSource, /placeholder="Find a project"/)
-  assert.match(sourceMapSource, /\['local', 'Changes'\]/)
+  assert.match(sourceMapSource, /\['local', 'Local changes'\]/)
   assert.equal((sourceMapSource.match(/\['all', 'All'\]/g) || []).length, 1)
 })
 
@@ -588,7 +588,7 @@ test('public action failures have one truthful owner', () => {
   assert.match(cardSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.doesNotMatch(feedSource, /await onStartAgent/)
-  assert.match(appSource, /Related PR stacks use Personal GitHub; the Möbius relay supports standalone drafts only\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
+  assert.match(appSource, /Connect GitHub to send this related group as your account\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
 })
 
 test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {
