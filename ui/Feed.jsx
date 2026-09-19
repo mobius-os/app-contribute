@@ -306,7 +306,7 @@ function ExactBatchAction({
         <p id={descriptionId}>{mode === 'ready'
           ? 'Makes the named drafts ready for review. Nothing merges.'
           : 'Publishes the reviewed changes exactly as listed below. Nothing merges.'}</p>
-        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>New pull requests use your connected GitHub account and open ready for review. Existing pull requests receive only the reviewed update.</p></details> : null}
+        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>New pull requests use your connected GitHub account and open ready for review. Existing pull requests receive only the reviewed update. Legacy relay records marked as Möbius-bot are published by the Möbius service under its legacy identity.</p></details> : null}
       </header>
       <ExactActionList
         items={activeItems}
