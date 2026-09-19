@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -74,6 +75,22 @@ class ApprovalHelperTests(unittest.TestCase):
     with patch.object(helper, "inspect_pr", return_value=ITEM):
       review = helper.prepare_selection(["example/project#7"], "review", "owning-chat")
     self.assertNotEqual(one["request_id"], review["request_id"])
+
+  def test_inspection_binds_current_target_tip_not_pull_comparison_base(self):
+    pull = {
+      "state": "open", "merged": False,
+      "base": {"ref": "release/next", "sha": "c" * 40,
+               "repo": {"full_name": "Example/Project"}},
+      "head": {"sha": "a" * 40}, "title": "A change",
+      "html_url": "https://github.com/Example/Project/pull/7",
+    }
+    results = [SimpleNamespace(stdout=json.dumps(pull)),
+               SimpleNamespace(stdout=json.dumps({"object": {"sha": "b" * 40}}))]
+    with patch.object(helper.subprocess, "run", side_effect=results) as run:
+      item = helper.inspect_pr("example/project#7")
+    self.assertEqual(item["base_sha"], "b" * 40)
+    self.assertEqual(run.call_args_list[1].args[0][-1],
+                     "repos/Example/Project/git/ref/heads/release%2Fnext")
 
   def test_approval_needs_both_explicit_flag_and_context(self):
     for args in (["--approved-in-chat"], ["--approval-context", "yes"],
