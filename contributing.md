@@ -335,8 +335,7 @@ write often returns **204 No Content**, so `mapi` prints nothing — that silenc
 is success, not failure: verify with a follow-up GET, or show the status with
 `mapi -o /dev/null -w '%{http_code}' -X PUT /api/... -d '...'`. And use the
 exact documented path including its trailing slash (`/api/apps/`): slash-less
-variants are a plain 404, not a redirect curl could follow. a linked Möbius account can use the bot path without connecting a
-personal GitHub account. The payload:
+variants are a plain 404, not a redirect curl could follow. The payload:
 
 - `connected: true` with a `login` — `gh` is authenticated as the owner. You
   never see the token (`gh` resolves it from the platform store — don't dig for
