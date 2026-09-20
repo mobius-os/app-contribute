@@ -42,22 +42,28 @@ def find_app_id():
   return apps[0]["id"]
 
 
+def gh_api(endpoint):
+  result = subprocess.run(["gh", "api", endpoint], capture_output=True,
+    text=True, check=True, timeout=60)
+  return json.loads(result.stdout)
+
+
 def inspect_pr(reference):
   match = PR_REFERENCE.fullmatch(reference)
   if not match:
     raise ValueError("Use owner/repository#123 or a github.com pull-request URL.")
   repo, number = match.group(1), int(match.group(2))
-  result = subprocess.run(["gh", "api", f"repos/{repo}/pulls/{number}"],
-    capture_output=True, text=True, check=True, timeout=60)
-  pull = json.loads(result.stdout)
+  pull = gh_api(f"repos/{repo}/pulls/{number}")
   if pull.get("state") != "open" or pull.get("merged"):
     raise ValueError(f"{reference} is no longer open.")
   canonical_repo = pull["base"]["repo"]["full_name"]
   if canonical_repo.lower() != repo.lower():
     raise ValueError(f"{reference} moved to another repository; inspect its destination first.")
+  base_ref = pull["base"]["ref"]
+  base = gh_api(f"repos/{canonical_repo}/git/ref/heads/{quote(base_ref, safe='')}")
   return {"repo": canonical_repo.lower(), "number": number,
-    "head_sha": pull["head"]["sha"], "base_ref": pull["base"]["ref"],
-    "base_sha": pull["base"]["sha"], "title": pull["title"], "url": pull["html_url"]}
+    "head_sha": pull["head"]["sha"], "base_ref": base_ref,
+    "base_sha": base["object"]["sha"], "title": pull["title"], "url": pull["html_url"]}
 
 
 def prepare_selection(references, mode, chat_id):

@@ -46,11 +46,12 @@ contribution. This app is the dashboard for that loop:
   it does not fetch online or certify linear history. Missing source does not
   hide saved contributions. Community review requests and historical replies
   remain discoverable even for repositories not installed here.
-- **Möbius by default** — new users can prepare for supported Möbius projects
-  without a personal GitHub connection. GitHub adds personal control and
-  community collaboration beyond mobius-os. Account setup lives in one compact
-  settings panel. Connecting GitHub does not silently switch a saved sending
-  preference. Settings never prepare or publish changes.
+- **Connected GitHub identity** — anyone can prepare and review changes
+  privately without connecting GitHub. Sending new contributions requires a
+  connected GitHub account and publishes as that account. Existing records
+  marked `submission_mode: "mobius-bot"` retain their legacy Möbius service
+  identity and recovery path. Account setup lives in one compact settings
+  panel; settings never prepare or publish changes.
 - **PR workflows** — each project shows all open PRs, with All, Unassigned,
   Assigned to me and My PRs filters. Select individual PRs or a batch for
   private Review or exact-version Review & merge. Independent reviews run in
