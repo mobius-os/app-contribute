@@ -821,16 +821,27 @@ test('tracked app work needs sorting when no current shared position is availabl
   assert.equal(projectPreparationState(notes), 'sorting')
 })
 
-test('accepted update count uses merged contributions only when shared files are available', async () => {
+test('accepted update count follows reconciled merged files, not historical reviews', async () => {
   const { acceptedUpdateCount } = await import('../source-map.js')
-  const project = installedApp({
-    contributions: [
-      { type: 'pr', status: 'merged' },
-      { type: 'pr', status: 'open' },
-    ],
-    incomingFiles: 2,
-    reconciliation: { available: true, new_upstream_count: 2 },
-  })
+  const repo = 'mobius-apps/notes'
+  const records = [
+    { id: 'incoming', type: 'pr', repo, status: 'merged', plan: { files: ['index.jsx'] } },
+    { id: 'historical', type: 'pr', repo, status: 'merged', plan: { files: ['README.md'] } },
+    { id: 'open', type: 'pr', repo, status: 'open', plan: { files: ['index.jsx'] } },
+  ]
+  const [, project] = attachSourceProjects({
+    platform: platform(),
+    apps: [installedApp({
+      canonical_repo: repo,
+      reconciliation: {
+        available: true,
+        new_upstream_count: 1,
+        new_upstream_paths: ['index.jsx'],
+      },
+    })],
+  }, records)
+
+  assert.equal(project.contributions.length, 1)
   assert.equal(acceptedUpdateCount(project), 1)
-  assert.equal(acceptedUpdateCount({ ...project, incomingFiles: 0, reconciliation: { available: true, new_upstream_count: 0 } }), 0)
+  assert.equal(acceptedUpdateCount({ ...project, incomingPaths: [] }), 0)
 })

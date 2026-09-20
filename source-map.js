@@ -83,12 +83,20 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
   }
   const active = (records || []).filter(activeContribution)
   const byRepo = new Map()
+  const acceptedByRepo = new Map()
   for (const rec of active) {
     const key = repoKey(rec.repo || rec.plan?.repo)
     if (!key) continue
     const bucket = byRepo.get(key) || []
     bucket.push(rec)
     byRepo.set(key, bucket)
+  }
+  for (const rec of records || []) {
+    const key = repoKey(rec.repo || rec.plan?.repo)
+    if (!key || rec?.type !== 'pr' || rec?.status !== 'merged') continue
+    const bucket = acceptedByRepo.get(key) || []
+    bucket.push(rec)
+    acceptedByRepo.set(key, bucket)
   }
 
   for (const record of records || []) {
@@ -111,7 +119,11 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
   const projects = base.map((project) => {
     const key = repoKey(project.canonical_repo)
     if (key) seen.add(key)
-    return decorateProject(project, key ? (byRepo.get(key) || []) : [])
+    return decorateProject(
+      project,
+      key ? (byRepo.get(key) || []) : [],
+      key ? (acceptedByRepo.get(key) || []) : [],
+    )
   })
 
   // A live contribution can outlast an uninstall or refer to a repository not
@@ -129,7 +141,7 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
       base_ref: null,
       tree: null,
       working: null,
-    }, contributions))
+    }, contributions, acceptedByRepo.get(repo) || []))
   }
 
   for (const project of projects) {
@@ -227,14 +239,18 @@ export function projectBoardFacts(project) {
   return { work: work.join(' · '), shared, publicReviews, prepared }
 }
 
-// Reconciliation owns the file-level answer once it is available. A branch
-// can be commits behind while producing no incoming files for the installed
-// release projection; falling back to ancestry in that case overstates an
-// update the project detail cannot show.
+// Count only merged reviews whose reviewed files are still present in the
+// reconciler's incoming path set. Historical merges must not be presented as
+// updates that this installation still needs.
 export function acceptedUpdateCount(project) {
-  if (!projectHasSharedUpdates(project)) return 0
-  return (Array.isArray(project?.contributions) ? project.contributions : [])
-    .filter(record => record?.type === 'pr' && record?.status === 'merged').length
+  if (project?.semanticAvailable !== true) return 0
+  const incoming = new Set(Array.isArray(project?.incomingPaths) ? project.incomingPaths : [])
+  if (!incoming.size) return 0
+  return (Array.isArray(project?.acceptedContributions) ? project.acceptedContributions : [])
+    .filter(record => (
+      Array.isArray(record?.plan?.files)
+      && record.plan.files.some(path => incoming.has(path))
+    )).length
 }
 
 // Reconciliation owns the file-level answer once it is available. A branch
@@ -278,7 +294,7 @@ export function projectWorkRevision(project) {
   ].map((value) => String(value || '')).join('\u0000')
 }
 
-function decorateProject(project, contributions) {
+function decorateProject(project, contributions, acceptedContributions = []) {
   const pullRequests = contributions.filter((rec) => (
     rec?.type === 'pr' || rec?.plan?.action === 'pr'
   ))
@@ -384,6 +400,7 @@ function decorateProject(project, contributions) {
   return {
     ...project,
     contributions: pullRequests,
+    acceptedContributions,
     issues,
     contributionCounts: {
       pullRequests: pullRequests.length,
