@@ -1783,5 +1783,34 @@ export const CSS = `
 .co-pr-runs > summary { cursor:pointer; min-height:44px; }
 .co-pr-runs > div { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:8px 0; font-size:14px; }
 @media (max-width:560px) { .co-pr-context { margin-left:0; width:100%; } .co-pr-workspace > summary { padding:10px 0; } }
+/* Sharpen hierarchy while preserving the app’s 14px readable-type floor. */
+.co-root { font-size: 15px; letter-spacing: -0.004em; }
+.co-page { width: min(100%, 1100px); padding-inline: 24px; }
+.co-header { width: min(100%, 1100px); min-height: 78px; padding: max(20px, env(safe-area-inset-top)) 24px 14px; }
+.co-title { font-size: 28px; font-weight: 680; letter-spacing: -0.045em; }
+.co-subtitle { font-size: 14px; line-height: 1.45; }
+.co-project-control { border-radius: 8px; font-size: 14px; font-weight: 650; }
+.co-view-heading { margin-bottom: 22px; }
+.co-view-heading h2 { font-size: clamp(24px, 3vw, 30px); font-weight: 680; letter-spacing: -.045em; }
+.co-card { border-radius: 11px; padding: 17px 18px; margin-top: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
+.co-card.is-blocked { border-width: 1px; }
+.co-card-title { font-size: 16px; font-weight: 680; letter-spacing: -.018em; line-height: 1.38; }
+.co-card-status, .co-card-summary { font-size: 14px; line-height: 1.5; }
+.co-card-meta { margin-top: 10px; font-size: 14px; }
+.co-chip { padding: 4px 8px; font-size: 14px; font-weight: 700; }
+.co-btn { border-radius: 8px; font-size: 14px; font-weight: 650; }
+.co-run-section { margin-top: 26px; }
+.co-run-section > header h3 { font-size: 17px; font-weight: 680; letter-spacing: -.025em; }
+.co-run-list { border-radius: 11px; }
+.co-run-row { padding-block: 15px; }
+.co-run-row-main strong { font-weight: 680; letter-spacing: -.012em; }
+.co-pr-workspace { margin-top: 20px; }
+@media (max-width: 640px) {
+  .co-page { padding-inline: 16px; }
+  .co-header { min-height: 68px; padding-inline: 16px; padding-bottom: 10px; }
+  .co-title { font-size: 23px; }
+  .co-card { padding: 15px; border-radius: 10px; }
+}
+
 ${WORKSPACE_CSS}
 `
