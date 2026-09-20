@@ -13,8 +13,8 @@ import { TaskContext, TaskPane } from './TaskPane.jsx'
 
 const FILTERS = [
   ['all', 'All'],
-  ['local', 'Changes'],
-  ['updates', 'Updates'],
+  ['local', 'Local changes'],
+  ['updates', 'Updates available'],
 ]
 
 function projectMatchesJourney(project, filter) {
@@ -400,6 +400,15 @@ export function SourceMap({
       )}
 
       {navigationError ? <p className="co-run-error" role="alert">{navigationError}</p> : null}
+      {conn?.state === 'disconnected' ? (
+        <div className="co-connect-banner" role="status">
+          <div>
+            <strong>Connect GitHub to contribute as yourself</strong>
+            <p>Your projects and saved reviews stay here. Connect your account when you’re ready to send or review work on GitHub.</p>
+          </div>
+          <button type="button" className="co-btn co-btn-primary" onClick={() => window.dispatchEvent(new Event('mobius:open-contribute-settings'))}>Connect GitHub</button>
+        </div>
+      ) : null}
       {['unknown', 'unsupported'].includes(conn?.state) ? (
         <div className="co-view-note">GitHub is unavailable. Local status and saved reviews remain visible.</div>
       ) : null}

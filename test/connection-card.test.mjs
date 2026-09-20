@@ -25,8 +25,8 @@ test('Möbius is implicit while optional GitHub setup has one real connection ac
   const { renderConnection, renderSettings } = await connectionRenderer()
   const conn = { state: 'disconnected', deviceFlowAvailable: true }
   const html = renderConnection(conn)
-  assert.match(html, /For Möbius projects. No GitHub needed/)
-  assert.match(html, /Collaborate on community projects and send as yourself/)
+  assert.match(html, /Legacy Möbius drafts only. New contributions use GitHub/)
+  assert.match(html, /Connect to contribute to projects as yourself/)
   assert.equal((html.match(/>Connect with GitHub</g) || []).length, 1)
   assert.doesNotMatch(html, /Use Möbius|Choose changes to prepare|Möbius selected/)
   assert.match(html, /<details class="co-account-advanced"/)

@@ -326,9 +326,9 @@ curl -s -H "Authorization: Bearer $AGENT_TOKEN" "$API_BASE_URL/api/github/status
 ```
 
 Use the `$API_BASE_URL` + `$AGENT_TOKEN` idiom for every chat-context command in
-this file — never hardcode localhost. This status is for the optional personal
-GitHub path; a linked Möbius account can use the bot path without connecting a
-personal GitHub account. The payload:
+this file — never hardcode localhost. New contributions require the connected
+owner's GitHub account. Existing records marked `submission_mode: "mobius-bot"`
+retain their legacy Möbius service identity and recovery path. The payload:
 
 - `connected: true` with a `login` — `gh` is authenticated as the owner. You
   never see the token (`gh` resolves it from the platform store — don't dig for
@@ -336,10 +336,12 @@ personal GitHub account. The payload:
   github.com remote authenticates as the owner and nothing at the git layer gates
   that — Hard stop #1 is the whole safety net. NEVER run a bare `git push` to a
   github remote outside the approved fork flow.
-- `connected: false` — personal GitHub is unavailable, but a supported Möbius
-  repository may still use **Contribute via Möbius (no GitHub needed)**. Other
-  repositories can still be prepared privately and wait for a later personal
-  connection. Nothing goes public until the partner approves the exact record.
+- `connected: false` — new contributions can still be prepared and reviewed
+  privately, but sending requires a connected GitHub account. Only existing
+  records marked `submission_mode: "mobius-bot"` may continue through their
+  legacy Möbius service path without that connection. Do not add the marker to
+  a new record to bypass GitHub setup. Nothing goes public until the partner
+  approves the exact record.
 - `gh_version: null` — the platform image predates GitHub support. Tell the
   partner a platform update is needed; don't improvise around it.
 
@@ -710,11 +712,12 @@ record, and stop again.
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
 
-For **Contribute via Möbius**, the instance proves the same exact reviewed head,
-merge-tests it against the configured current target, and sends an exact file
-snapshot through a one-use body-bound capability. The launcher writes only to
-the configured bot publication repository, opens or updates one draft PR in the
-target, and returns the stable PR URL. `local_record_id` stays stable while
+For existing **legacy Möbius-bot records** only, the instance proves the same
+exact reviewed head, merge-tests it against the configured current target, and
+sends an exact file snapshot through a one-use body-bound capability. New
+contributions use the connected GitHub account instead. The launcher writes
+only to the configured bot publication repository, opens or updates one draft
+PR in the target, and returns the stable PR URL. `local_record_id` stays stable while
 `relay_revision` increases for each changed reviewed snapshot, so a refresh can
 update the same PR without discarding comments. Exact retries reuse the same
 revision and cannot create a duplicate. Status polling is a fallback behind
