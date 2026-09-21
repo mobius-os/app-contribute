@@ -252,11 +252,24 @@ export function normalizeCycleState(raw) {
   }
 }
 
-function cycleKey(projectKey) { return projectKey ? `project-cycles/${encodeURIComponent(projectKey)}.json` : CYCLE_STATE }
+async function cycleKey(projectKey) {
+  if (!projectKey) return CYCLE_STATE
+
+  // Project identities contain `:` and may contain `/`, neither of which can
+  // safely be used as one storage filename. URL-encoding is not a storage
+  // encoding: the request path is decoded before the server validates it, so
+  // `app%3A10` still arrives as the rejected `app:10`. A fixed-size digest is
+  // collision-resistant, stays within filename limits, and uses only the
+  // storage path's portable character set.
+  const bytes = new TextEncoder().encode(String(projectKey))
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+  const id = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  return `project-cycles/${id}.json`
+}
 
 export async function loadCycleState(projectKey) {
   try {
-    return normalizeCycleState(await window.mobius.storage.get(cycleKey(projectKey)))
+    return normalizeCycleState(await window.mobius.storage.get(await cycleKey(projectKey)))
   } catch {
     return null
   }
@@ -266,7 +279,7 @@ export async function saveCycleState(state, projectKey) {
   const normalized = normalizeCycleState(state)
   if (!normalized) return false
   try {
-    await window.mobius.storage.set(cycleKey(projectKey), {
+    await window.mobius.storage.set(await cycleKey(projectKey), {
       schema: 1,
       ...normalized,
     })

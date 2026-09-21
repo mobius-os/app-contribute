@@ -185,7 +185,13 @@ test('durable project conversation shortcuts stay isolated across projects and t
   assert.equal((await loadCycleState('external:owner/other')).chat_id, 'second-chat')
   assert.equal((await loadCycleState()).chat_id, 'legacy-chat')
   assert.equal(await loadCycleState('app:never-started'), null)
-  assert.equal(new Set(calls.filter(([operation]) => operation === 'set').map(([, key]) => key)).size, 3)
+  const writtenKeys = calls.filter(([operation]) => operation === 'set').map(([, key]) => key)
+  assert.equal(new Set(writtenKeys).size, 3)
+  assert.equal(writtenKeys[0], 'cycle-state.json')
+  for (const key of writtenKeys.slice(1)) {
+    assert.match(key, /^project-cycles\/[a-f0-9]{64}\.json$/)
+    assert.doesNotMatch(key, /%|:|\/.*\//, 'project identity must not escape into the storage filename')
+  }
 })
 
 test('SSR selecting a focused contribution retains the project inventory and history', async t => {
