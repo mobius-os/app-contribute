@@ -252,11 +252,41 @@ export function normalizeCycleState(raw) {
   }
 }
 
-function cycleKey(projectKey) { return projectKey ? `project-cycles/${encodeURIComponent(projectKey)}.json` : CYCLE_STATE }
+async function cycleKey(projectKey) {
+  if (!projectKey) return CYCLE_STATE
+
+  // Project identities contain `:` and may contain `/`, neither of which can
+  // safely be used as one storage filename. URL-encoding is not a storage
+  // encoding: the request path is decoded before the server validates it, so
+  // `app%3A10` still arrives as the rejected `app:10`. A fixed-size digest is
+  // collision-resistant, stays within filename limits, and uses only the
+  // storage path's portable character set.
+  const bytes = new TextEncoder().encode(String(projectKey))
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+  const id = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  return `project-cycles/${id}.json`
+}
+
+function legacyCycleKey(projectKey) {
+  if (!projectKey || !/^[A-Za-z0-9._-]+$/.test(String(projectKey))) return null
+  return `project-cycles/${projectKey}.json`
+}
 
 export async function loadCycleState(projectKey) {
   try {
-    return normalizeCycleState(await window.mobius.storage.get(cycleKey(projectKey)))
+    const key = await cycleKey(projectKey)
+    const current = normalizeCycleState(await window.mobius.storage.get(key))
+    if (current || !projectKey) return current
+
+    // Older builds stored already-safe project identities directly. Preserve
+    // those conversations while moving them to the fixed digest namespace;
+    // identities containing ':' or '/' never had a valid legacy path.
+    const legacyKey = legacyCycleKey(projectKey)
+    if (!legacyKey) return null
+    const legacy = normalizeCycleState(await window.mobius.storage.get(legacyKey))
+    if (!legacy) return null
+    await window.mobius.storage.set(key, { schema: 1, ...legacy })
+    return legacy
   } catch {
     return null
   }
@@ -266,7 +296,7 @@ export async function saveCycleState(state, projectKey) {
   const normalized = normalizeCycleState(state)
   if (!normalized) return false
   try {
-    await window.mobius.storage.set(cycleKey(projectKey), {
+    await window.mobius.storage.set(await cycleKey(projectKey), {
       schema: 1,
       ...normalized,
     })

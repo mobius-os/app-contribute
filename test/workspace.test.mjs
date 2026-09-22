@@ -185,7 +185,23 @@ test('durable project conversation shortcuts stay isolated across projects and t
   assert.equal((await loadCycleState('external:owner/other')).chat_id, 'second-chat')
   assert.equal((await loadCycleState()).chat_id, 'legacy-chat')
   assert.equal(await loadCycleState('app:never-started'), null)
-  assert.equal(new Set(calls.filter(([operation]) => operation === 'set').map(([, key]) => key)).size, 3)
+  values.set('project-cycles/legacy-project.json', {
+    schema: 1, chat_id: 'platform-chat', title: 'Existing platform work',
+  })
+  assert.equal((await loadCycleState('legacy-project')).chat_id, 'platform-chat')
+  const platformDigestWrite = calls.find(([operation, key]) => (
+    operation === 'set'
+    && /^project-cycles\/[a-f0-9]{64}\.json$/.test(key)
+    && values.get(key)?.chat_id === 'platform-chat'
+  ))
+  assert.ok(platformDigestWrite, 'safe legacy shortcut is migrated to the digest key')
+  const writtenKeys = calls.filter(([operation]) => operation === 'set').map(([, key]) => key)
+  assert.equal(new Set(writtenKeys).size, 4)
+  assert.equal(writtenKeys[0], 'cycle-state.json')
+  for (const key of writtenKeys.slice(1)) {
+    assert.match(key, /^project-cycles\/[a-f0-9]{64}\.json$/)
+    assert.doesNotMatch(key, /%|:|\/.*\//, 'project identity must not escape into the storage filename')
+  }
 })
 
 test('SSR selecting a focused contribution retains the project inventory and history', async t => {
