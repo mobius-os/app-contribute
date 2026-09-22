@@ -267,9 +267,26 @@ async function cycleKey(projectKey) {
   return `project-cycles/${id}.json`
 }
 
+function legacyCycleKey(projectKey) {
+  if (!projectKey || !/^[A-Za-z0-9._-]+$/.test(String(projectKey))) return null
+  return `project-cycles/${projectKey}.json`
+}
+
 export async function loadCycleState(projectKey) {
   try {
-    return normalizeCycleState(await window.mobius.storage.get(await cycleKey(projectKey)))
+    const key = await cycleKey(projectKey)
+    const current = normalizeCycleState(await window.mobius.storage.get(key))
+    if (current || !projectKey) return current
+
+    // Older builds stored already-safe project identities directly. Preserve
+    // those conversations while moving them to the fixed digest namespace;
+    // identities containing ':' or '/' never had a valid legacy path.
+    const legacyKey = legacyCycleKey(projectKey)
+    if (!legacyKey) return null
+    const legacy = normalizeCycleState(await window.mobius.storage.get(legacyKey))
+    if (!legacy) return null
+    await window.mobius.storage.set(key, { schema: 1, ...legacy })
+    return legacy
   } catch {
     return null
   }
