@@ -285,7 +285,11 @@ export async function loadCycleState(projectKey) {
     if (!legacyKey) return null
     const legacy = normalizeCycleState(await window.mobius.storage.get(legacyKey))
     if (!legacy) return null
-    await window.mobius.storage.set(key, { schema: 1, ...legacy })
+    try {
+      await window.mobius.storage.set(key, { schema: 1, ...legacy })
+    } catch {
+      // The old shortcut still opens this time; a later read can retry repair.
+    }
     return legacy
   } catch {
     return null

@@ -204,6 +204,19 @@ test('durable project conversation shortcuts stay isolated across projects and t
   }
 })
 
+test('a legacy project shortcut still opens when its migration write fails', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  globalThis.window = { mobius: { storage: {
+    get: async key => key === 'project-cycles/platform.json'
+      ? { schema: 1, chat_id: 'platform-chat', title: 'Existing platform work' }
+      : undefined,
+    set: async () => { throw new Error('temporarily read-only') },
+  } } }
+
+  assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
+})
+
 test('SSR selecting a focused contribution retains the project inventory and history', async t => {
   const ui = await rendered(t)
   if (!ui) return

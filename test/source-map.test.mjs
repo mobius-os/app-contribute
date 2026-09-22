@@ -5,6 +5,7 @@ import {
   actionableSourceProjects,
   attachSourceProjects,
   projectDetailSummary,
+  projectCycleIdentity,
   projectForks,
   projectIconUrl,
   projectMatchesFilter,
@@ -19,6 +20,28 @@ import {
   projectWorkRevision,
   sourcePathRelationship,
 } from '../source-map.js'
+
+test('project conversation identity follows durable project identity, not reusable app ids', () => {
+  assert.equal(projectCycleIdentity({ kind: 'platform', key: 'platform' }), 'platform')
+  assert.equal(projectCycleIdentity({
+    kind: 'app', key: 'app:7', slug: 'Notes', canonical_repo: 'mobius-os/app-notes',
+  }), 'repo:mobius-os/app-notes')
+  assert.equal(projectCycleIdentity({
+    kind: 'app', key: 'app:99', slug: 'Renamed-Notes', canonical_repo: 'MOBIUS-OS/APP-NOTES',
+  }), 'repo:mobius-os/app-notes', 'reinstalling the same package keeps its project shortcut')
+  assert.notEqual(
+    projectCycleIdentity({ kind: 'app', key: 'app:7', slug: 'Notes', canonical_repo: 'owner/first' }),
+    projectCycleIdentity({ kind: 'app', key: 'app:7', slug: 'Notes', canonical_repo: 'owner/second' }),
+    'a reused numeric row cannot inherit another app shortcut',
+  )
+  assert.equal(
+    projectCycleIdentity({ kind: 'app', key: 'app:8', slug: 'Scratchpad' }),
+    'app:scratchpad',
+  )
+  assert.equal(projectCycleIdentity({
+    kind: 'external', key: 'external:Owner/Repo', canonical_repo: 'Owner/Repo',
+  }), 'repo:owner/repo')
+})
 
 test('project icons reuse canonical app and platform artwork', () => {
   assert.equal(projectIconUrl({ kind: 'platform', key: 'platform' }), '/moebius.png')
