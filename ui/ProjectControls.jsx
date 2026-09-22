@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { contributionCycleAction, projectUpdateAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
-import { acceptedUpdateCount, projectBoardFacts } from '../source-map.js'
+import { acceptedUpdateCount, projectBoardFacts, projectCycleIdentity } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
@@ -9,7 +9,7 @@ import { TaskPane, useProjectTask } from './TaskPane.jsx'
 
 export function ProjectControls({ appId, token, project, run, mergeRun, onStart, loading }) {
   const task = useProjectTask()
-  const workflow = useProjectCycle(project.key, onStart)
+  const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
   const { cycle } = workflow
   useEffect(() => { task?.setCycle(cycle) }, [cycle, task?.setCycle])
   const [error, setError] = useState('')

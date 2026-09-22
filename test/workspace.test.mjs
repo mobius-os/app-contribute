@@ -194,6 +194,24 @@ test('durable project conversation shortcuts stay isolated across projects and t
   }
 })
 
+test('the historical platform shortcut migrates to the storage-safe project key', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const legacy = { schema: 1, chat_id: 'platform-chat', title: 'Platform work' }
+  const values = new Map([['project-cycles/platform.json', legacy]])
+  const writes = []
+  globalThis.window = { mobius: { storage: {
+    get: async key => values.get(key),
+    set: async (key, value) => { writes.push(key); values.set(key, structuredClone(value)) },
+  } } }
+
+  assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
+  assert.equal(writes.length, 1)
+  assert.match(writes[0], /^project-cycles\/[a-f0-9]{64}\.json$/)
+  values.delete('project-cycles/platform.json')
+  assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
+})
+
 test('SSR selecting a focused contribution retains the project inventory and history', async t => {
   const ui = await rendered(t)
   if (!ui) return

@@ -62,6 +62,20 @@ export function projectIconUrl(project) {
   return match ? `/api/apps/${match[1]}/icon?size=64` : ''
 }
 
+// Project conversations follow the project itself, never the database row
+// currently representing it. App ids are reusable after uninstall. A tracked
+// app therefore follows its canonical repository; a local-only app follows its
+// stable install slug. The platform keeps its historical identity.
+export function projectCycleIdentity(project) {
+  if (project?.kind === 'platform') return 'platform'
+  const repo = repoKey(project?.canonical_repo)
+  if (repo) return `repo:${repo}`
+  const slug = typeof project?.slug === 'string' ? project.slug.trim().toLowerCase() : ''
+  if (project?.kind === 'app' && slug) return `app:${slug}`
+  const key = typeof project?.key === 'string' ? project.key.trim() : ''
+  return key ? `project:${key}` : ''
+}
+
 export function activeContribution(rec) {
   const action = rec?.type || rec?.plan?.action
   return !!rec && (action === 'pr' || action === 'issue') && ACTIVE.has(rec.status)
