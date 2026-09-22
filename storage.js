@@ -10,7 +10,6 @@
 const FEED_CACHE = 'feed-cache.json'
 const SOURCE_CACHE = 'source-cache.json'
 const CYCLE_STATE = 'cycle-state.json'
-const LEGACY_PLATFORM_CYCLE = 'project-cycles/platform.json'
 const RECORD_PREFIX = 'contributions/'
 const RECORD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
 const CURRENT_STATUSES = new Set([
@@ -268,18 +267,23 @@ async function cycleKey(projectKey) {
   return `project-cycles/${id}.json`
 }
 
+function legacyCycleKey(projectKey) {
+  if (!projectKey || !/^[A-Za-z0-9._-]+$/.test(String(projectKey))) return null
+  return `project-cycles/${projectKey}.json`
+}
+
 export async function loadCycleState(projectKey) {
   try {
     const key = await cycleKey(projectKey)
     const current = normalizeCycleState(await window.mobius.storage.get(key))
-    if (current || projectKey !== 'platform') return current
+    if (current || !projectKey) return current
 
-    // `platform` was the only historical project identity whose encoded path
-    // was itself storage-safe. Preserve that shortcut across the digest
-    // migration, then make the canonical hashed key authoritative.
-    const legacy = normalizeCycleState(
-      await window.mobius.storage.get(LEGACY_PLATFORM_CYCLE),
-    )
+    // Older builds stored already-safe project identities directly. Preserve
+    // those conversations while moving them to the fixed digest namespace;
+    // identities containing ':' or '/' never had a valid legacy path.
+    const legacyKey = legacyCycleKey(projectKey)
+    if (!legacyKey) return null
+    const legacy = normalizeCycleState(await window.mobius.storage.get(legacyKey))
     if (!legacy) return null
     try {
       await window.mobius.storage.set(key, { schema: 1, ...legacy })

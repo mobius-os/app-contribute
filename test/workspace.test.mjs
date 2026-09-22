@@ -185,8 +185,18 @@ test('durable project conversation shortcuts stay isolated across projects and t
   assert.equal((await loadCycleState('external:owner/other')).chat_id, 'second-chat')
   assert.equal((await loadCycleState()).chat_id, 'legacy-chat')
   assert.equal(await loadCycleState('app:never-started'), null)
+  values.set('project-cycles/legacy-project.json', {
+    schema: 1, chat_id: 'platform-chat', title: 'Existing platform work',
+  })
+  assert.equal((await loadCycleState('legacy-project')).chat_id, 'platform-chat')
+  const platformDigestWrite = calls.find(([operation, key]) => (
+    operation === 'set'
+    && /^project-cycles\/[a-f0-9]{64}\.json$/.test(key)
+    && values.get(key)?.chat_id === 'platform-chat'
+  ))
+  assert.ok(platformDigestWrite, 'safe legacy shortcut is migrated to the digest key')
   const writtenKeys = calls.filter(([operation]) => operation === 'set').map(([, key]) => key)
-  assert.equal(new Set(writtenKeys).size, 3)
+  assert.equal(new Set(writtenKeys).size, 4)
   assert.equal(writtenKeys[0], 'cycle-state.json')
   for (const key of writtenKeys.slice(1)) {
     assert.match(key, /^project-cycles\/[a-f0-9]{64}\.json$/)
@@ -194,21 +204,16 @@ test('durable project conversation shortcuts stay isolated across projects and t
   }
 })
 
-test('the historical platform shortcut migrates to the storage-safe project key', async t => {
+test('a legacy project shortcut still opens when its migration write fails', async t => {
   const previousWindow = globalThis.window
   t.after(() => { globalThis.window = previousWindow })
-  const legacy = { schema: 1, chat_id: 'platform-chat', title: 'Platform work' }
-  const values = new Map([['project-cycles/platform.json', legacy]])
-  const writes = []
   globalThis.window = { mobius: { storage: {
-    get: async key => values.get(key),
-    set: async (key, value) => { writes.push(key); values.set(key, structuredClone(value)) },
+    get: async key => key === 'project-cycles/platform.json'
+      ? { schema: 1, chat_id: 'platform-chat', title: 'Existing platform work' }
+      : undefined,
+    set: async () => { throw new Error('temporarily read-only') },
   } } }
 
-  assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
-  assert.equal(writes.length, 1)
-  assert.match(writes[0], /^project-cycles\/[a-f0-9]{64}\.json$/)
-  values.delete('project-cycles/platform.json')
   assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
 })
 
