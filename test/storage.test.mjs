@@ -210,6 +210,59 @@ test('an offline empty mirror falls back to the assembled feed cache', async () 
   })
 })
 
+test('ledger stays authoritative through online, offline, and reconnect listings', async () => {
+  let listing = {
+    entries: [{
+      name: 'online.json', type: 'file',
+      content: { id: 'online', status: 'prepared' },
+    }],
+    complete: true,
+    source: 'server',
+  }
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        async listWithStatus() {
+          return listing
+        },
+        async get(path) {
+          assert.equal(path, 'feed-cache.json')
+          return { schema: 2, records: [{ id: 'cached-complete-feed' }] }
+        },
+      },
+    },
+  }
+
+  assert.deepEqual((await loadLedger()).records.map(record => record.id), ['online'])
+
+  listing = {
+    entries: [{
+      name: 'partial.json', type: 'file',
+      content: { id: 'partial', status: 'prepared' },
+    }],
+    complete: false,
+    source: 'derived',
+  }
+  globalThis.window.mobius.online = false
+  assert.deepEqual(await loadLedger(), {
+    records: [{ id: 'cached-complete-feed' }],
+    fromCache: true,
+    omitted: [],
+  })
+
+  listing = {
+    entries: [{
+      name: 'reconnected.json', type: 'file',
+      content: { id: 'reconnected', status: 'prepared' },
+    }],
+    complete: true,
+    source: 'server',
+  }
+  globalThis.window.mobius.online = true
+  assert.deepEqual((await loadLedger()).records.map(record => record.id), ['reconnected'])
+})
+
 test('500 missing-content entries never become 500 fallback GETs', async () => {
   let gets = 0
   globalThis.window = {

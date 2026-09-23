@@ -135,13 +135,15 @@ async function readLedger() {
   // Current platforms page include-content listings at a bounded byte budget.
   // Exceptional oversized entries stay isolated and are reported to the UI;
   // this reader never falls back to an N+1 scan.
-  const entries = await window.mobius.storage.list(RECORD_PREFIX, {
-    includeContent: true,
-  })
-  if (
-    entries === null
-    || (entries.length === 0 && window.mobius.online === false)
-  ) {
+  const storage = window.mobius.storage
+  const listing = typeof storage.listWithStatus === 'function'
+    ? await storage.listWithStatus(RECORD_PREFIX, { includeContent: true })
+    : {
+        entries: await storage.list(RECORD_PREFIX, { includeContent: true }),
+        complete: window.mobius.online !== false,
+      }
+  const entries = listing?.entries || []
+  if (listing?.complete !== true) {
     return { records: await loadCachedFeed(), fromCache: true, omitted: [] }
   }
   const records = []
