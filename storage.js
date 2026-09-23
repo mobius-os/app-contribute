@@ -272,6 +272,41 @@ function legacyCycleKey(projectKey) {
   return `project-cycles/${projectKey}.json`
 }
 
+async function migrateCycleState(key, legacy) {
+  const storage = window.mobius.storage
+  // A migration is a create-if-absent, not a last-write-wins update. A
+  // project can mount in two panes while the first read is still in flight;
+  // an unconditional copy could erase the shortcut created by the other
+  // pane. The runtime's durable path owns the atomic precondition.
+  if (
+    typeof storage?.durableWrite === 'function'
+    && typeof storage?.getWithVersion === 'function'
+  ) {
+    try {
+      await storage.durableWrite(key, { schema: 1, ...legacy }, { ifNoneMatch: true })
+      return normalizeCycleState(await storage.get(key)) || legacy
+    } catch (error) {
+      if (error?.code === 'conflict') {
+        try {
+          return normalizeCycleState(await storage.get(key)) || legacy
+        } catch {
+          return legacy
+        }
+      }
+      return legacy
+    }
+  }
+  // Older runtimes and the app's small test doubles do not expose CAS. Keep
+  // the existing best-effort behavior there; failure must never hide the
+  // legacy shortcut for this open.
+  try {
+    await storage.set(key, { schema: 1, ...legacy })
+  } catch {
+    // The old shortcut still opens this time; a later read can retry repair.
+  }
+  return legacy
+}
+
 export async function loadCycleState(projectKey) {
   try {
     const key = await cycleKey(projectKey)
@@ -279,18 +314,16 @@ export async function loadCycleState(projectKey) {
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
-    // those conversations while moving them to the fixed digest namespace;
-    // identities containing ':' or '/' never had a valid legacy path.
+    // only that provably same-identity form while moving it to the fixed
+    // digest namespace; identities containing ':' or '/' never had a valid
+    // legacy path. In particular, do not probe a digest of the former
+    // `app:<row-id>` identity: the row may have been reused and the old state
+    // carries no evidence that it belongs to this project.
     const legacyKey = legacyCycleKey(projectKey)
     if (!legacyKey) return null
     const legacy = normalizeCycleState(await window.mobius.storage.get(legacyKey))
     if (!legacy) return null
-    try {
-      await window.mobius.storage.set(key, { schema: 1, ...legacy })
-    } catch {
-      // The old shortcut still opens this time; a later read can retry repair.
-    }
-    return legacy
+    return migrateCycleState(key, legacy)
   } catch {
     return null
   }

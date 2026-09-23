@@ -217,6 +217,84 @@ test('a legacy project shortcut still opens when its migration write fails', asy
   assert.equal((await loadCycleState('platform')).chat_id, 'platform-chat')
 })
 
+test('a durable project never falls back to an ambiguous old app-row digest', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const digest = bytes => Array.from(new Uint8Array(bytes), byte => (
+    byte.toString(16).padStart(2, '0')
+  )).join('')
+  const oldKey = `project-cycles/${digest(await crypto.subtle.digest(
+    'SHA-256', new TextEncoder().encode('app:7'),
+  ))}.json`
+  const reads = []
+  globalThis.window = { mobius: { storage: {
+    get: async key => {
+      reads.push(key)
+      return key === oldKey
+        ? { schema: 1, chat_id: 'wrong-project-chat', title: 'Old row work' }
+        : undefined
+    },
+  } } }
+
+  assert.equal(await loadCycleState('repo:owner/current'), null)
+  assert.equal(reads.some(key => key === oldKey), false)
+})
+
+test('legacy shortcut migration never overwrites a shortcut created concurrently', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  let digestReads = 0
+  globalThis.window = { mobius: { storage: {
+    get: async key => {
+      if (key === 'project-cycles/legacy-project.json') {
+        return { schema: 1, chat_id: 'legacy-chat', title: 'Old work' }
+      }
+      if (/^project-cycles\/[a-f0-9]{64}\.json$/.test(key)) {
+        digestReads += 1
+        return digestReads === 1 ? undefined : {
+          schema: 1, chat_id: 'new-chat', title: 'New work',
+        }
+      }
+      return undefined
+    },
+    getWithVersion: async () => ({ value: null, version: null }),
+    durableWrite: async () => {
+      const error = new Error('shortcut already exists')
+      error.code = 'conflict'
+      throw error
+    },
+  } } }
+
+  assert.equal((await loadCycleState('legacy-project')).chat_id, 'new-chat')
+  assert.equal(digestReads, 2, 'conflict reconciliation rereads the winning shortcut')
+})
+
+test('legacy shortcut remains usable when conflict reconciliation cannot reread', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  let digestReads = 0
+  globalThis.window = { mobius: { storage: {
+    get: async key => {
+      if (key === 'project-cycles/legacy-project.json') {
+        return { schema: 1, chat_id: 'legacy-chat', title: 'Old work' }
+      }
+      if (/^project-cycles\/[a-f0-9]{64}\.json$/.test(key)) {
+        digestReads += 1
+        if (digestReads > 1) throw new Error('temporarily unavailable')
+      }
+      return undefined
+    },
+    getWithVersion: async () => ({ value: null, version: null }),
+    durableWrite: async () => {
+      const error = new Error('shortcut already exists')
+      error.code = 'conflict'
+      throw error
+    },
+  } } }
+
+  assert.equal((await loadCycleState('legacy-project')).chat_id, 'legacy-chat')
+})
+
 test('SSR selecting a focused contribution retains the project inventory and history', async t => {
   const ui = await rendered(t)
   if (!ui) return
