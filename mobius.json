@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.38",
+  "version": "0.5.39",
   "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
@@ -39,7 +39,7 @@
     "access": "self"
   },
   "skills": [
-    "contributing.md",
+    "contributing/",
     "review-followup.md"
   ],
   "source_files": [
@@ -58,7 +58,14 @@
     "storage.js",
     "prepared_reconcile.py",
     "agent_snapshot.py",
-    "contributing.md",
+    "contributing/SKILL.md",
+    "contributing/cycle.md",
+    "contributing/prepare.md",
+    "contributing/branch.md",
+    "contributing/ledger.md",
+    "contributing/publish.md",
+    "contributing/review-merge.md",
+    "contributing/ci.md",
     "review-followup.md",
     "ui/Icons.jsx",
     "ui/BatchAction.jsx",

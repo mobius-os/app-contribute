@@ -133,11 +133,17 @@ The GitHub token stays server-side and never reaches this app. The app can read
 GitHub state and can call the single prepared-contribution submit endpoint after
 you approve a specific PR; it is not a general GitHub write proxy.
 
-The repo also ships `contributing.md`, the agent-side skill for the whole
-loop — studying existing upstream work, staging a reviewable plan here, the
-approval gate, and the exact command sequences. The manifest declares it
-under `skills`, and the platform installs it into the shared skills folder
-on install and update, so the skill always matches the app version.
+The repo also ships the `contributing/` folder skill, the agent-side guide for
+the whole loop — studying existing upstream work, staging a reviewable plan
+here, the approval gate, and the exact command sequences. The manifest
+declares it under `skills`, and the platform installs the folder into the
+shared skills directory on install and update, so the skill always matches
+the app version. `contributing/SKILL.md` is deliberately a short core (hard
+stops, privacy allowlist, approval gate, and a routing table); the per-mode
+procedures live beside it (`cycle.md`, `prepare.md`, `branch.md`,
+`ledger.md`, `publish.md`, `review-merge.md`, `ci.md`) and are linked
+relatively, so an agent re-reading the skill after context compaction pays
+only for the core and the one mode it is working in.
 
 ## Requirements
 
