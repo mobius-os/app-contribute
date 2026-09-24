@@ -186,7 +186,7 @@ test('ledger isolates entries without batched content without request fan-out', 
   const result = await loadLedger()
   assert.deepEqual(result.records.map((record) => record.id), ['batched'])
   assert.deepEqual(result.omitted, ['contributions/legacy.json'])
-  assert.deepEqual(gets, [])
+  assert.deepEqual(gets, ['feed-cache.json'])
 })
 
 test('an offline empty mirror falls back to the assembled feed cache', async () => {
@@ -210,6 +210,106 @@ test('an offline empty mirror falls back to the assembled feed cache', async () 
   })
 })
 
+test('a complete listing fills omitted member bodies from cache without resurrecting deletions', async () => {
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        async listWithStatus() {
+          return {
+            complete: true,
+            source: 'server',
+            entries: [
+              { name: 'visible.json', type: 'file', content: { id: 'visible', status: 'open' } },
+              { name: 'omitted.json', type: 'file', path: 'contributions/omitted.json' },
+            ],
+          }
+        },
+        async get(path) {
+          assert.equal(path, 'feed-cache.json')
+          return { records: [
+            { id: 'omitted', status: 'prepared' },
+            { id: 'deleted', status: 'prepared' },
+          ] }
+        },
+      },
+    },
+  }
+
+  const result = await loadLedger()
+  assert.deepEqual(result.records.map((record) => record.id).sort(), ['omitted', 'visible'])
+  assert.equal(result.fromCache, true)
+  assert.deepEqual(result.omitted, ['contributions/omitted.json'])
+})
+
+test('legacy null listing falls back to the assembled cache even while online', async () => {
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        async list() { return null },
+        async get() { return { records: [{ id: 'cached' }] } },
+      },
+    },
+  }
+  assert.deepEqual(await loadLedger(), {
+    records: [{ id: 'cached' }], fromCache: true, omitted: [],
+  })
+})
+
+test('ledger stays authoritative through online, offline, and reconnect listings', async () => {
+  let listing = {
+    entries: [{
+      name: 'online.json', type: 'file',
+      content: { id: 'online', status: 'prepared' },
+    }],
+    complete: true,
+    source: 'server',
+  }
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        async listWithStatus() {
+          return listing
+        },
+        async get(path) {
+          assert.equal(path, 'feed-cache.json')
+          return { schema: 2, records: [{ id: 'cached-complete-feed' }] }
+        },
+      },
+    },
+  }
+
+  assert.deepEqual((await loadLedger()).records.map(record => record.id), ['online'])
+
+  listing = {
+    entries: [{
+      name: 'partial.json', type: 'file',
+      content: { id: 'partial', status: 'prepared' },
+    }],
+    complete: false,
+    source: 'derived',
+  }
+  globalThis.window.mobius.online = false
+  assert.deepEqual(await loadLedger(), {
+    records: [{ id: 'cached-complete-feed' }],
+    fromCache: true,
+    omitted: [],
+  })
+
+  listing = {
+    entries: [{
+      name: 'reconnected.json', type: 'file',
+      content: { id: 'reconnected', status: 'prepared' },
+    }],
+    complete: true,
+    source: 'server',
+  }
+  globalThis.window.mobius.online = true
+  assert.deepEqual((await loadLedger()).records.map(record => record.id), ['reconnected'])
+})
+
 test('500 missing-content entries never become 500 fallback GETs', async () => {
   let gets = 0
   globalThis.window = {
@@ -230,7 +330,7 @@ test('500 missing-content entries never become 500 fallback GETs', async () => {
   const result = await loadLedger()
   assert.equal(result.records.length, 0)
   assert.equal(result.omitted.length, 500)
-  assert.equal(gets, 0)
+  assert.equal(gets, 1, 'one bounded feed-cache read replaces per-record fallback reads')
 })
 
 test('dismissal uses the runtime CAS version and never blind-writes', async () => {

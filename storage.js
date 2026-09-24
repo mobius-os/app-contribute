@@ -135,13 +135,15 @@ async function readLedger() {
   // Current platforms page include-content listings at a bounded byte budget.
   // Exceptional oversized entries stay isolated and are reported to the UI;
   // this reader never falls back to an N+1 scan.
-  const entries = await window.mobius.storage.list(RECORD_PREFIX, {
-    includeContent: true,
-  })
-  if (
-    entries === null
-    || (entries.length === 0 && window.mobius.online === false)
-  ) {
+  const storage = window.mobius.storage
+  const listing = typeof storage.listWithStatus === 'function'
+    ? await storage.listWithStatus(RECORD_PREFIX, { includeContent: true })
+    : await (async () => {
+        const entries = await storage.list(RECORD_PREFIX, { includeContent: true })
+        return { entries, complete: entries !== null && window.mobius.online !== false }
+      })()
+  const entries = listing?.entries || []
+  if (listing?.complete !== true) {
     return { records: await loadCachedFeed(), fromCache: true, omitted: [] }
   }
   const records = []
@@ -171,9 +173,26 @@ async function readLedger() {
       omitted.push(path)
     }
   }
+  // A complete directory snapshot proves membership, not that every body fit
+  // in the bounded include-content response. Fill omitted members from the
+  // assembled feed cache, but only when their exact filename is still present
+  // so a remote deletion cannot be resurrected.
+  let assembled = records
+  if (omitted.length > 0) {
+    const cached = await loadCachedFeed()
+    const presentNames = new Set(jsonEntries.map((entry) => entry.name))
+    const parsedIds = new Set(records.map((record) => record.id))
+    assembled = [
+      ...records,
+      ...cached.filter((record) => record?.id && !parsedIds.has(record.id) && (
+        presentNames.has(`${record.id}.json`)
+        || presentNames.has(`${record.id}.record.json`)
+      )),
+    ]
+  }
   return {
-    records: preferCanonicalLedgerRecords(records),
-    fromCache: false,
+    records: preferCanonicalLedgerRecords(assembled),
+    fromCache: omitted.length > 0,
     omitted,
   }
 }
