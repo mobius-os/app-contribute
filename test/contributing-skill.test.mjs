@@ -1,10 +1,53 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
-const skill = readFileSync(new URL('../contributing.md', import.meta.url), 'utf8')
+// The skill is the `contributing/` folder: a short SKILL.md core plus mode
+// files beside it that agents open, by relative link, only when that mode
+// applies. The rules below may live in any of them, so assert the whole set.
+const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')
+const core = read('contributing/SKILL.md')
+const modeFiles = readdirSync(new URL('../contributing', import.meta.url))
+  .filter((name) => name !== 'SKILL.md' && name.endsWith('.md'))
+  .sort()
+const mode = (name) => read(`contributing/${name}`)
+const skill = [core, ...modeFiles.map(mode)].join('\n')
 const prose = skill.replace(/\s+/g, ' ')
-const attached = readFileSync(new URL('../attached-work.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+const attached = read('attached-work.md').replace(/\s+/g, ' ')
+const manifest = JSON.parse(read('mobius.json'))
+
+test('folder skill core stays small and links every mode file relatively', () => {
+  assert.ok(Buffer.byteLength(core) <= 12 * 1024, `core is ${Buffer.byteLength(core)} bytes`)
+  assert.match(core, /^---\nname: contributing\ndescription: /)
+  const routed = [...core.matchAll(/\]\(([a-z-]+\.md)\)/g)].map((match) => match[1])
+  assert.deepEqual([...new Set(routed)].sort(), modeFiles)
+  assert.ok(modeFiles.length >= 6)
+  assert.ok(manifest.skills.includes('contributing/'))
+  for (const name of ['SKILL.md', ...modeFiles]) {
+    assert.ok(manifest.source_files.includes(`contributing/${name}`), `${name} ships with the skill`)
+  }
+  for (const name of modeFiles) {
+    const body = mode(name)
+    assert.match(body, /\[SKILL\.md\]\(SKILL\.md\)/, `${name} points back to the core`)
+    assert.doesNotMatch(body, /\/data\/apps\/contribute\/contributing/, `${name} has no stale app path`)
+    for (const [, ref] of body.matchAll(/\]\(([a-z-]+\.md)\)/g)) {
+      assert.ok(existsSync(new URL(`../contributing/${ref}`, import.meta.url)), `${name} links missing ${ref}`)
+    }
+  }
+})
+
+test('hard stops, the privacy allowlist, and the approval gate live only in the core', () => {
+  for (const heading of ['## Hard stops', '## What may leave — the privacy allowlist', '## The approval gate']) {
+    assert.ok(core.includes(heading), heading)
+    for (const name of modeFiles) assert.ok(!mode(name).includes(heading), `${heading} duplicated in ${name}`)
+  }
+})
+
+test('CI diagnosis prefers the failure summarizer over full log dumps', () => {
+  assert.match(core, /scripts\/ci-failures\.sh <pr-number\\\|run-id>/)
+  assert.match(mode('ci.md'), /scripts\/ci-failures\.sh <pr-number\|run-id>/)
+  assert.match(mode('ci.md'), /saves the full logs to a file and prints only the failing jobs/)
+})
 
 test('explicit exact chat approval does not need a second Contribute approval', () => {
   assert.match(prose, /An explicit, unambiguous instruction in chat is a valid yes/)
