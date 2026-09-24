@@ -98,11 +98,8 @@ test('private publication and local installation have separate ownership', () =>
   assert.doesNotMatch(prose, /The submit path proves `base_sha\.\.head_sha` is present in that source commit/)
 })
 
-test('a Goal waiting on a Contribute action hands off with one exact approval card', () => {
-  assert.match(prose, /The block is not a Goal handoff/)
-  assert.match(prose, /exactly one saved `request_approval` card for that record and head/)
-  assert.match(prose, /Except for the one Goal handoff card below, never also call/)
-  assert.match(prose, /github:<owner\/repo>:pr:<number>:<head_sha>:update/)
-  assert.match(prose, /It is the handoff, not a duplicate/)
-  assert.match(prose, /never re-ask for the same record and head/)
+test('a Goal waiting on a Contribute action hands off with one approval card', () => {
+  assert.match(prose, /Apart from the Goal\s+handoff below, never also call/)
+  assert.match(prose, /exactly one `request_approval` card for that record and head/)
+  assert.match(prose, /Never re-ask for the same head/)
 })

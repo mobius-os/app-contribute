@@ -459,10 +459,10 @@ explicit private-preparation request; dismissing it only hides that revision
 of the suggestion and keeps the work in Changes and Contribute.
 
 **One decision, no duplicate approval.** A live Contribute/prepare block is one
-owner decision surface for the exact action it represents. Except for the one
-Goal handoff card below, never also call `request_user_input` /
-`AskUserQuestion` for **Prepare**, **Review / Fix and review**, **Send / Update
-PR**, or another action already shown by that block.
+owner decision surface for the exact action it represents. Apart from the Goal
+handoff below, never also call `request_user_input` / `AskUserQuestion` for
+**Prepare**, **Review / Fix and review**, **Send / Update PR**, or another
+action already shown by that block.
 Do not paraphrase the same choice into chat merely to solicit a second answer.
 But if the partner voluntarily gives an explicit, unambiguous chat instruction
 for that exact current action—or replies "send all of those" to a
@@ -471,25 +471,19 @@ requiring the matching Contribute press. Run the same exact-head, full-diff,
 identity, and freshness checks and use the documented guarded submission path;
 chat approval changes the approval surface, not the safety preflight.
 
-**When an open Goal stops at that decision.** The block is not a Goal handoff:
-it neither counts as the Goal's next owner nor resumes the chat when pressed.
-If unfinished Goal work cannot continue until the owner approves the exact next
-public action, claim that action's canonical work key with `claim_agent_work`
-(for example `github:<owner/repo>:pr:<number>:<head_sha>:update`), then end the
-turn with exactly one saved `request_approval` card for that record and head
-under the same key. It is the handoff, not a duplicate, and approving it is a
-valid yes for that exact action. Skip it when the owner already approved this
-exact action, and never re-ask for the same record and head. The card offers a
-choice for having pressed the block instead; the resumed turn then verifies the
-public head and does not publish twice.
+**A Goal waiting on that decision** still needs a handoff; the block neither
+owns the Goal nor resumes the chat. Claim the action's canonical work key (for
+example `github:<owner/repo>:pr:<number>:<head_sha>:update`), then end with
+exactly one `request_approval` card for that record and head under the same
+key. Approving it is a valid yes. Never re-ask for the same head.
 
-A pressed block owns its complete batch until every item settles; in-flight
-siblings stay visibly in flight and never turn into a second doorway. A
-chat-scoped review, repair, or failed-publication recovery continues as a hidden
-turn in its source chat. Contribute may start an app-owned scoped conversation
-only for genuinely global work that has no source chat. Background Delegation
-children return evidence or independent edits to their parent; they do not
-become owner-facing contribution homes.
+If the owner presses the block, let that action own its complete batch until
+every item settles; in-flight siblings stay visibly in flight and never turn
+into a second doorway. A chat-scoped review, repair, or failed-publication
+recovery continues as a hidden turn in its source chat. Contribute may start an
+app-owned scoped conversation only for genuinely global work that has no source
+chat. Background Delegation children return evidence or independent edits to
+their parent; they do not become owner-facing contribution homes.
 
 Hard stop #1 is still the gate. In practice:
 
@@ -1052,18 +1046,17 @@ explicitly approves the exact update in chat or presses **Update PR**.
    installed-source proof.
 4. Stop for explicit public approval. **Update PR** in Contribute is one
    approval surface; an explicit, unambiguous chat instruction approving this
-   same record and exact new head is equally valid. Do not require both. When a
-   Goal must wait here, hand off with the one approval card described in the
-   approval gate. The guarded update route rechecks the live PR identity and
-   requires the public title and body to exactly match `plan.title` and
-   `plan.body_draft` before any branch mutation. It does not PATCH the pull
-   request's title or body: GitHub does not expose an expected-version guard for
-   that unsafe metadata update, so treating previously observed text as
-   overwrite authority could erase a maintainer edit. Any mismatch stops for a
-   fresh private review. The route allows only the exact reviewed fast-forward,
-   and a restarted attempt must prove the same metadata precondition again.
-   Ordinary **Send PR** continues to reject a branch that already has a PR, and
-   raw `git push` is never a substitute.
+   same record and exact new head is equally valid. Do not require both. The
+   guarded update route rechecks the live PR identity and requires the public
+   title and body to exactly match `plan.title` and `plan.body_draft` before any
+   branch mutation. It does not PATCH the pull request's title or body: GitHub
+   does not expose an expected-version guard for that unsafe metadata update,
+   so treating previously observed text as overwrite authority could erase a
+   maintainer edit. Any mismatch stops for a fresh private review. The route
+   allows only the exact reviewed fast-forward, and a restarted attempt must
+   prove the same metadata precondition again. Ordinary **Send PR** continues
+   to reject a branch that already has a PR, and raw `git push` is never a
+   substitute.
 5. After a successful update, the same record returns to `open`, retains its
    original submission time, records `last_updated_pr_at`, and advances an
    existing Autopilot grant to the new public head without creating, enabling,
