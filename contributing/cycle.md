@@ -120,7 +120,9 @@ reconciliation.
 4. After submission, let Contribute autopilot own ordinary PR feedback. When
    this chat promises to continue after CI, review, queue, or merge, declare a
    durable read-only wait using the `waiting` skill; prose alone is not a
-   watcher. Refresh the real current head and outcome whenever the chat resumes.
+   watcher. For CI, wait with `/data/platform/scripts/pr-checks.sh <repo> <pr>
+   <sha>` so a commit that never became the PR head fails at once. Refresh the
+   real current head and outcome whenever the chat resumes.
 5. Once every in-scope public item is merged, closed, superseded, or honestly
    blocked, reconcile each local project through the reviewed update path named
    by its adapter. Preserve private/local-only work and genuine local overlays,
