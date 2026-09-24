@@ -108,6 +108,15 @@ you hold the live round. `<base>` below is
    merely to make an all-clear or duplicate event look productive. Do not mark
    a draft ready or invent a review re-request; those are different GitHub
    actions.
+
+   A rejected `/update` is **not** evidence that GitHub checks are running.
+   Read its exact response, then make one read-only check of the PR's public
+   head. Only treat this as a published update—and only wait for CI—if that
+   public head exactly equals the reviewed `head_sha` you submitted. If it does
+   not, no checks for that candidate were triggered: do not keep waiting or
+   retry the same guarded request blindly. Diagnose the named guard if it is
+   clear; otherwise `/escalate` with the response and the observed public head.
+   Escalation ends this round.
 9. **Complete.** `POST /complete` with the exact `outcome` and a one-sentence
    summary. Use `"handled"` for a verified no-change event so the claim settles
    and the cursor advances without manufacturing a GitHub comment.
