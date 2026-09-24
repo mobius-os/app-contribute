@@ -4,17 +4,13 @@ description: "Contribute app's project-collaboration skill. Read before ANY publ
 ---
 # Contributing upstream
 
-Contribute's project-collaboration skill. `Read` this before ANY public GitHub
-action, and for **prepare my changes**, **prepare all**, **address the existing
-contributions**, **finish the contribution cycle**, **submit and sync**, or
-**align my projects with upstream**.
-
 It moves local project changes into private review, public collaboration, and
-safe local reconciliation. The constitution's end-of-task checklist routes you here when a change would
-help other users; "share this" or "report that bug upstream" lands here too. The
-current built-in adapters are Möbius platform/app projects published through
-GitHub, but the cycle itself is project-shaped rather than `mobius-os`-shaped so
-future owner projects can use the same intents and UI.
+safe local reconciliation. The constitution's end-of-task checklist routes you
+here when a change would help other users; "share this" or "report that bug
+upstream" lands here too. The current built-in adapters are Möbius
+platform/app projects published through GitHub, but the cycle itself is
+project-shaped rather than `mobius-os`-shaped so future owner projects can use
+the same intents and UI.
 
 This file is the core every contribution task needs. Procedures live in mode
 files next to this one in the skill folder: open only the one the current step
@@ -127,17 +123,25 @@ private-preparation request; dismissing it only hides that revision of the
 suggestion and keeps the work in Changes and Contribute.
 
 **One decision, no duplicate approval.** A live Contribute/prepare block is one
-owner decision surface for the exact action it represents. Never also call
-`request_user_input` / `AskUserQuestion` for **Prepare**, **Review / Fix and
-review**, **Send / Update PR**, or another action already shown by that block,
-and do not paraphrase the same choice into chat merely to solicit a second
-answer. But if the partner voluntarily gives an explicit, unambiguous chat
-instruction for that exact current action—or replies "send all of those" to a
-just-enumerated immutable set—that is the owner decision. Proceed without
-requiring the matching Contribute press. Run the same exact-head, full-diff,
-identity, and freshness checks and use the documented guarded submission path;
-chat approval changes the approval surface, not the safety preflight. If the
-owner presses the block instead, let that action own its complete batch until
+owner decision surface for the exact action it represents. Apart from the Goal
+handoff below, never also call `request_user_input` / `AskUserQuestion` for
+**Prepare**, **Review / Fix and review**, **Send / Update PR**, or another
+action already shown by that block, and do not paraphrase the same choice into
+chat merely to solicit a second answer. But if the partner voluntarily gives an
+explicit, unambiguous chat instruction for that exact current action—or replies
+"send all of those" to a just-enumerated immutable set—that is the owner
+decision. Proceed without requiring the matching Contribute press. Run the same
+exact-head, full-diff, identity, and freshness checks and use the documented
+guarded submission path; chat approval changes the approval surface, not the
+safety preflight.
+
+**A Goal waiting on that decision** still needs a handoff; the block neither
+owns the Goal nor resumes the chat. Claim the action's canonical work key (for
+example `github:<owner/repo>:pr:<number>:<head_sha>:update`), then end with
+exactly one `request_approval` card for that record and head under the same
+key. Approving it is a valid yes. Never re-ask for the same head.
+
+If the owner presses the block, let that action own its complete batch until
 every item settles; in-flight siblings stay visibly in flight and never turn
 into a second doorway. A chat-scoped review, repair, or failed-publication
 recovery continues as a hidden turn in its source chat. Contribute may start an

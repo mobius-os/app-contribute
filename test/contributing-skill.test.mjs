@@ -140,3 +140,9 @@ test('private publication and local installation have separate ownership', () =>
   assert.match(prose, /app-connection promise still requires its installed-source proof/)
   assert.doesNotMatch(prose, /The submit path proves `base_sha\.\.head_sha` is present in that source commit/)
 })
+
+test('a Goal waiting on a Contribute action hands off with one approval card', () => {
+  assert.match(prose, /Apart from the Goal\s+handoff below, never also call/)
+  assert.match(prose, /exactly one `request_approval` card for that record and head/)
+  assert.match(prose, /Never re-ask for the same head/)
+})
