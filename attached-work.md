@@ -106,6 +106,10 @@ For an app or platform checkout with a real upstream/base branch:
 
    `Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>`
 
+   Omit it only when the target project's contribution policy forbids it: then
+   set `plan.coauthor_trailer: false` and name that choice in the returned
+   outcome so the owner sees it before approving.
+
 3. Capture the exact `base_sha`, `head_sha`, live `source_sha`, full canonical
    `base_sha..head_sha` binary diff, its SHA-256, and its diff-stat tail. Re-read
    the full stored diff before marking it reviewed.
@@ -162,7 +166,7 @@ Write records and diffs through the Contribute storage API using
 record path is `contributions/<record-id>.json`; its sibling diff is
 `contributions/<record-id>.diff`. Never write the numeric storage directory
 directly. When updating an existing record, preserve its public identity,
-creation time, original `chat_id`, and relay fields; update the same record and
+creation time, original `chat_id`, and any legacy `relay_*` fields; update the same record and
 invalidate any review verdict that does not match the new head.
 
 If the source lacks a truthful accepted base, the current change overlaps an

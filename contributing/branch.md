@@ -4,7 +4,8 @@ Mode file of the `contributing` skill. The core
 ([SKILL.md](SKILL.md): Hard stops, privacy allowlist,
 approval gate, file table) always applies. The `plan` fields and review
 contract live in [prepare.md](prepare.md); ledger writes
-in [ledger.md](ledger.md).
+in [ledger.md](ledger.md). The target's adapter names
+the working source, accepted base, and any target-specific recipe.
 
 Run these during preparation, after the partner agrees to stage a PR for review.
 Do not fork, push, or create a PR here.
@@ -28,12 +29,8 @@ Resource cleanup is part of the work, not an unrelated maintenance favor.
   build output while idle. Remove those after verification when no process is
   using them; record an owner and expiry for any exceptional long-lived
   artifact.
-- For platform checks, use `scripts/wt-pytest.sh` and `scripts/wt-npm.sh` from
-  the staged checkout. The Python wrapper uses the shared test runtime, and the
-  npm wrapper temporarily borrows the primary checkout's dependency tree only
-  when `package-lock.json` matches exactly. Do not run a direct `npm ci` or
-  create a checkout-local `.venv` when either wrapper can supply the exact
-  environment. If a dependency change genuinely requires a new install, make
+- Prefer the environment the adapter names for checks (the Möbius adapter has
+  checkout-local wrappers). If a check genuinely requires a new install, make
   that install temporary and remove it in the same turn on success, failure,
   cancellation, or interruption.
 - The Contribute scheduled job retries missed terminal cleanup. Reflection may
@@ -43,7 +40,7 @@ Resource cleanup is part of the work, not an unrelated maintenance favor.
 
 ## Refresh upstream before review
 
-Fetch the canonical default branch immediately before constructing the review
+Fetch the target's default branch immediately before constructing the review
 checkout. Base the isolated review on that freshly fetched commit, then replay
 only the attributable local commits and working diff. Use three-way application
 where upstream moved; never copy an older complete tree over newer upstream
@@ -72,31 +69,25 @@ Once the review is exact, create only its record-bound checkout at
 `/data/contrib/<record-id>/worktree`; keep alternate candidates ephemeral and
 remove them in the turn that created them.
 
-**Use a linked worktree for every staged review checkout.** Its `.git` marker is
-a file pointing at the installed app/platform repo, not a nested `.git`
-directory. That keeps the live source on `main`, makes the review checkout
-restart-safe even on older images whose baked boot cleaner removes nested Git
-directories, and still gives Contribute a durable path to verify. Put it at
-`/data/contrib/<record-id>/worktree` and store that exact path as `repo_path`.
+## The durable review checkout
 
-## An app with a real origin (most catalog apps)
-
-`git -C /data/apps/<slug> remote get-url origin` succeeds → build one clean
-review commit in a linked worktree while the live app stays on `main`:
+Every staged review lives at `/data/contrib/<record-id>/worktree`, stored as
+`plan.repo_path`. Make it a **linked worktree of the working source** so its
+`.git` is a file pointing at that repository (when an adapter has no local
+repository to link, it clones with `--separate-git-dir` instead); never create
+a nested `.git` directory under `/data/contrib`. The working source stays on its own branch —
+only the review worktree is on the topic branch, so live edits and updates
+cannot land on the review.
 
 ```bash
-SOURCE=/data/apps/<slug>
+SOURCE=<working source named by the adapter>
 WORKTREE=/data/contrib/<record-id>/worktree
-BASE_SHA="$(git -C "$SOURCE" merge-base main upstream)"
-SOURCE_SHA="$(git -C "$SOURCE" rev-parse main)"
-git -C "$SOURCE" -c core.quotePath=false diff --no-ext-diff --no-color \
-  --binary --full-index --src-prefix=a/ --dst-prefix=b/ \
-  "$BASE_SHA..main" > /tmp/<record-id>.diff
-git -C "$SOURCE" worktree add -b fix/<slug>-<short> "$WORKTREE" "$BASE_SHA"
+SOURCE_SHA="$(git -C "$SOURCE" rev-parse HEAD)"
+git -C "$SOURCE" worktree add -b fix/<topic> "$WORKTREE" "$BASE_SHA"
 git -C "$SOURCE" worktree lock \
   --reason "Contribute review <record-id>" "$WORKTREE"
 cd "$WORKTREE"
-git apply --index --binary /tmp/<record-id>.diff
+git apply --3way --index --binary "$LOCAL_DIFF"   # the attributable change only
 git_email="$(git config --global --get user.email || true)"
 if [ -n "$git_email" ] && [ "$git_email" != "agent@mobius" ]; then
   git config user.name "$(git config --global --get user.name)"
@@ -111,100 +102,22 @@ git -c core.quotePath=false diff --no-ext-diff --no-color --binary \
 DIFF_SHA256="$(sha256sum /tmp/<record-id>.diff | awk '{print $1}')"
 ```
 
-Then write the ledger record with `repo_path: "$WORKTREE"`, `branch`,
+`$BASE_SHA` is the freshly fetched accepted base and `$LOCAL_DIFF` the owner's
+attributable change, both as the adapter describes. Then write
+the ledger record with `repo_path: "$WORKTREE"`, `branch`,
 `base_sha: "$BASE_SHA"`, `head_sha: "$HEAD_SHA"`,
 `source_repo_path: "$SOURCE"`, `source_sha: "$SOURCE_SHA"`, `diff_sha256` from
-`$DIFF_SHA256`, and `diff_stat` (required). `diff_excerpt` is legacy — omit it.
+`$DIFF_SHA256`, and `diff_stat` (required).
 
-Two invariants: the
-**`Co-authored-by: Möbius Agent` trailer on every contributed commit** (the
-visible Möbius mark on GitHub — partner stays author, Möbius co-author), and the
-**live source repo remains on `main`** — only the separate review worktree stays
-on `fix/…`, so watcher edits and store updates cannot land on the review branch.
+The co-author trailer is the default on every contributed commit: the partner
+stays author, Möbius is the visible co-author. Omit it only as the reviewed
+`plan.coauthor_trailer: false` choice described in
+[prepare.md](prepare.md).
+
 Lock every linked review immediately after creation, before applying or
 committing its diff. The record-specific lock keeps an unrelated
 `git worktree prune` from stranding reviewed owner work; terminal contribution
 cleanup verifies the reciprocal Git pointer and releases that exact lock.
-
-## An app with no origin, or platform/shell
-
-**No origin** (installed from a manifest): derive the repo from `manifest_url`
-(`.../<org>/<repo>/<ref>/mobius.json` → `github.com/<org>/<repo>`), clone it into
-`/data/contrib/<record-id>/worktree` with
-`--separate-git-dir=/data/contrib/<record-id>/git`, `checkout -b fix/…`, copy
-the changed source over (re-read vs the allowlist), and commit with the
-co-author trailer. Before cloning, capture the installed app's live source path
-as `source_repo_path` and its exact `main` commit as `source_sha`; the reviewed
-commit identities may differ, and the submit path handles that safely. The
-separate Git directory is deliberately named `git`, not `.git`, so older boot
-cleaners leave it intact. Use the worktree as `repo_path`.
-
-**Platform/shell**: only when `/data/platform` has a real origin — create the
-review branch with `git -C /data/platform worktree add -b fix/…
-/data/contrib/<record-id>/worktree <base-sha>`, then immediately lock it with
-`git -C /data/platform worktree lock --reason "Contribute review <record-id>"
-/data/contrib/<record-id>/worktree`. Apply only the reviewed source diff there,
-and record that worktree path with `repo: "mobius-os/mobius"`.
-Capture `SOURCE_SHA="$(git -C /data/platform rev-parse HEAD)"` before creating
-the review worktree and store `source_repo_path: "/data/platform"` beside
-`plan.source_sha`; `/data/platform` itself remains on its current live branch.
-No origin → be honest: platform
-contributions need the updated platform bootstrap; app contributions still work.
-
-## Choose a stack by default for coherent dependent work
-
-Before preparing two or more PRs for one goal, explicitly decide whether they
-form a stack. Use a stack by default when every layer is independently coherent
-and later layers genuinely depend on earlier ones, or when an ordered split
-makes review substantially clearer. This lets CI start on the foundation and on
-the cumulative result at the same time.
-
-Do not manufacture layers from one indivisible fix just to obtain more CI, and
-do not stack unrelated changes: independent work should stay as independent PRs
-to `main` so one failure, review, or delay cannot block the others. A stack's
-direction is parent-first: PR A targets `main`; PR B targets A's upstream
-branch, so B's check covers A+B; PR C targets B, and so on. Mention the stack
-choice in `prior_work.summary` or the record summary when it helps the partner
-understand the review shape.
-
-## Prepare a linked PR stack
-
-Use a stack when the default decision above finds a real dependency or review
-order. Each layer is its own complete, reviewed commit and its `.diff` is
-**incremental against the previous layer**, never the cumulative diff against
-`main`. Each layer must remain a sensible review unit; put the tests needed to
-trust a layer in that layer rather than postponing all coverage to the end.
-
-1. Choose one privacy-safe stack id, for example `chat-settlement`. Every branch
-   must start `stack/<stack-id>/`, followed by an ordered descriptive suffix:
-   `stack/chat-settlement/01-runtime`, `.../02-ui`, `.../03-tests`.
-2. Prepare layer 1 from the current upstream/default base SHA. Prepare layer 2
-   from layer 1's exact `head_sha`, and so on. Use one durable linked worktree
-   per record under `/data/contrib/<record-id>/worktree`.
-3. Set the connected owner's repo-local author/committer identity **before every
-   commit**. Standalone send can normalize one tip commit; stack send cannot
-   rewrite a parent without invalidating every child's reviewed ancestry.
-4. Store the canonical `base_sha..head_sha` diff and hash for each layer exactly
-   as for a standalone PR.
-5. Put this additive object in every plan (positions are 1-based and complete):
-
-```json
-"stack": {
-  "id": "chat-settlement",
-  "name": "Chat settlement",
-  "position": 2,
-  "total": 3,
-  "parent_record_id": "chat-settlement-01",
-  "base_branch": "stack/chat-settlement/01-runtime"
-}
-```
-
-Layer 1 has an empty `parent_record_id` and `base_branch` equal to upstream's
-default branch (normally `main`). Every later `parent_record_id` names the
-immediately preceding ledger record, `base_branch` equals that record's branch,
-and its `base_sha` equals that record's `head_sha`. Re-read all records and diffs
-as one review unit before saying the stack is ready. Sending the stack is in
-[publish.md](publish.md).
 
 ## Updating an existing open PR
 
@@ -254,6 +167,5 @@ explicitly approves the exact update in chat or presses **Update PR**.
    existing Autopilot grant to the new public head without creating, enabling,
    or retargeting a grant.
 
-If the installed platform does not yet expose the reviewed update route, keep
-the record privately prepared and say that a restart or platform update is
-needed. Do not fall back to a duplicate PR or an unguarded branch rewrite.
+To change a public title or description itself, see *Editing a PR's title or
+description* in [publish.md](publish.md).

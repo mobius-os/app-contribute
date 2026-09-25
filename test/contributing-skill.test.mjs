@@ -44,8 +44,8 @@ test('hard stops, the privacy allowlist, and the approval gate live only in the 
 })
 
 test('CI diagnosis prefers the failure summarizer over full log dumps', () => {
-  assert.match(core, /scripts\/ci-failures\.sh <pr-number\\\|run-id>/)
-  assert.match(mode('ci.md'), /scripts\/ci-failures\.sh <pr-number\|run-id>/)
+  assert.match(core, /scripts\/ci-failures\.sh <owner\/repo> <pr-number\\\|run-id>/)
+  assert.match(mode('ci.md'), /scripts\/ci-failures\.sh <owner\/repo> <pr-number\|run-id>/)
   assert.match(mode('ci.md'), /saves the full logs to a file and prints only the failing jobs/)
 })
 
@@ -145,4 +145,51 @@ test('a Goal waiting on a Contribute action hands off with one approval card', (
   assert.match(prose, /Apart from the Goal\s+handoff below, never also call/)
   assert.match(prose, /exactly one `request_approval` card for that record and head/)
   assert.match(prose, /Never re-ask for the same head/)
+})
+
+test('the general layer is project-shaped and Möbius facts live in its adapter', () => {
+  const cycle = mode('cycle.md')
+  const mobius = mode('adapter-mobius.md')
+  const github = mode('adapter-github.md')
+  for (const adapter of ['adapter-mobius.md', 'adapter-github.md']) {
+    assert.ok(cycle.includes(`](${adapter})`), `cycle registers ${adapter}`)
+  }
+  assert.doesNotMatch(cycle, /## Current Möbius adapter/)
+  assert.match(core, /under a project root its adapter registers/)
+  assert.doesNotMatch(core, /the platform \(`\/data\/platform\/`\), and the shell/)
+  assert.match(mobius, /the platform \(`\/data\/platform\/`\), and the shell/)
+  for (const [name, body] of [['SKILL.md', core], ...['ci.md', 'prepare.md', 'branch.md'].map((n) => [n, mode(n)])]) {
+    assert.doesNotMatch(body, /mobius-os\/mobius|area: ui|playwright-local|catalog\.json/, `${name} stays general`)
+  }
+  assert.match(github, /never assume\s+`main`/)
+  assert.match(github, /defaultBranchRef/)
+  assert.match(github, /\/data\/contrib\/<record-id>\/worktree/)
+  assert.match(mode('ci.md'), /target repository's required checks are the final gate/)
+})
+
+test('legacy bot and maintainer-only material each have one owner', () => {
+  const legacy = mode('legacy-bot.md')
+  const maintainer = mode('maintainer.md')
+  for (const name of modeFiles.filter((n) => n !== 'legacy-bot.md')) {
+    assert.doesNotMatch(mode(name), /relay_contribution_id|relay_revision/, `${name} leaves relay fields to the legacy file`)
+  }
+  assert.match(legacy, /relay_contribution_id/)
+  assert.match(maintainer, /permissions\.push/)
+  assert.match(maintainer, /review_prs\.py/)
+  assert.match(maintainer, /connect_app/)
+  assert.ok(!existsSync(new URL('../contributing/review-merge.md', import.meta.url)))
+  assert.doesNotMatch(mode('ledger.md'), /"repo_path": "\/data\/apps\/<slug>"/)
+})
+
+test('the co-author trailer is the default and an opt-out is explicit and disclosed', () => {
+  assert.match(prose, /`coauthor_trailer: false` is the only way to omit that trailer/)
+  assert.match(prose, /say so — with the reason — in the approval summary/)
+  assert.match(prose, /unless the reviewed plan set `coauthor_trailer: false`/)
+  assert.match(attached, /set `plan\.coauthor_trailer: false`/)
+})
+
+test('skill text states rules rather than incident history', () => {
+  for (const text of [prose, attached]) {
+    assert.doesNotMatch(text, /second doorway|Older platforms may still require|parallel Möbius-maintainer roster|chat-settlement|older boot cleaners|baked boot cleaner|ecosystem is young/)
+  }
 })

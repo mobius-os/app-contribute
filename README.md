@@ -141,7 +141,10 @@ shared skills directory on install and update, so the skill always matches
 the app version. `contributing/SKILL.md` is deliberately a short core (hard
 stops, privacy allowlist, approval gate, and a routing table); the per-mode
 procedures live beside it (`cycle.md`, `prepare.md`, `branch.md`,
-`ledger.md`, `publish.md`, `review-merge.md`, `ci.md`) and are linked
+`ledger.md`, `publish.md`, `maintainer.md`, `ci.md`, `legacy-bot.md`), with
+the facts that differ between targets in project adapters
+(`adapter-mobius.md` for Möbius platform and app projects,
+`adapter-github.md` for any other GitHub repository). They are linked
 relatively, so an agent re-reading the skill after context compaction pays
 only for the core and the one mode it is working in.
 

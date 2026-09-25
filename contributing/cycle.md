@@ -8,12 +8,9 @@ The intent names below are complete workflow requests, not hints that the owner
 must expand into a checklist every time. Preserve every hard stop while doing
 the routine discovery and sequencing without asking the owner to restate it.
 
-Every project adapter must supply five owning facts: the working source, the
-accepted/shared source, the publication target, the reviewed local update path,
-and the categories of private or local-only material that must be preserved.
-The stages below do not change when those facts come from another repository or
-project type. If a project has no truthful adapter yet, keep it visible but
-name that missing capability instead of guessing with raw Git commands.
+The stages below are the same for every project. What differs between targets
+comes from its adapter (see *Project adapters* at the end); read that adapter
+before touching source.
 
 ## Start queue work from one snapshot
 
@@ -54,8 +51,10 @@ belongs upstream.
    [prepare.md](prepare.md)). When a later chat refines
    an existing record, preserve its original `chat_id` and CAS-add both the
    original and current chat to `chat_ids`; one review can then reconcile every
-   source chat without duplicating or moving the contribution. Use a stack only
-   when the changes truly depend on one another. The source chat is the parent
+   source chat without duplicating or moving the contribution. Independent
+   changes become independent PRs; a stack is only for truly dependent changes
+   and needs upstream push permission
+   ([maintainer.md](maintainer.md)). The source chat is the parent
    and final integrator for chat-scoped work. Ordinary preparation stays in
    that turn. If, after inspection, genuinely independent project work can
    proceed in parallel, use the installed Subagents app's durable background
@@ -93,8 +92,8 @@ project can remain an ordinary bounded turn.
 ## Finish the contribution cycle
 
 Treat **finish the contribution cycle**, **handle the existing changes and
-submit them**, **submit and sync**, **align my projects with upstream**, and the
-Möbius-specific **align this Möbius with upstream** as one durable outcome. The
+submit them**, **submit and sync**, and **align my projects with upstream** as
+one durable outcome. The
 default scope is every active Contribute PR plus every current reusable local
 change, unless the owner names a narrower repository or project. This intent
 almost always earns a Goal because it crosses review, external waits, and local
@@ -108,7 +107,7 @@ reconciliation.
 2. Privately repair stale reviews, failed checks, merge conflicts, and sound
    review feedback. Prepare newly discovered reusable changes. Leave genuine
    owner choices, unsafe work, and unrelated refactors explicitly blocked.
-   Diagnose failed checks with `scripts/ci-failures.sh <pr-number|run-id>`
+   Diagnose failed checks with `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number|run-id>`
    (see [ci.md](ci.md)), not full-log dumps.
 3. Present the exact ready set in Contribute or enumerate it clearly in chat.
    **Send all ready** is one reviewed public approval boundary; an explicit,
@@ -142,21 +141,21 @@ Do not replace these stages with a blind reset or a one-click destructive
 shortcut. The streamlining is that the owner names the outcome once; exact
 publication, update review, conflicts, and restart retain their existing gates.
 
-## Current Möbius adapter
+## Project adapters
 
-For the platform and installed apps currently shown in Contribute Projects:
+Every project adapter supplies five owning facts:
 
-- the working source is the live platform checkout or app source directory;
-- the accepted/shared source is the configured canonical branch or installed
-  app release marker;
-- publication is staged through Contribute and, once explicitly approved,
-  sent through the GitHub path in [publish.md](publish.md);
-- accepted platform work returns through the reviewed Möbius update flow;
-- eligible tracked apps return through App Store's reviewed **Update all** flow;
-- private/local-only apps and genuine local overlays are preserved;
-- overlaps use the existing resolver instead of a reset; and
-- platform activation keeps its separately confirmed restart gate.
+1. **Working source** — where the owner's local changes live.
+2. **Shared source** — the accepted upstream the review is based on.
+3. **Publication** — how an approved review becomes public.
+4. **Local update path** — how accepted work returns to the working source.
+5. **Private material** — what must stay local beyond the core allowlist.
 
-These are adapter rules, not definitions of the contribution cycle. A future
-owner repository should register equivalent source, publication, update, and
-privacy facts and then reuse the same **Prepare** and **Run full cycle** intents.
+The stages above do not change between adapters. If a project has no truthful
+adapter, keep it visible but name that missing capability instead of guessing
+with raw Git commands.
+
+| Target | Adapter |
+|---|---|
+| The Möbius platform, shell, or an installed app shown in Contribute Projects | [adapter-mobius.md](adapter-mobius.md) |
+| Any other GitHub repository — the owner's own project or third-party open source | [adapter-github.md](adapter-github.md) |
