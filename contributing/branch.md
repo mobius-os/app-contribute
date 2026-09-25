@@ -105,16 +105,18 @@ fi
 git commit -m "<one line, generic>" \
   -m "Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>"
 HEAD_SHA="$(git rev-parse HEAD)"
-git -c core.quotePath=false diff --no-ext-diff --no-color --binary \
-  --full-index --src-prefix=a/ --dst-prefix=b/ \
-  "$BASE_SHA..$HEAD_SHA" > /tmp/<record-id>.diff
-DIFF_SHA256="$(sha256sum /tmp/<record-id>.diff | awk '{print $1}')"
+# The one fingerprint Send and /update re-verify; never hash your own diff.
+python3 /data/apps/contribute/review_diff.py \
+  "$WORKTREE" "$BASE_SHA" "$HEAD_SHA" /tmp/<record-id>.diff
 ```
+
+`review_diff.py` prints `diff_sha256`, `bytes`, and `diff_stat` for exactly the
+bytes it wrote.
 
 Then write the ledger record with `repo_path: "$WORKTREE"`, `branch`,
 `base_sha: "$BASE_SHA"`, `head_sha: "$HEAD_SHA"`,
-`source_repo_path: "$SOURCE"`, `source_sha: "$SOURCE_SHA"`, `diff_sha256` from
-`$DIFF_SHA256`, and `diff_stat` (required). `diff_excerpt` is legacy — omit it.
+`source_repo_path: "$SOURCE"`, `source_sha: "$SOURCE_SHA"`, and `diff_sha256`
+and `diff_stat` (required) from that output. `diff_excerpt` is legacy — omit it.
 
 Two invariants: the
 **`Co-authored-by: Möbius Agent` trailer on every contributed commit** (the
