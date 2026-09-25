@@ -106,9 +106,19 @@ For an app or platform checkout with a real upstream/base branch:
 
    `Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>`
 
-3. Capture the exact `base_sha`, `head_sha`, live `source_sha`, full canonical
-   `base_sha..head_sha` binary diff, its SHA-256, and its diff-stat tail. Re-read
-   the full stored diff before marking it reviewed.
+3. Capture the exact `base_sha`, `head_sha`, and live `source_sha`, then write
+   the canonical diff with the one helper Send re-verifies against:
+
+   ```bash
+   python3 /data/apps/contribute/review_diff.py \
+     "$WORKTREE" "$BASE_SHA" "$HEAD_SHA" /tmp/<record-id>.diff
+   ```
+
+   It prints `diff_sha256`, `bytes`, and `diff_stat`; use those values and
+   those exact file bytes. Never compose your own `git diff` for this: plain
+   `git diff` and even `git diff --binary` abbreviate blob ids, so their
+   fingerprint can never match and Send fails with `diff_mismatch`. Re-read the
+   full stored diff before marking it reviewed.
 4. Create or CAS-update one private record. A new record uses
    `If-None-Match: *`; an update first GETs with `x-mobius-version: 1` and PUTs
    the full reconciled JSON with `If-Match: <etag>`. A 412 means re-read and
@@ -164,6 +174,13 @@ record path is `contributions/<record-id>.json`; its sibling diff is
 directly. When updating an existing record, preserve its public identity,
 creation time, original `chat_id`, and relay fields; update the same record and
 invalidate any review verdict that does not match the new head.
+
+After writing, confirm with the same check Send runs rather than recomputing
+the fingerprint yourself: `GET $API_BASE_URL/api/github/contributions/<app
+id>/review-status` must report `state: "ready"` for every record you wrote. A
+`needs_refresh` state (for example `diff_mismatch`) means the record is not
+sendable. Regenerate its diff with `review_diff.py`, rewrite it, and check
+again. Never report a record as prepared while this check disagrees.
 
 If the source lacks a truthful accepted base, the current change overlaps an
 owner choice, or safe preparation needs a workflow not defined here, stop with

@@ -99,9 +99,13 @@ you hold the live round. `<base>` below is
    grant does not cover is an `/escalate`, never a quiet force-push.
 6. **Run the project's tests** before pushing. If they still fail after two
    honest attempts, escalate — don't push red.
-7. **Re-read the FULL diff.** Then write the new `head_sha` and `diff_sha256`
-   onto the ledger record (a CAS storage write, same as preparing) so `/update`
-   can bind to exactly what you reviewed.
+7. **Re-read the FULL diff.** Then regenerate the stored diff and its
+   fingerprint with the one helper `/update` re-verifies against, never your
+   own `git diff`:
+   `python3 /data/apps/contribute/review_diff.py <worktree> <base_sha> <new_head_sha> /tmp/<record-id>.diff`.
+   Write that file as the record's sibling `.diff`, and its printed `diff_sha256`
+   and the new `head_sha` onto the ledger record (a CAS storage write, same as
+   preparing), so `/update` can bind to exactly what you reviewed.
 8. **Push and reply when useful.** `POST /update` with the new head; then
    `POST /reply` for each thread you addressed, using its `in_reply_to` id when
    it is a review thread. Keep replies factual and scoped. Do not post a reply
