@@ -89,10 +89,11 @@ temporarily borrows the primary checkout's dependency tree only when
 `package-lock.json` matches exactly. Do not run a direct `npm ci` or create a
 checkout-local `.venv` when either wrapper can supply the exact environment.
 
-For `mobius-os/mobius` PRs, upstream CI runs backend pytest, frontend unit
-`npm test`, `packager-unit`, `core-apps-unit`, `core-apps-sync` via
-`scripts/check-core-apps-sync.sh`, and comprehensive Playwright e2e. Diagnose
-failures as in [ci.md](ci.md).
+For `mobius-os/mobius` PRs, upstream CI (`.github/workflows/test.yml`) runs
+the required `privacy`, `backend` (pytest), and `frontend-unit` (`npm test`
+plus the packager and browser-harness unit tests) jobs. Its sharded Playwright
+`e2e` job runs on manual dispatch and merge-group runs, not on every PR.
+Diagnose failures as in [ci.md](ci.md).
 
 **Playwright:** do not run it locally by default. The Möbius app container has
 no Docker, so diagnose browser failures from the hosted CI report. On a
