@@ -492,6 +492,25 @@ function PublicationReviewNote({ rec }) {
   )
 }
 
+// Omitting the Möbius Agent co-author trailer is part of what the owner
+// approves (the platform refuses a commit without it unless the reviewed plan
+// says exactly `coauthor_trailer: false`), so the review names that choice.
+function CoauthorOmittedNote({ rec }) {
+  if (rec?.plan?.coauthor_trailer !== false) return null
+  return (
+    <section className="co-publication-review" aria-label="Reviewed commit attribution">
+      <span>Attribution</span>
+      <div>
+        <strong>Möbius Agent is not listed as co-author</strong>
+        <p>
+          This commit leaves out the usual Co-authored-by line. Send it only if
+          the project's policy forbids that line or you asked to omit it.
+        </p>
+      </div>
+    </section>
+  )
+}
+
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
@@ -505,6 +524,7 @@ export function ReviewPlan({ rec, loadDiff }) {
     </nav>
     {tab === 'description' ? <>
       <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} />
+      {isPr ? <CoauthorOmittedNote rec={rec} /> : null}
       <PublicationReviewNote rec={rec} />
     </> : null}
     {tab === 'files' ? <FileDiffList rec={rec} loadDiff={loadDiff} /> : null}

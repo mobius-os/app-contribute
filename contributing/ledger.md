@@ -28,15 +28,16 @@ mapi -X PUT /api/storage/apps/<id>/contributions/<record-id>.json \
   -H "Content-Type: application/json" \
   -H "If-None-Match: *" -d '{
   "id": "<record-id>", "type": "pr", "repo": "<owner>/<repo>",
-  "status": "prepared", "title": "<title>", "branch": "fix/<slug>-<short>",
+  "status": "prepared", "title": "<title>", "branch": "fix/<topic>",
   "chat_id": "'"$CHAT_ID"'", "chat_ids": ["'"$CHAT_ID"'"],
   "created_at": "<ISO>", "updated_at": "<ISO>",
   "summary": "<one plain-language sentence about what improves for people>",
   "plan": {"action": "pr", "repo": "<owner>/<repo>", "title": "<title>",
            "body_draft": "<full PR body, word for word>",
-           "branch": "fix/<slug>-<short>", "repo_path": "/data/apps/<slug>",
+           "branch": "fix/<topic>",
+           "repo_path": "/data/contrib/<record-id>/worktree",
            "base_sha": "<sha>", "head_sha": "<sha>",
-           "source_repo_path": "/data/apps/<slug>", "source_sha": "<sha>",
+           "source_repo_path": "<adapter working source>", "source_sha": "<sha>",
            "files": ["<every path covered by this exact contribution>"],
            "diff_sha256": "<sha256 of the .diff>",
            "diff_stat": "<git diff --stat tail>"}
@@ -75,23 +76,18 @@ mapi -si -H "x-mobius-version: 1" \
 # note the ETag, edit the JSON, then PUT with -H 'If-Match: <etag>' -d '{ ...full record... }'
 ```
 
-When refreshing a record that already has a Möbius-bot PR, keep the same record
-id and preserve its `relay_contribution_id`, `relay_revision`,
-`relay_publication_repo`, and PR URL/number. Replace the plan/diff and invalidate
-the old `quality_review`; the instance assigns the next revision only after it
-has built the exact new merge snapshot. Do not create a second record merely
-because upstream moved.
+Refreshing a record keeps its id and public identity (PR URL/number); replace
+the plan/diff and invalidate the old `quality_review`. Do not create a second
+record merely because upstream moved.
 
 `type` ∈ `pr | issue | issue_comment | discussion_comment`; `status` ∈ `prepared
 | submitting | draft | open | merged | closed | commented | abandoned`; `number`,
 `url`, `branch` are optional until they exist. `submitting` = the approve endpoint
 claimed the record and the action is in flight; `commented` = terminal for
-comment actions. Bot-published records may additionally carry
-`submission_mode: "mobius-bot"`, `relay_contribution_id`, `relay_revision`,
-`relay_status`, and `relay_publication_repo`. A bot record stuck in `submitting`
-is reconciled by its saved relay id and exact revision—never search GitHub and
-invent a new record. The personal-GitHub path retains its existing lost-response
-reconciliation.
+comment actions. A record stuck in `submitting` is reconciled by the platform's
+lost-response recovery, never by searching GitHub and inventing a new record.
+Legacy `submission_mode: "mobius-bot"` records carry extra `relay_*` fields:
+[legacy-bot.md](legacy-bot.md).
 
 `quality_review.state` ∈ `reviewing | changes_needed | all_clear`. The
 `reviewed_head_sha` must exactly equal the record's current `plan.head_sha`.

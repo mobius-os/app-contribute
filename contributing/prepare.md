@@ -15,11 +15,16 @@ looks novel. A contribution is not ready for review until you have searched by
 the problem, subsystem, and visible symptoms, then inspected promising diffs
 and discussion. Searching and studying are read-only: no approval needed.
 
+Search the target project, not a fixed organization: use `--repo` for one
+repository or `--owner` when related work may live in sibling repositories.
+
 ```bash
-gh search issues --owner mobius-os "<problem in a few words>" --limit 10
-gh search prs --owner mobius-os "<same words>" --limit 10
-curl -s https://raw.githubusercontent.com/mobius-os/app-store/main/catalog.json | python3 -m json.tool
+gh search issues --repo <owner>/<repo> "<problem in a few words>" --limit 10
+gh search prs --repo <owner>/<repo> "<same words>" --limit 10
 ```
+
+The target's adapter may add a target-specific check (the Möbius adapter
+checks the App Store catalog before a new app is built).
 
 gh search covers open+closed by default — don't pass `--state` (its search form
 rejects `all`, and you want both). Know the repo? List it directly and keep
@@ -30,8 +35,8 @@ gh issue list -R <owner>/<repo> -s all --search "<terms>"
 gh pr list    -R <owner>/<repo> -s all --search "<terms>"
 ```
 
-If the catalog already has the app, installing beats rebuilding; empty results
-are normal, not a broken search.
+Empty results can be normal for a young or small project; they are not a
+broken search.
 
 On a hit, study it (`gh issue view <url> --comments`, `gh pr view <url> --json
 title,body,state,comments`, `gh pr diff <url>`), compare correctness, scope,
@@ -134,11 +139,12 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
        base_sha?, head_sha?, source_repo_path?, source_sha?,
        diff_sha256?, diff_stat,
        prior_work?: {searched_at, query, decision, summary?, matches?},
-       labels?: [type, area?],
-       stack?: {id, name?, position, total, parent_record_id, base_branch},
-       after_merge?: {action: connect_app, app_id, manifest_url},
+       labels?: [type, area?], coauthor_trailer?: false,
        diff_excerpt?}         # diff_stat REQUIRED; diff_excerpt legacy (unused)
 ```
+
+`plan.stack` and `plan.after_merge` are maintainer-only fields:
+[maintainer.md](maintainer.md).
 
 - Write `summary` for a person who does not know Git or the codebase: one short
   sentence about what becomes clearer, safer, faster, or easier. Do not put file
@@ -162,26 +168,28 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
 - `labels` is the small, reviewed GitHub classification proposed for a PR. List
   **one type** and optionally **one area**—never more than two total. Prefer the
   repository's existing taxonomy: inspect it with
-  `gh label list -R <owner>/<repo> --limit 100` before staging. For Möbius repos,
-  use exactly one of `bug`, `enhancement`, `documentation`, or `maintenance`,
-  plus at most one of `area: ui`, `area: backend`, `area: apps`, or
-  `area: infrastructure`. A visual defect is `bug` + `area: ui`; a new interface
-  is `enhancement` + `area: ui`. Do not use workflow/status labels such as
-  `help wanted`, `duplicate`, or `wontfix` on an already-prepared PR. Contribute
+  `gh label list -R <owner>/<repo> --limit 100` before staging; the adapter may
+  fix the taxonomy (the Möbius adapter does). Do not use workflow/status labels
+  such as `help wanted`, `duplicate`, or `wontfix` on an already-prepared PR.
+  Contribute
   shows these labels in Details and only applies names that still exist in the
   target repository. Missing labels or insufficient permission leave the PR
   open and unlabelled rather than changing the reviewed body or failing send.
-- For PRs, `repo_path` MUST be a durable git checkout under a staging root the
-  platform accepts — `/data/contrib/<workspace>` (the primary durable staging
-  root), `/data/apps/`, `/data/platform`, or the legacy `/data/contributions/`;
-  a scratch clone under `$TMPDIR` does not survive restart and cannot be
-  approved with one click.
+- For PRs, `repo_path` MUST be the durable review checkout at
+  `/data/contrib/<record-id>/worktree`; a scratch clone under `$TMPDIR` does
+  not survive restart and cannot be approved with one click.
 - Commit the reviewed source before staging. If GitHub is connected, first set
   the checkout's repo-local `user.name`/`user.email` to the connected owner
   identity (`git config --global --get user.email` should already be the
   owner's no-reply address). The partner is the commit author; Möbius is only
-  the co-author. The commit message MUST include:
-  `Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>`.
+  the co-author. By default the commit message includes
+  `Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>`, and
+  Send refuses a commit without it.
+- `coauthor_trailer: false` is the only way to omit that trailer. Set it only
+  when the target project's contribution or AI policy forbids the trailer, or
+  the owner asks to omit it. Contribute's review shows the omission; give the
+  reason in the message that tells the owner the contribution is ready. Any
+  other value, or no field, keeps the trailer required.
 - Store the full canonical diff as a sibling `contributions/<id>.diff`
   (raw-text PUT — see the ledger file): the review card renders its file list
   from this. `diff_stat` is REQUIRED — the card's diffline and its file-list
@@ -193,32 +201,14 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
 - Publication reviews the exact committed candidate, not its installation.
   An ordinary PR may remain uninstalled, and unrelated live edits do not make
   that review stale. Never install private work or invent a source witness to
-  make Send available. Older platforms may still require installation; leave
-  the candidate private and report that platform limitation rather than bypass
-  its guard.
-- For work originating from an installed app or platform, record truthful
-  `source_repo_path` and captured `source_sha` as provenance. After Send, the
-  platform records an optional local equivalence witness only if the current
-  clean source proves it contains the reviewed change. Missing proof means no
+  make Send available.
+- Record the adapter's working source as `source_repo_path` and its captured
+  commit as `source_sha`; Send refuses a record without that provenance. After
+  Send, the platform records an optional local equivalence witness only if the
+  current clean source proves it contains the reviewed change. Missing proof means no
   witness; later local updates retain their ordinary conservative
   reconciliation/resolver path. Exact head, diff, approval, public target and
   retry checks remain mandatory regardless of installation.
-- When the contribution publishes a local app into its own canonical
-  `mobius-os/app-<id>` repository, add one reviewed `after_merge` handoff:
-  `{"action":"connect_app","app_id":<live numeric app id>,
-  "manifest_url":"https://raw.githubusercontent.com/mobius-os/app-<id>/main/mobius.json"}`.
-  Use it only when `source_repo_path` is that exact live app source,
-  `source_sha` is its captured revision, and the reviewed manifest id matches
-  the target app repository (or declares the live id as `previous_id`). Never
-  use it for platform changes, an unrelated app, a non-`app-*` repository, or
-  as a workaround for an ordinary App Store update. Contribute shows this
-  handoff inside the private review. Approval to send the exact reviewed app
-  publication also approves this exact post-merge connection; it is one
-  publication outcome, not a later public or destructive action. Send binds it
-  to the exact reviewed source and capability digests, but the connection does
-  not run until GitHub confirms the reviewed change has merged (what happens
-  then: *After an app PR merges* in
-  [publish.md](publish.md)).
 
 Before you tell the partner it is ready, complete the exact-head review contract
 from **Thoroughly review prepared work** above. CAS-mark `quality_review.state`

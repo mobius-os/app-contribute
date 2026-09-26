@@ -18,25 +18,24 @@ be stretched to the changed head. No agent turn is needed after a valid button
 press, while a chat approval authorizes the current agent turn to submit the
 enumerated action.
 
-For **Personal GitHub**, the platform endpoint:
+The platform's Send endpoint:
 
 1. claims the `prepared` record as `submitting`,
 2. verifies `plan.head_sha` still equals the branch tip, `diff_sha256` still
    equals the stored `.diff`, and the canonical `base_sha..head_sha` branch diff
    hashes to the same value,
-3. verifies the commit carries the Möbius Agent co-author trailer,
-4. normalizes the tip commit author/committer to the connected owner while
-   preserving the reviewed diff,
-5. adapts the reviewed topic commit to a strictly-behind reusable fork without
-   changing its default branch, then proves the upstream merge result still
-   matches the exact reviewed diff (a diverged fork stops untouched),
-6. pushes the branch to the owner's fork,
-7. creates a review-ready PR with the approved `title` and `body_draft`,
-8. best-effort applies the reviewed `labels` that exist in the target repo, and
-9. records `url`, `number`, label outcome, and `status: "open"` in the ledger.
-   For a reviewed `after_merge` app handoff, Send also stores an immutable
-   publication witness in the live app repo; this remains private local
-   provenance and does not alter the PR.
+3. verifies the commit carries the Möbius Agent co-author trailer, unless the
+   reviewed plan set `coauthor_trailer: false`,
+4. pushes to the target repository itself when the connected owner owns it or
+   has push permission there (the commit must already carry the owner's
+   identity); otherwise normalizes the tip commit author/committer to the
+   connected owner while preserving the reviewed diff, adapts the reviewed
+   topic commit to a strictly-behind reusable fork without changing its default
+   branch, proves the upstream merge result still matches the exact reviewed
+   diff (a diverged fork stops untouched), and pushes to the owner's fork,
+5. creates a review-ready PR with the approved `title` and `body_draft`,
+6. best-effort applies the reviewed `labels` that exist in the target repo, and
+7. records `url`, `number`, label outcome, and `status: "open"` in the ledger.
 
 If any preflight fails, the endpoint rolls the record back to `prepared` with
 `last_submit_error`; the partner can press Leave feedback to return to the
@@ -45,48 +44,6 @@ record, and stop again.
 
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
-
-For existing **legacy Möbius-bot records** only, the instance proves the same
-exact reviewed head, merge-tests it against the configured current target, and
-sends an exact file snapshot through a one-use body-bound capability. New
-contributions use the connected GitHub account instead. The launcher writes
-only to the configured bot publication repository, opens or updates one draft
-PR in the target, and returns the stable PR URL. `local_record_id` stays stable while
-`relay_revision` increases for each changed reviewed snapshot, so a refresh can
-update the same PR without discarding comments. Exact retries reuse the same
-revision and cannot create a duplicate. Status polling is a fallback behind
-launcher webhooks. The partner may explicitly **Withdraw PR**; that closes the
-PR and removes only its bot-owned branch, never an upstream branch and never a
-merge.
-
-## After an app PR merges: connect the same local app
-
-A merged record with a reviewed `after_merge.action: connect_app` finishes the
-local connection automatically. This is the completion step of the exact app
-publication the owner already approved; never present a second **Link app**
-decision or count it among owner actions. The scheduled reconciler retries any
-interrupted handoff until it either completes or has a concrete recovery error.
-
-The platform then checks GitHub's actual merge commit, the stored reviewed diff,
-the durable landed witness, the immutable merged source and permission digests,
-and the intended live app row. Only an exact match installs that merged commit
-under the stable App Store identity. The
-existing numeric app row and its saved data remain in place, so later App Store
-updates target the same installation instead of creating a second app. If the
-local source advanced after review, the ordinary update merge may report
-conflicts; Contribute keeps the app connected and sends those source conflicts
-back to its owning chat for deliberate resolution.
-
-Do not call the publication complete until the local connection is recorded.
-When the intended catalog identity is already attached to the same numeric app
-row, the guarded route may reconcile that already-true connection without
-rewriting the app or its source. Any other proof failure stays visible in
-Working and must not be relabelled as connected.
-
-This handoff depends on the running platform version that supports reviewed
-publication connections. If Contribute reports that the route is unavailable,
-restart after installing the companion platform change; do not fall back to
-clicking App Store **Install** against an older public package.
 
 ## After it's sent: autopilot
 
@@ -105,61 +62,9 @@ nothing. Pause/Resume needs an explicit partner action, either through the
 Contribute control or an unambiguous chat instruction to use that same guarded
 operation.
 
-## The green light for a PR stack
-
-When 2–12 prepared PR records carry one complete `plan.stack` chain,
-Contribute groups them into one visual review and shows the current **Update
-stack** or **Send stack** action.
-The second, explicit confirmation lists every title and `base → branch` pair
-in the current public phase; that click approves exactly those enumerated
-pushes and PR creations. An explicit, unambiguous chat instruction accepting
-the same current list is equally valid; do not require both approval surfaces.
-Any record carrying `plan.stack` is stack-only: malformed or incomplete chains
-stay visible for feedback, but neither the app nor the platform may fall back
-to sending one layer through the standalone PR path.
-
-A reviewed chain may start with existing pull requests whose branches need an
-update and end with new unpublished children. Keep that as one stack, but use
-two exact public phases: first confirm and update the consecutive `pr_update`
-prefix; after a fresh ledger read proves those updates settled, separately
-confirm and open the `pr` suffix. The confirmation enumerates only the current
-phase, while the full chain remains visible and is revalidated on both calls.
-Never place an existing-PR update after a new private layer, and never let one
-phase claim, hide, or inherit approval for the deferred phase.
-
-Before the first public push, the platform rechecks every record, every stored
-diff, every parent SHA, the full branch topology, commit attribution, and the
-whole stack's ability to merge with current upstream. It then publishes the
-branches and opens the PRs from parent to child. If a later layer fails after a
-parent PR was already created, the successful record remains open and every
-unsent record returns to `prepared` with the durable error — retry never hides
-the partial public state. Draft and open parents remain valid reviewed links,
-but their upstream branch must still point at the exact reviewed commit before
-another layer can be sent. If a parent has merged, rebuild the remaining private
-layers on current upstream and review them again; never silently retarget an old
-child, because squash/rebase merges can change the diff GitHub would show.
-
-**True stacks require upstream push permission.** GitHub cannot use a branch
-that exists only in the contributor's fork as the base of a PR in the upstream
-repository. The stack path therefore publishes dedicated `stack/**` branches
-directly to upstream, and the server refuses before pushing anything unless the
-connected owner has `permissions.push` there. Without that permission, prepare
-independent fork PRs instead; never simulate a stack by publishing a cumulative
-diff that differs from the reviewed `.diff`.
-
-## Let GitHub accept a public stack
-
-Once the reviewed layers are public, GitHub owns their acceptance through the
-repository's ordinary review, protection, and merge-queue rules. Contribute
-observes those results and keeps the related records together; it does not
-advance a repository ref directly or bypass the repository's merge policy.
-
-Sending a stack never authorizes merging it. Any later queue or merge action is
-a separate exact approval against the current public head, performed through a
-repository-owned GitHub operation. For a dependent chain, advance parent-first
-and re-read the remaining layers after each accepted parent because their base
-or topology may have changed. Contribute then reconciles merged, closed, or
-superseded outcomes from GitHub without manufacturing a second public action.
+PR stacks, merging, and app publication with a post-merge connection are in
+[maintainer.md](maintainer.md); legacy `mobius-bot` sends
+are in [legacy-bot.md](legacy-bot.md).
 
 ## Commenting on an issue or discussion
 
@@ -177,6 +82,20 @@ gh api graphql -f query='mutation($id: ID!, $body: String!) {
   -F id=<discussion-node-id> -F body="<the approved text>"
 ```
 
+## Editing a PR's title or description
+
+Publish the approved text through GitHub's direct pull-request update. Do not
+use `gh pr edit`: it also reads organization and project metadata and needs
+`read:org`, which the scopes Contribute requests do not include.
+
+```bash
+gh api --method PATCH repos/<owner>/<repo>/pulls/<number> \
+  -f title="<the approved title>" -F body=@<file-with-the-approved-body>
+```
+
+Send only the fields that changed. Reading the PR back with `gh pr view` is
+fine: only the edit command needs the extra permission.
+
 ## When something fails
 
 | Symptom | What it means / what to do |
@@ -185,5 +104,6 @@ gh api graphql -f query='mutation($id: ID!, $body: String!) {
 | **`gh: command not found`** | Platform image too old; a platform update is needed. |
 | **`git push fork` fails right after the fork** | Forks are created async — wait 2s and retry, up to 3×, before treating it as real. |
 | **Push says `workflow` scope is required, but the reviewed diff does not change a workflow** | The reusable fork is stale and lacks an identical workflow file. Update Contribute and reconnect GitHub so the full PR scope set is granted, then retry the unchanged review. |
-| **Empty search results** | Normal while the ecosystem is young; not an error. |
-| **A PR's CI checks failed** | Diagnose with `scripts/ci-failures.sh` as described in [ci.md](ci.md), then repair privately and re-stage. |
+| **`gh pr edit` asks for `read:org`** | Expected with Contribute's scopes; nothing changed. Use the direct update in "Editing a PR's title or description" above rather than requesting a broader scope. |
+| **Send says the co-author trailer is missing** | Re-commit with the trailer and re-review. If the target's policy forbids it or the owner asked to omit it, set `plan.coauthor_trailer: false` as described in [prepare.md](prepare.md) and re-review. |
+| **A PR's CI checks failed** | Diagnose with `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number>` as described in [ci.md](ci.md), then repair privately and re-stage. |

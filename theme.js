@@ -729,9 +729,7 @@ export const CSS = `
   display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
   font-size: 14px; color: var(--muted);
 }
-/* Collapsed prepared card: one muted meta line + one mono diffline. The pill
-   stack and the collapsed co-author tag are gone (co-author now lives in the
-   expanded review). */
+/* Collapsed prepared card: one muted meta line + one mono diffline. */
 .co-technical-summary {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
   align-items: center; gap: 7px 12px;
@@ -851,13 +849,6 @@ export const CSS = `
   color: var(--accent);
 }
 .co-review-title { font-size: 14px; font-weight: 650; line-height: 1.4; }
-.co-review-coauthor {
-  display: inline-flex; align-items: center; gap: 6px;
-  min-height: 28px; padding: 5px 9px; border-radius: 8px;
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  color: var(--green); font-size: 14px; line-height: 1.2;
-}
-.co-review-coauthor strong { color: var(--green); font-weight: 700; }
 .co-publication-review {
   align-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr);
   gap: 10px; padding: 11px 12px; border: 1px solid var(--border);
