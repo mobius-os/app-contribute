@@ -106,9 +106,11 @@ For an app or platform checkout with a real upstream/base branch:
 
    `Co-authored-by: Möbius Agent <mobius-agent@users.noreply.github.com>`
 
-   Omit it only when the target project's contribution policy forbids it: then
-   set `plan.coauthor_trailer: false` and name that choice in the returned
-   outcome so the owner sees it before approving.
+   Omit it only when the target project's contribution or AI policy forbids
+   it: set `plan.coauthor_trailer: false` and name the policy in the returned
+   outcome; Contribute's review also shows the omission. An owner's request to
+   omit it reaches the source chat, not this helper, so the source chat applies
+   that one.
 
 3. Capture the exact `base_sha`, `head_sha`, live `source_sha`, full canonical
    `base_sha..head_sha` binary diff, its SHA-256, and its diff-stat tail. Re-read

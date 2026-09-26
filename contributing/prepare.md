@@ -187,9 +187,9 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   Send refuses a commit without it.
 - `coauthor_trailer: false` is the only way to omit that trailer. Set it only
   when the target project's contribution or AI policy forbids the trailer, or
-  the owner asks to omit it, and say so — with the reason — in the approval
-  summary the owner reads before saying yes. Any other value, or no field,
-  keeps the trailer required.
+  the owner asks to omit it. Contribute's review shows the omission; give the
+  reason in the message that tells the owner the contribution is ready. Any
+  other value, or no field, keeps the trailer required.
 - Store the full canonical diff as a sibling `contributions/<id>.diff`
   (raw-text PUT — see the ledger file): the review card renders its file list
   from this. `diff_stat` is REQUIRED — the card's diffline and its file-list

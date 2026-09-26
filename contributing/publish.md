@@ -105,5 +105,5 @@ fine: only the edit command needs the extra permission.
 | **`git push fork` fails right after the fork** | Forks are created async — wait 2s and retry, up to 3×, before treating it as real. |
 | **Push says `workflow` scope is required, but the reviewed diff does not change a workflow** | The reusable fork is stale and lacks an identical workflow file. Update Contribute and reconnect GitHub so the full PR scope set is granted, then retry the unchanged review. |
 | **`gh pr edit` asks for `read:org`** | Expected with Contribute's scopes; nothing changed. Use the direct update in "Editing a PR's title or description" above rather than requesting a broader scope. |
-| **Send says the co-author trailer is missing** | Re-commit with the trailer and re-review. If the target's policy forbids it or the owner asked to omit it, set `plan.coauthor_trailer: false`, say so in the approval summary, and re-review. |
+| **Send says the co-author trailer is missing** | Re-commit with the trailer and re-review. If the target's policy forbids it or the owner asked to omit it, set `plan.coauthor_trailer: false` as described in [prepare.md](prepare.md) and re-review. |
 | **A PR's CI checks failed** | Diagnose with `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number>` as described in [ci.md](ci.md), then repair privately and re-stage. |

@@ -272,6 +272,28 @@ test('a local app publication review explains the verified after-merge handoff',
   assert.match(html, /saved data/)
 })
 
+test('a PR review names a reviewed co-author trailer opt-out and nothing else', async (t) => {
+  if (!frontendModules) {
+    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
+    return
+  }
+  const { renderReview } = await cardRenderer()
+  const review = (plan, type = 'pr') => renderReview({
+    id: 'attribution', type, status: 'prepared', repo: 'acme/widgets',
+    plan: { action: type, repo: 'acme/widgets', body_draft: 'Fix the widget.', ...plan },
+  })
+
+  const omitted = review({ coauthor_trailer: false })
+  assert.match(omitted, /Möbius Agent is not listed as co-author/)
+  assert.match(omitted, /Send it only if the project&#x27;s policy forbids that line or you asked to omit it/)
+
+  // Only an exact `false` opts out on the platform, so only it is announced.
+  for (const plan of [{}, { coauthor_trailer: true }, { coauthor_trailer: 'false' }]) {
+    assert.doesNotMatch(review(plan), /not listed as co-author/)
+  }
+  assert.doesNotMatch(review({ coauthor_trailer: false }, 'issue'), /not listed as co-author/)
+})
+
 test('a merged app publication shows its automatic connection progress', async (t) => {
   if (!frontendModules) {
     t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')

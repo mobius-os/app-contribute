@@ -183,9 +183,10 @@ test('legacy bot and maintainer-only material each have one owner', () => {
 
 test('the co-author trailer is the default and an opt-out is explicit and disclosed', () => {
   assert.match(prose, /`coauthor_trailer: false` is the only way to omit that trailer/)
-  assert.match(prose, /say so — with the reason — in the approval summary/)
+  assert.match(prose, /Contribute's review shows the omission; give the reason/)
   assert.match(prose, /unless the reviewed plan set `coauthor_trailer: false`/)
-  assert.match(attached, /set `plan\.coauthor_trailer: false`/)
+  assert.match(attached, /set `plan\.coauthor_trailer: false` and name the policy/)
+  assert.match(attached, /owner's request to omit it reaches the source chat, not this helper/)
 })
 
 test('skill text states rules rather than incident history', () => {

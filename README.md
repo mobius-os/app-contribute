@@ -76,11 +76,12 @@ contribution. This app is the dashboard for that loop:
 - **Work list**, grouped:
   - **Needs you** — actual blockers and questions, linked to their owning work.
   - **Prepared proposals · not shared** — private drafts waiting on your go-ahead. Each card
-    shows high-level review context first: repo, branch, diff stat, summary,
-    and the Möbius Agent co-author tag. Open the card to review exactly what
-    would go public: the action ("New PR to…", "Comment on…"), the full
-    markdown-rendered body draft, and a structured diff only when you ask for
-    the excerpt or full patch. **Send PR for review** calls the platform submit
+    shows high-level review context first: repo, branch, diff stat, and
+    summary. Open the card to review exactly what would go public: the action
+    ("New PR to…", "Comment on…"), the full markdown-rendered body draft, a
+    note when the commit omits the Möbius Agent co-author trailer, and a
+    structured diff only when you ask for the excerpt or full patch.
+    **Send PR for review** calls the platform submit
     endpoint directly; the server recomputes the reviewed branch diff and, when
     a reusable fork is stale, adapts the reviewed topic branch to its existing
     base without changing the fork's default branch. It then pushes the branch,
