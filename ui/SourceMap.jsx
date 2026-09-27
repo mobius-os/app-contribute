@@ -13,8 +13,8 @@ import { TaskContext, TaskPane } from './TaskPane.jsx'
 
 const FILTERS = [
   ['all', 'All'],
-  ['local', 'Local changes'],
-  ['updates', 'Updates available'],
+  ['local', 'Changes'],
+  ['updates', 'Updates'],
 ]
 
 function projectMatchesJourney(project, filter) {

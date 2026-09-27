@@ -164,13 +164,15 @@ async function readLedger() {
     // fresh server read, so the field never lands in the ledger files.
     const canonicalName = rec?.id ? `${rec.id}.json` : ''
     const legacyName = rec?.id ? `${rec.id}.record.json` : ''
+    // A delivered body that is not a ledger record (an agent's stray scratch
+    // file, a list) is not a contribution at all. Skip it: counting it as
+    // omitted would mark every load partial, pin the feed to its cache, and
+    // show a permanent "Offline" note while the device is online.
     if (
-      rec && typeof rec === 'object' && rec.id
+      rec && typeof rec === 'object' && !Array.isArray(rec) && rec.id
       && (entry.name === canonicalName || entry.name === legacyName)
     ) {
       records.push({ ...rec, path })
-    } else {
-      omitted.push(path)
     }
   }
   // A complete directory snapshot proves membership, not that every body fit

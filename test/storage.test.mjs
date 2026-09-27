@@ -189,6 +189,33 @@ test('ledger isolates entries without batched content without request fan-out', 
   assert.deepEqual(gets, ['feed-cache.json'])
 })
 
+test('a stray non-record file in the ledger folder does not pin the feed to its cache', async () => {
+  const gets = []
+  globalThis.window = {
+    mobius: {
+      storage: {
+        async listWithStatus() {
+          return {
+            complete: true,
+            entries: [
+              { name: 'live.json', type: 'file', content: { id: 'live', status: 'open' } },
+              { name: 'agent-scratch-notes.json', type: 'file', content: [{ repo: 'x/y', number: 1 }] },
+              { name: 'renamed.json', type: 'file', content: { id: 'other', status: 'open' } },
+            ],
+          }
+        },
+        async get(path) { gets.push(path); return null },
+      },
+    },
+  }
+
+  const result = await loadLedger()
+  assert.deepEqual(result.records.map((record) => record.id), ['live'])
+  assert.equal(result.fromCache, false)
+  assert.deepEqual(result.omitted, [])
+  assert.deepEqual(gets, [])
+})
+
 test('an offline empty mirror falls back to the assembled feed cache', async () => {
   globalThis.window = {
     mobius: {

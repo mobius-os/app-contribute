@@ -34,8 +34,8 @@ test('disconnected projects offer a prominent GitHub connection action', () => {
 test('publication copy describes automatic GitHub identity without picker language', () => {
   assert.doesNotMatch(feedSource, /Choose Personal GitHub|Möbius relay supports standalone drafts/)
   assert.match(feedSource, /your connected GitHub account/)
-  assert.match(sourceMapSource, /Local changes/)
-  assert.match(sourceMapSource, /Updates available/)
+  assert.match(sourceMapSource, /\['local', 'Changes'\]/)
+  assert.match(sourceMapSource, /\['updates', 'Updates'\]/)
 })
 
 test('accepted merged work is surfaced at project level with the safe update action', () => {
@@ -455,4 +455,15 @@ test('prepared proposals have one actionable home and merge follow-through is vi
   assert.match(controlsSource, /Follow through to merge/)
   assert.match(controlsSource, /You still approve sharing and merging/)
   assert.doesNotMatch(controlsSource, /Options & process/)
+})
+
+test('the projects refresh control also renews the contribution feed and reports a partial one', () => {
+  const retry = appSource.match(/onRetry=\{async \(\) => \{[\s\S]*?\n          \}\}/)?.[0] || ''
+  assert.match(retry, /refreshCoordinatorRef\.current\(\)/)
+  assert.match(retry, /return sourceOk && ledgerCurrentRef\.current/)
+})
+
+test('the stale-feed note says offline only when the device is offline', () => {
+  assert.match(appSource, /window\.mobius\?\.online === false\s*\n\s*\? 'Offline — showing your last synced feed\.'/)
+  assert.match(appSource, /'Not fully up to date — showing your last synced feed\.'/)
 })
