@@ -113,7 +113,11 @@ function Header({ appId, fromCache, checking, onBack, children }) {
         {children}
       </div>
       {fromCache && (
-        <span className="co-offline-note">Offline — showing your last synced feed.</span>
+        <span className="co-offline-note">
+          {window.mobius?.online === false
+            ? 'Offline — showing your last synced feed.'
+            : 'Not fully up to date — showing your last synced feed.'}
+        </span>
       )}
     </header>
   )
@@ -202,6 +206,9 @@ export default function ContributeApp({ appId, token }) {
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
   const ledgerReadyRef = useRef(false)
+  // Whether the last ledger read was complete. The manual refresh reports
+  // failure from it, so a still-partial feed never reads as "updated".
+  const ledgerCurrentRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
   useEffect(() => { agentChoiceRef.current = agentChoice }, [agentChoice])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
@@ -452,6 +459,7 @@ export default function ContributeApp({ appId, token }) {
       setOmittedCount(ledger.omitted.length)
       setRecords(recs)
       setFromCache(ledger.fromCache)
+      ledgerCurrentRef.current = !ledger.fromCache
       setLoading(false)
       ledgerReadyRef.current = true
       setLedgerReady(true)
@@ -503,6 +511,7 @@ export default function ContributeApp({ appId, token }) {
       refreshReviewStatus(),
     ])
     setOmittedCount(ledger.omitted.length)
+    ledgerCurrentRef.current = !ledger.fromCache
     if (!ledger.fromCache) {
       let next = ledger.records
       if (connRef.current.state === 'connected') {
@@ -1400,9 +1409,15 @@ export default function ContributeApp({ appId, token }) {
           onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}
           onRetry={async () => {
-            const sourceOk = await refreshSources()
+            // The one visible refresh control renews everything the screen
+            // shows, including the contribution feed: otherwise a stale or
+            // partial feed has no manual way back to current.
+            const [sourceOk] = await Promise.all([
+              refreshSources(),
+              refreshCoordinatorRef.current(),
+            ])
             if (conn.state === 'connected') await Promise.all([loadRepositories(), refreshIncomingReviews()])
-            return sourceOk
+            return sourceOk && ledgerCurrentRef.current
           }} loadProjectDiff={loadProjectDiff}
           repositoryPicker={<RepositoryPicker token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
