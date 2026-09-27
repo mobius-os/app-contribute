@@ -138,7 +138,8 @@ submit it directly after approval. You supply the reviewed text and
 classification:
 
 ```
-title, body_draft, summary,              # required for a new record
+title, body_draft, summary,              # required for a new record, with
+                                         # repo_path and repo (ledger.md)
 labels?: [type, area?], coauthor_trailer?: false,
 prior_work?: {searched_at, query, decision, summary?, matches?}
 ```

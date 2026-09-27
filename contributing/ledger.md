@@ -30,7 +30,9 @@ mapi -X POST /api/github/contributions/<id>/<record-id>/stage \
 
 A new record needs `repo_path`, `repo`, `title`, `body_draft` and `summary`.
 Restaging an existing record (after a fix, rebase, split, or upstream merge)
-needs only `{}`, plus any text you are changing. Optional fields: `base_sha`
+needs only `{}`, plus any text you are changing on a PR that is not public
+yet (an open or draft PR's title and body are copied from GitHub and must not
+be sent). Optional fields: `base_sha`
 (the accepted base; default is the merge base with the target's freshly
 fetched default branch, and a stack layer uses its parent's head),
 `source_repo_path` (only for a checkout that is not a linked worktree of the

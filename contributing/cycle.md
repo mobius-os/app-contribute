@@ -60,7 +60,8 @@ belongs upstream.
    proceed in parallel, use the installed Subagents app's durable background
    Delegation path from the active source run. Give each helper one bounded
    task, wait for every result, then let the source parent reconcile the final
-   source and write or CAS-update the records and settlements. Never replace
+   source, stage the PR records, and write or CAS-update issue and comment
+   records and settlements ([ledger.md](ledger.md)). Never replace
    this relation with an app-owned chat whose prompt or opaque scope merely
    mentions the source chat.
 4. For a chat-scoped request, durably settle every recorded source path that
