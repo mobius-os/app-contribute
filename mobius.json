@@ -57,6 +57,7 @@
     "github-connection.js",
     "storage.js",
     "prepared_reconcile.py",
+    "ledger_scan.py",
     "agent_snapshot.py",
     "contributing/SKILL.md",
     "contributing/cycle.md",

@@ -64,6 +64,7 @@ mkdir -p /data/cron-logs
 # below: different target states, evidence, and failure modes should not turn
 # one proven path into a conditional branch of the other.
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export SCRIPT_DIR
 python3 "$SCRIPT_DIR/prepared_reconcile.py" 2>>/data/cron-logs/contribute.log
 
 # The refresh logic is pure I/O against the local storage API (urllib) plus gh
@@ -111,49 +112,15 @@ def _record_path(name):
   return "/api/storage/apps/%s/%s%s" % (APP_ID, PREFIX, name)
 
 
-def _read_record(name):
-  # The storage GET sends an ETag only when the read opts into versioning;
-  # that tag is what makes the later PUT compare-and-swap.
-  raw, headers = _call("GET", _record_path(name), headers={"x-mobius-version": "1"})
-  rec = json.loads(raw) if raw else None
-  return rec, headers.get("ETag")
+# Only records that still need scheduled work are read: live PRs/issues,
+# prepared records, terminal records that still hold a staging checkout, and
+# merged records awaiting their app connection. Settled history is recognized
+# from listing metadata plus the previous pass's summaries (ledger_scan.py).
+sys.path.insert(0, os.environ["SCRIPT_DIR"])
+from ledger_scan import LedgerScan
 
-
-# Enumerate the ledger, paging until the cursor is exhausted. The storage
-# list endpoint caps a page at 100 records; reading only the first page would
-# silently skip every contribution beyond it (and never refresh/notify them),
-# so walk next_cursor like the app's runtime storage.list does. A missing dir
-# (nothing recorded yet) is not an error. The page loop is bounded so a
-# server bug can't spin it forever.
-names = []
-cursor = None
-for _page in range(2000):
-  path = "/api/storage/apps-list/%s/%s?limit=500" % (APP_ID, PREFIX)
-  if cursor:
-    path += "&cursor=" + urllib.parse.quote(cursor, safe="")
-  try:
-    listing = _get_json(path)
-  except urllib.error.HTTPError as exc:
-    if exc.code == 404:
-      sys.exit(0)
-    raise
-  entries = (listing or {}).get("entries") or []
-  names.extend(
-    e["name"] for e in entries
-    if e.get("type") != "dir" and str(e.get("name", "")).endswith(".json")
-  )
-  cursor = (listing or {}).get("next_cursor")
-  if not cursor:
-    break
-
-records = []
-for name in names:
-  try:
-    rec, etag = _read_record(name)
-  except urllib.error.HTTPError:
-    continue
-  if isinstance(rec, dict) and rec.get("id"):
-    records.append((name, rec, etag))
+LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
+records = LEDGER.records_needing_work()
 
 
 TERMINAL_STAGING_STATUSES = frozenset((
@@ -199,7 +166,11 @@ def _reconcile_terminal_staging():
         {},
       )
       result = json.loads(raw) if raw else {}
-      if not result.get("cleaned") and os.path.isdir(checkout):
+      if (
+        not result.get("cleaned")
+        and os.path.isdir(checkout)
+        and LEDGER.note_cleanup_refused(_name, checkout)
+      ):
         print(
           "contribute: terminal staging remains %s" % rec.get("id"),
           file=sys.stderr,
@@ -214,6 +185,7 @@ def _reconcile_terminal_staging():
 
 
 _reconcile_terminal_staging()
+LEDGER.save()
 
 
 def _awaiting_publication_connection(rec):
