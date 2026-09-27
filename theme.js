@@ -100,7 +100,7 @@ export const CSS = `
 .co-project-control b {
   min-width: 18px; height: 18px; display: inline-flex; align-items: center;
   justify-content: center; padding: 0 5px; border-radius: 999px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-variant-numeric: tabular-nums;
 }
 @media (hover: hover) {
@@ -123,11 +123,11 @@ export const CSS = `
 }
 .co-project-icon {
   display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-weight: 700;
 }
 .co-project-icon.has-image {
-  background: var(--surface2, var(--surface)); color: transparent;
+  background: var(--surface-2, var(--surface)); color: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 76%, transparent);
 }
 .co-project-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -199,7 +199,7 @@ export const CSS = `
 .co-lens-nav b {
   min-width: 18px; height: 18px; display: inline-flex; align-items: center;
   justify-content: center; padding: 0 5px; border-radius: 999px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-variant-numeric: tabular-nums;
 }
 .co-stage-intro {
@@ -231,7 +231,7 @@ export const CSS = `
 .co-source-group + .co-source-group { border-top: 1px solid var(--border); }
 .co-source-group-label {
   min-height: 36px; display: flex; align-items: center; padding: 8px 14px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-weight: 720; letter-spacing: .045em;
   text-transform: uppercase;
 }
@@ -246,7 +246,7 @@ export const CSS = `
 .co-source-glyph {
   grid-column: 1; grid-row: 1 / 3; width: 36px; height: 36px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 10px; background: color-mix(in srgb, var(--accent) 11%, var(--surface2, var(--surface)));
+  border-radius: 10px; background: color-mix(in srgb, var(--accent) 11%, var(--surface-2, var(--surface)));
   color: var(--accent); font-size: 14px; font-weight: 750;
 }
 .co-source-row-id { grid-column: 2; grid-row: 1; min-width: 0; }
@@ -274,7 +274,7 @@ export const CSS = `
 .co-source-error p { margin: 0; }
 .co-source-unavailable { margin: 12px 0 0; padding: 12px; }
 @media (hover: hover) {
-  .co-quiet-action:hover { color: var(--text); background: var(--surface2, var(--surface)); }
+  .co-quiet-action:hover { color: var(--text); background: var(--surface-2, var(--surface)); }
   .co-lens-nav button:hover { color: var(--text); }
   .co-source-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent);  }
   .co-source-row:hover .co-source-row-cue .co-icon { transform: translateX(2px); }
@@ -283,7 +283,7 @@ export const CSS = `
 .co-source-status {
   flex: 0 0 auto; max-width: 128px; padding: 5px 8px; border-radius: 999px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: var(--surface2, var(--bg)); color: var(--muted);
+  background: var(--surface-2, var(--bg)); color: var(--muted);
   font-size: 14px; line-height: 1; font-weight: 680;
 }
 .co-source-status.tone-accent { background: color-mix(in srgb, var(--accent) 13%, transparent); color: color-mix(in srgb, var(--accent) 80%, var(--text)); }
@@ -484,7 +484,7 @@ export const CSS = `
   color: var(--muted); cursor: pointer;
 }
 .co-setting-info:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-@media (hover: hover) { .co-setting-info:hover { color: var(--text); background: var(--surface2, var(--bg)); } }
+@media (hover: hover) { .co-setting-info:hover { color: var(--text); background: var(--surface-2, var(--bg)); } }
 .co-setting-popover {
   position: absolute; z-index: 2; top: calc(100% + 5px); right: -36px;
   width: min(248px, calc(100vw - 48px)); margin: 0; padding: 10px 11px;
@@ -521,7 +521,7 @@ export const CSS = `
 .co-method-options {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 3px;
   border: 0; border-radius: 10px;
-  background: var(--surface2, var(--bg));
+  background: var(--surface-2, var(--bg));
 }
 .co-method-options > button {
   min-width: 0; min-height: 44px; padding: 8px; overflow: hidden;
@@ -586,7 +586,7 @@ export const CSS = `
 .co-conn-step {
   display: flex; flex-direction: column; gap: 10px; padding: 12px;
   border: 1px solid var(--border); border-radius: 12px;
-  background: color-mix(in srgb, var(--surface2, var(--surface)) 66%, transparent);
+  background: color-mix(in srgb, var(--surface-2, var(--surface)) 66%, transparent);
 }
 .co-conn-step-head { display: flex; align-items: flex-start; gap: 9px; }
 .co-conn-step-head > div {
@@ -622,7 +622,7 @@ export const CSS = `
 @media (hover: hover) {
   .co-btn:not(:disabled):hover {
     border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-    background: var(--surface2, var(--surface));
+    background: var(--surface-2, var(--surface));
   }
   .co-btn-primary:not(:disabled):hover {
     border-color: color-mix(in srgb, var(--text) 85%, var(--bg));
@@ -659,7 +659,7 @@ export const CSS = `
   display: flex; align-items: center; justify-content: center; min-width: 0;
   font-family: var(--mono, var(--font)); font-size: clamp(21px, 7vw, 28px); font-weight: 700;
   letter-spacing: 0; text-align: center; padding: 10px 8px;
-  border-radius: 10px; background: var(--surface2, var(--bg));
+  border-radius: 10px; background: var(--surface-2, var(--bg));
   border: 1px dashed var(--border); color: var(--text);
   user-select: text; -webkit-user-select: text; cursor: text;
 }
@@ -700,7 +700,7 @@ export const CSS = `
 .co-chip {
   flex: 0 0 auto; font-size: 14px; font-weight: 650; line-height: 1;
   padding: 5px 9px; border-radius: 999px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
 }
 .co-chip.is-prepared,
 .co-chip.is-submitting,
@@ -961,7 +961,7 @@ export const CSS = `
 .co-review-changes-head span {
   flex: 0 0 auto; max-width: 62%; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; padding: 4px 8px; border-radius: 999px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-weight: 650; line-height: 1.2;
 }
 .co-pr-metadata { align-self: stretch; width: 100%; margin-top: 12px; border-top: 1px solid var(--border); }
@@ -998,7 +998,7 @@ export const CSS = `
 }
 .co-markdown pre {
   overflow: auto; padding: 10px 12px; border-radius: 8px;
-  border: 1px solid var(--border); background: var(--surface2, var(--bg));
+  border: 1px solid var(--border); background: var(--surface-2, var(--bg));
 }
 .co-markdown pre code {
   display: block; padding: 0; background: transparent; white-space: pre;
@@ -1017,7 +1017,7 @@ export const CSS = `
 .co-files-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   min-height: 40px; padding: 9px 12px; border-bottom: 1px solid var(--border);
-  background: var(--surface2, var(--bg));
+  background: var(--surface-2, var(--bg));
   font-family: var(--mono, var(--font)); font-size: 14px;
 }
 .co-files-count { color: var(--muted); font-weight: 650; }
@@ -1073,7 +1073,7 @@ export const CSS = `
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 44px; height: 44px; flex: 0 0 44px; padding: 0;
   border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font: inherit; cursor: pointer;
   transition: color .14s ease, border-color .14s ease, background .14s ease, transform .1s ease;
 }
@@ -1345,7 +1345,7 @@ export const CSS = `
 .co-run-section > header h3 { margin: 0; font-size: 18px; font-weight: 700; }
 .co-run-section > header span {
   min-width: 20px; padding: 3px 6px; border-radius: 999px;
-  background: var(--surface2, var(--surface)); color: var(--muted);
+  background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: 14px; font-weight: 700; text-align: center;
 }
 .co-run-list { overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
@@ -1372,7 +1372,7 @@ export const CSS = `
 }
 .co-run-row-main > .co-icon { color: var(--muted); transition: transform .14s ease; }
 .co-run-row-main em {
-  padding: 4px 6px; border-radius: 999px; background: var(--surface2, var(--bg));
+  padding: 4px 6px; border-radius: 999px; background: var(--surface-2, var(--bg));
   color: var(--muted); font-size: 14px; font-style: normal; font-weight: 700; white-space: nowrap;
 }
 .co-run-row.is-publish .co-run-row-main em { color: var(--green); }
@@ -1412,7 +1412,7 @@ export const CSS = `
 .co-run-fold > summary::-webkit-details-marker { display: none; }
 .co-run-fold > summary b {
   min-width: 19px; padding: 3px 5px; border-radius: 999px;
-  background: var(--surface2, var(--bg)); font-size: 14px; text-align: center;
+  background: var(--surface-2, var(--bg)); font-size: 14px; text-align: center;
 }
 .co-run-fold > summary .co-icon { transition: transform .16s ease; }
 .co-run-fold[open] > summary .co-icon { transform: rotate(90deg); }
@@ -1482,7 +1482,7 @@ export const CSS = `
 .co-review-project > header {
   min-height: 40px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center; gap: 8px; padding: 8px 13px;
-  background: var(--surface2, var(--surface));
+  background: var(--surface-2, var(--surface));
 }
 .co-review-project > header .co-project-icon { width: 22px; height: 22px; border-radius: 7px; }
 .co-review-project > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
@@ -1503,7 +1503,7 @@ export const CSS = `
 .co-review-row-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.35; }
 .co-review-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 14px; }
 .co-review-state {
-  padding: 4px 7px; border-radius: 999px; background: var(--surface2, var(--bg));
+  padding: 4px 7px; border-radius: 999px; background: var(--surface-2, var(--bg));
   color: var(--muted); font-size: 14px; font-weight: 690; white-space: nowrap;
 }
 .co-review-state.is-action { color: var(--co-warn); }
@@ -1554,7 +1554,7 @@ export const CSS = `
   -webkit-line-clamp: 2; overflow-wrap: anywhere;
   color: var(--muted); font-size: 14px; line-height: 1.4;
 }
-.co-request-card em { padding: 4px 7px; border-radius: 999px; background: var(--surface2, var(--bg)); color: var(--muted); font-size: 14px; font-style: normal; font-weight: 700; }
+.co-request-card em { padding: 4px 7px; border-radius: 999px; background: var(--surface-2, var(--bg)); color: var(--muted); font-size: 14px; font-style: normal; font-weight: 700; }
 .co-request-card em.is-action { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .co-request-card em.is-open { color: var(--green); }
 .co-request-card > .co-icon { color: var(--muted); }
@@ -1718,7 +1718,7 @@ export const CSS = `
   .co-focus-view .co-send-btn { width: 100%; min-width: 0; }
   .co-focus-view .co-secondary-action {
     width: auto; flex: 0 0 auto; padding-inline: 11px;
-    border-color: var(--border); background: var(--surface2, var(--surface));
+    border-color: var(--border); background: var(--surface-2, var(--surface));
   }
   .co-card-footer:has(.co-confirm) { align-items: stretch; flex-direction: column; }
   .co-card-footer:has(.co-confirm) .co-details-toggle { align-self: flex-start; }
