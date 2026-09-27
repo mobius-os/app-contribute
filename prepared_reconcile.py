@@ -25,6 +25,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from ledger_scan import LedgerScan
+
 
 PREFIX = "contributions/"
 IDENTIFIER_PATTERNS = (
@@ -227,39 +229,13 @@ class Storage:
     def record_path(self, name: str) -> str:
         return f"/api/storage/apps/{self.app_id}/{PREFIX}{name}"
 
-    def list_names(self) -> list[str]:
-        names: list[str] = []
-        cursor = None
-        for _ in range(2000):
-            path = f"/api/storage/apps-list/{self.app_id}/{PREFIX}?limit=500"
-            if cursor:
-                path += "&cursor=" + urllib.parse.quote(cursor, safe="")
-            try:
-                raw, _ = self.call("GET", path)
-            except urllib.error.HTTPError as error:
-                if error.code == 404:
-                    return []
-                raise
-            page = json.loads(raw) if raw else {}
-            names.extend(
-                item["name"]
-                for item in page.get("entries") or []
-                if item.get("type") != "dir"
-                and str(item.get("name", "")).endswith(".json")
-            )
-            cursor = page.get("next_cursor")
-            if not cursor:
-                break
-        return names
-
-    def read_record(self, name: str) -> tuple[dict[str, Any] | None, str | None]:
-        raw, headers = self.call(
-            "GET",
-            self.record_path(name),
-            headers={"x-mobius-version": "1"},
+    def records_needing_work(self) -> list[tuple[str, dict[str, Any], str | None]]:
+        scan = LedgerScan(
+            self.call, self.app_id, os.environ.get("APP_JOB_STATE_DIR") or None,
         )
-        record = json.loads(raw) if raw else None
-        return (record if isinstance(record, dict) else None), headers.get("ETag")
+        records = scan.records_needing_work()
+        scan.save()
+        return records
 
     def read_diff(self, name: str) -> str | None:
         diff_name = name[:-5] + ".diff"
@@ -993,12 +969,8 @@ def run(storage: Storage, github: GitHub, dry_run: bool = False) -> dict[str, in
     }
     now = utc_now()
     prepared: list[tuple[str, dict[str, Any], str]] = []
-    for name in storage.list_names():
-        try:
-            record, etag = storage.read_record(name)
-        except urllib.error.HTTPError:
-            continue
-        if not record or not is_prepared_pr(record):
+    for name, record, etag in storage.records_needing_work():
+        if not is_prepared_pr(record):
             continue
         if not etag:
             print(
