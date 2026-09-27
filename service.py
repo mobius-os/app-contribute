@@ -82,6 +82,11 @@ def handle(request: dict) -> dict:
   return {"status": 404, "body": {"error": "unknown Contribute policy"}}
 
 
+# Möbius may run everything above once and fork each request from it,
+# removing interpreter start-up and imports from every request. Module setup
+# therefore reads only per-installation values and starts no threads.
+MOBIUS_PRELOAD = True
+
 if __name__ == "__main__":
   try:
     print(json.dumps(handle(json.load(sys.stdin)), separators=(",", ":")))
