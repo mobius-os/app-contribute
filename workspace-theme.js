@@ -7,7 +7,7 @@ export const WORKSPACE_CSS = `
 .co-header-back { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:6px 4px; border:0; background:none; color:var(--text); font:600 16px var(--font); cursor:pointer; }
 .co-header-back:hover { color:var(--accent); }
 .co-icon-action { display:inline-grid; place-items:center; flex:0 0 44px; width:44px; height:44px; padding:0; border:0; border-radius:10px; background:transparent; color:var(--muted); cursor:pointer; }
-.co-icon-action:hover { color:var(--text); background:var(--surface2); }
+.co-icon-action:hover { color:var(--text); background:var(--surface-2); }
 .co-icon-action:disabled { cursor:default; opacity:.5; }
 .co-page.is-sources { width:100%; max-width:none; padding:0; overflow:auto; }
 .co-projects-view { width:100%; max-width:1108px; margin:auto; padding:24px 44px 80px; }
@@ -105,7 +105,7 @@ export const WORKSPACE_CSS = `
 .co-selected-open span { font-size:14px; color:var(--muted); }
 .co-selected-open strong { font-size:14px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .co-selected-remove { display:grid; place-items:center; width:44px; min-height:44px; flex-shrink:0; border:0; background:none; color:var(--muted); cursor:pointer; }
-.co-selected-remove:hover,.co-selection-heading > button:hover { color:var(--text); background:var(--surface2); border-radius:8px; }
+.co-selected-remove:hover,.co-selection-heading > button:hover { color:var(--text); background:var(--surface-2); border-radius:8px; }
 .co-pr-selection.is-expanded .co-selected-cards { flex-direction:column; max-height:30dvh; }
 .co-pr-selection.is-expanded .co-selected-card { flex:none; }
 .co-pr-selection.is-expanded .co-selected-open strong { white-space:normal; overflow-wrap:anywhere; }
@@ -119,11 +119,11 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-task-dock > .co-run-approval h3 { margin:0; font-size:22px; line-height:1.3; letter-spacing:-.02em; }
 .co-workspace .co-task-dock > .co-run-approval header p { margin:8px 0 0; font-size:16px; line-height:1.55; }
 .co-workspace .co-task-dock > .co-run-approval .co-run-approval-list { max-height:min(35dvh,320px); border:1px solid var(--border); border-radius:10px; }
-.co-workspace .co-task-dock > .co-run-approval .co-run-approval-list li { background:var(--surface2); }
+.co-workspace .co-task-dock > .co-run-approval .co-run-approval-list li { background:var(--surface-2); }
 .co-workspace .co-task-dock > .co-run-approval .co-run-approval-list strong { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 .co-workspace .co-task-dock > .co-run-approval .co-run-approval-actions { padding:16px 0 0; }
 .co-workspace .co-btn { border-radius:7px; }
-.co-workspace .co-btn:not(.co-btn-primary):hover:not(:disabled) { background:var(--surface2); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); }
+.co-workspace .co-btn:not(.co-btn-primary):hover:not(:disabled) { background:var(--surface-2); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); }
 
 .co-workspace .co-pr-row:hover { background:color-mix(in srgb,var(--surface) 65%,transparent); }
 .co-workspace .co-pr-row.is-selected { background:var(--accent-dim); border-radius:12px; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 28%,transparent); }
@@ -195,7 +195,7 @@ export const WORKSPACE_CSS = `
 .co-directory-filters button span { min-width:20px; padding:1px 6px; border-radius:10px; background:var(--bg); color:var(--muted); font-variant-numeric:tabular-nums; }
 .co-pr-filters { display:flex; flex-wrap:wrap; gap:4px; margin-right:auto; }
 .co-pr-filters button { min-height:44px; padding:8px 10px; border:0; border-radius:7px; background:none; color:var(--muted); font:500 14px var(--font); text-decoration:none; cursor:pointer; }
-.co-pr-filters button[aria-pressed=true],.co-pr-filters button:hover { background:var(--surface2); color:var(--text); }
+.co-pr-filters button[aria-pressed=true],.co-pr-filters button:hover { background:var(--surface-2); color:var(--text); }
 .co-pr-list-controls .co-pr-search { display:flex; align-items:center; gap:8px; flex:1 1 100%; margin:4px 0; color:var(--muted); }
 .co-workspace .co-pr-search input { border:0; background:none; padding:8px 0; min-width:0; width:100%; }
 .co-workspace .co-pr-side > button[aria-label^="Assign PR"] { min-width:44px; justify-content:center; }
@@ -258,7 +258,7 @@ export const WORKSPACE_CSS = `
 .co-model-group { display:grid; gap:2px; padding-top:5px; }
 .co-model-group h4 { margin:0; padding:7px 9px 4px; color:var(--muted); font-size:14px; font-weight:650; }
 .co-model-option { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:50px; padding:7px 9px; border:0; border-radius:10px; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
-.co-model-option:hover,.co-model-option[aria-pressed=true] { background:var(--surface2); }
+.co-model-option:hover,.co-model-option[aria-pressed=true] { background:var(--surface-2); }
 .co-model-option > span { display:grid; gap:2px; min-width:0; }
 .co-model-option strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:600; }
 .co-model-option small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:14px; }

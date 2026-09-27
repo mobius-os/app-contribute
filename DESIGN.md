@@ -8,7 +8,7 @@ colors:
   accent-muted: "var(--accent-dim)"
   background: "var(--bg)"
   surface: "var(--surface)"
-  surface-muted: "var(--surface2, var(--surface))"
+  surface-muted: "var(--surface-2, var(--surface))"
   text: "var(--text)"
   text-muted: "var(--muted)"
   border: "var(--border)"

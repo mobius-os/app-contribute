@@ -131,7 +131,7 @@
       "refersTo": "button-secondary",
       "description": "A visible alternative inside a review, assignment, or detail action group.",
       "html": "<button type=\"button\" class=\"ds-secondary\">Review &amp; merge</button>",
-      "css": ".ds-secondary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-secondary:hover { background:var(--surface2,var(--surface)); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); } .ds-secondary:active { transform:scale(.97); } .ds-secondary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "css": ".ds-secondary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-secondary:hover { background:var(--surface-2,var(--surface)); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); } .ds-secondary:active { transform:scale(.97); } .ds-secondary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
       "name": "Quiet action",
