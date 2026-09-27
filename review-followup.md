@@ -43,8 +43,9 @@ you hold the live round. `<base>` below is
 
 - `POST <base>/update` — push a validated fix to this PR's branch. Body:
   `{"run_id", "head_sha", "diff_sha256", "summary"}`. You commit the
-  fix in the worktree and write the new `head_sha`/`diff_sha256` onto the record
-  first (see below); this endpoint re-verifies both, the co-author trailer
+  fix in the worktree and restage the record first (see below), then pass the
+  `head_sha`/`diff_sha256` that staging returned; this endpoint re-verifies
+  both, the co-author trailer
   (unless the reviewed plan set `coauthor_trailer: false`), the attribution,
   and the source allowlist, then pushes as the owner. You never run
   a bare `git push`.
@@ -100,9 +101,14 @@ you hold the live round. `<base>` below is
    grant does not cover is an `/escalate`, never a quiet force-push.
 6. **Run the project's tests** before pushing. If they still fail after two
    honest attempts, escalate — don't push red.
-7. **Re-read the FULL diff.** Then write the new `head_sha` and `diff_sha256`
-   onto the ledger record (a CAS storage write, same as preparing) so `/update`
-   can bind to exactly what you reviewed.
+7. **Re-read the FULL diff.** Then restage the open record in place so
+   `/update` binds to exactly what you reviewed:
+   `POST <base>/stage` with `{"autopilot_run_id": "<run_id>"}`. Staging derives
+   the new head, canonical diff and hash from the committed branch, keeps the
+   PR open, and brings the revision into the owner's live copy when it can.
+   Never write the record or its diff through storage. If the branch needs
+   upstream changes, merge upstream into it (never rebase a published branch);
+   the merge commit needs the co-author trailer too.
 8. **Push and reply when useful.** `POST /update` with the new head; then
    `POST /reply` for each thread you addressed, using its `in_reply_to` id when
    it is a review thread. Keep replies factual and scoped. Do not post a reply

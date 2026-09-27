@@ -11,3 +11,9 @@ test('Autopilot settles exact no-change reviews without public noise', () => {
   assert.match(prose, /Do not post a reply merely to make an all-clear or duplicate event look productive/)
   assert.match(prose, /skip the public reply and `\/complete` with `outcome: "handled"`/)
 })
+
+test('autopilot rounds restage in place instead of hand-writing the record', () => {
+  assert.match(skill, /"autopilot_run_id": "<run_id>"/)
+  assert.match(prose, /Never write the record or its diff through storage/)
+  assert.doesNotMatch(prose, /CAS storage write/)
+})
