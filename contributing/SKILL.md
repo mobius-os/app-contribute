@@ -51,7 +51,7 @@ Three rules never bend. Every mode file assumes them and points back here.
 | Work on any other GitHub repository — the owner's own project or third-party open source: clone, default branch, fork or branch PR, the target's contribution policy | [adapter-github.md](adapter-github.md) |
 | Prepare one contribution: prior-work search, two-pass code review, **review all / review this PR / fix and review again** on prepared records, the `plan` fields, the `all_clear` verdict and handoff | [prepare.md](prepare.md) |
 | Build the review branch: refresh upstream, scratch vs `/data/contrib` checkouts, the locked review worktree, updating an existing open PR; **cleanup ownership** of any clone, worktree, install, or build output you create | [branch.md](branch.md) |
-| Read or write ledger records: create, CAS update, `.diff` blob, `chat_ids`, `type`/`status` values, `quality_review` | [ledger.md](ledger.md) |
+| Read or write ledger records: **stage** a PR, record a verdict, CAS updates, `chat_ids`, `type`/`status` values | [ledger.md](ledger.md) |
 | Publish after approval: the green light, **Send/Open PR**, issue/discussion comments, editing a PR's title or description, autopilot grants, the failure table | [publish.md](publish.md) |
 | Work that needs upstream push or merge rights: PR stacks, **Review** / **Review & merge** of selected public PRs (`review_prs.py`), **Prepare & merge**, publishing an app into its own `mobius-os/app-<id>` repository and the post-merge `connect_app` | [maintainer.md](maintainer.md) |
 | Check results: required checks, local checks before staging, inspecting failed CI (prefer `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number\|run-id>` over full `gh run view --log` dumps) | [ci.md](ci.md) |

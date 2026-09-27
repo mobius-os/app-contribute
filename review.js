@@ -260,9 +260,9 @@ function reviewAction(records, mode = 'review') {
       '',
       'Refresh each record and inspect its complete diff. Review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt with expanding scope where ownership requires it.',
       fixing
-        ? 'For owner-authored work, fix every sound finding privately, update the prepared record, and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.'
+        ? 'For owner-authored work, fix every sound finding privately, commit it on the review branch, restage the record through the Contribute stage call, and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.'
         : 'If a sound issue is found in owner-authored work, fix it privately and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.',
-      'After every pass, CAS-update quality_review on the Contribute record. Use state reviewing while active, changes_needed when a sound finding remains, and all_clear only when the complete current head passes. Store reviewed_head_sha equal to plan.head_sha, reviewed_at, iteration, chat_id, scope, and a concise summary.',
+      'After every pass, record the verdict through Contribute\'s review call for the exact staged head and diff (see the contributing skill\'s ledger file). Use state reviewing while active, changes_needed when a sound finding remains, and all_clear only when the complete current head passes, with a concise summary.',
       'Do not push, publish, comment, merge, or otherwise change GitHub. Stop once every listed record is either all_clear on its exact current head or has a precise remaining blocker.',
     ].join('\n'),
   }
@@ -350,7 +350,7 @@ export function progressReviewAction(records, reviewStatus) {
       '',
       'Refresh every record first. Resolve stale prepared heads, then thoroughly review correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
       'For owner-authored work, fix every sound finding privately and repeat the full review on the new head. For work owned by someone else, prepare concrete suggestions instead of changing their branch.',
-      'CAS-update quality_review throughout the loop. Mark all_clear only when reviewed_head_sha exactly matches the current plan.head_sha.',
+      'Restage every fix through Contribute\'s stage call and record each verdict through its review call for the exact staged head. Mark all_clear only after the complete current head passes.',
       'Do not push, publish, comment, merge, or otherwise change GitHub. Stop with every listed item either all clear on its exact head or carrying one precise blocker.',
     ].join('\n'),
   }
@@ -506,7 +506,7 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
       'Inspect untracked and generated-looking paths before staging. When a path is clearly repository-wide generated state, add the smallest reusable ignore rule to the owning .gitignore and settle the generated path locally. Do not silently ignore ambiguous files; leave one concrete owner decision instead.',
       'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
       'Group cohesive changes within each repository before publication, not one pull request per chat. Keep unrelated work independent; use stacks only for genuine dependencies. Preserve all source-chat links when work is consolidated. A blocked group must not hold up unrelated ready work.',
-      'Privately prepare every worthwhile change in scope and thoroughly review each exact head. CAS-update quality_review throughout; all_clear is valid only when reviewed_head_sha equals plan.head_sha.',
+      'Privately prepare every worthwhile change in scope and thoroughly review each exact head. Stage each exact head through Contribute\'s stage call and record verdicts through its review call; all_clear is valid only for the complete current staged head.',
       'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',
       'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',
     ].filter(Boolean).join('\n'),

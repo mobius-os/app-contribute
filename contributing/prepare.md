@@ -109,38 +109,38 @@ apply it proportionally here too.
 Treat **review all**, **review this PR**, and **fix and review again** as complete
 private review intents. The owner should not have to restate the usual rubric.
 
-1. Refresh each named record, inspect its complete diff, and mark
-   `quality_review.state` as `reviewing` with CAS before material review work.
+1. Refresh each named record, inspect its complete diff, and record the
+   `reviewing` verdict for its staged head (the review call in
+   [ledger.md](ledger.md)) before material review work.
 2. Review correctness, maintainability, simplicity, tests, security/privacy,
    and avoidable technical debt. Expand into owning callers and invariants when
    the changed surface warrants it; do not turn this into unrelated cleanup.
-3. For owner-authored work, fix every sound finding privately, update the
-   prepared branch/plan/diff, and repeat the complete review on the new head.
+3. For owner-authored work, fix every sound finding privately, commit it on
+   the review branch, restage the record, and repeat the complete review on
+   the new head.
    For someone else's work, do not change their branch: prepare concrete,
    actionable suggestions and leave them private until approved.
-4. Set `changes_needed` while a sound finding remains. Set `all_clear` only
-   after the complete current head passes. A changed head invalidates the old
-   verdict even if the diff looks similar.
+4. Record `changes_needed` while a sound finding remains and `all_clear` only
+   after the complete current head passes. Restaging drops the verdict unless
+   the reviewed diff and text are byte-identical.
 5. Stop with the durable verdict visible in Contribute. Review work does not
    authorize a push, PR, comment, review, merge, or other GitHub mutation.
 
 ## Prepare for review
 
 Nothing goes public here. For a PR, create a durable branch under `/data`
-(recipes in [branch.md](branch.md)), commit the exact
-source you want reviewed, and stage that branch as a `prepared` ledger record
-(endpoints in [ledger.md](ledger.md)) with a `plan`
-object carrying everything Contribute needs to submit it directly after
-approval:
+(recipes in [branch.md](branch.md)), commit the exact source you want
+reviewed, and **stage** it (the stage call in [ledger.md](ledger.md)).
+Staging derives the record's `plan` from Git (`action`, `base_sha`,
+`head_sha`, canonical `.diff`, `diff_sha256`, `diff_stat`, `files`, and the
+live `source_repo_path`/`source_sha`) and keeps what Contribute needs to
+submit it directly after approval. You supply the reviewed text and
+classification:
 
 ```
-plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
-       repo, target_url?, title?, body_draft, branch?, repo_path?,
-       base_sha?, head_sha?, source_repo_path?, source_sha?,
-       diff_sha256?, diff_stat,
-       prior_work?: {searched_at, query, decision, summary?, matches?},
-       labels?: [type, area?], coauthor_trailer?: false,
-       diff_excerpt?}         # diff_stat REQUIRED; diff_excerpt legacy (unused)
+title, body_draft, summary,              # required for a new record
+labels?: [type, area?], coauthor_trailer?: false,
+prior_work?: {searched_at, query, decision, summary?, matches?}
 ```
 
 `plan.stack` and `plan.after_merge` are maintainer-only fields:
@@ -190,36 +190,31 @@ plan: {action: pr|issue|issue_comment|discussion_comment,  # mirrors record.type
   the owner asks to omit it. Contribute's review shows the omission; give the
   reason in the message that tells the owner the contribution is ready. Any
   other value, or no field, keeps the trailer required.
-- Store the full canonical diff as a sibling `contributions/<id>.diff`
-  (raw-text PUT — see the ledger file): the review card renders its file list
-  from this. `diff_stat` is REQUIRED — the card's diffline and its file-list
-  fallback (when the `.diff` is missing) both parse it. `diff_excerpt` is legacy
-  and no longer displayed; you may omit it. Record
-  `base_sha`/`head_sha`/`diff_sha256` so the submit button can recompute the
-  exact branch diff before pushing (Hard stop #3). Compute the hash from the
-  exact `.diff` bytes you store.
 - Publication reviews the exact committed candidate, not its installation.
   An ordinary PR may remain uninstalled, and unrelated live edits do not make
   that review stale. Never install private work or invent a source witness to
   make Send available.
-- Record the adapter's working source as `source_repo_path` and its captured
-  commit as `source_sha`; Send refuses a record without that provenance. After
-  Send, the platform records an optional local equivalence witness only if the
-  current clean source proves it contains the reviewed change. Missing proof means no
-  witness; later local updates retain their ordinary conservative
-  reconciliation/resolver path. Exact head, diff, approval, public target and
-  retry checks remain mandatory regardless of installation.
+- Staging records the adapter's working source and its current commit as
+  provenance. After Send, the platform records a local equivalence witness when
+  the live source provably contains the reviewed change, so a later update
+  recognizes the merged change instead of replaying a local draft. Missing
+  proof means no witness; later local updates keep their ordinary conservative
+  reconciliation/resolver path. When a
+  review revises a change the live source already held, staging commits the
+  revision onto the live source (`source_sync.state: adopted`); installed apps
+  and overlapping live edits stay `diverged` for the ordinary update
+  reconciliation. Exact head, diff, approval, public target and retry checks
+  remain mandatory regardless of installation.
 
 Before you tell the partner it is ready, complete the exact-head review contract
-from **Thoroughly review prepared work** above. CAS-mark `quality_review.state`
-as `reviewing`, inspect the complete stored diff and its owning invariants, fix
-every sound issue privately, and repeat on the new head. Confirm the body draft
-is exactly what should be published and that no private data appears in the
-branch, commit message, branch name, body, or diff. Only then CAS-store
-`quality_review.state: all_clear` with `reviewed_head_sha` exactly equal to the
-current `plan.head_sha`. If that verdict cannot honestly be recorded, leave the
-record visibly at **Review needed** or **Changes needed**—never tell the partner
-it is sendable.
+from **Thoroughly review prepared work** above. Record `reviewing`, inspect the
+complete stored diff and its owning invariants, fix every sound issue
+privately, restage, and repeat on the new head. Confirm the body draft is
+exactly what should be published and that no private data appears in the
+branch, commit message, branch name, body, or diff. Only then record
+`all_clear` for the exact staged head and diff. If that verdict cannot
+honestly be recorded, leave the record visibly at **Review needed** or
+**Changes needed**—never tell the partner it is sendable.
 
 Status stays `prepared`. Then give the partner one short, text-only handoff:
 summarize what is staged and say it is waiting for their review. A prepared
