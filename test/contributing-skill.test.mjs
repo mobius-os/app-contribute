@@ -194,3 +194,12 @@ test('skill text states rules rather than incident history', () => {
     assert.doesNotMatch(text, /second doorway|Older platforms may still require|parallel Möbius-maintainer roster|chat-settlement|older boot cleaners|baked boot cleaner|ecosystem is young/)
   }
 })
+
+test('pull-request records are staged and reviewed through Contribute, never hand-written', () => {
+  assert.match(prose, /contributions\/<id>\/<record-id>\/stage/)
+  assert.match(prose, /contributions\/<id>\/<record-id>\/review/)
+  assert.match(prose, /never recompute or hand-write those fields/)
+  assert.match(attached, /never write the record or diff through the storage API/)
+  assert.doesNotMatch(prose, /CAS-(store|mark|update) `?quality_review/)
+  assert.doesNotMatch(attached, /"quality_review": \{/)
+})

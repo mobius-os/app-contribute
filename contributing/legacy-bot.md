@@ -17,9 +17,10 @@ account.
 
 When refreshing a bot record that already has a PR, keep the same record id
 and preserve its `relay_contribution_id`, `relay_revision`,
-`relay_publication_repo`, and PR URL/number. Replace the plan/diff and
-invalidate the old `quality_review`; the instance assigns the next revision
-only after it has built the exact new merge snapshot.
+`relay_publication_repo`, and PR URL/number. Legacy relay records are the one
+exception to staging: replace the plan/diff by CAS and invalidate the old
+`quality_review`; the instance assigns the next revision only after it has
+built the exact new merge snapshot.
 
 A bot record stuck in `submitting` is reconciled by its saved relay id and
 exact revision — never search GitHub and invent a new record.

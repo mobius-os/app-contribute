@@ -55,9 +55,12 @@ tests needed to trust a layer in that layer.
 3. Set the connected owner's repo-local author/committer identity **before every
    commit**. Standalone send can normalize one tip commit; stack send cannot
    rewrite a parent without invalidating every child's reviewed ancestry.
-4. Store the canonical `base_sha..head_sha` diff and hash for each layer exactly
-   as for a standalone PR.
-5. Put this additive object in every plan (positions are 1-based and complete):
+4. Stage each layer ([ledger.md](ledger.md)); a later layer passes
+   `base_sha` set to the previous layer's exact `head_sha`, so its `.diff` is
+   incremental.
+5. CAS-add this object to every staged plan (positions are 1-based and
+   complete). Once it is present, a restage uses the parent layer's head as
+   its base automatically:
 
 ```json
 "stack": {

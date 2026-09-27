@@ -63,8 +63,9 @@ updates cannot land on the review branch.
 
 **An app with no origin** (installed from a manifest): derive the repo from
 `manifest_url` (`.../<org>/<repo>/<ref>/mobius.json` → `github.com/<org>/<repo>`).
-Before cloning, capture the installed app's live source path as
-`source_repo_path` and its exact `main` commit as `source_sha`. Clone into
+The clone is not a linked worktree of the installed app, so pass the app's
+live source path as `source_repo_path` to the stage call (staging reads its
+current commit itself). Clone into
 `/data/contrib/<record-id>/worktree` with
 `--separate-git-dir=/data/contrib/<record-id>/git` (named `git`, never `.git`),
 `checkout -b fix/…`, copy the changed source over (re-read against the source

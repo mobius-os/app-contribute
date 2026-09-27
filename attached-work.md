@@ -36,7 +36,7 @@ sidecars, or unrelated project trees.
    ```
 
    Its `records` array is the complete active-ledger overlap for this work.
-   Read a named record directly only when you must CAS-update that exact match.
+   Read a named record directly only when you must restage that exact match.
 2. For every manifest path, inspect current source and the owning repository's
    bounded status/diff. Classify it as reusable local work, working draft,
    already-covered/duplicate, incoming-only, experimental, personal, or
@@ -46,9 +46,9 @@ sidecars, or unrelated project trees.
    move the shared live checkout. Treat fetched upstream commits as incoming,
    not as work authored by this chat.
 3. Prefer an existing matching record when it covers the same coherent change.
-   Never duplicate an active contribution. Preserve its original `chat_id` and
-   CAS-union the source `source_chat_id` into `chat_ids` when the current work
-   is incorporated.
+   Never duplicate an active contribution. Restaging it with `chat_id` set to
+   the `source_chat_id` keeps its original `chat_id` and adds the source chat
+   to `chat_ids`.
 
 ## Settle what stays local
 
@@ -112,64 +112,18 @@ For an app or platform checkout with a real upstream/base branch:
    omit it reaches the source chat, not this helper, so the source chat applies
    that one.
 
-3. Capture the exact `base_sha`, `head_sha`, live `source_sha`, full canonical
-   `base_sha..head_sha` binary diff, its SHA-256, and its diff-stat tail. Re-read
-   the full stored diff before marking it reviewed.
-4. Create or CAS-update one private record. A new record uses
-   `If-None-Match: *`; an update first GETs with `x-mobius-version: 1` and PUTs
-   the full reconciled JSON with `If-Match: <etag>`. A 412 means re-read and
-   reconcile once—never overwrite blindly. Store the full raw diff beside the
-   record.
-
-The record must remain `status: "prepared"` and include:
-
-```json
-{
-  "id": "<record-id>",
-  "type": "pr",
-  "repo": "<owner/repo>",
-  "status": "prepared",
-  "title": "<maintainer-facing title>",
-  "summary": "<one plain-language sentence about what improves>",
-  "branch": "<branch>",
-  "chat_id": "<source_chat_id>",
-  "chat_ids": ["<source_chat_id>"],
-  "created_at": "<ISO>",
-  "updated_at": "<ISO>",
-  "plan": {
-    "action": "pr",
-    "repo": "<owner/repo>",
-    "title": "<title>",
-    "body_draft": "<complete proposed public body>",
-    "branch": "<branch>",
-    "repo_path": "/data/contrib/<record-id>/worktree",
-    "base_sha": "<sha>",
-    "head_sha": "<sha>",
-    "source_repo_path": "<exact manifest project root>",
-    "source_sha": "<live source sha>",
-    "files": ["<every covered path, relative to source root>"],
-    "diff_sha256": "<sha256>",
-    "diff_stat": "<required stat>"
-  },
-  "quality_review": {
-    "state": "all_clear",
-    "reviewed_head_sha": "<exact plan.head_sha>",
-    "reviewed_at": "<ISO>",
-    "iteration": 1,
-    "chat_id": "<helper chat id is allowed here only as review audit>",
-    "scope": ["correctness", "maintainability", "simplicity", "tests", "security_privacy", "technical_debt"],
-    "summary": "Complete current head passes review."
-  }
-}
-```
-
-Write records and diffs through the Contribute storage API using
-`$API_BASE_URL`, `$AGENT_TOKEN`, and the installed Contribute app id. The
-record path is `contributions/<record-id>.json`; its sibling diff is
-`contributions/<record-id>.diff`. Never write the numeric storage directory
-directly. When updating an existing record, preserve its public identity,
-creation time, original `chat_id`, and any legacy `relay_*` fields; update the same record and
-invalidate any review verdict that does not match the new head.
+3. Stage the committed branch through Contribute's stage call (the
+   `contributing` skill's ledger file shows its exact shape): pass `repo_path`,
+   `repo`, `title`, the complete public `body_draft`, a one-sentence
+   plain-language `summary`, reviewed `labels`, and `chat_id` set to the
+   manifest's `source_chat_id`. Staging derives the base, head, canonical diff,
+   hash, stat, files and live source provenance, writes the diff beside the
+   record, and keeps `status: "prepared"`. Restage the same record id after
+   every fix; never write the record or diff through the storage API.
+4. Re-read the full stored diff, then record the verdict through the review
+   call for the exact staged `head_sha` and `diff_sha256`: `changes_needed`
+   while a sound finding remains, `all_clear` only when the complete head
+   passes. Your helper chat id is recorded there as review audit only.
 
 If the source lacks a truthful accepted base, the current change overlaps an
 owner choice, or safe preparation needs a workflow not defined here, stop with
