@@ -4,8 +4,9 @@ import tempfile
 import time
 import unittest
 import urllib.parse
+from datetime import datetime, timezone
 
-from ledger_scan import LedgerScan
+from ledger_scan import LedgerScan, awaiting_publication_connection
 
 
 class FakeLedger:
@@ -18,12 +19,14 @@ class FakeLedger:
         for name, record in records.items():
             self.put(name, record)
 
-    def put(self, name, record):
+    def put(self, name, record, modified_at=None):
         self.tick += 1
-        body = json.dumps(record)
+        body = record if isinstance(record, str) else json.dumps(record)
         self.records[name] = {
             "body": body,
-            "modified_at": "2026-09-27T00:00:%02d.000000Z" % self.tick,
+            "modified_at": (
+                modified_at or "2026-09-27T00:00:%02d.000000Z" % self.tick
+            ),
             "etag": '"v%d"' % self.tick,
         }
 
@@ -137,6 +140,51 @@ class LedgerScanTests(unittest.TestCase):
         again.save()
 
         self.assertEqual(os.stat(path).st_mtime_ns, before)
+
+    def test_a_malformed_or_non_record_file_is_skipped_and_not_reread(self):
+        self.ledger.put("broken.json", "{not json")
+        self.ledger.put("stray-list.json", ["not", "a", "record"])
+        self.ledger.put("no-id.json", {"status": "open"})
+
+        first, work = scan(self.ledger, self.state.name)
+        first.save()
+        self.assertEqual(set(work), {"open.json", "prepared.json", "connect.json"})
+        self.ledger.reads.clear()
+
+        _, work = scan(self.ledger, self.state.name)
+
+        self.assertEqual(set(work), {"open.json", "prepared.json", "connect.json"})
+        for name in ("broken.json", "stray-list.json", "no-id.json"):
+            self.assertNotIn(name, self.ledger.reads)
+
+    def test_a_same_size_rewrite_within_one_clock_tick_is_not_missed(self):
+        # Coarse file clocks can give two same-size writes one modified_at.
+        # A body read that recently can't vouch for that metadata.
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        before = json.dumps({"id": "racy", "status": "merged", "pad": "aa"})
+        after = json.dumps({"id": "racy", "status": "open", "pad": "aaaa"})
+        self.assertEqual(len(before), len(after))
+        self.ledger.put("racy.json", before, modified_at=now)
+        first, work = scan(self.ledger, self.state.name)
+        first.save()
+        self.assertNotIn("racy.json", work)
+
+        self.ledger.put("racy.json", after, modified_at=now)
+        _, work = scan(self.ledger, self.state.name)
+
+        self.assertEqual(work["racy.json"][0], "open")
+
+    def test_the_job_and_the_scan_share_one_awaiting_connection_predicate(self):
+        handoff = {"plan": {"after_merge": {"action": "connect_app"}}}
+        self.assertTrue(awaiting_publication_connection({"status": "merged", **handoff}))
+        self.assertFalse(awaiting_publication_connection({
+            "status": "merged", **handoff,
+            "publication_connection": {"status": "connected"},
+        }))
+        self.assertFalse(awaiting_publication_connection({"status": "open", **handoff}))
+        job = open(os.path.join(os.path.dirname(__file__), "..", "job.sh")).read()
+        self.assertIn("import LedgerScan, awaiting_publication_connection", job)
+        self.assertNotIn("def _awaiting_publication_connection", job)
 
 
 if __name__ == "__main__":

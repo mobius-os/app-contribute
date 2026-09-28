@@ -117,7 +117,7 @@ def _record_path(name):
 # merged records awaiting their app connection. Settled history is recognized
 # from listing metadata plus the previous pass's summaries (ledger_scan.py).
 sys.path.insert(0, os.environ["SCRIPT_DIR"])
-from ledger_scan import LedgerScan
+from ledger_scan import LedgerScan, awaiting_publication_connection
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
 records = LEDGER.records_needing_work()
@@ -188,27 +188,8 @@ _reconcile_terminal_staging()
 LEDGER.save()
 
 
-def _awaiting_publication_connection(rec):
-  plan = rec.get("plan") if isinstance(rec.get("plan"), dict) else {}
-  handoff = (
-    plan.get("after_merge")
-    if isinstance(plan.get("after_merge"), dict)
-    else {}
-  )
-  connection = (
-    rec.get("publication_connection")
-    if isinstance(rec.get("publication_connection"), dict)
-    else {}
-  )
-  return (
-    rec.get("status") == "merged"
-    and handoff.get("action") == "connect_app"
-    and connection.get("status") not in ("connected", "connected_conflict")
-  )
-
-
 def _finish_publication_connection(rec):
-  if not _awaiting_publication_connection(rec):
+  if not awaiting_publication_connection(rec):
     return
   record_id = urllib.parse.quote(str(rec.get("id") or ""), safe="")
   if not record_id:
