@@ -8,9 +8,10 @@ records, twice per run, every 15 minutes).
 
 A listing is metadata only. A record's body is re-read only when its size or
 modification time changed since the previous run, and each body is reduced to
-the few fields that decide scheduled work. Those summaries live in the
-runner's per-app ``APP_JOB_STATE_DIR``: derived, job-private state whose loss
-costs one full read, never correctness. Records that need work are always
+the few fields that decide scheduled work. A file that is not a record (stray
+list, malformed JSON) is remembered as needing no work until it changes. Those
+summaries live in the runner's per-app ``APP_JOB_STATE_DIR``: derived,
+job-private state whose loss costs one full read, never correctness. Records that need work are always
 returned with a freshly read storage version, so compare-and-swap writes are
 unchanged.
 """
@@ -20,9 +21,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 
@@ -37,11 +40,16 @@ TERMINAL_STATUSES = frozenset((
     "merged", "closed", "superseded", "commented", "abandoned",
 ))
 
+# File clocks are coarse, so two same-size writes can share one modified_at.
+# Like git's "racily clean" rule, a body whose modified_at is this close to
+# the scan is not trusted to match that metadata next pass; it is re-read.
+RACY_SECONDS = 2
+
 Call = Callable[..., tuple[bytes, Any]]
 
 
-def summarize(record: dict[str, Any]) -> dict[str, Any]:
-    """Keep only the fields that decide whether a record needs scheduled work."""
+def awaiting_publication_connection(record: dict[str, Any]) -> bool:
+    """A merged record whose app still has to be connected to its new repo."""
     plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
     handoff = (
         plan.get("after_merge") if isinstance(plan.get("after_merge"), dict) else {}
@@ -51,16 +59,30 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(record.get("publication_connection"), dict)
         else {}
     )
+    return (
+        record.get("status") == "merged"
+        and handoff.get("action") == "connect_app"
+        and connection.get("status") not in ("connected", "connected_conflict")
+    )
+
+
+def summarize(record: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the fields that decide whether a record needs scheduled work."""
+    plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
     repo_path = plan.get("repo_path")
     return {
         "status": record.get("status"),
         "repo_path": repo_path if isinstance(repo_path, str) else "",
-        "awaiting_connection": (
-            record.get("status") == "merged"
-            and handoff.get("action") == "connect_app"
-            and connection.get("status") not in ("connected", "connected_conflict")
-        ),
+        "awaiting_connection": awaiting_publication_connection(record),
     }
+
+
+def _settled_before(modified_at: Any, moment: float) -> bool:
+    try:
+        stamp = datetime.fromisoformat(str(modified_at)).timestamp()
+    except ValueError:
+        return False
+    return stamp < moment - RACY_SECONDS
 
 
 def _checkout_mtime(path: str) -> int | None:
@@ -128,8 +150,13 @@ class LedgerScan:
         raw, headers = self._call(
             "GET", self._record_path(name), headers={"x-mobius-version": "1"},
         )
-        record = json.loads(raw) if raw else None
-        return (record if isinstance(record, dict) else None), headers.get("ETag")
+        try:
+            record = json.loads(raw) if raw else None
+        except ValueError:
+            record = None
+        if not isinstance(record, dict) or not record.get("id"):
+            record = None
+        return record, headers.get("ETag")
 
     def _load(self) -> dict[str, dict[str, Any]]:
         if not self._state_path:
@@ -146,6 +173,7 @@ class LedgerScan:
 
     def records_needing_work(self) -> list[tuple[str, dict[str, Any], str | None]]:
         """Return (name, record, version) for every record needing scheduled work."""
+        started = time.time()
         listed = self._list()
         if listed is None:
             return []
@@ -166,12 +194,14 @@ class LedgerScan:
                 record, version = self._read(name)
             except urllib.error.HTTPError:
                 continue
-            if not record or not record.get("id"):
-                continue
-            fresh[name] = (record, version)
+            if record:
+                fresh[name] = (record, version)
             entries[name] = {
-                "size": size, "modified_at": modified_at,
-                "summary": summarize(record),
+                "size": size,
+                "modified_at": (
+                    modified_at if _settled_before(modified_at, started) else None
+                ),
+                "summary": summarize(record or {}),
             }
         self._changed = entries != previous
         self._entries = entries
