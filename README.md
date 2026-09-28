@@ -62,17 +62,17 @@ contribution. This app is the dashboard for that loop:
   can start. No browser or agent-writable ledger can grant itself merge access.
   Changed versions stop, normal repository protections still apply, and queued
   work remains queued until GitHub confirms a merge.
-- **GitHub account menu** — connect GitHub right here with the GitHub **device
-  flow**: tap Connect, then enter the one-time code at
-  github.com/login/device. Full PR access is the default so reviewed workflow
-  changes and stale forks cannot interrupt sends.
-  After this contract change, an older reduced-access connection is signed out
-  once when Contribute opens and the owner reconnects with the complete scope
-  set. If GitHub sign-in is not configured, the card says so; on an older
-  platform it explains that an update is needed instead. Once connected, the
-  account and settings live in the top toolbar, while the Projects row reserves
-  its space and reports its own refresh instead of making counts pop into the
-  layout.
+- **GitHub account menu** — shows which GitHub account Contribute uses.
+  The account itself is connected, upgraded (for example, adding private
+  repositories), and disconnected in **Möbius Settings → Accounts → GitHub**;
+  Contribute's buttons open that row, and Contribute re-reads the account
+  whenever you come back to it. Full PR access is the default so reviewed
+  workflow changes and stale forks cannot interrupt sends; older
+  reduced-access connections can be reconnected in Settings. This version
+  requires a Möbius shell with the GitHub Settings row.
+  The account and Contribute's own settings live in the top toolbar, while the
+  Projects row reserves its space and reports its own refresh instead of
+  making counts pop into the layout.
 - **Work list**, grouped:
   - **Needs you** — actual blockers and questions, linked to their owning work.
   - **Prepared proposals · not shared** — private drafts waiting on your go-ahead. Each card

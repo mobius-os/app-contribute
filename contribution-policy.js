@@ -19,7 +19,7 @@ export function contributionPathDecision(record, preference, githubState) {
   if (method === 'github' && githubState !== 'connected') {
     return {
       method,
-      error: 'Connect GitHub to contribute as your account.',
+      error: 'Connect GitHub in Möbius Settings → Accounts to contribute as your account.',
     }
   }
   return { method, error: '' }

@@ -313,7 +313,7 @@ export function applyLiveStates(records, aliases, data) {
 // Contribute's one setup step is the GitHub connection, so mirror each
 // definitive connection verdict into the record: `connected` marks setup
 // complete, `disconnected` clears it so the tag truthfully returns after a
-// disconnect. Transient states (checking / unknown / unsupported) leave the
+// disconnect. Transient states (checking / unknown) leave the
 // record untouched. `storage` is a localStorage-like object injected by the
 // caller; returns true when the record was actually changed. Unparseable
 // existing data is a safe no-op (returns false, stored value left alone);

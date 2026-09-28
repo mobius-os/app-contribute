@@ -20,68 +20,30 @@ const connectionRenderer = () => renderModule(`
   }
 `)
 
-test('Möbius is implicit while optional GitHub setup has one real connection action', async t => {
+test('disconnected Contribute sends the owner to Settings instead of signing in itself', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderConnection, renderSettings } = await connectionRenderer()
   const conn = { state: 'disconnected', deviceFlowAvailable: true }
   const html = renderConnection(conn)
   assert.match(html, /Legacy Möbius drafts only. New contributions use GitHub/)
-  assert.match(html, /Connect to contribute to projects as yourself/)
-  assert.equal((html.match(/>Connect with GitHub</g) || []).length, 1)
-  assert.doesNotMatch(html, /Use Möbius|Choose changes to prepare|Möbius selected/)
-  assert.match(html, /<details class="co-account-advanced"/)
+  assert.match(html, /Möbius Settings → Accounts → GitHub/)
+  assert.equal((html.match(/>Go to Settings to connect</g) || []).length, 1)
+  assert.doesNotMatch(html, /Connect with GitHub|device code|Private repositories|Disconnect/)
   const closed = renderSettings(conn)
   assert.match(closed, /Contribute settings/)
   assert.match(closed, /Connect GitHub/)
-  assert.doesNotMatch(closed, /co-settings-panel|Connect with GitHub|Private repositories/)
+  assert.doesNotMatch(closed, /co-settings-panel/)
 })
 
-test('disconnected setup renders one GitHub device-flow action', async (t) => {
-  if (!frontendModules) {
-    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
-    return
-  }
+test('connected Contribute shows the account read-only with a Settings link', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderConnection } = await connectionRenderer()
-  const html = renderConnection({
-    state: 'disconnected',
-    deviceFlowAvailable: true,
-  })
-
-  assert.match(html, />Connect with GitHub</)
-  assert.doesNotMatch(html, /token|Advanced/)
+  const html = renderConnection({ state: 'connected', login: 'octocat', scopes: ['repo', 'workflow'] })
+  assert.match(html, /octocat/)
+  assert.match(html, /Managed in Möbius Settings/)
+  assert.match(html, />Manage in Settings</)
+  assert.doesNotMatch(html, /Disconnect|Add access/)
 })
-
-test('unconfigured device flow explains the unavailable sign-in', async (t) => {
-  if (!frontendModules) {
-    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
-    return
-  }
-  const { renderConnection } = await connectionRenderer()
-  const html = renderConnection({
-    state: 'disconnected',
-    deviceFlowAvailable: false,
-  })
-
-  assert.match(html, /GitHub sign-in is not configured/)
-  assert.doesNotMatch(html, />Connect with GitHub</)
-})
-
-test('reduced access shows the reconnect migration state', async (t) => {
-  if (!frontendModules) {
-    t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for component rendering')
-    return
-  }
-  const { renderConnection } = await connectionRenderer()
-  const html = renderConnection({
-    state: 'connected',
-    login: 'octocat',
-    scopes: ['public_repo'],
-  })
-
-  assert.match(html, /Updating GitHub access/)
-  assert.match(html, /being signed out/)
-})
-
 
 test('the header shows the connected handle without claiming an unchecked connection', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')

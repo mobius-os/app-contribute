@@ -8,7 +8,7 @@
 //   storage.js  — the window.mobius.storage ledger layer (+ offline cache,
 //                 the full-diff read, and the Dismiss CAS flip)
 //   api.js      — same-origin /api/github/* transport
-//   github-connection.js — bounded connection-attempt state machine
+//   github-connection.js — open Settings at GitHub
 //   ui/*.jsx    — one React component per file (owned copies, not shared imports)
 //
 // Only App lives here: it owns ledger + connection state, runs the best-effort
@@ -376,9 +376,9 @@ export default function ContributeApp({ appId, token }) {
   }, [refreshSources, signalReady])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
 
-  // Re-read connection status after an in-app connect/disconnect, and — when we
-  // land connected and have a real (non-cached) ledger — re-run the live
-  // refresh now that GitHub is reachable. Passed to ConnectionCard as onChanged.
+  // Re-read connection status (it is owned by Möbius Settings, so it can change
+  // while Contribute is open), and — when we land connected and have a real
+  // (non-cached) ledger — re-run the live refresh now that GitHub is reachable.
   const refreshConnection = useCallback(async () => {
     const requestId = connectionRequestRef.current + 1
     connectionRequestRef.current = requestId
@@ -391,6 +391,9 @@ export default function ContributeApp({ appId, token }) {
     }
     return status
   }, [token, fromCache, runLiveRefresh])
+
+  const refreshConnectionRef = useRef(null)
+  refreshConnectionRef.current = refreshConnection
 
   const refreshIncomingReviews = useCallback(async () => {
     const requestId = incomingReviewsRequestRef.current + 1
@@ -506,9 +509,12 @@ export default function ContributeApp({ appId, token }) {
     // Mount already owns the first authoritative scan. Startup focus and
     // visibility events must not queue another full pass behind it.
     if (!ledgerReadyRef.current) return
+    // Returning from Settings is the normal way GitHub becomes connected, so
+    // every return also re-reads the account before the ledger pass.
     const [ledger] = await Promise.all([
       loadLedger(),
       refreshReviewStatus(),
+      refreshConnectionRef.current?.(),
     ])
     setOmittedCount(ledger.omitted.length)
     ledgerCurrentRef.current = !ledger.fromCache
@@ -746,7 +752,7 @@ export default function ContributeApp({ appId, token }) {
     if (updating) {
       if (connRef.current.state !== 'connected') {
         return {
-          error: 'Connect GitHub before updating this pull request.',
+          error: 'Connect GitHub in Möbius Settings → Accounts before updating this pull request.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
@@ -1140,7 +1146,7 @@ export default function ContributeApp({ appId, token }) {
     )
     if (updating && connRef.current.state !== 'connected') {
       return {
-        error: 'Connect GitHub before updating these pull requests.',
+        error: 'Connect GitHub in Möbius Settings → Accounts before updating these pull requests.',
         failure: { owner: 'owner', code: 'github_not_connected' },
       }
     }
@@ -1156,7 +1162,7 @@ export default function ContributeApp({ appId, token }) {
       }
       if (decision.method === 'mobius') {
         return {
-          error: 'Connect GitHub to send this related group as your account.',
+          error: 'Connect GitHub in Möbius Settings → Accounts to send this related group as your account.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
@@ -1433,7 +1439,7 @@ export default function ContributeApp({ appId, token }) {
             <>
 
 
-            {project && conn.state !== 'connected' ? <TaskPane id="task:pulls"><h3>Review contributions</h3><p>Connect GitHub in the top right to see this project’s public pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane> : null}
+            {project && conn.state !== 'connected' ? <TaskPane id="task:pulls"><h3>Review contributions</h3><p>Go to Möbius Settings → Accounts and connect GitHub to see this project’s public pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane> : null}
             {project ? <ContributionRun
               renderPublicWork={project ? () => renderPullRequests(project, navigation) : null}
               run={projectRun(project)} presentation={project ? 'project' : 'overview'}

@@ -25,39 +25,6 @@ async function fetchRead(url, options = {}, timeoutMs = 12000) {
   }
 }
 
-// Device authorization is safe to retry, but a request that never settles
-// must not pin the connection UI forever. Compose the caller's cancellation
-// signal with a local deadline without relying on AbortSignal.any(), which is
-// not available in every WebView supported by the app frame.
-async function fetchWithDeadline(url, options = {}, timeoutMs = 45000) {
-  const controller = new AbortController()
-  const callerSignal = options.signal
-  let timedOut = false
-  const cancelFromCaller = () => controller.abort(callerSignal?.reason)
-  if (callerSignal?.aborted) cancelFromCaller()
-  else callerSignal?.addEventListener('abort', cancelFromCaller, { once: true })
-  const timer = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, timeoutMs)
-  try {
-    return await fetch(url, { ...options, signal: controller.signal })
-  } catch (error) {
-    if (timedOut) {
-      const timeoutError = new Error(
-        'The GitHub sign-in request timed out. Please try again.',
-      )
-      timeoutError.name = 'TimeoutError'
-      timeoutError.code = 'request_timeout'
-      throw timeoutError
-    }
-    throw error
-  } finally {
-    clearTimeout(timer)
-    callerSignal?.removeEventListener('abort', cancelFromCaller)
-  }
-}
-
 async function responseDetail(response, fallback) {
   const body = await response.json().catch(() => ({}))
   if (typeof body?.detail === 'string' && body.detail.trim()) {
@@ -69,50 +36,27 @@ async function responseDetail(response, fallback) {
   return fallback
 }
 
-// Resolves the connection card's state and carries the fields the connect
-// flow needs (device_flow_available, login). 404 means the platform predates
-// the GitHub surface entirely — a distinct, actionable message.
+// The instance GitHub account, owned by Möbius Settings. Contribute needs only
+// whether it is connected, as whom, and whether review follow-up is available.
 export async function fetchGithubStatus(token) {
   try {
     const r = await fetchRead('/api/github/status', { headers: authHeaders(token) })
-    if (r.status === 404) return { state: 'unsupported' }
     if (!r.ok) {
       return {
         state: 'unknown',
-        status: r.status,
-        message: await responseDetail(
-          r,
-          `Could not check GitHub connection (HTTP ${r.status}).`,
-        ),
+        message: await responseDetail(r, `Could not check GitHub connection (HTTP ${r.status}).`),
       }
     }
     const s = await r.json()
-    const active = s?.active_attempt
-    const activeAttempt = active?.attempt_id
-      && active?.user_code
-      && active?.verification_uri
-      ? {
-          attemptId: String(active.attempt_id),
-          userCode: String(active.user_code),
-          verificationUri: String(active.verification_uri),
-          intervalMs: Math.max(1, Number(active.interval) || 5) * 1000,
-          expiresAtMs: Math.max(0, Number(active.expires_at) || 0) * 1000,
-          expiresInMs: Math.max(0, Number(active.expires_in) || 0) * 1000,
-        }
-      : null
     return {
       state: s.connected ? 'connected' : 'disconnected',
       login: s.login || '',
-      scopes: Array.isArray(s.scopes) ? s.scopes : [],
-      deviceFlowAvailable: !!s.device_flow_available,
-      activeAttempt,
       autopilotAvailable: s.autopilot_available === true,
     }
   } catch (error) {
     // Network failure (offline, backend restarting) — not a platform verdict.
     return {
       state: 'unknown',
-      status: 0,
       message: error?.name === 'AbortError'
         ? 'The GitHub connection check timed out.'
         : 'Could not reach the GitHub connection service.',
@@ -241,55 +185,6 @@ export async function assignIncomingReview({ appId, token, repo, number }) {
   } catch {
     return { ok: false, error: 'Could not confirm the assignment. Refresh before trying again.' }
   }
-}
-
-// Identified device attempt: start returns attempt_id + expiry, every poll and
-// cancellation names that exact attempt, and pending responses carry the next
-// server-approved retry delay.
-export function connectStart(
-  token,
-  { privateRepos = false, signal, timeoutMs = 45000 } = {},
-) {
-  return fetchWithDeadline('/api/github/connect/start', {
-    method: 'POST',
-    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ private_repos: privateRepos }),
-    signal,
-  }, timeoutMs)
-}
-
-export function connectPoll(
-  token,
-  attemptId,
-  { signal, timeoutMs = 45000 } = {},
-) {
-  return fetchWithDeadline('/api/github/connect/poll', {
-    method: 'POST',
-    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ attempt_id: attemptId }),
-    signal,
-  }, timeoutMs)
-}
-
-export function connectCancel(
-  token,
-  attemptId,
-  { signal, timeoutMs = 45000 } = {},
-) {
-  return fetchWithDeadline('/api/github/connect/cancel', {
-    method: 'POST',
-    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ attempt_id: attemptId }),
-    signal,
-  }, timeoutMs)
-}
-
-export function disconnect(token, { signal, timeoutMs = 60000 } = {}) {
-  return fetchWithDeadline('/api/github/connect', {
-    method: 'DELETE',
-    headers: authHeaders(token),
-    signal,
-  }, timeoutMs)
 }
 
 // Send button path: the platform claims the prepared PR record, recomputes the

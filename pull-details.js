@@ -9,7 +9,7 @@ export function pullPath(pr) {
 export async function githubRead(token, path, signal) {
   const response = await fetch(`/api/github/api/${path}`, { signal, headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } })
   const data = await response.json().catch(() => null)
-  if (!response.ok || data === null) throw new Error(response.status === 401 ? 'Reconnect GitHub to read this contribution.' : 'Could not load this information from GitHub. Try again.')
+  if (!response.ok || data === null) throw new Error(response.status === 401 ? 'Reconnect GitHub in Möbius Settings → Accounts to read this contribution.' : 'Could not load this information from GitHub. Try again.')
   return data
 }
 export function assertPullVersion(pr, detail) {

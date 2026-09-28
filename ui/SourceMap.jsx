@@ -10,6 +10,7 @@ import { ProjectIcon } from './ProjectIcon.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
 import { parseUnifiedDiff } from './diff/parseUnifiedDiff.js'
 import { TaskContext, TaskPane } from './TaskPane.jsx'
+import { openGithubSettings } from '../github-connection.js'
 
 const FILTERS = [
   ['all', 'All'],
@@ -403,13 +404,13 @@ export function SourceMap({
       {conn?.state === 'disconnected' ? (
         <div className="co-connect-banner" role="status">
           <div>
-            <strong>Connect GitHub to contribute as yourself</strong>
-            <p>Your projects and saved reviews stay here. Connect your account when you’re ready to send or review work on GitHub.</p>
+            <strong>Connect GitHub in Settings to contribute as yourself</strong>
+            <p>Your projects and saved reviews stay here. When you’re ready to send or review work on GitHub, go to Möbius Settings → Accounts → GitHub and connect your account there.</p>
           </div>
-          <button type="button" className="co-btn co-btn-primary" onClick={() => window.dispatchEvent(new Event('mobius:open-contribute-settings'))}>Connect GitHub</button>
+          <button type="button" className="co-btn co-btn-primary" onClick={openGithubSettings}>Go to Settings</button>
         </div>
       ) : null}
-      {['unknown', 'unsupported'].includes(conn?.state) ? (
+      {conn?.state === 'unknown' ? (
         <div className="co-view-note">GitHub is unavailable. Local status and saved reviews remain visible.</div>
       ) : null}
       {error ? (

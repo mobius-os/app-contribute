@@ -20,13 +20,13 @@ test('recognizes only mobius-os repositories as bot-eligible', () => {
 test('new contributions require the connected owner GitHub identity', () => {
   assert.deepEqual(
     contributionPathDecision(mobius, 'github', 'disconnected'),
-    { method: 'github', error: 'Connect GitHub to contribute as your account.' },
+    { method: 'github', error: 'Connect GitHub in Möbius Settings → Accounts to contribute as your account.' },
   )
   assert.deepEqual(
     contributionPathDecision(external, 'mobius', 'disconnected'),
     {
       method: 'github',
-      error: 'Connect GitHub to contribute as your account.',
+      error: 'Connect GitHub in Möbius Settings → Accounts to contribute as your account.',
     },
   )
 })

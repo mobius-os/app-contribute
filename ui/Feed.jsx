@@ -106,7 +106,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (item?.kind === 'mark_ready') {
     return githubState === 'connected'
       ? ''
-      : 'Reconnect GitHub before requesting review for these drafts.'
+      : 'Reconnect GitHub in Möbius Settings → Accounts before requesting review for these drafts.'
   }
   if (item?.kind !== 'publish') return ''
   const records = item?.unit?.type === 'stack'
@@ -118,7 +118,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (updating) {
     return githubState === 'connected'
       ? ''
-      : 'Connect GitHub before updating these pull requests.'
+      : 'Connect GitHub in Möbius Settings → Accounts before updating these pull requests.'
   }
   if (item?.unit?.type === 'stack') {
     const route = contributionStackDecision(
@@ -126,7 +126,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
     )
     if (route.error) return route.error
     if (route.method === 'mobius') {
-      return 'Connect GitHub to send this related group as your account.'
+      return 'Connect GitHub in Möbius Settings → Accounts to send this related group as your account.'
     }
     return ''
   }
@@ -463,7 +463,7 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
       <h3>{itemHeading(item)}</h3>
       <p className="co-group-count">1 group · {records.length} contributions{questions.length ? ` · ${questions.length} need attention` : ''}</p>
       <p>{item.detail}</p>
-      {item.kind === 'route_attention' ? <p>Connect GitHub to send this related group as your account.</p> : null}
+      {item.kind === 'route_attention' ? <p>Connect GitHub in Möbius Settings → Accounts to send this related group as your account.</p> : null}
       {onFeedback ? <button className="co-btn co-btn-primary" onClick={addressTogether}>Address group in conversation</button> : null}
       {note ? <p role="status">{note}</p> : null}
     </section>
@@ -607,7 +607,7 @@ export function FocusedItem({
         <small>Choose a publication route</small>
         <h3>{itemHeading(item)}</h3>
         <p>{item.detail}</p>
-        <p>Connect GitHub, then return to the exact Send batch.</p>
+        <p>Connect GitHub in Möbius Settings → Accounts, then come back to this Send batch.</p>
         <SourceChatChoices records={records} onFeedback={onFeedback} />
       </section>
     )
