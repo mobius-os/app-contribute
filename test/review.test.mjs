@@ -184,7 +184,7 @@ test('review-facing refreshes reject stale async settlements', () => {
 })
 
 test('mount-time live state reconciles with newer focused and action results', () => {
-  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next\)\)/)
+  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next, recs\)\)/)
   assert.match(appSource, /slower startup work cannot overwrite it/)
 })
 

@@ -304,17 +304,6 @@ export default function ContributeApp({ appId, token }) {
     return applyLiveStates(recs, refresh.aliases, data)
   }, [token])
 
-  // Refresh in place: apply the fresh states to both React state and the
-  // offline cache. Used by the connect-flow and return-to-app rescans, where
-  // there is no other pending write to fold the result into.
-  const runLiveRefresh = useCallback(async (recs) => {
-    const next = await fetchRefreshed(recs)
-    if (next !== recs) {
-      replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
-    }
-    return next
-  }, [fetchRefreshed, replaceFeed])
-
   const refreshReviewStatus = useCallback(async () => {
     const requestId = reviewStatusRequestRef.current + 1
     reviewStatusRequestRef.current = requestId
@@ -376,9 +365,7 @@ export default function ContributeApp({ appId, token }) {
   }, [refreshSources, signalReady])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
 
-  // Re-read connection status (it is owned by Möbius Settings, so it can change
-  // while Contribute is open), and — when we land connected and have a real
-  // (non-cached) ledger — re-run the live refresh now that GitHub is reachable.
+  // Account reads do not scan the feed; the foreground coordinator owns that.
   const refreshConnection = useCallback(async () => {
     const requestId = connectionRequestRef.current + 1
     connectionRequestRef.current = requestId
@@ -386,11 +373,8 @@ export default function ContributeApp({ appId, token }) {
     if (requestId !== connectionRequestRef.current) return connRef.current
     connRef.current = status
     setConn(status)
-    if (status.state === 'connected' && !fromCache) {
-      runLiveRefresh(recordsRef.current)
-    }
     return status
-  }, [token, fromCache, runLiveRefresh])
+  }, [token])
 
   const refreshConnectionRef = useRef(null)
   refreshConnectionRef.current = refreshConnection
@@ -478,7 +462,7 @@ export default function ContributeApp({ appId, token }) {
           // A public action or focused exact read may have advanced one row
           // while the mount-time GitHub overlay was in flight. Reconcile at
           // settlement so that slower startup work cannot overwrite it.
-          toCache = replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
+          toCache = replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next, recs))
           feedReplaced = true
         }
       }
@@ -519,11 +503,12 @@ export default function ContributeApp({ appId, token }) {
     setOmittedCount(ledger.omitted.length)
     ledgerCurrentRef.current = !ledger.fromCache
     if (!ledger.fromCache) {
-      let next = ledger.records
-      if (connRef.current.state === 'connected') {
-        next = await fetchRefreshed(next)
-      }
-      replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next))
+      // Reconcile stored rows before querying so stale ledger lifecycle state
+      // cannot erase a live overlay. At settlement keep concurrent local edits.
+      const baseline = reconcileLedgerSnapshot(recordsRef.current, ledger.records)
+      const next = connRef.current.state === 'connected'
+        ? await fetchRefreshed(baseline) : baseline
+      replaceFeed(reconcileLedgerSnapshot(recordsRef.current, next, baseline))
       setFromCache(false)
     }
   }, [fetchRefreshed, refreshReviewStatus, replaceFeed])

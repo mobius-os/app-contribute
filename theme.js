@@ -419,7 +419,7 @@ export const CSS = `
 .co-conn-title { font-size: 14px; font-weight: 650; margin: 0 0 2px; }
 .co-conn-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
 .co-conn-text strong { color: var(--text); font-weight: 650; }
-.co-conn-text a, .co-conn-hint a { color: var(--accent); }
+.co-conn-text a { color: var(--accent); }
 .co-conn.is-connected {
   display: block; padding: 0; border: 0; border-radius: 0; background: transparent;
 }
@@ -615,12 +615,6 @@ export const CSS = `
   font-size: 14px; font-weight: 680; cursor: pointer;
 }
 
-.co-conn-hint { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
-.co-conn-hint code {
-  font-family: var(--mono, var(--font)); font-size: 14px;
-  padding: 1px 5px; border-radius: 5px;
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
 .co-conn-error { margin: 2px 0 0; font-size: 14px; color: var(--danger); line-height: 1.45; }
 .co-conn-note { margin: 2px 0 0; font-size: 14px; color: var(--muted); line-height: 1.45; }
 /* mobius-ui:Card v1 — app-owned copy; library candidate. */
