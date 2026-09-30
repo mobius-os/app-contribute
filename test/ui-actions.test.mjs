@@ -26,9 +26,10 @@ test('new contributions use GitHub automatically without a route picker', () => 
 
 test('disconnected projects offer a prominent GitHub connection action', () => {
   assert.match(sourceMapSource, /co-connect-banner/)
-  assert.match(sourceMapSource, /Connect GitHub to contribute as yourself/)
-  assert.match(sourceMapSource, /mobius:open-contribute-settings/)
-  assert.match(connectionSource, /mobius:open-contribute-settings/)
+  assert.match(sourceMapSource, /Connect GitHub in Settings to contribute as yourself/)
+  assert.match(sourceMapSource, /onClick=\{openGithubSettings\}/)
+  assert.match(connectionSource, /openGithubSettings/)
+  assert.doesNotMatch(connectionSource, /runDeviceConnection|disconnect\(/)
 })
 
 test('publication copy describes automatic GitHub identity without picker language', () => {
@@ -49,11 +50,6 @@ test('settings place the connection controls after optional agent preferences', 
   const settings = connectionSource.indexOf('<ConnectionCard {...props} />')
   const agent = connectionSource.indexOf('<AgentModelSettings')
   assert.ok(settings > agent)
-})
-
-test('disconnect is a centered red action and stays explicit on confirmation', () => {
-  assert.match(connectionSource, /className="co-btn co-btn-sm co-btn-danger co-disconnect-trigger"[\s\S]*?>\s*Disconnect GitHub\s*<\/button>/)
-  assert.match(connectionSource, /className="co-btn co-btn-sm co-btn-danger"[\s\S]*Disconnecting/)
 })
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
@@ -324,37 +320,12 @@ test('status narration never promises a tap', async () => {
   }
 })
 
-test('GitHub setup exposes only the device-flow connection path', () => {
-  assert.doesNotMatch(connectionSource, /personal access token|connectToken|patSubmitting/)
-  assert.doesNotMatch(connectionSource, /Advanced: use a token instead/)
-  assert.doesNotMatch(apiSource, /connectToken|classicTokenUrl|classicWorkflowTokenUrl/)
-  assert.match(connectionSource, /GitHub sign-in is not configured/)
-})
-
-test('GitHub device flow copies the code before opening the login link', () => {
-  assert.match(
-    connectionSource,
-    /Copy the code[\s\S]*Copy code[\s\S]*Open GitHub and log in[\s\S]*Open GitHub/,
-  )
-  assert.match(connectionSource, /navigator\.clipboard\?\.writeText/)
-  assert.match(connectionSource, /document\.execCommand\?\.\('copy'\)/)
-  assert.match(themeSource, /user-select: text; -webkit-user-select: text/)
-})
-
-test('GitHub setup uses the current device-flow contract and migrates older connections', () => {
-  assert.doesNotMatch(connectionSource, /workflow: true/)
-  assert.match(
-    connectionSource,
-    /onStart=\{\(\) => startDeviceFlow\(null, \{ privateRepos: includePrivate \}\)\}/,
-  )
-  assert.match(
-    connectionSource,
-    /conn\?\.state !== 'connected'[\s\S]*?hasFullPrAccess\(conn\?\.scopes\)/,
-  )
-  assert.match(connectionSource, /migrateLimitedConnection\(\)/)
-  assert.match(connectionSource, /Updating GitHub access/)
-  assert.doesNotMatch(connectionSource, /use a token instead/)
-  assert.doesNotMatch(connectionSource, /Workflow access is optional/)
+test('GitHub account changes live only in Möbius Settings', () => {
+  assert.doesNotMatch(connectionSource, /personal access token|connectToken|runDeviceConnection|startDeviceFlow|migrateLimitedConnection/)
+  assert.doesNotMatch(apiSource, /connectStart|connectPoll|connectCancel|export function disconnect/)
+  assert.match(connectionSource, /settingsButton\('Go to Settings to connect', true\)/)
+  assert.match(connectionSource, /Manage in Settings/)
+  assert.doesNotMatch(connectionSource, /hasFullPrAccess|unsupported|open-contribute-settings/)
 })
 
 test('one on-demand settings surface owns account setup in the toolbar', () => {
@@ -385,25 +356,13 @@ test('background checks have one shared accessible toolbar indicator', () => {
   assert.doesNotMatch(appSource, /activeChecks|whileChecking/)
 })
 
-test('GitHub connection failures stay visible and recoverable', () => {
+test('GitHub status failures stay visible and the account refreshes on return', () => {
   assert.doesNotMatch(connectionSource, /if \(state === 'unknown'\) return null/)
   assert.match(connectionSource, /GitHub status unavailable/)
   assert.match(connectionSource, /Check GitHub again/)
-  assert.match(connectionSource, /Try GitHub again/)
-  assert.match(connectionSource, /GitHub sign-in cancelled/)
-  assert.match(connectionSource, /transport\.cancel\(\{/)
-  assert.match(connectionSource, /flow === 'pending' \|\| flow === 'cancelling'/)
-  assert.match(connectionSource, /Starting GitHub sign-in…/)
-  assert.match(connectionSource, /disabled=\{cancelling\}/)
-  assert.match(connectionSource, /existingAttempt/)
-  assert.match(connectionSource, /conn\?\.activeAttempt\?\.attemptId/)
-  assert.match(connectionSource, /const statusConnected = state === 'connected'/)
-  assert.doesNotMatch(connectionSource, /flow === 'complete' \|\| state === 'connected'/)
   assert.match(appSource, /connectionRequestRef/)
   assert.match(appSource, /requestId !== connectionRequestRef\.current/)
-  assert.match(connectionSource, /status\?\.state === 'disconnected'/)
-  assert.match(connectionSource, /Stop its local poll before clearing/)
-  assert.match(connectionSource, /role=\{flow === 'cancelled' \? 'status' : 'alert'\}/)
+  assert.match(appSource, /refreshConnectionRef\.current\?\.\(\)/)
   assert.doesNotMatch(connectionSource, /setInterval/)
 })
 

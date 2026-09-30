@@ -41,6 +41,6 @@ export function RepositoryPicker({ token, connected, onAdded }) {
       <button className="co-btn" disabled={busy || !value.trim()}>{busy ? 'Adding…' : 'Add'}</button></div>
       <p>Follow contributions here without installing the project.</p>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
-    </form> : <p className="co-repository-note">Connect GitHub in the top right to add a repository.</p> : null}
+    </form> : <p className="co-repository-note">To add a repository, go to Möbius Settings → Accounts and connect GitHub.</p> : null}
   </div>
 }

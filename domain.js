@@ -195,7 +195,10 @@ export function summarizeSubmissionResolutions(resolutions) {
 // updated_at so a slow refresh cannot resurrect Ready or Submitting after the
 // action has completed. Equal timestamps keep the current row, retaining a
 // same-session live GitHub overlay when the stored lifecycle row is unchanged.
-export function reconcileLedgerSnapshot(current, snapshot) {
+export function reconcileLedgerSnapshot(current, snapshot, overlayBaseline = []) {
+  // A live query may replace an equal-timestamp row only when the exact row
+  // it queried is still current. Concurrent local results keep their ownership.
+  const baselineById = new Map(overlayBaseline.map(rec => [rec.id, rec]))
   const currentById = new Map(
     (current || []).filter(Boolean).map((rec) => [rec.id, rec]),
   )
@@ -204,6 +207,9 @@ export function reconcileLedgerSnapshot(current, snapshot) {
     if (!present) return incoming
     const presentTime = Date.parse(present.updated_at || present.created_at || '') || 0
     const incomingTime = Date.parse(incoming.updated_at || incoming.created_at || '') || 0
+    if (presentTime === incomingTime && present === baselineById.get(incoming.id)) {
+      return incoming
+    }
     return presentTime >= incomingTime ? present : incoming
   })
 }
@@ -313,7 +319,7 @@ export function applyLiveStates(records, aliases, data) {
 // Contribute's one setup step is the GitHub connection, so mirror each
 // definitive connection verdict into the record: `connected` marks setup
 // complete, `disconnected` clears it so the tag truthfully returns after a
-// disconnect. Transient states (checking / unknown / unsupported) leave the
+// disconnect. Transient states (checking / unknown) leave the
 // record untouched. `storage` is a localStorage-like object injected by the
 // caller; returns true when the record was actually changed. Unparseable
 // existing data is a safe no-op (returns false, stored value left alone);

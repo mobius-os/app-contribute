@@ -419,7 +419,7 @@ export const CSS = `
 .co-conn-title { font-size: 14px; font-weight: 650; margin: 0 0 2px; }
 .co-conn-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
 .co-conn-text strong { color: var(--text); font-weight: 650; }
-.co-conn-text a, .co-conn-hint a { color: var(--accent); }
+.co-conn-text a { color: var(--accent); }
 .co-conn.is-connected {
   display: block; padding: 0; border: 0; border-radius: 0; background: transparent;
 }
@@ -536,22 +536,12 @@ export const CSS = `
   background: var(--surface); color: var(--text);
   box-shadow: 0 1px 4px color-mix(in srgb, #000 20%, transparent);
 }
-.co-private-setting {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 9px 8px; border-bottom: 1px solid var(--border);
-}
-.co-private-setting > strong { color: var(--text); font-size: 14px; font-weight: 650; }
-.co-private-setting .co-btn { min-height: 44px; padding: 8px 10px; font-size: 14px; }
 .co-conn-settings > .co-conn-actions { padding: 7px 8px 2px; }
 .co-conn-settings > .co-conn-actions .co-btn { min-height: 44px; padding: 8px 10px; font-size: 14px; }
-.co-disconnect-trigger { width:100%; justify-content:center; margin-top:6px; color:color-mix(in srgb,var(--danger) 82%,var(--text)); border-color:color-mix(in srgb,var(--danger) 34%,var(--border)); background:color-mix(in srgb,var(--danger) 8%,transparent); }
-.co-disconnect-trigger:hover:not(:disabled) { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 58%,var(--border)); background:color-mix(in srgb,var(--danger) 14%,transparent); }
-.co-disconnect-confirm { width: 100%; display: flex; flex-direction: column; gap: 8px; }
-.co-disconnect-confirm > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; text-wrap: pretty; }
 
-/* GitHub device flow, shown inline when disconnected. The card switches to a
-   column layout so the controls stack; every control uses the shared theme
-   tokens and a 44px min touch target. */
+/* Account summary in the settings panel. The disconnected card switches to a
+   column layout; every control uses the shared theme tokens and a 44px min
+   touch target. */
 .co-conn.is-column { flex-direction: column; align-items: stretch; gap: 13px; }
 .co-conn-row { display: flex; align-items: flex-start; gap: 10px; }
 .co-conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -576,34 +566,6 @@ export const CSS = `
 .co-github-upgrade { padding-top: 18px; margin-top: 5px; border-top: 1px solid var(--border); }
 .co-github-upgrade strong { font-size: 14px; }
 .co-github-upgrade .co-conn-note { margin: 5px 0 0; }
-.co-account-advanced > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer; font-size: 14px; color: var(--muted); list-style: none; }
-.co-account-advanced > summary::-webkit-details-marker { display: none; }
-.co-conn-device { display: flex; flex-direction: column; gap: 10px; }
-.co-conn-steps {
-  display: flex; flex-direction: column; gap: 10px;
-  margin: 0; padding: 0; list-style: none;
-}
-.co-conn-step {
-  display: flex; flex-direction: column; gap: 10px; padding: 12px;
-  border: 1px solid var(--border); border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-2, var(--surface)) 66%, transparent);
-}
-.co-conn-step-head { display: flex; align-items: flex-start; gap: 9px; }
-.co-conn-step-head > div {
-  display: flex; flex-direction: column; gap: 2px; min-width: 0;
-}
-.co-conn-step-head strong { font-size: 14px; line-height: 1.35; color: var(--text); }
-.co-conn-step-head small { font-size: 14px; line-height: 1.4; color: var(--muted); }
-.co-conn-step-number {
-  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  width: 23px; height: 23px; border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent); font-size: 14px; font-weight: 750;
-}
-.co-conn-code-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch;
-  gap: 8px;
-}
 
 /* mobius-ui:Button v1 — app-owned copy; library candidate. */
 .co-btn {
@@ -653,26 +615,6 @@ export const CSS = `
   font-size: 14px; font-weight: 680; cursor: pointer;
 }
 
-/* The one-time device code stays genuinely selectable as a fallback when a
-   sandboxed browser does not grant clipboard access. */
-.co-conn-code {
-  display: flex; align-items: center; justify-content: center; min-width: 0;
-  font-family: var(--mono, var(--font)); font-size: clamp(21px, 7vw, 28px); font-weight: 700;
-  letter-spacing: 0; text-align: center; padding: 10px 8px;
-  border-radius: 10px; background: var(--surface-2, var(--bg));
-  border: 1px dashed var(--border); color: var(--text);
-  user-select: text; -webkit-user-select: text; cursor: text;
-}
-.co-conn-copy { white-space: nowrap; }
-.co-conn-copy-status { min-height: 18px; margin: -4px 0 0; font-size: 14px; color: var(--muted); }
-.co-conn-wait { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.co-conn-waiting { margin: 0; font-size: 14px; color: var(--muted); }
-.co-conn-hint { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
-.co-conn-hint code {
-  font-family: var(--mono, var(--font)); font-size: 14px;
-  padding: 1px 5px; border-radius: 5px;
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
 .co-conn-error { margin: 2px 0 0; font-size: 14px; color: var(--danger); line-height: 1.45; }
 .co-conn-note { margin: 2px 0 0; font-size: 14px; color: var(--muted); line-height: 1.45; }
 /* mobius-ui:Card v1 — app-owned copy; library candidate. */

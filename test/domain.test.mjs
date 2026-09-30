@@ -249,3 +249,19 @@ test('setup completion mirrors definitive connection verdicts into the shared st
   assert.equal(syncSetupCompletion(null, 'connected', s1), false)
   assert.equal(syncSetupCompletion(7, 'connected', null), false)
 })
+
+
+test('fresh live overlay replaces its unchanged equal-timestamp baseline', () => {
+  const before = { id: 'one', status: 'open', updated_at: '2026-09-01T10:00:00Z' }
+  const merged = { ...before, status: 'merged' }
+  assert.equal(reconcileLedgerSnapshot([before], [merged], [before])[0], merged)
+  const concurrent = { ...before, status: 'landing', title: 'New owner action' }
+  assert.equal(reconcileLedgerSnapshot([concurrent], [merged], [before])[0], concurrent)
+})
+
+test('a stale ledger is reconciled before live work so it cannot downgrade settled state', () => {
+  const before = { id: 'one', type: 'pr', status: 'merged', url: 'https://github.com/x/y/pull/1' }
+  const baseline = reconcileLedgerSnapshot([before], [{ ...before, status: 'open' }])
+  assert.equal(buildRefreshQuery(baseline), null)
+  assert.equal(reconcileLedgerSnapshot([before], baseline, baseline)[0], before)
+})

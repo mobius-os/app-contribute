@@ -184,7 +184,7 @@ test('review-facing refreshes reject stale async settlements', () => {
 })
 
 test('mount-time live state reconciles with newer focused and action results', () => {
-  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next\)\)/)
+  assert.match(appSource, /replaceFeed\(reconcileLedgerSnapshot\(recordsRef\.current, next, recs\)\)/)
   assert.match(appSource, /slower startup work cannot overwrite it/)
 })
 
@@ -392,7 +392,7 @@ test('all private handoffs use changed-work scopes instead of permanent one-shot
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
   assert.match(appSource, /refreshed\.plan\?\.action === 'pr_update'/)
   assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
-  assert.match(appSource, /Connect GitHub before updating this pull request/)
+  assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
   assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
@@ -588,7 +588,7 @@ test('public action failures have one truthful owner', () => {
   assert.match(cardSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.doesNotMatch(feedSource, /await onStartAgent/)
-  assert.match(appSource, /Connect GitHub to send this related group as your account\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
+  assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts to send this related group as your account\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
 })
 
 test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {

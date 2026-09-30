@@ -25,6 +25,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
+import ContributeApp from './index.jsx'
 
 const HEAD = 'a'.repeat(40), SECOND_HEAD = 'c'.repeat(40), BASE = 'b'.repeat(40)
 const projects = [
@@ -60,6 +61,18 @@ function forbidden(kind) {
 window.fetch = async (url, options = {}) => {
   const call = { url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null }
   calls.requests.push(call)
+  if (window.fullAppFixture) {
+    if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
+    if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
+    if (call.url.endsWith('/review-status')) return response({ records: [] })
+    if (call.url === '/api/github/graphql' && call.method === 'POST') {
+      if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
+      if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
+      if (call.body.query.includes('ContributeRepositories')) return response({data:{viewer:{repositories:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}}})
+      if (call.body.query.includes('search(')) return response({data:{search:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}})
+    }
+    return forbidden('full-app fetch')(call.url)
+  }
   if (call.url === '/api/github/graphql' && call.method === 'POST') {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
     if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
@@ -173,7 +186,8 @@ function Fixture() {
       /> : null} />}
   </main></div>
 }
-createRoot(document.getElementById('root')).render(<Fixture />)
+const root = createRoot(document.getElementById('root'))
+root.render(<Fixture />)
 
 const frame = () => new Promise(resolve => requestAnimationFrame(resolve))
 const text = node => node?.textContent?.replace(/\s+/g, ' ').trim() || ''
@@ -543,6 +557,38 @@ window.runWorkspaceChecks = async () => {
       await click(query('.co-other-repositories summary'))
       ensure([...document.querySelectorAll('.co-source-row')].some(node => node.getClientRects().length && text(node).includes('team/community')), 'Explicitly added repository was lost')
       ensure(mutationRequests().length === beforeLink + 1, 'Adding repository mutated GitHub')
+    })
+    await check('returning from Settings refreshes the full app account and live feed exactly once', async () => {
+      // Mount the actual app, not a refresh helper. Only external storage and
+      // fetch boundaries are faked; hooks, coordinator and reconciliation run.
+      root.render(null)
+      await frame(); await frame()
+      window.fullAppFixture = true
+      window.fullAppConnected = false
+      values.clear()
+      let ledgerReads = 0
+      const liveRecord = {...prepared, status:'open', number:7, url:'https://github.com/owner/project/pull/7'}
+      window.mobius.storage.listWithStatus = async prefix => {
+        ensure(prefix === 'contributions/', 'Unexpected ledger path')
+        ledgerReads++
+        return {complete:true,entries:[{type:'file',name:liveRecord.id+'.json',content:structuredClone(liveRecord)}]}
+      }
+      root.render(<ContributeApp appId="fixture-app" token="fixture-only" />)
+      await until(() => values.get('feed-cache.json')?.records?.[0]?.status === 'open', 'Initial ledger did not settle')
+      ensure(ledgerReads === 1, 'Initial app performed duplicate ledger scans')
+      const previous = calls.requests.length
+      window.fullAppConnected = true
+      // One authentic parent-window message represents returning from Settings.
+      // No focus/click retries manufacture success or conceal duplicate work.
+      window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
+      await until(() => text(query('.co-settings summary')).includes('reconnected-owner'), 'Foreground did not display the new account')
+      const returning = calls.requests.slice(previous)
+      ensure(returning.filter(call => call.url === '/api/github/status').length === 1, 'Foreground checked the account more than once')
+      const overlays = returning.filter(call => call.url === '/api/github/graphql' && call.body.query.includes('resource(url:'))
+      ensure(overlays.length === 1, 'Expected one foreground live-feed query, got ' + overlays.length)
+      await until(() => values.get('feed-cache.json')?.records?.[0]?.status === 'merged', 'Foreground live state was not reconciled and cached')
+      ensure(ledgerReads === 2, 'Foreground did not own exactly one fresh ledger scan')
+      ensure(returning.every(call => call.method === 'GET' || call.url === '/api/github/graphql'), 'Foreground mutated public work')
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
