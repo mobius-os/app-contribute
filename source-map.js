@@ -30,12 +30,22 @@ function currentContributionCoverage(project, contributions, localPaths) {
   const currentSha = typeof project?.head_sha === 'string' ? project.head_sha : ''
   if (!currentSha || localPaths.length === 0) return new Set()
   const known = new Set(localPaths)
+  const changedSince = project?.reconciliation?.local_changed_since || {}
   const covered = new Set()
   for (const rec of contributions) {
-    if (String(rec?.plan?.source_sha || '') !== currentSha) continue
-    for (const path of declaredContributionPaths(rec)) {
-      if (known.has(path)) covered.add(path)
+    // A proposal covers a local path only while that path is byte-identical to
+    // the live source it was staged from. Platform updates replace the live
+    // commit, so source status names which paths moved since each recorded
+    // source; a commit it could not compare proves nothing.
+    const sourceSha = String(rec?.plan?.source_sha || '')
+    const moved = sourceSha === currentSha
+      ? new Set()
+      : Array.isArray(changedSince[sourceSha]) ? new Set(changedSince[sourceSha]) : null
+    if (!moved) continue
+    const cover = (path) => {
+      if (known.has(path) && !moved.has(path)) covered.add(path)
     }
+    for (const path of declaredContributionPaths(rec)) cover(path)
     // Legacy records predate the explicit files field. Git's diff-stat still
     // gives exact paths for ordinary rows; intersect only exact known paths so
     // an abbreviated `.../file` can never cover unrelated work by guesswork.
@@ -44,11 +54,24 @@ function currentContributionCoverage(project, contributions, localPaths) {
     for (const line of stat.split('\n')) {
       const separator = line.search(/\s+\|\s+/)
       if (separator < 0) continue
-      const path = line.slice(0, separator).trim()
-      if (known.has(path)) covered.add(path)
+      cover(line.slice(0, separator).trim())
     }
   }
   return covered
+}
+
+// The recorded live sources of active proposals. Source status reports which
+// local paths changed after each, so a proposal keeps covering untouched files
+// across platform updates.
+export function proposalSourceCommits(records) {
+  const commits = new Set()
+  for (const rec of records || []) {
+    const sha = rec?.plan?.source_sha
+    if (ACTIVE.has(rec?.status) && typeof sha === 'string' && /^[0-9a-f]{40}$/i.test(sha)) {
+      commits.add(sha.toLowerCase())
+    }
+  }
+  return [...commits].sort().slice(0, 64)
 }
 
 // Project identity is already present in the source-status key, so the UI can
