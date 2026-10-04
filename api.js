@@ -65,10 +65,14 @@ export async function fetchGithubStatus(token) {
 }
 
 // Fetch-free local Git metadata for the Projects view. The endpoint returns
-// refs, ancestry/diff magnitudes, working-tree counts, and bounded path names.
-export async function fetchSourceStatus(token) {
+// refs, ancestry/diff magnitudes, working-tree counts, and bounded path names,
+// plus which local paths moved since each active proposal's recorded source.
+export async function fetchSourceStatus(token, since = []) {
+  const query = new URLSearchParams()
+  for (const sha of since) query.append('since', sha)
+  const suffix = since.length ? '?' + query.toString() : ''
   try {
-    const r = await fetchRead('/api/github/source-status', {
+    const r = await fetchRead('/api/github/source-status' + suffix, {
       headers: authHeaders(token),
     })
     if (!r.ok) {

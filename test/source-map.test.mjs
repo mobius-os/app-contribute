@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  proposalSourceCommits,
   actionableSourceProjects,
   attachSourceProjects,
   projectDetailSummary,
@@ -763,7 +764,7 @@ test('an exact current contribution covers its prepared local paths', () => {
   assert.equal(projectNeedsPreparation(notes), false)
 })
 
-test('a stale contribution never covers the current source', () => {
+test('an older contribution whose source was not compared never covers the current source', () => {
   const [notes] = attachSourceProjects({
     apps: [installedApp({
       head_sha: 'current-head',
@@ -786,6 +787,43 @@ test('a stale contribution never covers the current source', () => {
   assert.equal(notes.coveredLocalFiles, 0)
   assert.deepEqual(notes.localOnlyPaths, ['index.jsx'])
   assert.equal(projectNeedsPreparation(notes), true)
+})
+
+test('an older contribution covers only paths unchanged since its source', () => {
+  const older = 'a'.repeat(40)
+  const [notes] = attachSourceProjects({
+    apps: [installedApp({
+      head_sha: 'current-head',
+      working: { files: 0, paths: [] },
+      tree: { available: true, files: 3, authored_files: 3, paths: [] },
+      reconciliation: {
+        available: true,
+        local_only_count: 3,
+        local_only_paths: ['api.js', 'index.jsx', 'theme.js'],
+        local_changed_since: { [older]: ['index.jsx'] },
+      },
+    })],
+  }, [{
+    type: 'pr', status: 'prepared', repo: 'mobius-apps/notes',
+    plan: { source_sha: older, files: ['api.js', 'index.jsx'] },
+  }])
+
+  assert.deepEqual(notes.coveredLocalPaths, ['api.js'])
+  assert.deepEqual(notes.localOnlyPaths, ['index.jsx', 'theme.js'])
+  assert.equal(notes.localFiles, 2)
+})
+
+test('proposal source commits are the distinct full ids of active records', () => {
+  const a = 'A'.repeat(40)
+  const b = 'b'.repeat(40)
+  assert.deepEqual(proposalSourceCommits([
+    { status: 'open', plan: { source_sha: a } },
+    { status: 'prepared', plan: { source_sha: a.toLowerCase() } },
+    { status: 'draft', plan: { source_sha: b } },
+    { status: 'merged', plan: { source_sha: 'c'.repeat(40) } },
+    { status: 'abandoned', plan: { source_sha: 'd'.repeat(40) } },
+    { status: 'prepared', plan: { source_sha: 'short' } },
+  ]), [a.toLowerCase(), b])
 })
 
 test('coverage preserves local counts when source status omits path details', () => {

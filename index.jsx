@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CSS } from './theme.js'
 import {
   attachSourceProjects,
+  proposalSourceCommits,
   recordsForProject,
 } from './source-map.js'
 import {
@@ -327,9 +328,18 @@ export default function ContributeApp({ appId, token }) {
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
   // backend route was restarted into the running server, so say that plainly.
+  const sourceCommitsKeyRef = useRef('')
+  const sourceRequestRef = useRef(0)
   const refreshSources = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setSourceLoading(true)
-    const result = await fetchSourceStatus(token)
+    const since = proposalSourceCommits(recordsRef.current)
+    sourceCommitsKeyRef.current = since.join(',')
+    const requestId = sourceRequestRef.current + 1
+    sourceRequestRef.current = requestId
+    const result = await fetchSourceStatus(token, since)
+    // An older read (for example one made before the feed loaded) must not
+    // replace a newer snapshot that compared more proposal sources.
+    if (requestId !== sourceRequestRef.current) return result.ok
     if (result.ok) {
       sourceSnapshotRef.current = result.data
       setSourceSnapshot(result.data)
@@ -364,6 +374,15 @@ export default function ContributeApp({ appId, token }) {
     return () => { cancelled = true }
   }, [refreshSources, signalReady])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
+  // Proposal coverage depends on which recorded sources source status
+  // compared. When the active set changes (feed load, staging, dismissal),
+  // re-read it quietly rather than leaving covered files counted as local.
+  const sourceCommitsKey = useMemo(
+    () => proposalSourceCommits(records).join(','), [records],
+  )
+  useEffect(() => {
+    if (sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
+  }, [sourceCommitsKey, refreshSources])
 
   // Account reads do not scan the feed; the foreground coordinator owns that.
   const refreshConnection = useCallback(async () => {
