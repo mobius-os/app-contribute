@@ -158,6 +158,15 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
 - `body_draft` is the FULL text you propose to publish — PR body, issue body, or
   comment, word for word. The partner reviews exactly this; never publish
   anything that differs from what they approved.
+- For a screenshot already hosted as a GitHub attachment, link the image to
+  its canonical `https://github.com/user-attachments/assets/...` URL:
+  `[![Screenshot description](URL)](URL)`. GitHub may render a plain image's
+  click target as a short-lived `private-user-images.githubusercontent.com`
+  URL, even when its Markdown source uses the canonical URL. The explicit
+  outer link keeps opening the full image tied to the durable attachment.
+  Never put that signed URL or a private Möbius chat-media URL in a public PR
+  body. If no approved durable public image URL exists, leave the screenshot
+  out of the prepared body rather than publishing a broken or private link.
 - `prior_work` is private review evidence, not text that is published. Set
   `searched_at` to the UTC scan time, `query` to the concise terms used, and
   `decision` to exactly one of `none`, `comment`, `collaborate`, or
