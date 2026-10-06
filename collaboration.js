@@ -6,6 +6,7 @@ export const PR_FIELDS = `id number title url headRefOid headRefName baseRefName
   additions deletions changedFiles createdAt updatedAt
   author { login } assignees(first:100) { nodes { login } }
   repository { nameWithOwner viewerPermission }
+  headRepository { nameWithOwner viewerPermission isArchived }
   labels(first:20) { nodes { name color } totalCount }
   comments { totalCount }
   commits(last:1) { nodes { commit { statusCheckRollup { state contexts {
@@ -14,6 +15,16 @@ export const PR_FIELDS = `id number title url headRefOid headRefName baseRefName
   reviewDecision mergeable`
 export const mayAssign = permission => ['TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN'].includes(permission)
 export const mayMerge = permission => ['WRITE', 'MAINTAIN', 'ADMIN'].includes(permission)
+// This is discovery, not authority: the server rechecks exact repositories at
+// admission and before publication. Older snapshots still need that preflight.
+export const TAKEOVER_SCOPE = 'named_pr_repairs_and_reviewed_successors'
+export const DRAFT_TAKEOVER_SCOPE = 'named_pr_repairs_ready_and_reviewed_successors'
+export function takeoverBlocker(pulls, { allowDraft = false } = {}) {
+  if (!allowDraft && pulls.some(pr => pr.isDraft)) return 'Draft PRs must be marked ready first.'
+  if (pulls.some(pr => !mayMerge(pr.repository?.viewerPermission))) return 'Requires merge access to every selected PR.'
+  if (pulls.some(pr => pr.headRepository && (pr.headRepository.isArchived || !mayMerge(pr.headRepository.viewerPermission)))) return 'Requires push access to the PR’s source repository to send fixes.'
+  return ''
+}
 // GitHub's rollup counts include check runs and commit statuses. Like GitHub's
 // own "18/18", skipped and neutral runs count as passing; anything failed or
 // cancelled is a failure; the rest is still pending. A green rollup is not a
@@ -124,9 +135,38 @@ export async function collaborationRequest(token, appId, path, body) {
   return data
 }
 
+// A Review only run that posts on GitHub is not private, so its name says so.
+export const reviewRunTitle = run => run.mode === 'review_fix_merge' ? 'Review, fix & merge' : run.mode === 'review_merge' ? 'Review & merge' : run.options?.post_review === true ? 'GitHub review' : 'Private review'
+
+export const REVIEW_STATE_NAMES = { reviewing: 'Reviewing', repairing:'Fixing review findings', pushing:'Sending scoped fix', marking_ready:'Marking ready for review', ready_unknown:'Readiness outcome needs checking', push_unknown:'Fix outcome needs checking', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Failed', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', complete: 'Complete', stopped: 'Stopped', interrupted:'Interrupted', paused: 'Paused', awaiting_owner: 'Waiting for your answer' }
+
+// Public outcomes a run saved before GitHub settled them. The server's observe
+// step is read-only reconciliation, so the view settles them itself: a queued
+// PR reads as merged even while its conversation waits on the owner or stopped.
+const UNSETTLED = new Set(['queued', 'merging', 'merge_unknown', 'pushing', 'push_unknown', 'marking_ready', 'ready_unknown'])
+export const awaitsGithub = run => run.state !== 'complete' && (run.items || []).some(item => UNSETTLED.has(item.state))
+export const OBSERVE_EVERY_MS = 60000
+const observedAt = new Map()
+
+// Shows the saved list at once (onList), then re-reads it after any due
+// GitHub reconciliation so a settled merge replaces "In merge queue".
+export async function loadReviewRuns(token, appId, { onList, now = Date.now() } = {}) {
+  const list = await collaborationRequest(token, appId, 'review-runs')
+  onList?.(list)
+  const due = (list.runs || []).filter(run => awaitsGithub(run) && now - (observedAt.get(run.id) ?? -Infinity) >= OBSERVE_EVERY_MS)
+  if (!due.length) return list
+  due.forEach(run => observedAt.set(run.id, now))
+  const settled = await Promise.allSettled(due.map(run => collaborationRequest(token, appId, `review-runs/${encodeURIComponent(run.id)}/observe`, {})))
+  return settled.some(result => result.status === 'fulfilled') ? collaborationRequest(token, appId, 'review-runs') : list
+}
+
 export function reviewRunRequest(choice) {
   return {
     request_id: choice.request_id, mode: choice.mode,
+    ...(choice.mode === 'review_fix_merge' ? { confirmation_scope:choice.confirmation_scope || TAKEOVER_SCOPE } : {}),
+    ...(choice.options ? { options:choice.options } : {}),
+    ...(choice.preview_sha256 ? { preview_sha256:choice.preview_sha256 } : {}),
+    ...(choice.agent ? { agent:choice.agent } : {}),
     items: choice.pulls.map(pr => {
       if (!baseTip(pr)) throw new Error(`Couldn’t read the target branch of #${pr.number}. Refresh and try again.`)
       return { repo: pr.repository.nameWithOwner, number: pr.number,

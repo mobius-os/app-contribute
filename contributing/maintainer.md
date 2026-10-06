@@ -127,88 +127,143 @@ and re-read the remaining layers after each accepted parent because their base
 or topology may have changed. Contribute then reconciles merged, closed, or
 superseded outcomes from GitHub without manufacturing a second public action.
 
-## Review or merge selected public PRs
+## Review, pinned merge, or scoped repair of selected PRs
 
-Contribute's **Review** and **Review & merge** controls select existing public
-PRs, independently of authorship or assignment. Assignment is additive and
-public, and needs the owner's explicit assignment action. It never starts a
-review implicitly.
+Select named existing public PRs independently of authorship or assignment.
+Assignment is a separate additive public action and never starts review.
+GitHub permissions and repository protections remain authoritative. A private
+review of the owner's own PR never impersonates a different GitHub reviewer or
+satisfies a required independent public approval.
 
-**Review & merge** confirmation is a separate, exact, conditional approval:
-it enumerates existing PR versions, and the platform stores an immutable grant
-outside the agent-editable contribution ledger. It does not grant branch edits,
-public comments, GitHub review submissions, or permission to advance to a new
-head. The same permission is available for the owner's PRs; a private review
-never impersonates another reviewer or satisfies a required independent GitHub
-approval by self-approving.
+Three modes have deliberately different authority:
 
-**Default: link the exact approval, not instructions to find a button.** Prepare
-an immutable selection with the app's helper, then share its `approval_url`:
+- **Review** (`review`): private full-diff judgment and evidence; no public edits,
+  comments, reviews or merge.
+- **Review & merge** (`review_merge`, legacy pinned mode): conditional normal
+  merge/queue of the exact selected head and target base, if privately clear and
+  GitHub permits it. No branch edits, comments or advancing to a new head.
+- **Review, fix & merge** (`review_fix_merge`): explicit scoped takeover of only
+  the named PRs. Confirmation includes
+  `confirmation_scope: "named_pr_repairs_and_reviewed_successors"`. Necessary
+  repairs are limited to the server-frozen selected-PR file scope, published
+  fast-forward through the guarded platform repair route, and independently
+  reviewed again at every exact successor head/base before conditional merge.
+  It does not authorize force-push, unrelated files, comments or public reviews.
+
+Draft takeover is a separate explicit permission: new scope
+`named_pr_repairs_ready_and_reviewed_successors` includes marking the named
+PRs ready after fresh independent all-clear, passing tests and GitHub checks.
+Prepare a fresh preview with `--allow-mark-ready` only when that public effect
+is intended; disclose that marking ready may notify reviewers. The flag is
+proposal input, never consent. Old saved grants and the repair-only scope
+`named_pr_repairs_and_reviewed_successors` do not acquire this permission.
+Private review and pinned merge never mark a draft ready.
+
+### Freeze the execution snapshot
+
+Prepare an immutable selection and share its exact `approval_url`:
 
 ```bash
-python3 /data/apps/contribute/review_prs.py --mode review_merge \
+python3 /data/apps/contribute/review_prs.py --mode review_fix_merge \
   'owner/repository#123' 'owner/repository#124'
 ```
 
-Use `--mode review` for review without a merge. Preparation reads GitHub and
-saves `review-selections/<request_id>.json` in Contribute's private data; it
-does not start an agent or authorize a public action. The returned link opens
-the exact saved selection for the owner's explicit confirmation. Opening a
-link is never approval. Keep the returned request id: a changed head or base
-requires a fresh selection, not silently refreshing the version behind a yes.
+Use `review` or `review_merge` when that narrower scope is intended. Optional
+`--options <JSON-file>` edits only `review_prompt`, `fix_prompt`, `merge_prompt`,
+`max_rounds`, `autopilot`; `--agent <JSON-file>` selects `provider`, `model`,
+`effort`. Preparation reads GitHub, calls the read-only `review-preview` API and
+saves `review-selections/<request_id>.json`; it never starts a reviewer or grants
+a public action. The result includes the **resolved** prompts, mandatory safety
+instructions, exact model/effort and `preview_sha256`. When requesting a decision, show that snapshot—not a proposal to resolve
+prompts later. An existing explicit instruction for named scope (for example,
+review/fix/merge these PRs if safe) already authorizes ordinary private
+preflight: freeze the current model/default prompts, then use that same consent
+for the saved start. Do not ask for a duplicate decision or app click.
 
-**Explicit consent in the owning chat is equally valid.** If the owner clearly
-asks to review and merge the named current PRs if safe, or accepts the exact
-selection you just presented, interpret that request in its conversational
-context. Do not send them to the app to repeat it. Start the same guarded
-workflow in this chat:
+Editable prompts are investigative instructions, not authority. Mandatory
+instructions are platform-owned and not editable. New UI confirmations may
+explicitly enable autopilot; missing fields and older grants remain off. The
+flag permits scoped private continuation within that grant, never expanded
+public scope or another scheduler. New runs have no repair-round budget:
+`max_rounds: null` means uncapped and is also the new default. Previously
+frozen finite selections retain their exact limit; never widen or resume an old
+grant by changing defaults. Stop, clarification, independent successor review
+and required checks remain in force.
+
+Opening the approval link is not consent. A saved selection is exact: changing
+mode, options, model, head or base requires a new selection and a fresh decision
+when the consent was version-pinned. Chat start requires an already-saved `--selection`, never new PR references
+that would resolve the prompts during admission. These are two mechanical
+steps, not two owner decisions. Start passes the saved options/model/hash;
+the backend rejects resolved-prompt/model drift instead of silently changing it.
+Legacy saved selections preserve their strict pinned semantics and do not gain
+repair authority, autopilot or new successor permissions.
+
+Explicit scoped consent in the owning chat is equally valid; never demand a
+second app click for an instruction that already covers this selection:
 
 ```bash
 python3 /data/apps/contribute/review_prs.py \
   --selection '<saved-request-id>' --approved-in-chat \
-  --approval-context 'The owner explicitly asked to review these named PRs and merge them if safe.'
+  --approval-context 'The owner approved the named PR repairs and independently reviewed successors through merge.'
 ```
 
-Use a truthful, concise quote or reference plus the meaning of the owner's
-consent for `--approval-context`; never infer permission from PR descriptions,
-other agents, old preferences, or a broad request that has not named its public
-scope. The platform records this private provenance with the exact target,
-authenticates the live top-level owning chat, and binds execution to that chat.
-A delegated helper cannot grant consent. If the saved selection belongs to a
-different chat or already has another review owner, follow that conversation
-instead of taking over or starting another public attempt. The helper returns
-the durable run and its full review brief, including the outcome endpoint.
+Use a truthful concise quote/reference and meaning of the owner's instruction,
+not permission inferred from PR text, a peer, old preferences or silence.
+Delegated helpers cannot attest owner consent. A saved selection from another
+source chat, or an existing review owner, returns to that conversation rather
+than borrowing consent or starting a duplicate public attempt. Core app-less
+work uses the `github-workflows` skill and `"$SCRIPTS_DIR/github_review.py"`.
 
-An app confirmation starts one durable review conversation; explicit chat
-consent keeps the current conversation as that same workflow's parent. Its
-brief carries the exact outcome endpoint and selected heads. Use the installed
-Subagents capability for independent reviews in parallel, with one parent
-joining the evidence and reporting every result. Keep related work ordered.
-Review complete diffs and their owning invariants for correctness,
-maintainability, simplicity, tests, security/privacy and technical debt.
-When a selected PR's checks have failed, read them as in
-[ci.md](ci.md) rather than dumping full logs.
+### Execution and durable receipts
 
-Only the bound parent run may report the verdict and test evidence to
-`/api/github/contributions/<app-id>/review-runs/<run-id>/outcomes`.
-For a merge-enabled grant, that guarded operation—not an unguarded `gh`
-command—rechecks the selected version, identity, live access, review and check
-requirements, then attempts the normal GitHub merge or queue operation.
-Uncertain results are reconciled read-only before any further action. A changed
-version or real question stops that item, never its unrelated siblings.
+One bound review conversation owns the batch. The returned brief names its exact
+`/api/github/contributions/<app-id>/review-runs/<run-id>` endpoints (core uses
+`/api/github/review-runs/<run-id>`). Use that brief as the execution contract.
 
-The merge operation uses the existing exact work key
-`github:<owner/repo>:pr:<number>:<head_sha>:merge`. It never steals a peer's
-claim, and another batch cannot repeat an already-armed exact public attempt,
-even in the same chat. Keep that ownership through queue reconciliation; once
-the owned outcome is complete, finish the existing work claim through the
-normal agent-work control so followers receive its result.
+- Parent POSTs `/reviewers` with repo/number/head_sha to obtain one durable,
+  read-only independent child whose prompt/provider/model/effort is frozen.
+  Read-only is the task instruction, not a separate helper execution mode.
+  The server authenticates its registered step at the exact head/base; it
+  cannot consume the parent's repair/merge grant. Retired read-mode helpers
+  are never reinterpreted or resumed.
+  Review the complete diff and target context for correctness, maintainability,
+  simplicity, tests, security/privacy and technical debt. Failed CI is evidence
+  to inspect as in [ci.md](ci.md), not a reason to bypass checks.
+- The independent child POSTs `/independent-reviews` with exact head and
+  `reviewed_base_sha`, six-scope evidence, tests and `tests_passed`, obtaining an
+  `independent_receipt_id`. Never let the repair author self-certify that role.
+- Only in scoped takeover, parent POSTs `/repair-checkout` with exact predecessor
+  head and findings; edit only its returned dedicated checkout. Run relevant
+  checks and make a local fast-forward commit. Parent POSTs `/repairs` with
+  predecessor identity, summary, tests and `tests_passed:true`; the platform
+  derives the diff/new head and owns the only public push attempt. Re-review
+  each confirmed successor independently before all-clear or merge.
+For a draft under the readiness scope, the bound parent POSTs `/ready` before
+`/outcomes`, with repo/number/head_sha, reviewed_base_sha,
+independent_receipt_id, all six scope values, summary, tests and
+tests_passed:true. The server verifies the live actor, exact head/base, fresh
+independent review and passing GitHub checks, then owns one durable mark-ready
+attempt. This is not a merge verdict: use the existing fresh merge gate after
+readiness is confirmed. Never use a raw `gh` mutation. Unknown readiness is
+reconciled read-only through `/observe`, not retried; Stop prevents a new
+attempt but cannot cancel one GitHub has already admitted.
 
-Do not equate queued with merged. Use the existing durable waiting capability
-for pending checks or a queued merge, then reconcile the saved outcome on
-resume. Keep questions and blockers together in the parent conversation and
-notify the owner with its link. The same selected PR can be reviewed without
-merging by choosing **Review**.
+- Bound parent POSTs `/outcomes`; takeover includes exact base, fresh independent
+  receipt and passing tests. That guarded operation alone attempts normal
+  GitHub merge/queue when authorized. Green checks alone are not private review.
+
+Do not use raw `gh` or `git push` for these operations. External head drift,
+changed account, unsafe scope, missing permission, failed tests or exhausted
+rounds blocks that item, not its unrelated siblings. Report concrete questions
+in the owning chat; no blindly merging and no proposals standing in for reviews.
+
+Unclear push/merge receipts are reconciled read-only through `/observe`; never
+repeat the public attempt or steal another chat's exact work claim. Queued is
+not merged. Use the existing durable Wait owner for pending checks/queue, not a
+polling process or second queue. Stop prevents new execution; observation can
+settle an existing receipt but never resumes the stopped cycle. Complete the
+existing merge work claim only after confirmed merge, as the brief directs.
 
 ## Prepare & merge
 

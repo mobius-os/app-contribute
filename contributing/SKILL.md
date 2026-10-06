@@ -65,7 +65,7 @@ stage with one verdict ([ledger.md](ledger.md)), then publish once approved:
 | Build the review branch: refresh upstream, scratch vs `/data/contrib` checkouts, the locked review worktree, updating an existing open PR; **cleanup ownership** of any clone, worktree, install, or build output you create | [branch.md](branch.md) |
 | Read or write ledger records: **stage** a PR, record a verdict, CAS updates, `chat_ids`, `type`/`status` values | [ledger.md](ledger.md) |
 | Publish after approval: the green light, **Send/Open PR**, issue/discussion comments, editing a PR's title or description, autopilot grants, the failure table | [publish.md](publish.md) |
-| Work that needs upstream push or merge rights: PR stacks, **Review** / **Review & merge** of selected public PRs (`review_prs.py`), **Prepare & merge**, publishing an app into its own `mobius-os/app-<id>` repository and the post-merge `connect_app` | [maintainer.md](maintainer.md) |
+| Work that needs upstream push or merge rights: PR stacks, **Review**, pinned **Review & merge**, and scoped **Review, fix & merge** of selected public PRs (`review_prs.py`), **Prepare & merge**, publishing an app into its own `mobius-os/app-<id>` repository and the post-merge `connect_app` | [maintainer.md](maintainer.md) |
 | Check results: required checks, local checks before staging, inspecting failed CI (prefer `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number\|run-id>` over full `gh run view --log` dumps) | [ci.md](ci.md) |
 | Any record with `submission_mode: "mobius-bot"` (legacy relay records only) | [legacy-bot.md](legacy-bot.md) |
 | Answer review activity in an "Autopilot: …" chat | the `review-followup` skill, not this one |
@@ -167,8 +167,13 @@ Interpret the request in context, using Hard stop #1:
 - **Not now** declines the proposed action. Do not re-offer the same version.
   An unanswered, preselected, or empty card is not approval.
 
-## Contribute not installed
+## GitHub without Contribute
 
-No staging, no review card, no tracking — but Hard stop #1 still holds.
-Recommend installing it from the App Store before contributing; go app-less
-only if the partner insists.
+GitHub is connected in **Möbius Settings → Accounts → GitHub**, independently of
+this app. The core `github-workflows` skill and
+`python3 "$SCRIPTS_DIR/github_review.py"` support privately previewed review,
+pinned conditional merge and explicitly scoped repair-and-merge in the owning
+chat without installing Contribute. They use the same platform grants and
+receipts, not an app ledger or a second queue. Contribute adds project overview,
+private proposal staging, app approval links and rich app-backed detail; it is
+not a prerequisite for core GitHub work. All hard stops still apply.

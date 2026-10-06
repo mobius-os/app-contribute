@@ -270,6 +270,8 @@ export function normalizeCycleState(raw) {
     scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 128) : '',
     ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
     ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
+    ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined })).filter(Boolean) } : {}),
+    ...(raw.pending && typeof raw.pending.id === 'string' ? { pending: { id: raw.pending.id.slice(0, 80), previous_chat_id: String(raw.pending.previous_chat_id || '').slice(0, 128), title: String(raw.pending.title || '').slice(0, 240), event: String(raw.pending.event || '').slice(0, 80) } } : {}),
   }
 }
 
@@ -331,7 +333,9 @@ async function migrateCycleState(key, legacy) {
 export async function loadCycleState(projectKey) {
   try {
     const key = await cycleKey(projectKey)
-    const current = normalizeCycleState(await window.mobius.storage.get(key))
+    const raw = await window.mobius.storage.get(key)
+    const current = normalizeCycleState(raw)
+    if (!current && raw?.pending?.id) return { pending: raw.pending, history: [] }
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
@@ -362,6 +366,48 @@ export async function saveCycleState(state, projectKey) {
   } catch {
     return false
   }
+}
+
+// A fresh cycle needs a new scoped-start identity: the platform intentionally
+// reuses an old chat forever for the same scope. Claim it with app-storage CAS
+// first so two open project panes cannot create two owner conversations.
+export async function claimProjectCycle(projectKey, previousChatId = '', action = {}) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion || !storage?.durableWrite) return { ok: false, error: 'Safe cycle starts are unavailable in this Möbius version.' }
+  try {
+    const key = await cycleKey(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline) return { ok: false, error: 'Reconnect before starting a new project cycle.' }
+    const current = normalizeCycleState(value)
+    if ((current?.chat_id || '') !== previousChatId || value?.pending) return { ok: false, error: 'Project work changed in another view. Refresh before starting.' }
+    const id = globalThis.crypto.randomUUID()
+    const next = { ...(value || {}), schema: 2, pending: { id, previous_chat_id: previousChatId, title: String(action.title || '').slice(0, 240), event: String(action.event || '').slice(0, 80) } }
+    const receipt = await storage.durableWrite(key, next, version ? { ifMatch: version } : { ifNoneMatch: true })
+    if (receipt?.durability !== 'synced') return { ok: false, error: 'Cycle reservation was not confirmed online. Refresh before trying again.' }
+    return { ok: true, id }
+  } catch {
+    return { ok: false, error: 'Could not reserve this project cycle. Refresh and try again.' }
+  }
+}
+
+export async function settleProjectCycleClaim(projectKey, claimId, started = null) {
+  const storage = window.mobius?.storage
+  try {
+    const key = await cycleKey(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline || value?.pending?.id !== claimId || !version) return false
+    const previous = normalizeCycleState(value)
+    const history = [...(previous?.history || [])]
+    if (started && previous?.chat_id && previous.chat_id !== started.chat_id) history.unshift({
+      chat_id: previous.chat_id, title: previous.title, event: previous.event,
+      scope: previous.scope, started_at: previous.started_at,
+    })
+    const next = started
+      ? { schema: 2, ...normalizeCycleState(started), history }
+      : { ...value, pending: undefined }
+    const receipt = await storage.durableWrite(key, next, { ifMatch: version })
+    return receipt?.durability === 'synced'
+  } catch { return false }
 }
 
 export async function clearCycleState() {

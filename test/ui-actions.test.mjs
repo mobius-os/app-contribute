@@ -16,6 +16,12 @@ const cycleSource = readFileSync(new URL('../ui/useProjectCycle.js', import.meta
 const workspaceTheme = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
 const runSource = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
 
+test('a frozen selection cannot change its scope through the unavailable merge fallback', () => {
+  const selection = readFileSync(new URL('../ui/ReviewSelection.jsx', import.meta.url), 'utf8')
+  assert.match(selection, /state\.request\?\.preview_sha256\s*\? 'Start a new private review selection/)
+  assert.match(selection, /setResolved\(null\); setMode\('review'\)/)
+})
+
 test('new contributions use GitHub automatically without a route picker', () => {
   assert.doesNotMatch(appSource, /onChooseSubmissionMethod|submissionError|setSubmissionError/)
   assert.doesNotMatch(connectionSource, /co-method-setting|Send Möbius contributions as|onChooseSubmissionMethod/)
@@ -47,10 +53,11 @@ test('incoming upstream work is surfaced at project level with the safe update a
   assert.match(controlsSource, /task\?\.open\('task:update'\)/)
 })
 
-test('settings place the connection controls after optional agent preferences', () => {
-  const settings = connectionSource.indexOf('<ConnectionCard {...props} />')
-  const agent = connectionSource.indexOf('<AgentModelSettings')
-  assert.ok(settings > agent)
+test('settings keep prompts and account management while model choice belongs to each launch', () => {
+  assert.match(connectionSource, /<ReviewPromptSettings/)
+  assert.match(connectionSource, /<ConnectionCard \{\.\.\.props\} \/>/)
+  assert.doesNotMatch(connectionSource, /<AgentModelSettings/)
+  assert.doesNotMatch(appSource, /setAgentChoice|onChooseAgent/)
 })
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
@@ -120,7 +127,7 @@ test('global app handoffs stay durable while source-linked work returns to its c
   assert.match(batchActionSource, /function openAgentConversation\(chatId\)/)
   assert.match(batchActionSource, /type: 'moebius:open-chat',[\s\S]*chatId,[\s\S]*}, '\*'\)/)
   assert.match(batchActionSource, /openAgentConversation\(started\?\.chatId\)/)
-  assert.match(cycleSource, /openAgentConversation\(cycle\.chatId\)/)
+  assert.match(cycleSource, /openAgentConversation\(chatId\)/)
   assert.doesNotMatch(batchActionSource, /postMessage\([\s\S]*window\.location\.origin/)
   assert.doesNotMatch(appSource, /type: 'moebius:new-chat'/)
   assert.doesNotMatch(appSource, /type: 'moebius:open-chat', draft: action\.draft/)
@@ -128,7 +135,7 @@ test('global app handoffs stay durable while source-linked work returns to its c
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.match(feedSource, /function SourceChatChoices/)
   assert.match(controlsSource, /Prepare changes/)
-  assert.match(controlsSource, /Open conversation/)
+  assert.match(controlsSource, /Open current conversation/)
   assert.match(appSource, /const onFeedback = useCallback/)
   assert.match(appSource, /type: 'moebius:open-chat', chatId: rec\.chat_id, draft \},[\s\S]{0,20}'\*'\)/)
   assert.doesNotMatch(appSource, /moebius:open-chat[\s\S]{0,200}window\.location\.origin/)
@@ -176,7 +183,7 @@ test('contribution details retain their project parent and refresh only source d
 
 test('preparation runs as one cycle while every public send stays explicit', () => {
   assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
-  assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
+  assert.match(controlsSource, /start\(run.privateAction, prepareAgent\)/)
   assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
   assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
@@ -289,7 +296,7 @@ test('Projects owns vertical scrolling and makes every row visibly navigable', (
 
 test('one scoped control surface starts private preparation without leaving the project', () => {
   assert.match(appSource, /<ProjectControls[\s\S]*projectProgress=\{progress\}/)
-  assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
+  assert.match(controlsSource, /start\(run.privateAction, prepareAgent\)/)
   assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
   assert.match(appSource, /recordsForProject\(records, project\)/)
   assert.match(appSource, /onStart=\{startAgentTask\}/)
@@ -325,13 +332,13 @@ test('GitHub account changes live only in Möbius Settings', () => {
   assert.doesNotMatch(connectionSource, /personal access token|connectToken|runDeviceConnection|startDeviceFlow|migrateLimitedConnection/)
   assert.doesNotMatch(apiSource, /connectStart|connectPoll|connectCancel|export function disconnect/)
   assert.match(connectionSource, /settingsButton\('Go to Settings to connect', true\)/)
-  assert.match(connectionSource, /Manage in Settings/)
+  assert.match(connectionSource, /GitHub account settings/)
   assert.doesNotMatch(connectionSource, /hasFullPrAccess|unsupported|open-contribute-settings/)
 })
 
 test('one on-demand settings surface owns account setup in the toolbar', () => {
   assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
-  assert.match(connectionSource, /open \? <div className="co-settings-panel"/)
+  assert.match(connectionSource, /open \? <div className="co-settings-panel co-settings-workspace"/)
   assert.match(connectionSource, /Contribute settings/)
   assert.match(connectionSource, /className="co-autopilot-setting"/)
   assert.match(themeSource, /\.co-settings-panel \{[\s\S]*?position: absolute/)
@@ -408,12 +415,11 @@ test('project chrome consolidates navigation, refresh, files, and preparation ch
   assert.match(controlsSource, /<span>Local<\/span>/)
 })
 
-test('prepared proposals have one actionable home and merge follow-through is visible', () => {
+test('private proposals have one actionable home without another merge workflow', () => {
   assert.doesNotMatch(controlsSource, /co-saved-summaries|Draft descriptions saved/)
   assert.match(feedSource, /Prepared work/)
-  assert.match(controlsSource, /co-follow-merge/)
-  assert.match(controlsSource, /Follow through to merge/)
-  assert.match(controlsSource, /You still approve sharing and merging/)
+  assert.doesNotMatch(controlsSource, /co-follow-merge/)
+  assert.doesNotMatch(controlsSource, /Follow through to merge/)
   assert.doesNotMatch(controlsSource, /Options & process/)
 })
 

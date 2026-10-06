@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls } from '../collaboration.js'
+import { discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -55,16 +55,52 @@ test('old backend reports the activation requirement without mutation fallback',
   await assert.rejects(collaborationRequest('test', 80, 'review-runs', { items: [] }), /activated/)
   assert.equal(calls, 1)
 })
-test('review-and-merge confirmation enumerates exact versions and excludes extra public actions', async t => {
+test('a run with a saved merge or push GitHub may have settled is observed read-only, at most once a minute', async t => {
+  const queued = { id: 'run-q', state: 'reviewing', items: [{ number: 1674, state: 'queued' }, { number: 1673, state: 'reviewing' }] }
+  const settled = { ...queued, items: [{ number: 1674, state: 'merged' }, { number: 1673, state: 'reviewing' }] }
+  assert.equal(awaitsGithub(queued), true)
+  assert.equal(awaitsGithub({ state: 'reviewing', items: [{ state: 'reviewing' }, { state: 'merged' }] }), false)
+  assert.equal(awaitsGithub({ ...queued, state: 'complete' }), false)
+  const calls = []
+  let observed = false
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push(`${init.method} ${url}`)
+    if (url.endsWith('/observe')) { observed = true; return new Response(JSON.stringify({ run: settled })) }
+    return new Response(JSON.stringify({ runs: [observed ? settled : queued] }))
+  })
+  const shown = []
+  const first = await loadReviewRuns('test', 80, { now: 1_000_000, onList: list => shown.push(list.runs[0].items[0].state) })
+  assert.deepEqual(shown, ['queued'], 'the saved list shows before GitHub is checked')
+  assert.equal(first.runs[0].items[0].state, 'merged', 'the list is re-read after GitHub reconciliation')
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs', 'POST /api/github/contributions/80/review-runs/run-q/observe', 'GET /api/github/contributions/80/review-runs'])
+  observed = false; calls.length = 0
+  await loadReviewRuns('test', 80, { now: 1_000_000 + OBSERVE_EVERY_MS - 1 })
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs'], 'no second GitHub check within the minute')
+})
+test('a failed observation keeps the listed runs rather than hiding them', async t => {
+  const run = { id: 'run-fail', state: 'reviewing', items: [{ number: 9, state: 'merge_unknown' }] }
+  t.mock.method(globalThis, 'fetch', async (url) => url.endsWith('/observe')
+    ? new Response(JSON.stringify({ detail: 'GitHub unavailable' }), { status: 502 })
+    : new Response(JSON.stringify({ runs: [run] })))
+  assert.deepEqual((await loadReviewRuns('test', 80, { now: 5_000_000 })).runs, [run])
+})
+test('review-and-merge confirmation names exact PRs and excludes extra public actions', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES required')
   const { render } = await renderModule(`import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ReviewConfirmation} from './ui/PullRequests.jsx'; export const render = choice => renderToStaticMarkup(React.createElement(ReviewConfirmation, {choice}));`)
   const html = render({mode:'review_merge', pulls:[pull(1), pull(2)]})
   assert.match(html, /Allow review &amp; merge/)
-  assert.match(html, /exact versions/); assert.match(html, /No branch edits or public review comments/)
+  assert.match(html, /Public effect: these PRs may be merged or queued/); assert.match(html, /No branch edits or public comments/)
   assert.match(html, /<strong>#1 A clear change<\/strong><span>team\/repo<\/span>/)
   assert.match(html, /<strong>#2 A clear change<\/strong><span>team\/repo<\/span>/)
-  assert.match(html, /version <code>aaaaaaa/)
-  assert.match(render({mode:'review', pulls:[pull(1)]}), /Nothing is posted or merged/)
+  assert.doesNotMatch(html, /version <code>/)
+  const privately = render({mode:'review', pulls:[pull(1)]})
+  assert.match(privately, /Private findings, no public changes/); assert.match(privately, /Start private review/)
+  assert.doesNotMatch(privately, /Public effect/)
+  const posting = render({mode:'review', pulls:[pull(1)], options:{post_review:true}})
+  assert.doesNotMatch(posting, /Private findings|Start private review/, 'a review posted on GitHub is never called private')
+  assert.match(posting, /Findings posted on GitHub\. No code changes\./)
+  assert.match(posting, /Public effect: one comment review with the verdict and findings is posted on this PR from your connected GitHub account\. It never approves, requests changes, edits code or merges\./)
+  assert.match(posting, /Review and post on GitHub/)
 })
 
 
@@ -90,10 +126,51 @@ test('batch assignment pins each head and reports partial failures without repla
   assert.ok(calls.every(item => item.assignee === 'reviewer' && item.expected_head_sha === 'a'.repeat(40)))
 })
 
-test('merge option is available only for an entirely eligible exact selection', async t => {
+test('merge option is enabled only for an entirely eligible exact selection', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES required')
   const { render } = await renderModule(`import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ReviewConfirmation} from './ui/PullRequests.jsx'; export const render = pulls => renderToStaticMarkup(React.createElement(ReviewConfirmation, {choice:{mode:'review',pulls},onModeChange:()=>{}}));`)
-  assert.match(render([pull(1)]), /Merge when safe/)
-  assert.doesNotMatch(render([pull(1), pull(2, {repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})]), /Merge when safe/)
-  assert.doesNotMatch(render([pull(1, {isDraft:true})]), /Merge when safe/)
+  const eligible = render([pull(1)])
+  assert.match(eligible, /Review, fix &amp; merge/)
+  assert.doesNotMatch(eligible, /class="co-pr-mode"[^>]*disabled/)
+  for (const selection of [[pull(1), pull(2, {repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})], [pull(1, {isDraft:true})]]) {
+    const html = render(selection)
+    assert.match(html, /class="co-pr-mode"[^>]*disabled=""><strong>Review, fix &amp; merge/)
+    // Before the served capability resolves a draft reads as a pending check, never a missing update.
+    assert.match(html, /Checking draft support…|Requires merge access to every selected PR/)
+    assert.doesNotMatch(html, /needs the Möbius update/)
+  }
+  // A permanent rights blocker is not hidden behind the pending draft check.
+  {
+    const html = render([pull(1, {isDraft:true, repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})])
+    assert.match(html, /Requires merge access to every selected PR/)
+  }
+})
+
+
+test('takeover eligibility distinguishes drafts, base merge rights and fork push rights', async () => {
+  const { takeoverBlocker } = await import('../collaboration.js')
+  const ready = pull(9, { repository:{nameWithOwner:'team/repo',viewerPermission:'WRITE'}, headRepository:{nameWithOwner:'team/repo',viewerPermission:'WRITE'} })
+  assert.equal(takeoverBlocker([ready]), '')
+  assert.match(takeoverBlocker([{...ready,isDraft:true}]), /Draft/)
+  assert.match(takeoverBlocker([{...ready,repository:{viewerPermission:'READ'}}]), /merge access/)
+  assert.equal(takeoverBlocker([{...ready,headRepository:{nameWithOwner:'fork/repo',viewerPermission:'WRITE'}}]), '')
+  assert.match(takeoverBlocker([{...ready,headRepository:{nameWithOwner:'fork/repo',viewerPermission:'READ'}}]), /push access/)
+})
+
+test('draft takeover discovery needs explicit readiness support and never bypasses fork rights', async () => {
+  const { takeoverBlocker, reviewRunRequest, DRAFT_TAKEOVER_SCOPE, TAKEOVER_SCOPE } = await import('../collaboration.js')
+  const draft=pull(9,{isDraft:true,headRepository:{viewerPermission:'WRITE'}})
+  assert.match(takeoverBlocker([draft]), /Draft/)
+  assert.equal(takeoverBlocker([draft],{allowDraft:true}), '')
+  assert.match(takeoverBlocker([{...draft,headRepository:{viewerPermission:'READ'}}],{allowDraft:true}), /push access/)
+  const old={request_id:'fixture-old',mode:'review_fix_merge',pulls:[draft]}
+  assert.equal(reviewRunRequest(old).confirmation_scope, TAKEOVER_SCOPE)
+  assert.equal(reviewRunRequest({...old,confirmation_scope:DRAFT_TAKEOVER_SCOPE}).confirmation_scope, DRAFT_TAKEOVER_SCOPE)
+})
+
+test('a review run is named by what it does in public', () => {
+  assert.equal(reviewRunTitle({ mode: 'review', options: { autopilot: true } }), 'Private review')
+  assert.equal(reviewRunTitle({ mode: 'review', options: { post_review: true } }), 'GitHub review')
+  assert.equal(reviewRunTitle({ mode: 'review_merge' }), 'Review & merge')
+  assert.equal(reviewRunTitle({ mode: 'review_fix_merge', options: { post_review: true } }), 'Review, fix & merge')
 })

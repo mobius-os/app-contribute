@@ -1,6 +1,6 @@
 ---
 name: Contribute
-description: A continuous project workspace with calm inventory, bottom-stacking selection, and exact review actions.
+description: A continuous project workspace with a PR-first inventory, inline decisions, and exact review actions.
 colors:
   accent: "var(--accent)"
   action: "var(--accent-hover, var(--accent))"
@@ -40,8 +40,8 @@ typography:
     fontWeight: 700
   row-title:
     fontFamily: "var(--font)"
-    fontSize: "17px"
-    fontWeight: 600
+    fontSize: "16px"
+    fontWeight: 650
     lineHeight: 1.45
   body:
     fontFamily: "var(--font)"
@@ -82,14 +82,14 @@ components:
     backgroundColor: "{colors.action}"
     textColor: "{colors.accent-foreground}"
     typography: "{typography.button}"
-    rounded: "{rounded.control}"
+    rounded: "{rounded.field}"
     padding: "10px 16px"
     height: "44px"
   button-secondary:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
     typography: "{typography.button}"
-    rounded: "{rounded.control}"
+    rounded: "{rounded.field}"
     padding: "10px 16px"
     height: "44px"
   button-quiet:
@@ -105,29 +105,35 @@ components:
     rounded: "{rounded.field}"
     padding: "8px 12px"
     height: "44px"
-  local-work-summary:
+  compact-position:
     backgroundColor: "transparent"
     textColor: "{colors.text}"
-    rounded: "{rounded.panel}"
-    padding: "22px"
+    padding: "4px 0"
   work-state:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text-muted}"
     typography: "{typography.label}"
     rounded: "{rounded.state}"
     padding: "3px 8px"
-  selection-tray:
-    backgroundColor: "{colors.surface}"
+  pr-action-toolbar:
+    backgroundColor: "transparent"
     textColor: "{colors.text}"
-    rounded: "{rounded.dock}"
+    padding: "6px 0"
+  pr-row:
+    backgroundColor: "transparent"
+    textColor: "{colors.text}"
+    padding: "12px 6px"
+  prompt-editor:
+    backgroundColor: "{colors.background}"
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.field}"
     padding: "12px"
-    width: "calc(100% - 48px)"
-  task-dock:
+  inline-confirmation:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
-    rounded: "{rounded.dock}"
-    padding: "24px"
-    width: "calc(100% - 48px)"
+    rounded: "{rounded.panel}"
+    padding: "18px"
 ---
 
 # Design System: Contribute
@@ -136,109 +142,102 @@ components:
 
 **Creative North Star: "The Continuous Project Desk"**
 
-Contribute is one calm, project-shaped workspace rather than a dashboard of competing panes. A project directory leads into a continuous vertical document: project position, local work, decisions that need attention, saved private proposals, public contributions, and history appear in one readable flow. Technical depth stays available without displacing the next meaningful action.
+Contribute is one calm project workspace, not a separate agent dashboard or Reviews room. A compact local/upstream position keeps the prepare and pull loop visible, then the open pull-request list becomes the principal working surface. Titles, authors, labels, check counts and assignment are scannable before detail is opened. Prepared work appears above PRs only when actionable. Full merge cycles and History sit below the inventory; old work is never restarted merely by opening it.
 
-Selection is a temporary working layer at the bottom of that document. Native checkboxes collect contributions without navigating; a compact stack of selected cards can expand, remove individual items, and launch review or assignment. Those workflows reuse the same bottom position as a focused, nonmodal dock while the project remains behind it. The shell owns both light and dark appearance, typography, icons, and semantic color.
+Selection belongs to the list: native checkboxes change a stable, in-flow action toolbar. An agent handoff leads to an inline choice and exact confirmation; it is not a direct action on selection. Details open inside the row, with a reserved scrolling body below stable actions and tabs. Settings is flat: Review, Fix and Merge guidance share a tabbed editor, with account management first. Model and effort are chosen per launch. Version, consent and safety checks remain implementation contracts, not routine settings content. The Möbius shell owns theme colors, typography, and icons.
 
 **Key Characteristics:**
-- One continuous workspace per project; no persistent split pane or second review room.
-- Directory filters reflect real local-change and update facts.
-- Selection accumulates independently from contribution detail.
-- Review and assignment occupy a fixed bottom dock without resetting project scroll.
-- Description leads; Files and Activity load only when opened.
-- Exact contribution versions remain the unit of approval and refresh safety.
+- One continuous project workspace; no persistent split pane or second review room.
+- Compact two-line project position and immediate PR inventory.
+- Separate PR selection, detail, assignment, and agent action.
+- Inline review-mode choice and exact confirmation before a run starts.
+- Stable row detail actions and tabs above a bounded, scrolling context region.
+- Named paused work and saved history remain reachable below current work.
 
 ## Colors
 
-The palette is entirely semantic and theme-responsive. Accent marks action, selection, links, and active controls; neutral surfaces separate temporary work from the continuous document. Success, caution, and danger communicate outcomes, and every state also has a written label.
+The palette is semantic and theme-responsive. Accent identifies actions, selection, links, and active controls. Neutral borders and surfaces separate rows and temporary in-flow tasks. Success, caution, and danger reinforce written outcomes; checks and agent state are never conveyed by hue alone.
 
-**The Inherited Theme Rule.** Use the shell’s semantic color and font variables in both light and dark modes. Do not freeze the accent into a named hue, manufacture a tonal ramp, or introduce an app-owned light/dark palette.
+**The Inherited Theme Rule.** Use shell semantic color and font variables in light and dark modes. Do not pin a purple hex, manufacture a tonal ramp, or introduce an app-owned theme.
 
-**The Written State Rule.** Color may reinforce a state, but labels such as “Ready for review,” “Needs you,” and “Prepared proposals · not shared” carry the meaning.
+**The Written State Rule.** Text such as “✓ 18/18”, “2 failing”, “Needs you” and “Prepared · not shared” carries meaning independently of color. Passing checks are not a review verdict.
+
+**The GitHub Label Rule.** PR labels keep their GitHub color using GitHub's own treatment (tinted fill and lifted text in dark mode, solid fill with black or white text in light mode). PR state icons follow GitHub: open green, draft grey, merged purple, closed red.
 
 ## Typography
 
-Use the inherited shell/system font throughout; source versions, paths, and patches use the inherited monospace stack. The working hierarchy is deliberately readable rather than dense: labels and metadata are 14px, body and detail copy are 16px, and the project headline is 32px on desktop and 28px at the phone breakpoint. Task headings are 22px and contribution titles are 17px.
+Use the inherited shell font and monospace stack. The project/section headline uses the established 32px desktop and 28px phone hierarchy; PR titles are 16px/650 in the current list. Metadata and controls stay at least 14px, reading copy at 16px. Long titles, labels, versions, and paths wrap rather than forcing the viewport wider.
 
-**The Readable Floor Rule.** Do not shrink workflow copy below the established 14px label and 16px body sizes to fit more controls. Let controls wrap and layouts stack instead.
+**The Readable Floor Rule.** Never shrink workflow copy to fit the phone. Keep practical control targets at least 44px; prompt tabs are 48px tall.
 
 ## Layout
 
-- **Project directory:** Search and wrapped All projects / Local changes / Updates chips narrow the same real project inventory. Local changes means work that is ready to prepare or needs sorting; Updates means incoming, behind, comparison-required, or conflicting work. Repositories remembered through contribution history or incoming review appear under “On GitHub, not installed here”; GitHub access alone does not import every repository.
-- **Selected project:** The header logo becomes a compact Projects back control above one continuous, maximum-1192px workspace. Project position, local work, contribution runs, public contributions, and technical detail flow vertically; there is no project switcher and no desktop inventory/task split.
-- **Local work:** One line-separated summary presents the current file count, a single files-and-versions path, and the primary Prepare changes action. Prepared proposals live once in the contribution inventory below rather than being repeated as inert summaries.
-- **Needs you:** Grouped work reports groups, individual decisions, and total contributions; a single item keeps the simpler count. These counts describe the same project-scoped run rather than a separate ledger.
-- **Contribution inventory:** Search and assignment/authorship filters narrow the existing rows. Each row keeps a 44px checkbox target separate from its title/detail button. Opening a row reveals detail in place and does not change selection.
-- **Bottom selection:** Any nonempty selection creates a fixed, nonmodal tray within the app, inset 24px on wide screens and 8px on phones. Selected cards stack horizontally by default, expand into a vertical list, and may be opened or removed individually. Measured bottom padding and scroll padding keep the final rows reachable above the tray.
-- **Review and assignment dock:** Review or assignment replaces the visible tray with a fixed bottom task dock while preserving the selected items in the document state. The dock scrolls internally, preserves the project’s scroll position, and moves keyboard focus to its action region. Closing it restores the tray and returns to the same project context.
-- **Contribution detail:** Description is the default tab. Files and Activity fetch only when chosen; files disclose patches per path, while Activity lists written review and comment events.
-- **Refresh safety:** A refresh retains only selections whose repository, pull request, head version, base version, and base branch still match. Changed or closed items are removed with a status announcement that asks the owner to select the current version again.
-- **Exact approvals:** The focused approval page remains a maximum 760px and enumerates the exact head and base versions. Changed versions require fresh approval.
+- **Project directory:** Search and factual All / Changes / Updates filters narrow actual local and shared project conditions. A remembered GitHub repository is not treated as an installed local project.
+- **Selected project:** A continuous workspace contains the compact two-line local/upstream position, Prepare and pull entry points, actionable prepared work, the PR list, then Full merge cycles and History. Branch/version detail remains inspectable; the position is not omitted to make room for PRs.
+- **PR inventory:** Laid out like GitHub's PR list: search and an All / Unassigned / Assigned / Mine segmented filter above one bordered list box. The box header shows select-all and “N open”; Assign and Take on with agent appear there only once PRs are selected. Each row has a native checkbox, the GitHub state icon, the title with colored labels beside it, and a meta line “#123 · author opened 2 days ago · ✓ 18/18 · +a −d” plus any agent state. Comments, assignee avatars, the person action and the small purple agent action sit on the right. Check counts treat skipped and neutral runs as passing, as GitHub does.
+- **Selection and confirmation:** Selection only changes selection. Starting agent work opens an inline, focused review choice and confirmation within the project. Review only, legacy merge scope, and explicit review/fix/merge remain distinct. A launch, assignment or run opened from one PR appears directly under that PR; a batch opens under the list header. The confirmation identifies each selected PR, offers per-run model/effort and explains public effects when applicable. Private-review autopilot lives inside its choice; repair-and-merge continues automatically within its approved scope. Exact versions and frozen instructions remain checked underneath, without a second routine preview panel. Assigning a person is separate and does not start review.
+- **Detail:** Follows GitHub's PR page: title with #number, a state badge and “author wants to merge into base from head”, colored labels, then actions and Conversation / Files changed / Checks tabs. Conversation shows the description and comments as bordered comment boxes. The body below has a bounded scroll region so delayed data, long patches, empty states, and errors do not move those controls. Files, checks, and activity load on request; available patches may be incomplete.
+- **Settings:** One on-demand workspace groups Review / Fix / Merge decision tabs above a single editor. GitHub account comes first; Agent prompts follows with the same section heading. No Model or Automation settings sections. Preset changes affect new runs only; admitted-run instructions remain inspectable in deliberate run details.
+- **Responsive:** Current workspace content is capped near 1100px with 24px horizontal padding; at 640px padding becomes 16px. At 680px and below, local position remains compact, PR metadata wraps, side statuses move under the title, search becomes an explicit 44px control, and the action uses its short phone label. The settings workspace stacks at 650px. No horizontal viewport overflow or hidden primary action.
 
-At 680px and below, workspace side padding becomes 18px, the project headline becomes 28px, filters and local work stack, in-row detail removes its left inset, and bottom surfaces use 8px side/bottom insets with 16px corners. This is one document adapted for touch, not a different information architecture.
+**The Stable Inventory Rule.** Checkbox selection neither navigates nor opens detail, changes a filter, steals focus, or scrolls the page.
 
-**The Stable Inventory Rule.** Checkbox selection changes only selection. It never opens detail, changes filters, scrolls the page, or steals focus.
-
-**The Continuous Context Rule.** Tasks may focus attention, but they do not replace the project with another room or discard its place in the document.
+**The Continuous Context Rule.** Inline decisions and detail may focus attention, but they do not replace the project or revive paused work.
 
 ## Elevation & Depth
 
-The project workspace is flat and line-separated. Borders, muted surfaces, spacing, and selected-row tone organize the persistent document. Only temporary bottom work surfaces use a broad ambient shadow, and only the active detail tab uses a very small lift. The existing settings popover remains a transient exception rather than a model for project content.
+Persistent project content is mostly flat and line-separated. Muted surfaces and borders distinguish selected rows, inline tasks, and the on-demand settings workspace; do not resurrect a bottom selection tray as the primary PR action. Small shadows are reserved for transient popovers or selected detail tabs. Brief state transitions and reduced-motion handling follow the incumbent shell/component rules.
 
-Motion stays brief and functional: background and border changes use 140ms, button press uses 100ms with a 0.97 scale, and disclosure rotation uses 160ms. Reduced-motion preferences collapse these transitions and animations to effectively instant.
-
-**The Temporary Lift Rule.** Persistent project content stays flat; elevation belongs to the bottom selection/task surface or a transient control state.
+**The Temporary Lift Rule.** Elevation clarifies transient controls, not every PR row or project section.
 
 ## Shapes
 
-Line-separated inventory rows sit inside a gently curved control language. Written state labels use 5px corners; tabs use 7px; fields use 8px; buttons and selected cards use 10px; summaries and inline task panels use 12px. Bottom work surfaces are the roundest elements at 18px, reducing to 16px on phones. Checkboxes remain native and avatars remain circular.
+Rows remain line-separated rather than floating cards. Controls and selected rows use gentle corners; label chips are pill-shaped. Inline task/detail surfaces use modest rounding. Native checkboxes remain native, and avatar/identity marks retain the shell’s treatment.
 
-**The Purposeful Radius Rule.** Radius signals interaction and temporary grouping. Do not turn every project section or contribution row into a floating card.
+**The Purposeful Radius Rule.** Grouping and interaction earn a radius; repeated project sections do not become decorative cards.
 
 ## Components
 
 ### Actions and fields
 
-Primary, secondary, and quiet actions all preserve practical 44px targets. Primary actions use the inherited action shade; secondary actions use surface and border; quiet actions keep muted text on a transparent background. Buttons press to 0.97 scale and disabled controls remain visible at half opacity. Keyboard focus uses a 2px accent outline with a 2px offset.
+The inherited primary button marks agent handoff or confirmation; secondary and quiet actions carry assignment, cancel, navigation, and refresh. Disabled actions stay visible. Focus uses a clear accent outline. Search fields keep 16px entry text and a semantic border. Model and effort are chosen at task launch, not in Settings, with an app-owned copy of the chat composer's picker: a compact Agent trigger that opens monochrome provider rows and the same effort track. The default row names the model the launch will actually use (background-agent setting for PR runs, chat default for prepare/pull/cycle). Contribute never restyles the shell's own picker.
 
-Directory and contribution search inputs use 16px text, semantic surface fill, and visible borders. Directory filter chips wrap rather than scroll, preserve 44px targets, and show their result counts. Search stacks above its filters on phones rather than becoming narrower or smaller.
+### Compact project position
 
-Agent settings use a searchable in-app model picker rather than a browser-native select. The shorter effort scale stays directly visible as a segmented choice.
+Two concise lines show local and upstream facts with adjacent prepare/pull paths. Inspection reveals branch, versions, repository, and comparison detail without occupying the PR-first viewport by default.
 
-### Local work and prepared proposals
+### PR list and action toolbar
 
-The local-work summary is the project’s main preparation entry: current state and file facts on the left, Prepare changes on the right, then stacked on phones. A files-and-versions action opens the one technical view. Prepared work remains actionable in one expandable contribution section; it is never repeated as an inert count or second summary block.
+The in-flow toolbar keeps select-all, count, Assign, and Take on with agent beside the rows. Individual checkboxes have a 44px target. A row title opens detail independently; author, labels, change totals, check count, meaningful work state, and assignment remain scannable. The purple agent action is icon-only on both device sizes and retains an accessible label. GitHub domain states use official Octicons; generic chrome keeps the shell icon vocabulary. A selected state is tonal, not the only indication of selection.
 
-### Contribution rows and selection tray
+### Inline confirmation and progress
 
-Each contribution row has a native checkbox and a separate title button. Title, number, author, date, file totals, written review state, and assignment remain visible. Selected rows use the inherited muted accent, but the checkbox remains the authoritative selection control.
-
-The bottom tray summarizes the count, previews selected contribution cards, and exposes Review and Assign when eligible. Merge follow-through is chosen inside the review confirmation, where its consequences are visible. The tray disclosure changes card layout, not task ownership. The clear action empties the selection; each card also has its own remove action.
-
-### Review and assignment dock
-
-The dock is a scrollable bottom surface with a sticky close control. Review begins with a plain-language private/public consequence, lists every selected contribution, hides exact versions in an optional disclosure, and keeps merge permission as an explicit checkbox. Assignment leads with a searchable people list and states that it changes GitHub assignment but does not start review. Opening either dock moves keyboard focus into it without scrolling the project behind it.
+Review mode cards show the difference between private review and scoped review/fix/merge. The compact confirmation explains public effects and Stop when relevant. For a draft takeover it explicitly includes marking ready after independent review and required checks; permission is saved in a new scope, never inferred for old runs. Exact head/base binding and prompt/model freeze are checked underneath, not repeated as routine disclosures. A run carries its own owning conversation and named remaining state; queued is not merged, and green checks do not imply independent approval.
 
 ### Contribution detail
 
-Description, Files, and Activity form a segmented tab set with 48px targets and an active neutral surface. Description opens first. Files disclose one path at a time and retain the warning that an available patch may be incomplete. Activity shows written reviews and comments, with source-conversation navigation when stored local provenance exists.
+Actions and Conversation / Files changed / Checks tabs remain in place above a bounded scrolling body. Conversation opens first. Delayed success or failure changes content in that body without shifting the title, actions, or tabs.
+
+### Settings and prompt editor
+
+A single flat prompt editor groups Review, Fix and Merge decision. Tabs have generous targets and a genuine textarea; Save and Restore are explicit. A prior run’s saved prompts are inspectable in its own detail, without duplicating a full prompt in Settings or launch. A preset edit does not mutate a previously admitted run.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep each project as one continuous document from position through history.
-- **Do** make directory filters reflect the data conditions named by their labels.
-- **Do** keep native checkbox selection independent from row detail and keyboard focus.
-- **Do** preserve selected versions through refresh only when the exact head and base still match, and announce removals.
-- **Do** place selected work and review actions in the fixed bottom tray/dock while keeping the final inventory rows reachable.
-- **Do** preserve local-work and prepared-record summaries as readable text, not counts alone.
-- **Do** lead contribution detail with Description and defer Files and Activity until requested.
-- **Do** enumerate exact public effects and contribution versions before approval.
+- **Do** preserve the local/upstream prepare-and-pull context above PR work.
+- **Do** lead with visible PR title, colored labels, author and GitHub-style check counts; omit empty agent state.
+- **Do** keep selection independent from row detail and route agent action through inline confirmation.
+- **Do** distinguish assignment, private review, legacy merge scope, and scoped takeover.
+- **Do** keep detail controls stable while context loads and scrolls below them.
+- **Do** show paused work by name and preserve its remaining steps without automatic restart.
+- **Do** keep editable prompts separate from frozen run snapshots and immutable safety instructions.
+- **Do** identify selected PRs and explain actual public effects before approval; retain exact-version binding underneath.
 
 ### Don't:
-- **Don't** restore the discarded split-pane workspace, persistent task rail, or separate Reviews room.
-- **Don't** treat a row checkbox as navigation or clear selection merely because detail opened.
-- **Don't** make the bottom tray modal, reset project scroll, or discard selection while the review/assignment dock is open.
-- **Don't** hide changed-version removal; announce that the current version must be selected again.
-- **Don't** shrink labels below 14px or body copy below 16px to make the phone layout fit.
-- **Don't** invent fixed colors, tonal ramps, icons, approval states, or workflow capabilities outside the implemented semantic theme and product contract.
+- **Don't** restore a split-pane workspace, parallel Reviews room, or bottom tray as the primary PR action.
+- **Don't** equate passing checks with a review verdict or queued work with merged work.
+- **Don't** start agent work merely from selecting a PR or assigning a person.
+- **Don't** hide changed-version removal, scope drift, or ambiguous outcomes.
+- **Don't** shrink 14px metadata, 16px body copy, or 44px controls to fit the phone.
+- **Don't** invent fixed colors, fonts, icons, approval states, or product permissions outside the shell and implemented contract.
