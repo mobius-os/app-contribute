@@ -1,3 +1,4 @@
+import { isAutopilotResponding } from '../autopilot.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 
@@ -135,12 +136,18 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   return route.error || ''
 }
 
+const PROGRESS_TEXT = {
+  ready: { working: 'Requesting review…', done: 'Review requested' },
+  send: { working: 'Sending…', done: 'Sent to GitHub' },
+}
+
 function ExactActionList({
   items,
   mode,
   publicationPreference,
   githubState,
   onSelect,
+  progress = {},
 }) {
   return (
     <ol className="co-run-approval-list">
@@ -165,9 +172,9 @@ function ExactActionList({
                   <strong>{contributionTitle(record)}</strong>
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
                 </span>
-                <em>{mode === 'ready'
-                  ? 'Request review'
-                  : publicationLine(record, publicationPreference, githubState)}</em>
+                <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.error
+                  || PROGRESS_TEXT[mode]?.[progress[record.id]]
+                  || (mode === 'ready' ? 'Request review' : publicationLine(record, publicationPreference, githubState))}</em>
                 {meta ? <code>{meta.baseBranch} → {record?.plan?.branch || record?.branch}</code> : null}
                 {typeof onSelect === 'function' ? (
                   <button type="button" onClick={() => onSelect(item)}>Details</button>
@@ -199,7 +206,11 @@ function ExactBatchAction({
   const fingerprint = useMemo(() => batchFingerprint(
     items, mode, publicationPreference, githubState,
   ), [items, mode, publicationPreference, githubState])
-  const confirming = !!approval && approval.fingerprint === fingerprint
+  // A confirmed batch stays on screen while it runs and until the owner closes
+  // its results; each handled item changes the live set, which must not close it.
+  const confirming = !!approval && (approval.locked || approval.fingerprint === fingerprint)
+  const [progress, setProgress] = useState({})
+  const [finished, setFinished] = useState(false)
   const activeItems = confirming ? approval.items : items
   const count = mode === 'ready' ? readyCount(activeItems) : actionCount(activeItems)
   const singleRecord = count === 1 ? runPrimaryRecord(activeItems[0]) : null
@@ -209,13 +220,51 @@ function ExactBatchAction({
   }, [confirming])
 
   useEffect(() => {
-    if (!approval || approval.fingerprint === fingerprint) return
+    if (!approval || approval.locked || approval.fingerprint === fingerprint) return
     setApproval({ fingerprint, items: captureBatchItems(items) })
     setBusy(false)
     setNote('The reviewed set changed. The current actions are listed now; confirm this refreshed set when you are ready.')
   }, [approval, fingerprint, items])
 
-  if (count < 1) return null
+  if (count < 1 && !approval?.locked) return null
+
+  function failureText(outcome) {
+    return outcome?.error || (contributionFailureOwner(outcome) === 'agent'
+      ? 'Moved back to private preparation.'
+      : 'Needs attention.')
+  }
+  const handled = outcome => outcome?.ok || outcome?.alreadyHandled || outcome?.pending
+
+  // Drafts are independent, so review requests run a few at a time. A stack's
+  // own records stay in order; publication keeps its reviewed order too.
+  async function requestReview(item) {
+    const records = sortStackRecords(runUnitRecords(item)).filter(record => (
+      record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
+    ))
+    setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, 'working'])) }))
+    for (const record of records) {
+      let outcome
+      try { outcome = await onMarkReady?.(record) } catch { outcome = { error: 'Not confirmed. Refresh before trying again.' } }
+      if (!handled(outcome)) {
+        setProgress(old => ({ ...old, [record.id]: { error: failureText(outcome) } }))
+        return false
+      }
+      setProgress(old => ({ ...old, [record.id]: 'done' }))
+    }
+    return true
+  }
+  async function send(item) {
+    const records = item?.unit?.type === 'stack' ? runUnitRecords(item) : [runPrimaryRecord(item)].filter(Boolean)
+    setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, 'working'])) }))
+    let outcome
+    try {
+      if (item?.unit?.type === 'stack') outcome = await onSendStack?.(runUnitRecords(item))
+      else outcome = await onSend?.(runPrimaryRecord(item))
+    } catch { outcome = { error: 'Not confirmed. Refresh before trying again.' } }
+    const value = handled(outcome) ? 'done' : { error: failureText(outcome) }
+    setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, value])) }))
+    return handled(outcome)
+  }
 
   async function applyAll() {
     if (busy) return
@@ -225,38 +274,26 @@ function ExactBatchAction({
       return
     }
     const approvedItems = approval.items
+    setApproval({ ...approval, locked: true })
     setBusy(true)
     setNote('')
-    const failures = []
-    for (const item of approvedItems) {
-      try {
-        let outcome = null
-        if (mode === 'ready') {
-          const records = sortStackRecords(runUnitRecords(item)).filter(record => (
-            record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
-          ))
-          for (const record of records) {
-            outcome = await onMarkReady?.(record)
-            if (!(outcome?.ok || outcome?.alreadyHandled || outcome?.pending)) break
-          }
-        } else if (item?.unit?.type === 'stack') {
-          outcome = await onSendStack?.(runUnitRecords(item))
-        } else {
-          outcome = await onSend?.(runPrimaryRecord(item))
-        }
-        if (outcome?.ok || outcome?.alreadyHandled || outcome?.pending) continue
-        failures.push(outcome?.error || (
-          contributionFailureOwner(outcome) === 'agent'
-            ? 'The remaining work moved back to private preparation.'
-            : 'One action still needs attention.'
-        ))
-      } catch {
-        failures.push('One result could not be confirmed. Refresh before trying it again.')
-      }
+    setProgress({})
+    let results = []
+    if (mode === 'ready') {
+      const queue = [...approvedItems]
+      const worker = async () => { while (queue.length) results.push(await requestReview(queue.shift())) }
+      await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
+    } else {
+      for (const item of approvedItems) results.push(await send(item))
     }
+    const failed = results.filter(ok => !ok).length
     setBusy(false)
-    setApproval(null)
-    setNote(failures[0] || '')
+    setFinished(true)
+    setNote(failed ? `${failed} ${failed === 1 ? 'item needs' : 'items need'} attention; the rest finished.` : '')
+  }
+  function closeResults() {
+    setApproval(null); setFinished(false); setProgress({}); setNote('')
+    task?.close()
   }
 
   if (!confirming) {
@@ -267,11 +304,9 @@ function ExactBatchAction({
         </span>
         <div>
           <strong>{mode === 'ready'
-            ? `${count} ready to request review`
-            : `${count} reviewed and ready to send`}</strong>
-          <p>{mode === 'ready'
-            ? 'Requesting review does not merge these changes.'
-            : 'Choose the exact changes before anything is sent.'}</p>
+            ? `${count} ready for review`
+            : `${count} prepared ${count === 1 ? 'PR' : 'PRs'}`}</strong>
+          <span className="co-visually-hidden">{mode === 'ready' ? 'Requesting review does not merge these changes.' : 'Privately reviewed. Nothing shared yet.'}</span>
           {note ? <p className="co-run-error" role="status">{note}</p> : null}
         </div>
         <button
@@ -305,16 +340,19 @@ function ExactBatchAction({
           : `Send ${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'}?`}</h3>
         <p id={descriptionId}>{mode === 'ready'
           ? 'Makes the named drafts ready for review. Nothing merges.'
-          : 'Publishes the reviewed changes exactly as listed below. Nothing merges.'}</p>
-        {mode === 'send' ? <details className="co-task-details"><summary>Where each change goes</summary><p>New pull requests use your connected GitHub account and open ready for review. Existing pull requests receive only the reviewed update. Legacy relay records marked as Möbius-bot are published by the Möbius service under its legacy identity.</p></details> : null}
+          : 'New pull requests use your connected GitHub account and open ready for review. Each line shows exactly where its change goes. Nothing merges.'}</p>
       </header>
       <ExactActionList
         items={activeItems}
         mode={mode}
         publicationPreference={publicationPreference}
         githubState={githubState}
+        progress={progress}
       />
-      <div className="co-run-approval-actions">
+      {note ? <p className="co-run-error" role="status">{note}</p> : null}
+      {finished ? <div className="co-run-approval-actions">
+        <button type="button" className="co-btn co-btn-primary" onClick={closeResults}>Done</button>
+      </div> : <div className="co-run-approval-actions">
         <button ref={safeRef} type="button" className="co-btn" disabled={busy} onClick={() => setApproval(null)}>
           {mode === 'ready' ? 'Keep drafts' : 'Keep private'}
         </button>
@@ -323,7 +361,7 @@ function ExactBatchAction({
             ? (count === 1 ? 'Request review on GitHub' : `Request review for ${count} on GitHub`)
             : (count === 1 ? 'Send to GitHub' : `Send ${count} to GitHub`)}
         </button>
-      </div>
+      </div>}
     </section>
     </TaskPane>
     </>
@@ -383,7 +421,6 @@ function DecisionRow({
           <strong>{itemHeading(item)}</strong>
           <small>{item.detail}</small>
         </span>
-        <Icon name="right" size={14} />
       </button>
       {item.kind === 'incoming_review' ? (
         <IncomingAction item={item.item} onAssign={onAssignIncomingReview} />
@@ -400,10 +437,16 @@ function DecisionRow({
   )
 }
 
-function QuietRow({ item, onSelect }) {
+function activityRowItem(item) {
+  if (item.kind !== 'autopilot' || runUnitRecords(item).some(isAutopilotResponding)) return item
+  const record = runPrimaryRecord(item)
+  return { ...item, detail: `Agent follow-up queued · ${record?.repo || record?.plan?.repo || item.project?.name || 'Project'}` }
+}
+
+function QuietRow({ item, onSelect, active = false }) {
   return (
     <button type="button" className="co-run-quiet-row" onClick={() => onSelect?.(item)}>
-      <span className={'co-run-dot is-' + item.kind} aria-hidden="true" />
+      {active ? <span className="co-working-icon"><Icon name={item.kind === 'review_in_progress' ? 'review' : 'refresh'} size={16} /></span> : <span className={'co-run-dot is-' + item.kind} aria-hidden="true" />}
       <span><strong>{itemHeading(item)}</strong><small>{item.detail}</small></span>
       <Icon name="right" size={14} />
     </button>
@@ -443,10 +486,11 @@ function SourceChatChoices({ records, onFeedback }) {
   )
 }
 
-function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot, loadDiff }) {
+function StackFocus({ item, reviewStatus, onReview, onFeedback, onRestore, onSetAutopilot, loadDiff }) {
   const records = sortStackRecords(runUnitRecords(item))
   const needsAnswer = record => record?.needs_attention === true || !!record?.attention?.title || !!record?.attention?.message || record?.quality_review?.state === 'changes_needed'
   const questions = records.filter(needsAnswer)
+  const reviewAction = item.kind === 'private_review' ? progressReviewAction(records, reviewStatus) : null
   const [note, setNote] = useState('')
   function addressTogether() {
     const owner = records.find(record => record.quality_review?.chat_id || record.chat_id)
@@ -464,11 +508,12 @@ function StackFocus({ item, reviewStatus, onFeedback, onRestore, onSetAutopilot,
       <p className="co-group-count">1 group · {records.length} contributions{questions.length ? ` · ${questions.length} need attention` : ''}</p>
       <p>{item.detail}</p>
       {item.kind === 'route_attention' ? <p>Connect GitHub in Möbius Settings → Accounts to send this related group as your account.</p> : null}
+      {reviewAction && onReview ? <button className="co-btn co-btn-primary" onClick={() => onReview(reviewAction)}>Review group</button> : null}
       {onFeedback ? <button className="co-btn co-btn-primary" onClick={addressTogether}>Address group in conversation</button> : null}
       {note ? <p role="status">{note}</p> : null}
     </section>
     <div className="co-group-members">{records.map(record => <details className="co-group-member" key={record.id}>
-      <summary>{contributionTitle(record)}<span className="co-group-count"> · {needsAnswer(record) ? 'Needs attention' : record.status === 'prepared' ? 'Private proposal' : record.status}</span></summary>
+      <summary>{contributionTitle(record)}<span className="co-group-count"> · {needsAnswer(record) ? 'Needs attention' : record.status === 'prepared' ? (record.plan?.action === 'pr_update' ? 'Private PR revision' : 'Private proposal') : record.status}</span></summary>
       {record?.status === 'abandoned' || needsAnswer(record) ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} onFeedback={onFeedback} onRestore={onRestore} /> : null}
       <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} initialExpanded showDecision={false} />
       <SourceChatChoices records={[record]} onFeedback={onFeedback} />
@@ -530,11 +575,12 @@ function IncomingFocus({ item, onAssignIncomingReview }) {
   )
 }
 
-function BatchOwnedFocus({ item, reviewStatus, onFeedback, onSetAutopilot, loadDiff }) {
+function BatchOwnedFocus({ item, reviewStatus, onReview, onFeedback, onSetAutopilot, loadDiff }) {
   const record = runPrimaryRecord(item)
   if (!record) return null
   return (
     <div className="co-focus-unit">
+      {item.kind === 'private_review' ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} reviewAction={progressReviewAction(runUnitRecords(item), reviewStatus)} onReview={onReview} onFeedback={onFeedback} /> : null}
       <SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />
       <ContributionCard
         rec={record}
@@ -552,6 +598,7 @@ export function FocusedItem({
   item,
   reviewStatus,
   onFeedback,
+  onReview,
   onDismiss,
   onRestore,
   onSetAutopilot,
@@ -595,6 +642,7 @@ export function FocusedItem({
         item={item}
         reviewStatus={reviewStatus}
         onFeedback={onFeedback}
+        onReview={onReview}
         onRestore={onRestore}
         onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
@@ -618,6 +666,7 @@ export function FocusedItem({
         item={item}
         reviewStatus={reviewStatus}
         onFeedback={onFeedback}
+        onReview={onReview}
         onRestore={onRestore}
         onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
@@ -633,6 +682,7 @@ export function FocusedItem({
         reviewState={reviewStateFor(record, reviewStatus)}
         reviewAction={progressReviewAction([record], reviewStatus)}
         onFeedback={onFeedback}
+        onReview={onReview}
         onDismiss={onDismiss}
         onRestore={onRestore}
         onWithdraw={onWithdraw}
@@ -660,6 +710,7 @@ export function ContributionRun({
   onSendStack,
   onMarkReady,
   onFeedback,
+  onReview,
   onDismiss,
   onRestore,
   onSetAutopilot,
@@ -668,6 +719,8 @@ export function ContributionRun({
   loadDiff,
   presentation = 'project',
   renderPublicWork,
+  controls,
+  projectProgress,
   projectName = 'project',
   selectedId = '',
   onSelect,
@@ -677,7 +730,6 @@ export function ContributionRun({
   onFocusConsumed,
 }) {
   const task = useProjectTask()
-  const cycle = task?.cycle
   const [missingTarget, setMissingTarget] = useState(false)
   const [allDecisions, setAllDecisions] = useState(false)
   const projectedDecisions = useMemo(() => (run?.decisions || []).map((item) => {
@@ -716,21 +768,18 @@ export function ContributionRun({
 
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review')
-  const privateCycleRunning = cycle?.event !== 'update_source_projects' && ['running', 'starting', 'checking', 'stopping'].includes(cycle?.phase)
-  const working = [
-    ...(run?.working || []),
-    ...(privateCycleRunning ? privateItems.map(item => ({
-      ...item,
-      kind: 'review_in_progress',
-      detail: `Private run in progress · ${item.detail}`,
-    })) : []),
-  ]
+  const working = run?.working || []
   const visibleWorking = renderPublicWork ? working.filter(item => {
     return !runUnitRecords(item).every(record => record?.type === 'pr' && ['open', 'draft'].includes(record.status)
       && task?.publicKeys?.has(`${(record.repo || record.plan?.repo || '').toLowerCase()}#${record.number}`))
   }) : working
+  // An open issue/PR is inventory, not evidence that an agent is working.
+  const agentActivity = visibleWorking.filter(item => ['review_in_progress', 'autopilot'].includes(item.kind))
+  const actionsInProgress = visibleWorking.filter(item => ['publishing', 'connecting'].includes(item.kind))
+  const sharedItems = visibleWorking.filter(item => !['review_in_progress', 'autopilot', 'publishing', 'connecting'].includes(item.kind))
+  const issues = sharedItems.filter(item => runUnitRecords(item).some(record => record?.type === 'issue'))
+  const otherShared = sharedItems.filter(item => !issues.includes(item))
   const recent = run?.recent || []
-  const archive = run?.archive || []
   const publishItems = decisions.filter(item => item.kind === 'publish')
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
   const ownerDecisions = decisions.filter(item => ![
@@ -739,11 +788,23 @@ export function ContributionRun({
   const ownerActionCount = ownerDecisions.length
   const ownerContributionCount = ownerDecisions.reduce((total, item) => total + Math.max(1, runUnitRecords(item).length), 0)
   const groupedDecisions = ownerDecisions.filter(item => runUnitRecords(item).length > 1).length
-  const privateProposals = [...(privateCycleRunning ? [] : privateItems), ...decisions.filter(item => item.kind === 'request')]
+  const preparedItems = [...privateItems, ...decisions.filter(item => item.kind === 'request')]
+
+  // Task-first: when the owner has blocking decisions, this section leads the
+  // opened project — above local position/preparation. Otherwise order is
+  // unchanged and this is null. The count only appears once rows are folded.
+  const needsYou = (presentation === 'project' && ownerActionCount > 0) ? (
+    <details className="co-run-fold" aria-label="Needs you">
+      <summary><span>Needs you</span><b>{ownerActionCount}</b><Icon name="chevron" size={14} /></summary>
+      {groupedDecisions ? <p className="co-inventory-note">{groupedDecisions} related {groupedDecisions === 1 ? 'group' : 'groups'} · {ownerContributionCount} contributions</p> : null}
+      <div className="co-run-list">{(allDecisions ? ownerDecisions : ownerDecisions.slice(0, 3)).map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} onAssignIncomingReview={onAssignIncomingReview} />)}</div>
+      {ownerActionCount > 3 ? <button className="co-quiet-action" onClick={() => setAllDecisions(!allDecisions)}>{allDecisions ? 'Show fewer' : `Show all ${ownerActionCount} decisions`}</button> : null}
+    </details>
+  ) : null
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
   const focus = (selected || missingTarget || missingSelection) ? (
-      <TaskPane id={selectedId}>
+      <TaskPane id={selectedId} dock={false}>
         <div className="co-run-focus-layout">
           <div className="co-run-focus-detail">
         {missingTarget || missingSelection ? (
@@ -757,6 +818,7 @@ export function ContributionRun({
             item={selected}
             reviewStatus={reviewStatus}
             onFeedback={onFeedback}
+            onReview={onReview}
             onDismiss={onDismiss}
             onRestore={onRestore}
             onSetAutopilot={onSetAutopilot}
@@ -778,6 +840,11 @@ export function ContributionRun({
       {focus}
       {!actionCount(publishItems) ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
       {!readyCount(readyItems) ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
+      {presentation === 'project' ? controls : null}
+      {/* Everything that needs an owner decision sits in one GitHub-style box
+          above the PRs and disappears when there is nothing to act on. */}
+      <div className="co-decisions" aria-label="Ready for you">
+      {needsYou}
       <ExactBatchAction
         key={`send:${run?.revision || ''}:${publicationPreference}:${githubState}`}
         items={publishItems}
@@ -798,44 +865,33 @@ export function ContributionRun({
         onMarkReady={onMarkReady}
         onSelect={selectRunItem}
       />
+      {presentation === 'project' && preparedItems.length ? <details className="co-run-fold co-prepared-work" aria-label="Prepared work">
+        <summary><span>Prepared work</span><b>{preparedItems.length}</b><Icon name="chevron" size={14} /></summary>
+        <div className="co-run-list">{preparedItems.map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+      </details> : null}
+      </div>
 
       {presentation === 'project' ? <>
-      {ownerActionCount > 0 ? <section className="co-run-section" aria-label="Needs you">
-        <header><h3>Needs you <span className="co-section-count">{groupedDecisions ? `${groupedDecisions} ${groupedDecisions === 1 ? 'group' : 'groups'}${ownerActionCount > groupedDecisions ? ` + ${ownerActionCount - groupedDecisions} individual` : ''} · ${ownerContributionCount} contributions` : ownerActionCount}</span></h3></header>
-        <div className="co-run-list">{(allDecisions ? ownerDecisions : ownerDecisions.slice(0, 3)).map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} onAssignIncomingReview={onAssignIncomingReview} />)}</div>
-        {ownerActionCount > 3 ? <button className="co-quiet-action" onClick={() => setAllDecisions(!allDecisions)}>{allDecisions ? 'Show fewer' : `Show all ${ownerActionCount} decisions`}</button> : null}
-      </section> : null}
-      {privateProposals.length ? (
-        <details className="co-run-fold">
-          <summary><span>Prepared proposals · not shared</span><b>{privateProposals.length}</b><Icon name="chevron" size={14} /></summary>
-          <div>{privateProposals.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
-        </details>
-      ) : null}
-
       {renderPublicWork?.()}
+      {projectProgress}
 
-      {visibleWorking.length > 0 ? (
-        <section className="co-run-section">
-          <header><h3>In progress</h3></header>
-          <div>{visibleWorking.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
-        </section>
-      ) : null}
+      {[[issues, 'Issues'], [otherShared, 'Shared work'], [agentActivity, 'Agent activity'], [actionsInProgress, 'Actions in progress']].map(([items, title]) => items.length ? (
+        <details key={title} className="co-run-fold" aria-label={title}>
+          <summary><span>{title}</span><b>{items.length}</b><Icon name="chevron" size={14} /></summary>
+          <div>{items.map(item => <QuietRow key={item.id} item={activityRowItem(item)} active={item.kind === 'review_in_progress' || actionsInProgress.includes(item) || runUnitRecords(item).some(isAutopilotResponding)} onSelect={selectRunItem} />)}</div>
+        </details>
+      ) : null)}
 
       {recent.length > 0 ? (
         <details className="co-run-fold is-recent">
-          <summary><span>Done recently</span><b>{recent.length}</b><Icon name="chevron" size={14} /></summary>
+          <summary><span>History</span><b>{recent.length}</b><Icon name="chevron" size={14} /></summary>
+          <p className="co-inventory-note">Latest recorded outcomes, including closed, local-only, and superseded work. Not all were merged.</p>
           <div>{recent.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
       ) : null}
 
-      {archive.length > 0 ? (
-        <details className="co-run-fold is-archive">
-          <summary><span>History</span><b>{archive.length}</b><Icon name="chevron" size={14} /></summary>
-          <div>{archive.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
-        </details>
-      ) : null}
-
       </> : null}
+      {presentation !== 'project' ? renderPublicWork?.() : null}
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}
     </section>
   )

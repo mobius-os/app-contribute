@@ -1,58 +1,199 @@
 import { useEffect, useState } from 'react'
-import { loadPullActivity, loadPullDescription, loadPullFiles } from '../pull-details.js'
+import { loadPullActivity, loadPullChecks, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, pullFileDiff, safeDetailLink } from '../pull-details.js'
 import { MarkdownView } from './MarkdownView.jsx'
+import DiffView from './diff/DiffView.jsx'
+import { Icon } from './Icons.jsx'
+import { ChecksBadge, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
 
 export function DateLabel({ value, prefix = '' }) {
   if (!value || !Number.isFinite(Date.parse(value))) return null
-  return <time dateTime={value} title={new Date(value).toLocaleString()}>{prefix}{new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</time>
+  return <time dateTime={value} title={new Date(value).toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</time>
 }
-export function PullRequestDetail({ pr, token, onReview, onAssign, onRefresh, canMerge, canAssign, status, onProgress, onRecord, record }) {
-  const [tab, setTab] = useState('description')
-  const [cache, setCache] = useState({})
-  const [page, setPage] = useState({ files: 1, activity: 1 })
+function DetailLink({ href, children }) {
+  const safe = safeDetailLink(href)
+  return safe ? <a className="co-quiet-action" href={safe} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>
+}
+function threadLocation(thread) {
+  const side = thread.diffSide === 'LEFT' ? 'old' : thread.diffSide === 'RIGHT' ? 'new' : 'unknown-side'
+  if (thread.subjectType === 'FILE') return 'file discussion'
+  if (Number.isInteger(thread.line)) {
+    const range = Number.isInteger(thread.startLine) && thread.startLine !== thread.line
+    if (range && thread.startDiffSide && thread.startDiffSide !== thread.diffSide) return `${thread.startDiffSide === 'LEFT' ? 'old' : 'new'} line ${thread.startLine} → ${side} line ${thread.line}`
+    return `${side} line ${range ? `${thread.startLine}–` : ''}${thread.line}`
+  }
+  if (Number.isInteger(thread.originalLine)) return `original line ${thread.originalStartLine && thread.originalStartLine !== thread.originalLine ? `${thread.originalStartLine}–` : ''}${thread.originalLine}`
+  return 'line unavailable'
+}
+function ReadErrors({ errors, onRetry }) {
+  return errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={onRetry}>Retry</button></p>)
+}
+export function PullFileTotals({ totals, label = 'Total change' }) {
+  if (!totals || Object.values(totals).every(value => value === null)) return null
+  return <p className="co-detail-stats" aria-label={label}><span>{label}</span>{totals.files !== null ? <span>{totals.files} {totals.files === 1 ? 'file' : 'files'}</span> : null}{totals.additions !== null ? <span className="co-file-add">+{totals.additions} lines</span> : null}{totals.deletions !== null ? <span className="co-file-del">−{totals.deletions} lines</span> : null}</p>
+}
+export function PullFiles({ data }) {
+  const totals = data?.totals
+  return <>
+    {Number.isInteger(totals?.files) ? <p className="co-pr-note">Showing {totals.files} changed {totals.files === 1 ? 'file' : 'files'}{Number.isInteger(totals.additions) ? ` with ${totals.additions} additions and ${totals.deletions ?? 0} deletions` : ''}{data?.page > 1 ? ` · page ${data.page}` : ''}. GitHub may omit or shorten large patches.</p> : null}
+    {(data?.files || []).map(file => <details key={file.filename} className="co-file-disclosure"><summary>{file.filename} <span className="co-detail-stats">{file.status} · +{file.additions} −{file.deletions}</span></summary>{file.previous_filename ? <p>Previously {file.previous_filename}</p> : null}{file.patch ? <DiffView file={pullFileDiff(file)} /> : <p>No text patch is available for this file; it may be binary or too large.</p>}</details>)}
+    {!data?.files?.length ? <p>No changed files returned on this page.</p> : null}
+    {data?.capped ? <p>GitHub’s 3,000-file limit has been reached. More files may be omitted; use the review conversation for the full source.</p> : null}
+  </>
+}
+export function PullChecks({ data }) {
+  return <>
+    <p className="co-pr-note">Reported by GitHub for this version{data?.page > 1 ? ` · page ${data.page}` : ''}. Checks are not an all-clear review.</p>
+    {data?.groups?.map(group => <section key={group.name} aria-label={group.name}>
+      <h4>{group.name}{group.total !== null ? ` · ${group.total}` : ''}</h4>
+      {group.hasMore ? <p className="co-pr-note">More results remain on GitHub.</p> : null}
+      {group.items.map(item => <article className="co-activity-item" key={item.id}>
+        <header style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', overflowWrap: 'anywhere' }}><strong>{item.name || item.context || 'Unnamed check'}</strong><span>{(item.conclusion || item.status || item.state || 'unknown').replaceAll('_', ' ')}</span><DateLabel value={item.completed_at || item.updated_at || item.started_at || item.created_at} /></header>
+        {item.output?.title || item.description ? <p>{item.output?.title || item.description}</p> : null}
+        {item.details_url || item.target_url || item.html_url ? <DetailLink href={item.details_url || item.target_url || item.html_url}>View result</DetailLink> : null}
+      </article>)}
+      {!group.items.length ? <p>No {group.name.toLowerCase()} returned on this page.</p> : null}
+    </section>)}
+    {data?.capped ? <p>Only the first 100 result pages are available here. More results remain on GitHub.</p> : null}
+  </>
+}
+export function PullRelated({ data }) {
+  if (!data?.items?.length) return null
+  return <section aria-label="Related issues and pull requests"><h4>Related issues & PRs</h4>
+    {data?.items?.map(item => <p key={item.url} style={{ overflowWrap: 'anywhere' }}><span className="co-pr-note">{item.relationships.join(' · ')} · </span><DetailLink href={item.url}>{item.__typename === 'PullRequest' ? 'PR' : 'Issue'} {item.repository?.nameWithOwner}#{item.number} · {item.title}</DetailLink></p>)}
+    {data?.truncated ? <p>Showing the first 50 closing issues and first 50 cross-reference events. More references remain on GitHub.</p> : null}
+  </section>
+}
+export function PullThreads({ data }) {
+  if (!data?.threads?.length) return null
+  return <section aria-label="Inline review discussions"><h4>Inline discussions</h4>
+    {data?.threads?.map(thread => <article className="co-activity-item" key={thread.id}>
+      <header style={{ overflowWrap: 'anywhere' }}><strong>{thread.path || 'File not provided'}</strong> · {threadLocation(thread)} · {thread.isResolved === true ? 'Resolved' : thread.isResolved === false ? 'Unresolved' : 'Resolution unknown'}{thread.isOutdated ? ' · Outdated location' : ''}</header>
+      {thread.comments?.nodes?.filter(Boolean).map(comment => <div key={comment.id} style={{ padding: '12px 0' }}><div className="co-detail-stats"><span>{comment.author?.login || 'Contributor'}</span><DateLabel value={comment.createdAt} /><DetailLink href={comment.url}>View comment</DetailLink></div><MarkdownView markdown={comment.body || 'No written comment.'} /></div>)}
+      {thread.comments?.pageInfo?.hasNextPage ? <p className="co-pr-note">First 50 of {thread.comments.totalCount} comments shown in this thread. More replies remain on GitHub.</p> : null}
+      {!thread.comments ? <p role="alert">Thread comments are unavailable.</p> : null}
+    </article>)}
+  </section>
+}
+// Key the complete local cache to the exact selected identity. Equal SHAs in
+// different PRs must not reuse descriptions, pages, or stale-state decisions.
+export function PullRequestDetail(props) {
+  const pr = props.pr
+  const identity = `${pr.repository?.nameWithOwner}#${pr.number}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
+  return <PullRequestDetailView key={identity} {...props} />
+}
+function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record }) {
+  const [tab, setTab] = useState('conversation')
+  const [cache, setCache] = useState(() => cacheStore?.entries || {})
+  const [page, setPage] = useState({ files: 1, checks: 1, conversation: 1 })
+  const [threadCursors, setThreadCursors] = useState([null])
   const [retry, setRetry] = useState(0)
+  const [versionStale, setVersionStale] = useState(cacheStore?.stale === true)
+  useEffect(() => {
+    if (!cacheStore) return
+    // Incomplete reads are aborted on close and must be retried, not cached
+    // as a permanent loader. This snapshot belongs to the project/PR version.
+    cacheStore.entries = Object.fromEntries(Object.entries(cache).filter(([,value]) => !value.loading))
+    cacheStore.stale = versionStale
+  }, [cache, cacheStore, versionStale])
+  const threadCursor = threadCursors[threadCursors.length - 1]
+  const number = page[tab] || 1
+  // Conversation is GitHub's first tab: the description plus its comments,
+  // reviews, inline discussions and links. Each is an independent read so one
+  // failure never blanks the others.
+  const keys = tab === 'conversation'
+    ? { description: 'description:1', activity: `activity:${number}`, threads: `threads:${threadCursor || ''}`, related: 'related' }
+    : { view: `${tab}:${number}` }
+  const keySignature = Object.values(keys).join('|')
   useEffect(() => {
     const controller = new AbortController()
     let current = true
-    const number = page[tab] || 1
-    setCache(old => ({ ...old, [tab]: { ...old[tab], loading: true, error: '' } }))
-    const loader = tab === 'description' ? () => loadPullDescription(token, pr, controller.signal)
-      : tab === 'files' ? () => loadPullFiles(token, pr, number, controller.signal)
-        : () => loadPullActivity(token, pr, number, controller.signal)
-    loader().then(data => {
-      if (!current) return
-      setCache(old => ({ ...old, [tab]: { data, loading: false, error: '' } }))
-    }).catch(error => {
-      if (current) setCache(old => ({ ...old, [tab]: { loading: false, error: error.message, stale: error.code === 'stale' } }))
-    })
-    return () => { current = false; controller.abort() }
-  }, [tab, page.files, page.activity, retry, token, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
-  const view = cache[tab] || { loading: true }
-  const detail = cache.description?.data
-  const stale = Object.values(cache).some(value => value.stale)
+    const started = []
+    function read(key, loader) {
+      if (cache[key]) return
+      started.push(key)
+      setCache(old => ({ ...old, [key]: { loading: true } }))
+      loader().then(data => {
+        if (current) setCache(old => ({ ...old, [key]: { data, loading: false } }))
+      }).catch(error => {
+        if (current) {
+          if (error.code === 'stale') setVersionStale(true)
+          setCache(old => ({ ...old, [key]: { loading: false, error: error.message, stale: error.code === 'stale' } }))
+        }
+      })
+    }
+    if (tab === 'conversation') {
+      read(keys.description, () => loadPullDescription(token, pr, controller.signal))
+      read(keys.activity, () => loadPullActivity(token, pr, number, controller.signal))
+      read(keys.threads, () => loadPullThreads(token, pr, threadCursor, controller.signal))
+      read(keys.related, () => loadPullRelated(token, pr, controller.signal))
+    } else {
+      read(keys.view, () => tab === 'files' ? loadPullFiles(token, pr, number, controller.signal) : loadPullChecks(token, pr, number, controller.signal))
+    }
+    return () => {
+      current = false; controller.abort()
+      setCache(old => {
+        const next = { ...old }
+        for (const key of started) if (next[key]?.loading) delete next[key]
+        return next
+      })
+    }
+  }, [keySignature, retry, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
+  const entry = key => cache[key] || { loading: true }
+  const stale = versionStale || Object.values(cache).some(value => value.stale)
+  const tryAgain = () => {
+    const mine = new Set(Object.values(keys))
+    setCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
+    setRetry(value => value + 1)
+  }
+  function readState(value, label) {
+    return <>{value.loading ? <p className="co-pr-note" role="status">Loading {label}…</p> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : tryAgain}>{value.stale ? 'Refresh PR list' : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={tryAgain} /></>
+  }
+  const ready = value => !value.loading && !value.error && !stale
+  const description = entry(keys.description || '')
+  const activity = entry(keys.activity || '')
+  const threads = entry(keys.threads || '')
+  const related = entry(keys.related || '')
+  const view = entry(keys.view || '')
+  const pager = (current, hasMore, unknown, set) => current > 1 || hasMore ? <div className="co-board-actions">
+    {current > 1 ? <button className="co-btn" onClick={() => set(current - 1)}>Previous page</button> : null}
+    {hasMore ? <button className="co-btn" onClick={() => set(current + 1)}>{unknown ? 'Check next page' : 'Next page'}</button> : null}
+  </div> : null
+  const labels = pr.labels?.nodes || []
+  const tabs = [['conversation', 'Conversation'], ['files', 'Files changed'], ['checks', 'Checks']]
   return <div className="co-pr-detail" aria-label={`Details for PR ${pr.number}`}>
-    <nav className="co-detail-tabs" aria-label="Contribution details">{[['description', 'Description'], ['files', 'Files'], ['activity', 'Activity']].map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}{key === 'files' && Number.isInteger(pr.changedFiles) ? ` ${pr.changedFiles}` : ''}</button>)}</nav>
-    <div className="co-detail-stats"><DateLabel prefix="Opened " value={pr.createdAt} /><DateLabel prefix="Updated " value={pr.updatedAt} /><span>{pr.reviewDecision === 'APPROVED' ? 'GitHub review approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes requested' : 'GitHub review pending'}</span><span>{pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No merge conflicts reported' : 'Mergeability not yet known'}</span></div>
-    {view.loading ? <p role="status">Loading {tab}…</p> : null}
-    {view.error ? <div role="alert"><p>{view.error}</p><button className="co-btn" onClick={view.stale ? onRefresh : () => setRetry(value => value + 1)}>{view.stale ? 'Refresh PR list' : 'Try again'}</button></div> : null}
-    {!view.loading && !view.error && tab === 'description' ? <><MarkdownView markdown={detail?.body || 'No description was provided.'} />
-      {detail?.labels?.length ? <p className="co-detail-stats">{detail.labels.map(label => <span key={label.name}>{label.name}</span>)}</p> : null}
-      <details className="co-task-details"><summary>Technical details</summary><p>Head <code>{pr.headRefOid}</code><br />Base <code>{pr.baseRefName} · {pr.baseRefOid}</code></p></details>
+    <header className="co-gh-pr-head">
+      <h3 className="co-gh-pr-title">{pr.title} <span>#{pr.number}</span></h3>
+      <div className="co-gh-pr-sub"><PullStateBadge pr={pr} /><span><b>{pr.author?.login || 'Someone'}</b> wants to merge into <code>{pr.baseRefName}</code>{pr.headRefName ? <> from <code>{pr.headRefName}</code></> : null}</span></div>
+      {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
+    </header>
+    <div className="co-pr-detail-actions">
+      <button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview?.('review')}><Icon name="prepare" /> Take on with agent</button>
+      {canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}><Icon name="person" /> Assign</button> : null}
+      {status ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
+      <DetailLink href={pr.url}>Open on GitHub</DetailLink>
+    </div>
+    <nav className="co-detail-tabs" aria-label="Pull request details">{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}
+      {key === 'files' && Number.isInteger(pr.changedFiles) ? <><span className="co-tab-count">{pr.changedFiles}</span><span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span></> : null}
+      {key === 'checks' ? <ChecksBadge pr={pr} /> : null}</button>)}</nav>
+    <div className="co-pr-detail-body" role="region" aria-label="Pull request context">
+    {stale ? <p role="alert">This PR changed since the list was loaded. <button className="co-btn" onClick={onRefresh}>Refresh PR list</button></p> : null}
+    {tab === 'conversation' ? <>
+      {readState(description, 'description')}
+      {ready(description) ? <article className="co-gh-comment"><header><b>{description.data?.user?.login || pr.author?.login}</b> <DateLabel prefix="opened " value={pr.createdAt} /></header><MarkdownView markdown={description.data?.body || '_No description provided._'} /></article> : null}
+      {ready(activity) ? activity.data?.items?.map(item => <article className="co-gh-comment" key={`${item.kind}:${item.id}`}><header><b>{item.user?.login || 'Contributor'}</b> {item.kind === 'review' ? (item.state || 'reviewed').toLowerCase().replaceAll('_', ' ') : 'commented'} <DateLabel value={item.date} />{item.html_url ? <DetailLink href={item.html_url}>View</DetailLink> : null}</header>{item.body ? <MarkdownView markdown={item.body} /> : null}</article>) : null}
+      {readState(activity, 'comments')}
+      {ready(activity) ? pager(number, activity.data?.hasMore, false, value => setPage(old => ({ ...old, conversation: value }))) : null}
+      {readState(threads, 'inline discussions')}
+      {ready(threads) ? <><PullThreads data={threads.data} />{threads.data?.hasMore ? <div className="co-board-actions">{threadCursors.length > 1 ? <button className="co-btn" onClick={() => setThreadCursors(old => old.slice(0, -1))}>Previous discussions</button> : null}{threads.data.nextCursor ? <button className="co-btn" onClick={() => setThreadCursors(old => [...old, threads.data.nextCursor])}>More discussions</button> : null}</div> : null}</> : null}
+      {related.error ? readState(related, 'related issues') : ready(related) ? <PullRelated data={related.data} /> : null}
+      <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
+      {record && onRecord ? <button className="co-quiet-action" onClick={() => onRecord(record)}>Local preparation &amp; source conversation</button> : null}
     </> : null}
-    {!view.loading && !view.error && tab === 'files' ? <>
-      {(view.data?.files || []).map(file => <details key={file.filename} className="co-file-disclosure"><summary>{file.filename} <span className="co-detail-stats">{file.status} · +{file.additions} −{file.deletions}</span></summary>{file.previous_filename ? <p>Previously {file.previous_filename}</p> : null}{file.patch ? <pre><code>{file.patch}</code></pre> : <p>No text patch is available for this file; it may be binary or too large.</p>}</details>)}
-      {!view.data?.files?.length ? <p>No changed files returned.</p> : null}
-      <p className="co-pr-note">GitHub may omit or shorten large patches. A displayed patch is not proof that the complete change has been reviewed.</p>
-      {view.data?.capped ? <p>GitHub’s 3,000-file limit has been reached. Use the review conversation for the full source.</p> : null}
-    </> : null}
-    {!view.loading && tab === 'activity' ? <>
-      {view.data?.errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={() => setRetry(value => value + 1)}>Retry</button></p>)}
-      {view.data?.items?.map(item => <article className="co-activity-item" key={`${item.kind}:${item.id}`}><header>{item.user?.login || 'Contributor'} · {item.kind === 'review' ? (item.state || 'Reviewed').toLowerCase().replaceAll('_', ' ') : 'commented'} · <DateLabel value={item.date} /></header><MarkdownView markdown={item.body || 'No written comment.'} /></article>)}
-      {!view.data?.items?.length && !view.error ? <p>No review comments on this page.</p> : null}
-      <p className="co-pr-note">Conversation comments and reviews. Commit and queue events remain in the review conversation or on GitHub.</p>
-      {record ? <button className="co-quiet-action" onClick={() => onRecord?.(record)}>Local preparation & source conversation</button> : null}
-    </> : null}
-    {tab !== 'description' && !view.loading ? <div className="co-board-actions">{page[tab] > 1 ? <button className="co-btn" onClick={() => setPage(old => ({ ...old, [tab]: old[tab] - 1 }))}>Previous page</button> : null}{view.data?.hasMore ? <button className="co-btn" onClick={() => setPage(old => ({ ...old, [tab]: old[tab] + 1 }))}>Next page</button> : null}</div> : null}
-    <div className="co-board-actions"><button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview('review')}>Review this PR</button>{canMerge ? <button className="co-btn" disabled={stale} onClick={() => onReview('review_merge')}>Review & merge</button> : null}{canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}>Assign</button> : null}{status ? <button className="co-btn" onClick={onProgress}>Review progress</button> : null}<a className="co-quiet-action" href={pr.url} target="_blank" rel="noopener noreferrer">Open on GitHub</a></div>
+    {tab !== 'conversation' ? readState(view, tab === 'files' ? 'files' : 'checks') : null}
+    {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
+    {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
+    {tab !== 'conversation' && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
+    {tab === 'checks' && !view.loading ? <button className="co-quiet-action" onClick={() => { setCache(old => { const next = { ...old }; delete next[keys.view]; return next }); setRetry(value => value + 1) }}>Refresh checks</button> : null}
+    </div>
   </div>
 }

@@ -39,10 +39,11 @@ test('publication copy describes automatic GitHub identity without picker langua
   assert.match(sourceMapSource, /\['updates', 'Updates'\]/)
 })
 
-test('accepted merged work is surfaced at project level with the safe update action', () => {
+test('incoming upstream work is surfaced at project level with the safe update action', () => {
   const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
-  assert.match(controlsSource, /co-accepted-banner/)
-  assert.match(controlsSource, /Bring accepted changes here/)
+  assert.match(controlsSource, /incoming \? `\$\{incoming\} incoming`/)
+  assert.match(controlsSource, /<h3>Pull updates<\/h3>/)
+  assert.match(controlsSource, />Start pull</)
   assert.match(controlsSource, /task\?\.open\('task:update'\)/)
 })
 
@@ -287,7 +288,7 @@ test('Projects owns vertical scrolling and makes every row visibly navigable', (
 })
 
 test('one scoped control surface starts private preparation without leaving the project', () => {
-  assert.match(sourceMapSource, /renderControls\?\.\(project\)/)
+  assert.match(appSource, /<ProjectControls[\s\S]*projectProgress=\{progress\}/)
   assert.match(controlsSource, /start\(merge && fullCycle \? fullCycle : run.privateAction\)/)
   assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
   assert.match(appSource, /recordsForProject\(records, project\)/)
@@ -379,7 +380,7 @@ test('the Projects summary reserves its row while source checks refresh', () => 
 test('project status and essential controls remain visible with a readable type floor', () => {
   assert.doesNotMatch(controlsSource, /More actions|View reviews/)
   assert.match(controlsSource, /className="co-btn co-btn-primary co-task-primary"/)
-  assert.match(sourceMapSource, /Check for updates/)
+  assert.match(sourceMapSource, /Refresh project status/)
   assert.match(sourceMapSource, /visibleWork \? <span>\{visibleWork\}<\/span>/)
   assert.match(sourceMapSource, /className="co-source-shared">\{facts.shared\}/)
   const sizes = [...(themeSource + workspaceTheme).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map(match => Number(match[1]))
@@ -387,7 +388,7 @@ test('project status and essential controls remain visible with a readable type 
 })
 
 test('bottom work surfaces stay content-sized and avoid nested approval cards', () => {
-  assert.match(workspaceTheme, /\.co-workspace \.co-pr-selection,\.co-workspace \.co-task-dock \{[^}]*top:auto;/)
+  assert.match(workspaceTheme, /\.co-workspace \.co-task-dock \{[^}]*top:auto;/)
   assert.match(workspaceTheme, /> \.co-run-approval \{[^}]*border:0;/)
 })
 
@@ -401,15 +402,15 @@ test('project chrome consolidates navigation, refresh, files, and preparation ch
   assert.match(appSource, /onProjectOpenChange=\{setProjectOpen\}/)
   assert.doesNotMatch(sourceMapSource, /className="co-project-switcher"/)
   assert.match(sourceMapSource, /aria-label=\{loading \|\| manualRefresh === 'running' \? 'Refreshing projects'/)
-  assert.match(sourceMapSource, /aria-label=\{`Check for updates\. \$\{facts\.shared\}`\}/)
+  assert.match(sourceMapSource, /aria-label="Refresh project status"/)
   assert.doesNotMatch(sourceMapSource, /Files, branch and versions <Icon/)
-  assert.match(controlsSource, /Review changed files/)
-  assert.match(controlsSource, /Review versions/)
+  assert.match(controlsSource, /co-position-inspect[\s\S]*task\?\.open\('task:files'\)/)
+  assert.match(controlsSource, /<span>Local<\/span>/)
 })
 
 test('prepared proposals have one actionable home and merge follow-through is visible', () => {
   assert.doesNotMatch(controlsSource, /co-saved-summaries|Draft descriptions saved/)
-  assert.match(feedSource, /Prepared proposals · not shared/)
+  assert.match(feedSource, /Prepared work/)
   assert.match(controlsSource, /co-follow-merge/)
   assert.match(controlsSource, /Follow through to merge/)
   assert.match(controlsSource, /You still approve sharing and merging/)
@@ -425,4 +426,10 @@ test('the projects refresh control also renews the contribution feed and reports
 test('the stale-feed note says offline only when the device is offline', () => {
   assert.match(appSource, /window\.mobius\?\.online === false\s*\n\s*\? 'Offline — showing your last synced feed\.'/)
   assert.match(appSource, /'Not fully up to date — showing your last synced feed\.'/)
+})
+
+test('adjacent local controls and PR inventory have distinct stable component identities', () => {
+  assert.match(appSource, /<PullRequests key=\{`pulls:/)
+  assert.match(appSource, /key=\{`controls:\$\{project\.key\}`\}/)
+  assert.doesNotMatch(appSource, /<PullRequests key=\{project\?\.key/)
 })

@@ -120,20 +120,12 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
   }
   const active = (records || []).filter(activeContribution)
   const byRepo = new Map()
-  const acceptedByRepo = new Map()
   for (const rec of active) {
     const key = repoKey(rec.repo || rec.plan?.repo)
     if (!key) continue
     const bucket = byRepo.get(key) || []
     bucket.push(rec)
     byRepo.set(key, bucket)
-  }
-  for (const rec of records || []) {
-    const key = repoKey(rec.repo || rec.plan?.repo)
-    if (!key || rec?.type !== 'pr' || rec?.status !== 'merged') continue
-    const bucket = acceptedByRepo.get(key) || []
-    bucket.push(rec)
-    acceptedByRepo.set(key, bucket)
   }
 
   for (const record of records || []) {
@@ -156,11 +148,7 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
   const projects = base.map((project) => {
     const key = repoKey(project.canonical_repo)
     if (key) seen.add(key)
-    return decorateProject(
-      project,
-      key ? (byRepo.get(key) || []) : [],
-      key ? (acceptedByRepo.get(key) || []) : [],
-    )
+    return decorateProject(project, key ? (byRepo.get(key) || []) : [])
   })
 
   // A live contribution can outlast an uninstall or refer to a repository not
@@ -178,7 +166,7 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
       base_ref: null,
       tree: null,
       working: null,
-    }, contributions, acceptedByRepo.get(repo) || []))
+    }, contributions))
   }
 
   for (const project of projects) {
@@ -256,12 +244,14 @@ export function projectBoardFacts(project) {
   const reviews = project.contributions || []
   const publicReviews = reviews.filter(rec => ['draft', 'open', 'landing'].includes(rec.status)).length
   const prepared = reviews.filter(rec => rec.status === 'prepared').length
+  const preparedUpdates = reviews.filter(rec => rec.status === 'prepared' && (rec.plan?.action === 'pr_update' || rec.url || rec.number > 0)).length
   const work = []
   if (project.builtHere) work.push('Only on your Möbius')
   else if (local > 0) work.push(`${fileCount(local)} with local changes`)
   if (project.workingFiles > 0) work.push(`${fileCount(project.workingFiles)} being edited`)
-  if (prepared > 0) work.push(`${prepared} prepared · not shared`)
-  if (publicReviews > 0) work.push(`${publicReviews} in review`)
+  if (prepared > preparedUpdates) work.push(`${prepared - preparedUpdates} private ${prepared - preparedUpdates === 1 ? 'proposal' : 'proposals'}`)
+  if (preparedUpdates > 0) work.push(`${preparedUpdates} prepared ${preparedUpdates === 1 ? 'update' : 'updates'}`)
+  if (publicReviews > 0) work.push(`${publicReviews} shared ${publicReviews === 1 ? 'contribution' : 'contributions'}`)
   if (!work.length) work.push(project.available ? 'No local changes to prepare' : 'Local changes not checked')
 
   let shared = 'Shared version not checked'
@@ -274,20 +264,6 @@ export function projectBoardFacts(project) {
   else if (project.origin?.sha) shared = 'Last check found no shared updates'
   else if (project.base_sha) shared = 'Compared with installed version'
   return { work: work.join(' · '), shared, publicReviews, prepared }
-}
-
-// Count only merged reviews whose reviewed files are still present in the
-// reconciler's incoming path set. Historical merges must not be presented as
-// updates that this installation still needs.
-export function acceptedUpdateCount(project) {
-  if (project?.semanticAvailable !== true) return 0
-  const incoming = new Set(Array.isArray(project?.incomingPaths) ? project.incomingPaths : [])
-  if (!incoming.size) return 0
-  return (Array.isArray(project?.acceptedContributions) ? project.acceptedContributions : [])
-    .filter(record => (
-      Array.isArray(record?.plan?.files)
-      && record.plan.files.some(path => incoming.has(path))
-    )).length
 }
 
 // Reconciliation owns the file-level answer once it is available. A branch
@@ -331,7 +307,7 @@ export function projectWorkRevision(project) {
   ].map((value) => String(value || '')).join('\u0000')
 }
 
-function decorateProject(project, contributions, acceptedContributions = []) {
+function decorateProject(project, contributions) {
   const pullRequests = contributions.filter((rec) => (
     rec?.type === 'pr' || rec?.plan?.action === 'pr'
   ))
@@ -437,7 +413,6 @@ function decorateProject(project, contributions, acceptedContributions = []) {
   return {
     ...project,
     contributions: pullRequests,
-    acceptedContributions,
     issues,
     contributionCounts: {
       pullRequests: pullRequests.length,
@@ -594,7 +569,9 @@ function localCount(value) {
   return `${fileCount(value)} ${Number(value || 0) === 1 ? 'remains' : 'remain'} local`
 }
 
-function incomingCount(project) {
+// Upstream position in the same units as local work (files when the
+// reconciler can say, otherwise commits behind).
+export function incomingCount(project) {
   if (project.semanticAvailable) return fileCount(project.incomingFiles)
   const count = Number(project.originBehind || 0)
   return count + (count === 1 ? ' shared update' : ' shared updates')
