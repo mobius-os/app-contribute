@@ -75,6 +75,7 @@ python3 - <<'PY' 2>>/data/cron-logs/contribute.log
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -667,6 +668,19 @@ def _attention_update(rec, node):
   return patch, notify
 
 
+# A push about one contribution opens that contribution, not the app's front
+# page. `review:<id>` is the app-intent the shell delivers to index.jsx, which
+# selects the record in whichever section it currently sits.
+_RECORD_INTENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def _record_target(rec):
+  record_id = str(rec.get("id") or "")
+  if _RECORD_INTENT_ID.match(record_id):
+    return "/shell/?app=%s&intent=review:%s" % (APP_ID, record_id)
+  return "/shell/?app=%s" % APP_ID
+
+
 def _notify_attention(rec, attention):
   title = attention.get("title") or "Contribution needs attention"
   body = rec.get("title") or rec.get("repo") or "A contribution"
@@ -677,7 +691,7 @@ def _notify_attention(rec, attention):
     "title": title,
     "body": body,
     "source_id": str(rec.get("id") or ""),
-    "target": "/shell/?app=%s" % APP_ID,
+    "target": _record_target(rec),
   })
 
 
@@ -806,25 +820,36 @@ for alias, (name, rec, etag) in aliases.items():
   # contacted only on merged / closed / human_required (the last sent
   # server-side by /escalate). For a classic record, or an autopilot event the
   # loop cannot handle, notify exactly as before.
-  attention_to_route = attention_notice
-  if (
-    not attention_to_route
-    and updated.get("needs_attention")
-    and isinstance(updated.get("attention"), dict)
-  ):
-    attention_to_route = updated["attention"]
-  if attention_to_route:
+  #
+  # The owner hears about an attention KEY once: only when this pass newly
+  # raised it (attention_notice). A standing flag from an earlier pass — or a
+  # human_required one the platform already announced at /escalate — must not
+  # re-notify just because this pass wrote some other field; it is only
+  # re-offered to the autopilot loop, whose /respond dedupes by key.
+  if attention_notice:
     handled = False
     if (
       _is_autopilot(updated)
-      and attention_to_route.get("type") in ACTIONABLE_ATTENTION
+      and attention_notice.get("type") in ACTIONABLE_ATTENTION
     ):
-      handled = _respond_autopilot(updated, attention_to_route)
+      handled = _respond_autopilot(updated, attention_notice)
     if not handled:
       try:
-        _notify_attention(updated, attention_to_route)
+        _notify_attention(updated, attention_notice)
       except Exception:
         pass
+  else:
+    standing = (
+      updated.get("attention")
+      if updated.get("needs_attention") and isinstance(updated.get("attention"), dict)
+      else None
+    )
+    if (
+      standing
+      and _is_autopilot(updated)
+      and standing.get("type") in ACTIONABLE_ATTENTION
+    ):
+      _respond_autopilot(updated, standing)
   if new_status == "merged" and was != "merged":
     title = rec.get("title") or "contribution"
     try:
@@ -832,7 +857,7 @@ for alias, (name, rec, etag) in aliases.items():
         "title": "Contribution merged 🎉",
         "body": "Your %s was merged — it ships to everyone 🎉" % title,
         "source_id": str(rec.get("id") or ""),
-        "target": "/shell/?app=%s" % APP_ID,
+        "target": _record_target(rec),
       })
     except Exception:
       pass
@@ -847,7 +872,7 @@ for alias, (name, rec, etag) in aliases.items():
         "title": "Contribution closed",
         "body": "Your %s was closed on GitHub without merging." % title,
         "source_id": str(rec.get("id") or ""),
-        "target": "/shell/?app=%s" % APP_ID,
+        "target": _record_target(rec),
       })
     except Exception:
       pass
