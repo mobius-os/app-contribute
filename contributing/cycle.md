@@ -110,13 +110,12 @@ reconciliation.
    owner choices, unsafe work, and unrelated refactors explicitly blocked.
    Diagnose failed checks with `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number|run-id>`
    (see [ci.md](ci.md)), not full-log dumps.
-3. Present the exact ready set in Contribute or enumerate it clearly in chat.
-   **Send all ready** is one reviewed public approval boundary; an explicit,
-   unambiguous chat reply accepting that same current set is equally valid. Do
-   not send the partner to Contribute solely to repeat an approval they already
-   gave in chat. Either path stops if any branch or diff moved. The broad cycle
-   request alone still does not authorize an unenumerated push, comment, PR,
-   issue, or merge.
+3. Apply Hard stop #1 to the reviewed set. Carry out explicitly requested
+   publication or updates for objectively identified work without asking again.
+   The broad cycle request alone still does not authorize an unenumerated push,
+   comment, PR, issue, or merge. Present genuinely undecided public scope as
+   one batch, rather than asking per mechanical step. Re-stage and re-review
+   changed branches; never publish using stale evidence.
 4. After submission, let Contribute autopilot own ordinary PR feedback. When
    this chat promises to continue after CI, review, queue, or merge, declare a
    durable read-only wait using the `waiting` skill; prose alone is not a

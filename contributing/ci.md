@@ -36,5 +36,7 @@ repository; always pass the PR's own repository:
 
 It saves the full logs to a file and prints only the failing jobs and their
 failure lines. Open the saved log file only for the specific job and region
-those lines point to. Diagnosing CI is read-only; any repair is private
-preparation and any new public push needs its own exact approval.
+those lines point to. Diagnosis and bounded monitoring are ordinary read-only
+verification. Repair privately and re-review; whether a new public push is
+covered by the owner's instruction is decided by Hard stop #1, not by the fact
+that CI failed. Keep a monitor-only request read-only.

@@ -63,10 +63,21 @@ test('app publication is one reviewed outcome with an automatic local connection
   assert.match(prose, /Do not call the publication complete until the local connection is recorded/)
 })
 
-test('chat approval stays bound to the exact current public action', () => {
-  assert.match(prose, /If the target, diff, head, or proposed public text changes, the old yes no longer applies/)
+test('scoped instructions authorize dependent publication steps but not merging or new scope', () => {
+  assert.match(prose, /"create a PR for this fix" authorizes its private preparation, necessary fork and push, and PR creation/)
+  assert.match(prose, /Neither instruction authorizes merging/)
+  assert.match(prose, /Ask again for a different target, materially changed scope, risk, or public message/)
+  assert.match(prose, /when the owner limited approval to a pinned version/)
+  assert.match(prose, /A changed commit requires fresh review, not automatically a new owner decision/)
+  assert.match(prose, /Never submit stale work/)
   assert.match(prose, /The broad cycle request alone still does not authorize an unenumerated push/)
   assert.match(prose, /Preparing is still private/)
+})
+
+test('ordinary CI verification is not an approval loop and read-only requests stay read-only', () => {
+  assert.match(prose, /Ordinary read-only checks and bounded CI monitoring are verification, not another permission request/)
+  assert.match(prose, /Do not invent indefinite monitoring/)
+  assert.match(prose, /Keep a monitor-only request read-only/)
 })
 
 test('existing PR updates require exact public metadata without mutating it', () => {
@@ -141,10 +152,11 @@ test('private publication and local installation have separate ownership', () =>
   assert.doesNotMatch(prose, /The submit path proves `base_sha\.\.head_sha` is present in that source commit/)
 })
 
-test('a Goal waiting on a Contribute action hands off with one approval card', () => {
-  assert.match(prose, /Apart from the Goal\s+handoff below, never also call/)
-  assert.match(prose, /exactly one `request_approval` card for that record and head/)
-  assert.match(prose, /Never re-ask for the same head/)
+test('a Goal does not manufacture permission or duplicate the owning decision surface', () => {
+  assert.match(prose, /An open Goal does not create a new permission requirement/)
+  assert.match(prose, /If permission is genuinely missing, use one decision surface/)
+  assert.match(prose, /Do not ask for the same decision on both surfaces/)
+  assert.match(prose, /A saved approval card claims its work key itself/)
 })
 
 test('the general layer is project-shaped and Möbius facts live in its adapter', () => {

@@ -109,9 +109,10 @@ apply it proportionally here too.
 Treat **review all**, **review this PR**, and **fix and review again** as complete
 private review intents. The owner should not have to restate the usual rubric.
 
-1. Refresh each named record, inspect its complete diff, and record the
-   `reviewing` verdict for its staged head (the review call in
-   [ledger.md](ledger.md)) before material review work.
+1. Refresh each named record and inspect its complete diff. Record
+   `reviewing` (the review call in [ledger.md](ledger.md)) only when the
+   review will outlast this turn or run in a helper, so others can see it is
+   in progress; a review finished in one pass records only its verdict.
 2. Review correctness, maintainability, simplicity, tests, security/privacy,
    and avoidable technical debt. Expand into owning callers and invariants when
    the changed surface warrants it; do not turn this into unrelated cleanup.
@@ -156,8 +157,9 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
   needed by maintainers because it is shown inside the expanded details rather
   than as the primary owner-facing explanation.
 - `body_draft` is the FULL text you propose to publish — PR body, issue body, or
-  comment, word for word. The partner reviews exactly this; never publish
-  anything that differs from what they approved.
+  comment, word for word. Review it for accuracy, privacy, and the owner's
+  authorized public scope. If the owner approved specific wording, preserve
+  those exact words; otherwise apply Hard stop #1 to the publication request.
 - For a screenshot already hosted as a GitHub attachment, link the image to
   its canonical `https://github.com/user-attachments/assets/...` URL:
   `[![Screenshot description](URL)](URL)`. GitHub may render a plain image's
@@ -217,7 +219,7 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
   remain mandatory regardless of installation.
 
 Before you tell the partner it is ready, complete the exact-head review contract
-from **Thoroughly review prepared work** above. Record `reviewing`, inspect the
+from **Thoroughly review prepared work** above. Inspect the
 complete stored diff and its owning invariants, fix every sound issue
 privately, restage, and repeat on the new head. Confirm the body draft is
 exactly what should be published and that no private data appears in the
@@ -226,7 +228,9 @@ branch, commit message, branch name, body, or diff. Only then record
 honestly be recorded, leave the record visibly at **Review needed** or
 **Changes needed**—never tell the partner it is sendable.
 
-Status stays `prepared`. Then give the partner one short, text-only handoff:
-summarize what is staged and say it is waiting for their review. A prepared
-review is not an app build completion. Do not navigate the workspace, place an
-app, or link a completion notification to an app as part of this handoff.
+Status stays `prepared` until publication. After a prepare-only request, give
+one short, text-only handoff summarizing the staged work. If publication is
+already authorized, continue through [publish.md](publish.md) instead of asking
+again. A prepared review is not an app build completion. Do not navigate the
+workspace, place an app, or link a completion notification to an app as part of
+this handoff.

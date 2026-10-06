@@ -3,20 +3,20 @@
 Mode file of the `contributing` skill. The core
 ([SKILL.md](SKILL.md): Hard stops, privacy allowlist,
 approval gate, file table) always applies. Nothing here runs without the
-partner's explicit yes for the exact current action (Hard stop #1).
+partner's scoped approval (Hard stop #1).
 
 ## The green light
 
-The green light for a staged PR is explicit approval of its exact current,
-`all_clear` record. **Open PR** in Contribute is one convenient path. An
-explicit, unambiguous chat instruction approving that same record and current
-head is equally valid, and the agent must not require the partner to repeat it
-in Contribute. Whichever surface carries the yes, re-read the canonical record
-immediately before Send and use the same guarded submission path. A stale
-record returns to **Review** instead of publishing; the earlier approval cannot
-be stretched to the changed head. No agent turn is needed after a valid button
-press, while a chat approval authorizes the current agent turn to submit the
-enumerated action.
+Publish an `all_clear` record when the owner's instruction covers that work
+under Hard stop #1. **Open PR** approves the displayed version; a clear chat
+request to create the PR can also authorize preparing and publishing it.
+Whichever surface carries the yes, re-read the canonical record immediately
+before Send and use the same guarded submission path. A stale record returns
+to **Review**, never publishes on stale evidence. Re-stage and re-review it,
+then apply Hard stop #1 to decide whether the existing instruction still
+covers publication. Do not stretch a version-pinned approval or automatically
+ask again merely because review produced a new commit. No agent turn is needed
+after a valid button press.
 
 The platform's Send endpoint:
 
@@ -38,12 +38,30 @@ The platform's Send endpoint:
 7. records `url`, `number`, label outcome, and `status: "open"` in the ledger.
 
 If any preflight fails, the endpoint rolls the record back to `prepared` with
-`last_submit_error`; the partner can press Leave feedback to return to the
-source chat. Your job after feedback is to re-read the diff, fix/re-stage the
-record, and stop again.
+`last_submit_error`. Diagnose, repair within scope, and re-stage/re-review;
+continue under the existing instruction when Hard stop #1 permits it. Stop
+only for a genuinely missing decision or approval, not every failed preflight.
 
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
+
+## Updating an existing PR after approval
+
+A prepared `pr_update` record (built as in *Updating an existing open PR* in
+[branch.md](branch.md), restaged, and `all_clear`) is published with the same
+guarded call the **Update PR** button uses. When the owner's chat instruction
+already covers the update, call it directly:
+
+```bash
+mapi -X POST /api/github/contributions/<id>/<record-id>/update-existing \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+It rechecks the reviewed head and diff and the live PR identity before the
+fast-forward push, and returns the record at `open` with `last_updated_pr_at`.
+Then confirm the PR's `headRefOid` equals `plan.head_sha`. The `/update`
+route is the autopilot's own path and needs a live autopilot run; do not use
+it for owner-approved updates.
 
 ## After it's sent: autopilot
 
