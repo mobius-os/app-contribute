@@ -123,14 +123,12 @@ personal or don't propose.
 ## The approval gate
 
 Private preparation begins only from an explicit partner request, including a
-project-level or **Prepare to submit** handoff from Contribute. The source chat's
-automatic **Changes ready to organize** card is the lightweight preparation
-suggestion after coherent file edits: it only reflects already-recorded work
-and never starts an agent, reviews a diff, or inspects GitHub on its own. Do not
-duplicate that visible choice with another question at the end of the turn.
-Pressing **Prepare to submit** on the card or in Changes is an explicit
-private-preparation request; dismissing it only hides that revision of the
-suggestion and keeps the work in Changes and Contribute.
+project-level or **Prepare to submit** handoff from Contribute. A chat's
+**Changes** view only lists its edits; it is never a request or approval.
+
+**Hand off prepared work with its Send block** ([prepare.md](prepare.md)): the
+block's guarded **Contribute** button in the chat is the owner's
+approval surface, so never also send them to Contribute or ask on a card.
 
 **One decision, no duplicate approval.** Proceed without requiring the matching
 Contribute press when the owner's instruction already covers the action. Run
@@ -138,8 +136,8 @@ the same exact-head, full-diff, identity, and freshness checks; chat approval
 changes the approval surface, not the safety preflight. An open Goal does not
 create a new permission requirement. If permission is genuinely missing, use
 one decision surface: a saved approval card when this chat needs to resume, or
-the existing Contribute control when its workflow owns the continuation. Do not
-ask for the same decision on both surfaces. A saved approval card claims its
+the prepared record's Send block when publication is the only remaining step.
+Do not ask for the same decision on both surfaces. A saved approval card claims its
 work key itself; do not claim it separately first.
 
 If the owner presses the block, let that action own its complete batch until
@@ -172,7 +170,7 @@ Interpret the request in context, using Hard stop #1:
 Use [maintainer.md](maintainer.md) for the read-only PR block helper, saved
 prompt/model preview, run blocks and scoped review modes. Rich chat detail is
 not a new approval surface: opening a block never starts work or authorizes
-comments, repairs or merges. The source or bound review chat owns continuation;
+comments, repairs or merges; only the Send block above carries Contribute's send. The source or bound review chat owns continuation;
 a helper supplies evidence, not an alternative owner-facing workflow.
 
 ## GitHub without Contribute

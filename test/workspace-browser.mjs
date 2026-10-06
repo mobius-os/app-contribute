@@ -68,7 +68,10 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64)})
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
-    if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
+    if (call.url.startsWith('/api/github/source-status')) {
+      if (window.deferSourceDiscovery) return new Promise(resolve => { window.releaseSourceDiscovery = value => resolve(response(value)) })
+      return response({ apps: [], platform: null })
+    }
     if (call.url.endsWith('/review-status')) return response({ records: [] })
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
@@ -510,10 +513,10 @@ window.runWorkspaceChecks = async () => {
       window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
-      await inventory(); await click(button('Review and send'))
-      await until(() => button('Send to GitHub'),'Publication confirmation missing')
+      await inventory(); await click(button('Contribute'))
+      await until(() => button('Contribute'),'Publication confirmation missing')
       ensure(calls.publications.length===0,'Opening publication sent work')
-      await click(button('Send to GitHub'))
+      await click(button('Contribute'))
       await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
       ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
@@ -683,6 +686,67 @@ window.runWorkspaceChecks = async () => {
       ensure(getComputedStyle(headings[0]).fontSize===getComputedStyle(headings[1]).fontSize, 'Settings headings use different sizes')
       ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
       await click(button('Done',panel))
+    })
+    await check('cold record links open before a slow ledger and source discovery, with projects navigation intact', async () => {
+      root.render(null); await frame(); await frame()
+      values.clear()
+      window.fullAppConnected = false
+      window.deferSourceDiscovery = true
+      const exact = {...prepared, id:'cold-record', title:'Cold reviewed proposal',
+        plan:{...prepared.plan,title:'Cold reviewed proposal',base_branch:'main'}, updated_at:'2026-10-06T12:00:00Z'}
+      values.set('contributions/cold-record.json', exact)
+      const originalGet = window.mobius.storage.get
+      window.mobius.storage.get = async key => key === 'feed-cache.json'
+        ? new Promise(resolve => { window.releaseColdCache = () => resolve({records:[{...exact,title:'Old cached title',plan:{...exact.plan,title:'Old cached title'}}]}) })
+        : originalGet(key)
+      let ledgerSettled = false
+      window.mobius.storage.listWithStatus = async () => new Promise(resolve => {
+        window.releaseColdLedger = () => { ledgerSettled = true; resolve({complete:true,entries:[
+          {type:'file',name:exact.id+'.json',content:{...exact,title:'Stale scan title',plan:{...exact.plan,title:'Stale scan title'}}},
+          ...Array.from({length:1900},(_,i)=>({type:'file',name:'history-'+i+'.json',content:{id:'history-'+i,type:'pr',status:'closed',repo:'owner/project',title:'History '+i}})),
+        ]}) }
+      })
+      root.render(<ContributeApp appId="fixture-app" token="fixture-only" />)
+      await until(() => window.releaseColdCache && window.releaseSourceDiscovery && window.releaseColdLedger, 'Cold reads did not start')
+      const hostIntent = (intent, nonce, source = window.parent) => window.dispatchEvent(new MessageEvent('message', {
+        source, origin:window.location.origin, data:{type:'moebius:app-intent',intent,nonce},
+      }))
+      hostIntent('review:cold-record','untrusted',null)
+      await frame(); await frame()
+      ensure(!query('.co-run-focus-detail'), 'A non-parent sender opened a record')
+      hostIntent('review:cold-record','cold-review')
+      await until(() => text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Exact record stayed behind slow startup reads')
+      ensure(!ledgerSettled, 'Cold focus waited for the history scan')
+      ensure(query('.co-header-shell') && query('[aria-label="Back to projects"]'), 'Cold detail lost its full-app header or projects action')
+      window.releaseColdCache()
+      await frame(); await frame()
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Late cache erased the exact record')
+      window.deferSourceDiscovery = false
+      window.releaseSourceDiscovery({apps:[{...projects[0],key:'app:cold',name:'Cold installed project',state:'aligned'}],platform:null})
+      await until(() => text(query('.co-workspace-head h2')) === 'Cold installed project', 'Provisional repository did not resolve into the installed project')
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Project reconciliation closed record detail')
+      window.releaseColdLedger()
+      await until(() => values.get('feed-cache.json')?.records?.some(record=>record.id==='cold-record'), 'Cold ledger did not settle')
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Slow scan overwrote the exact read')
+      const changedPhase = {...exact, updated_at:'2026-10-06T12:01:00Z', quality_review:{state:'needed'}}
+      values.set('contributions/cold-record.json',changedPhase)
+      window.mobius.storage.listWithStatus = async () => ({complete:true,entries:[{type:'file',name:'cold-record.json',content:changedPhase}]})
+      window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
+      await until(() => values.get('feed-cache.json')?.records?.[0]?.quality_review?.state === 'needed', 'Changed phase did not refresh')
+      await frame(); await frame()
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal') && !text(query('.co-run-focus-detail')).includes('This contribution moved'), 'A review phase change lost the exact selected record')
+      await click(query('[aria-label="Back to projects"]'))
+      await until(() => text(query('.co-view-heading')).includes('Your projects'), 'Full detail could not return to all projects')
+      await click([...document.querySelectorAll('.co-source-row')].find(node=>text(node.querySelector('strong'))==='Cold installed project'))
+      await until(() => query('.co-workspace-head') && query('[aria-label="Back to projects"]'), 'Entering a project hid the toolbar')
+      hostIntent('chat-prepared:cold-record','legacy-review')
+      await until(() => text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Legacy title did not open the normal record workspace')
+      ensure(query('.co-header-shell') && !query('.co-inline-view'), 'Legacy title entered a headerless embedded view')
+      values.set('contributions/cold-record.json',exact)
+      hostIntent('chat-send:cold-record','inline-confirm')
+      await until(() => query('.co-inline-confirm'), 'chat-send no longer opens its confirmation')
+      ensure(!query('.co-header-shell'), 'chat-send must retain its embedded headerless layout')
+      window.mobius.storage.get = originalGet
     })
     await check('reopening inline detail uses cached metadata', async () => {
       ensure(!detailReread, 'Reopen needlessly reread cached detail')

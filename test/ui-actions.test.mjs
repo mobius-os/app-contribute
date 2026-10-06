@@ -68,9 +68,9 @@ test('settings keep prompts and account management while model choice belongs to
 })
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
-  assert.match(feedSource, /count === 1 \? 'Review and send' : `Review and send \$\{count\}`/)
-  assert.match(feedSource, /count === 1 \? 'Send to GitHub' : `Send \$\{count\} to GitHub`/)
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Contribute update' : 'Contribute'\)\}<\/span>/)
+  assert.match(feedSource, /singleRecord\?\.plan\?\.action === 'pr_update' \? 'Contribute update' : 'Contribute'/)
+  assert.match(feedSource, /disabled=\{busy\} aria-busy=\{busy\} onClick=\{applyAll\}/)
   assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
 })
 
@@ -192,7 +192,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
   assert.match(controlsSource, /start\(run.privateAction, prepareAgent\)/)
   assert.match(controlsSource, /Turn your local work into a clear proposal for private review/)
-  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Contribute update' : 'Contribute'\)\}<\/span>/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing merges\./)
   assert.match(appSource, /provider: chosenAgent\.provider/)

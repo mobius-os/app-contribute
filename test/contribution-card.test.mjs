@@ -13,6 +13,9 @@ const cardRenderer = () => renderModule(`
       onConnectApp: () => {}, onWithdraw: () => ({ ok: true }),
     }))
   }
+  export function renderFullDetail(rec) {
+    return renderToStaticMarkup(React.createElement(ContributionCard, { rec, initialExpanded:true, showDecision:false }))
+  }
   export function renderReview(rec) {
     return renderToStaticMarkup(React.createElement(ReviewPlan, { rec }))
   }
@@ -99,7 +102,7 @@ test('prepared platform cards keep one explicit public action', async (t) => {
   })
   assert.doesNotMatch(html, /Check on fork|Run GitHub checks/)
   assert.match(html, /aria-label="Send pull request"/)
-  assert.match(html, />Send PR</)
+  assert.match(html, />Contribute</)
 })
 
 test('a settled update target blocks another public action and leads to recovery', async (t) => {
@@ -412,4 +415,33 @@ test('an escalated autopilot PR surfaces the human_required callout', async (t) 
     autopilot: { enabled: true, state: 'idle', rounds: [] },
   })
   assert.match(html, /A reviewer asked for a redesign\./)
+})
+
+
+test('full record detail separates private review from PR state and preserves the GitHub reading structure', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const {renderFullDetail} = await cardRenderer()
+  const rec = {id:'full',type:'pr',status:'prepared',repo:'owner/repo',title:'Private change',author:{login:'owner'},
+    plan:{action:'pr',repo:'owner/repo',branch:'fix/detail',base_branch:'main',head_sha:'current',body_draft:'Reviewed description',diff_stat:'1 file changed, 2 insertions(+), 1 deletion(-)',labels:['bug']},
+    quality_review:{state:'all_clear',reviewed_head_sha:'current'}}
+  const html = renderFullDetail(rec)
+  assert.match(html, /co-card-full-detail/)
+  assert.match(html, /Not sent yet/)
+  assert.match(html, /wants to merge/)
+  assert.match(html, /fix\/detail/)
+  assert.match(html, /Private review of this exact version/)
+  assert.match(html, /not GitHub CI/)
+  assert.match(html, /What “All clear” means/)
+  assert.match(html, /Conversation/)
+  assert.match(html, /Commits/)
+  assert.match(html, /Files changed.*co-tab-count/s)
+  assert.match(html, /https:\/\/github.com\/owner\/repo/)
+  assert.match(html, /Reviewed labels/)
+  assert.doesNotMatch(html, /Contribution actions|Hide details/)
+  for (const [status,label] of [['open','Open'],['draft','Draft'],['merged','Merged'],['closed','Closed']]) {
+    const publicHtml = renderFullDetail({...rec,status,number:42})
+    assert.match(publicHtml,new RegExp('is-'+status))
+    assert.match(publicHtml,new RegExp('>'+label+'<'))
+    assert.doesNotMatch(publicHtml,/Not sent yet|Private review of this exact version/)
+  }
 })

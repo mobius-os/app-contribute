@@ -16,3 +16,17 @@ test('source, fix and review provenance belongs to the same repo and PR', () => 
   assert.deepEqual(links.map(x=>x.chat_id),['source-1','source-2','review-1','fix-1','run-1'])
   assert.equal(links[0].role,'source')
 })
+test('a prepared transcript block names one ledger record and nothing else', () => {
+  assert.equal(contributeBlockTarget('chat-prepared:00000000-0000-4000-8000-000000000001'), null)
+  assert.equal(contributeBlockTarget('chat-prepared:../escape'),null)
+  assert.equal(contributeBlockTarget('chat-prepared:'),null)
+  assert.deepEqual(contributeBlockTarget('chat-send:rec-1'),{kind:'prepared',id:'rec-1',embedded:true,confirm:true})
+  assert.equal(contributeBlockTarget('chat-send:../x'),null)
+  assert.equal(contributeBlockTarget('chat-prepared:a b'),null)
+})
+test('a batch names 1 to 12 safe record ids, deduplicated, and nothing else', () => {
+  assert.deepEqual(contributeBlockTarget('chat-send-batch:a-1,b.2,a-1'),{kind:'batch',ids:['a-1','b.2'],embedded:true})
+  assert.equal(contributeBlockTarget('chat-send-batch:'),null)
+  assert.equal(contributeBlockTarget('chat-send-batch:a,../b'),null)
+  assert.equal(contributeBlockTarget('chat-send-batch:'+Array.from({length:13},(_, i)=>`r${i}`).join(',')),null)
+})

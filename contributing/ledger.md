@@ -96,7 +96,7 @@ record has reconciled. A newly created record may contain only the current
 chat. When reusing a prepared or public record from another chat, restage it
 from that chat (staging adds the chat) or CAS-union the existing values with
 the current `$CHAT_ID`; never overwrite the primary id or create a duplicate
-merely to make the new chat's Changes view settle. A background worker child is
+merely to attribute the record to the new chat. A background worker child is
 execution history, not source provenance: never add its chat id to `chat_ids`
 (pass the source chat as `chat_id` when a helper stages). If that worker
 performed the actual review, its id is recorded in `quality_review.chat_id` for

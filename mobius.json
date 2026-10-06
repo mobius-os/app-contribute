@@ -107,6 +107,8 @@
     "review-prompts.js",
     "ui/ReviewPromptSettings.jsx",
     "pr_block.py",
-    "ui/InlinePullView.jsx"
+    "prepared_block.py",
+    "ui/InlinePullView.jsx",
+    "ui/InlinePreparedView.jsx"
   ]
 }

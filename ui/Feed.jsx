@@ -318,7 +318,7 @@ function ExactBatchAction({
             setApproval({ fingerprint, items: captureBatchItems(items) })
           }}
         >
-          {mode === 'ready' ? 'Request review' : count === 1 ? 'Review and send' : `Review and send ${count}`}
+          {mode === 'ready' ? 'Request review' : count === 1 ? (singleRecord?.plan?.action === 'pr_update' ? 'Contribute update' : 'Contribute') : `Contribute ${count}`}
         </button>
       </section>
     )
@@ -359,7 +359,7 @@ function ExactBatchAction({
         <button type="button" className="co-btn co-btn-primary" disabled={busy} aria-busy={busy} onClick={applyAll}>
           {busy ? 'Working…' : mode === 'ready'
             ? (count === 1 ? 'Request review on GitHub' : `Request review for ${count} on GitHub`)
-            : (count === 1 ? 'Send to GitHub' : `Send ${count} to GitHub`)}
+            : (count === 1 ? (singleRecord?.plan?.action === 'pr_update' ? 'Contribute update' : 'Contribute') : `Contribute ${count}`)}
         </button>
       </div>}
     </section>
@@ -581,7 +581,6 @@ function BatchOwnedFocus({ item, reviewStatus, onReview, onFeedback, onSetAutopi
   return (
     <div className="co-focus-unit">
       {item.kind === 'private_review' ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} reviewAction={progressReviewAction(runUnitRecords(item), reviewStatus)} onReview={onReview} onFeedback={onFeedback} /> : null}
-      <SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />
       <ContributionCard
         rec={record}
         reviewState={reviewStateFor(record, reviewStatus)}
@@ -590,6 +589,7 @@ function BatchOwnedFocus({ item, reviewStatus, onReview, onFeedback, onSetAutopi
         initialExpanded
         showDecision={false}
       />
+      <SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />
     </div>
   )
 }
@@ -653,9 +653,9 @@ export function FocusedItem({
     return (
       <section className="co-run-focus-summary is-route_attention">
         <small>Choose a publication route</small>
-        <h3>{itemHeading(item)}</h3>
+        <h3>Publication route</h3>
         <p>{item.detail}</p>
-        <p>Connect GitHub in Möbius Settings → Accounts, then come back to this Send batch.</p>
+        <ContributionCard rec={runPrimaryRecord(item)} reviewState={reviewStateFor(runPrimaryRecord(item), reviewStatus)} loadDiff={loadDiff} initialExpanded showDecision={false} />
         <SourceChatChoices records={records} onFeedback={onFeedback} />
       </section>
     )
@@ -749,7 +749,21 @@ export function ContributionRun({
     ...(run?.recent || []),
     ...(run?.archive || []),
   ], [projectedDecisions, run?.working, run?.recent, run?.archive])
-  const selected = allItems.find(item => item.id === selectedId) || null
+  // Run item IDs include their decision phase. A foreground review or source
+  // refresh can move the same record to another phase/group after the intent
+  // was consumed; selection follows the ledger identity, not the old phase.
+  const selectedRecordRef = useRef(null)
+  const matched = allItems.find(item => item.id === selectedId) || null
+  const retainedId = selectedRecordRef.current?.itemId === selectedId ? selectedRecordRef.current.recordId : ''
+  const relocated = !matched && retainedId ? findRunItemByRecord(run, retainedId)?.item : null
+  const selectedItem = matched || allItems.find(item => item.id === relocated?.id) || null
+  const requestedRecord = runUnitRecords(selectedItem).find(record => record.id === (focusTarget?.recordId || retainedId))
+  const selected = requestedRecord ? { ...selectedItem, record: requestedRecord } : selectedItem
+  useEffect(() => {
+    if (!selected) { if (!selectedId) selectedRecordRef.current = null; return }
+    selectedRecordRef.current = { itemId: selected.id, recordId: runPrimaryRecord(selected)?.id }
+    if (selected.id !== selectedId) onSelect?.(selected.id)
+  }, [selected, selectedId, onSelect])
 
   useEffect(() => {
     if (!focusTarget || !focusReady) return

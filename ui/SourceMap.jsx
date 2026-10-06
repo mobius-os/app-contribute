@@ -366,6 +366,16 @@ export function SourceMap({
     void openProject(target.key)
   }, [focusKey, projects])
 
+  // Exact record links can open a repository before source discovery finishes.
+  // Reconcile that provisional identity in place, without closing its detail
+  // or adding another host back entry when the installed project arrives.
+  useEffect(() => {
+    if (!selected.startsWith('external:') || projects.some(project => project.key === selected)) return
+    const repo = selected.slice('external:'.length)
+    const local = projects.find(project => project.canonical_repo?.toLowerCase() === repo)
+    if (local) setSelected(local.key)
+  }, [selected, projects])
+
   const selectedProject = selected
     ? projects.find((project) => project.key === selected) || null
     : null

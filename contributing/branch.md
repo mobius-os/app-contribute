@@ -51,7 +51,7 @@ change would have run on the older base.
 
 Before staging, inspect untracked and generated-looking paths. A clearly
 repository-wide generated path earns the smallest reusable `.gitignore` rule;
-review that rule as source and settle the generated path locally. Ambiguous
+review that rule as source and keep the generated path local. Ambiguous
 files remain an owner decision—do not grow a hidden ignore mechanism.
 
 ## Keep exploration out of durable staging

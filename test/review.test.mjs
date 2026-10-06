@@ -86,6 +86,9 @@ test('shell review intents name one ledger record without encoding presentation 
   assert.deepEqual(contributionReviewTargetFromIntent('  review:record_2  '), {
     recordId: 'record_2',
   })
+  assert.deepEqual(contributionReviewTargetFromIntent('chat-prepared:legacy-record'), { recordId: 'legacy-record' })
+  assert.equal(contributionReviewTargetFromIntent('chat-send:legacy-record'), null)
+  assert.equal(contributionReviewTargetFromIntent('chat-prepared:../escape'), null)
   assert.equal(contributionReviewTargetFromIntent('review:../escape'), null)
   assert.equal(contributionReviewTargetFromIntent('reviews:record'), null)
   assert.equal(contributionReviewTargetFromIntent(null), null)
@@ -122,7 +125,7 @@ test('the app resolves trusted focused intents without waiting for the full ledg
   assert.match(appSource, /upsertRecord\(recordsRef\.current, record\)/)
   assert.match(appSource, /focusedContributionReady\(next, recordId\)/)
   assert.match(appSource, /focusTarget=\{\(project\?\.key \|\| ''\) === focusedProjectKey \? reviewFocus : null\}/)
-  assert.match(appSource, /focusReady=\{focusedReviewReady && !sourceLoading\}/)
+  assert.match(appSource, /focusReady=\{focusedReviewReady\}/)
   assert.doesNotMatch(appSource, /focusedReviewReady && ledgerReady/)
   assert.match(feedSource, /if \(!focusTarget \|\| !focusReady\) return/)
   assert.match(feedSource, /if \(focusTarget\.queue\)/)
@@ -192,8 +195,8 @@ test('the Run owns one exact grouped action across standalone and stacked work',
   assert.match(feedSource, /<ExactActionList[\s\S]*?items=\{activeItems\}/)
   assert.match(feedSource, /sortStackRecords\(runUnitRecords\(item\)\)/)
   assert.match(feedSource, /item\?\.unit\?\.type === 'stack'/)
-  assert.match(feedSource, /Review and send \$\{count\}/)
-  assert.match(feedSource, /Send \$\{count\} to GitHub/)
+  assert.match(feedSource, /Contribute \$\{count\}/)
+  assert.match(feedSource, /onClick=\{applyAll\}/)
   assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
   assert.match(feedSource, /New pull requests use your connected GitHub account and open ready for review/)
   assert.match(feedSource, /Nothing merges\./)
@@ -396,7 +399,7 @@ test('a reviewed existing-PR update stays distinct from opening a new PR', () =>
   assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
   assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
-  assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
+  assert.match(cardSource, /isUpdate \? 'Contribute update' : 'Contribute'/)
   assert.match(appSource, /\? updateContributionStack\s*: submitContributionStack/)
 })
 
@@ -410,7 +413,7 @@ test('existing pull-request stack prefixes use one exact update phase', () => {
 })
 
 test('sending a pull request stays concise instead of repeating publication narration', () => {
-  assert.match(cardSource, /sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)/)
+  assert.match(cardSource, /sending \? 'Sending…' : \(isUpdate \? 'Contribute update' : 'Contribute'\)/)
   assert.doesNotMatch(cardSource, /Opening pull request/)
   assert.doesNotMatch(cardSource, /Pull request opened on GitHub for review/)
   assert.doesNotMatch(cardSource, /sendElapsed/)

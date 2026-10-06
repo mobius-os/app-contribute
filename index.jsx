@@ -64,6 +64,7 @@ import {
 import { ConnectionSettings } from './ui/ConnectionCard.jsx'
 import { contributeBlockTarget } from './chat-blocks.js'
 import { InlinePullView } from './ui/InlinePullView.jsx'
+import { InlineBatchView, InlinePreparedView } from './ui/InlinePreparedView.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
@@ -85,7 +86,7 @@ function Header({ appId, fromCache, checking, onBack, children }) {
     <header className="co-header">
       <div className="co-header-main">
         {onBack ? (
-          <button type="button" className="co-header-back" onClick={onBack} aria-label="Back to projects"><Icon name="left" size={18} /><span>Projects</span></button>
+          <button type="button" className="co-header-back" onClick={onBack} aria-label="Back to projects"><Icon name="left" size={18} /><span>Your projects</span></button>
         ) : (
           <>
             {iconFailed ? (
@@ -455,8 +456,9 @@ export default function ContributeApp({ appId, token }) {
       const settingsPromise = loadAppSettings()
       const cached = await cachedPromise
       if (!cancelled && cached.length > 0) {
-        recordsRef.current = cached
-        setRecords(cached)
+        const next = reconcileLedgerSnapshot(recordsRef.current, mergeRecordUpdates(cached, recordsRef.current))
+        recordsRef.current = next
+        setRecords(next)
         setLoading(false)
         signalReady({
           item_count: cached.length,
@@ -476,7 +478,12 @@ export default function ContributeApp({ appId, token }) {
 
       const ledger = await ledgerPromise
       if (cancelled) return
-      const recs = ledger.records
+      // A bounded listing may omit a large body that the focused path already
+      // read. Preserve only those explicitly-present omitted members, never a
+      // record removed from an authoritative directory snapshot.
+      const omittedPaths = new Set(ledger.omitted)
+      const available = mergeRecordUpdates(ledger.records, recordsRef.current.filter(record => omittedPaths.has(record.path)))
+      const recs = reconcileLedgerSnapshot(recordsRef.current, available)
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
       setRecords(recs)
@@ -1379,10 +1386,10 @@ export default function ContributeApp({ appId, token }) {
     recordsForProject(focusedRecord ? [focusedRecord] : [], project).length > 0)?.key || ''
   const routedFocusRef = useRef('')
   useEffect(() => {
-    if (!reviewFocus?.recordId || !focusedReviewReady || sourceLoading || routedFocusRef.current === reviewFocus.nonce) return
+    if (!reviewFocus?.recordId || !focusedReviewReady || !focusedProjectKey || routedFocusRef.current === reviewFocus.nonce) return
     routedFocusRef.current = reviewFocus.nonce
     setProjectFocus({ key: focusedProjectKey, nonce: reviewFocus.nonce })
-  }, [reviewFocus, focusedReviewReady, sourceLoading, focusedProjectKey])
+  }, [reviewFocus, focusedReviewReady, focusedProjectKey])
 
   function projectRun(project) {
     return project ? buildContributionRun({
@@ -1409,7 +1416,13 @@ export default function ContributeApp({ appId, token }) {
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       {!inlineTarget?.embedded ? <div className="co-header-shell">
-        <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
+        <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen || reviewFocus || selectionFocus || inlineTarget ? () => {
+          setInlineTarget(null)
+          setReviewFocus(null)
+          setPullFocus(null)
+          closeSelection()
+          setProjectFocus({ key: '', nonce: crypto.randomUUID() })
+        } : null}>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
@@ -1418,7 +1431,12 @@ export default function ContributeApp({ appId, token }) {
       </div> : null}
       <main ref={pageRef} className="co-page is-sources">
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
-        {inlineTarget ? <InlinePullView target={inlineTarget} appId={appId} token={token} records={records} onClose={() => setInlineTarget(null)} onProject={repository => {
+        {reviewFocus?.recordId && focusedReviewReady && !focusedRecord ? <p className="co-run-error" role="alert">This contribution is no longer available. Use Your projects to see your current work.</p> : null}
+        {inlineTarget?.kind === 'batch' ? <InlineBatchView target={inlineTarget} records={records} ledgerReady={ledgerReady}
+          reviewStatus={reviewStatus} onSend={onSend} onSendStack={onSendStack} onRefresh={() => refreshCoordinatorRef.current()} />
+          : inlineTarget?.kind === 'prepared' ? <InlinePreparedView target={inlineTarget} appId={appId} records={records} ledgerReady={ledgerReady}
+          reviewStatus={reviewStatus} onSend={onSend} onSendStack={onSendStack} onDismiss={onDismiss}
+          loadDiff={loadFullDiff} onRefresh={() => refreshCoordinatorRef.current()} /> : inlineTarget ? <InlinePullView target={inlineTarget} appId={appId} token={token} records={records} onClose={() => setInlineTarget(null)} onProject={repository => {
           const repo=repository.nameWithOwner
           setInlineTarget(null)
           setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.toLowerCase())?.key || `external:${repo.toLowerCase()}`, repository, nonce: crypto.randomUUID() })
@@ -1464,7 +1482,7 @@ export default function ContributeApp({ appId, token }) {
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
               onAssignIncomingReview={onAssignIncomingReview} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
-              focusReady={focusedReviewReady && !sourceLoading}
+              focusReady={focusedReviewReady}
               onFocusConsumed={consumeReviewFocus}
             />}
             </ProjectControls> : null}

@@ -585,7 +585,7 @@ export function partitionReviewUnits(units, reviewStatus) {
   return { needsAttention, needsReview, reviewing, readyToSend }
 }
 
-const REVIEW_INTENT = /^review:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
+const REVIEW_INTENT = /^(?:review|chat-prepared):([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/
 const REVIEW_QUEUE_INTENT = 'reviews:queue'
 
 // Shell cards address one immutable ledger identity. The record's current

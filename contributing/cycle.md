@@ -61,30 +61,13 @@ belongs upstream.
    Delegation path from the active source run. Give each helper one bounded
    task, wait for every result, then let the source parent reconcile the final
    source, stage the PR records, and write or CAS-update issue and comment
-   records and settlements ([ledger.md](ledger.md)). Never replace
+   records ([ledger.md](ledger.md)). Never replace
    this relation with an app-owned chat whose prompt or opaque scope merely
    mentions the source chat.
-4. For a chat-scoped request, durably settle every recorded source path that
-   was intentionally excluded. Fetch that chat's current `edit-diffs` before
-   classification, retain the newest `ts` actually reviewed, and after the
-   source recheck run the app helper once per disposition/summary group:
-
-   ```bash
-   python3 /data/apps/contribute/settle_chat_changes.py \
-     --chat "$CHAT_ID" --through '<newest-reviewed-ts>' \
-     --disposition local-only --summary 'Kept local by design.' \
-     /data/platform/path/to/file /data/apps/example/path/to/file
-   ```
-
-   Use `personal`, `experimental`, `incoming-only`, or `duplicate` when that is
-   the truthful reason. The helper writes the Contribute-owned temporal
-   disposition through the platform domain route; never hand-edit its storage.
-   A later edit to the same path becomes Unsorted again. Do not settle a path
-   you did not inspect through the supplied timestamp, and do not substitute a
-   prose summary for this write—without it the same card will return.
-5. Stop with the prepared records in Contribute. Report what was prepared and
-   what was intentionally left local, private, incomplete, duplicated, or
-   blocked. Nothing public happens in this intent.
+4. Report what was prepared and what was intentionally left local, private,
+   incomplete, duplicated, or blocked, and end with each `all_clear` record's
+   Send block ([prepare.md](prepare.md)). Nothing public happens
+   in this intent.
 
 When this spans several projects or review units, make it a durable Goal with
 inventory, preparation, verification, and handoff stages. A single small

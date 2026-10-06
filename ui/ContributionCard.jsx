@@ -28,6 +28,7 @@ import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
 import { AgentHandoffButton } from './BatchAction.jsx'
+import { GithubLabel, PullStateBadge } from './GithubParts.jsx'
 
 // One ledger row. Cards deliberately expose explicit targets only — the title
 // is the link on a linked PR/issue card, and prepared cards use their
@@ -63,6 +64,14 @@ const PREPARED_ACTION_LABELS = {
   discussion_comment: 'New discussion reply',
 }
 
+// A repository name links to it on GitHub wherever a card shows it.
+const REPO = /^[\w.-]{1,100}\/[\w.-]{1,100}$/
+export function RepoLink({ repo, number, collection = 'pull', className }) {
+  if (!REPO.test(repo || '') || repo.split('/').some(part => /^\.+$/.test(part))) return <span className={className}>{repo}{number ? ` #${number}` : ''}</span>
+  const href = `https://github.com/${repo}${number ? `/${collection}/${number}` : ''}`
+  return <a className={['co-repo-link', className].filter(Boolean).join(' ')} href={href} target="_blank" rel="noopener noreferrer">{repo}{number ? ` #${number}` : ''}</a>
+}
+
 // The collapsed prepared card's one meta line: repo · branch · timeAgo. Kept to
 // a single row — the branch (usually the longest, least critical char-by-char)
 // is the piece that truncates, so repo and recency always stay legible.
@@ -84,7 +93,9 @@ function PlanMeta({ rec }) {
           {i > 0 ? (
             <span className="co-plan-meta-sep" aria-hidden="true">·</span>
           ) : null}
-          <span className={part.cls}>{part.value}</span>
+          {part.cls === 'co-plan-meta-repo'
+            ? <RepoLink repo={part.value} className={part.cls} />
+            : <span className={part.cls}>{part.value}</span>}
         </React.Fragment>
       ))}
     </div>
@@ -514,19 +525,28 @@ function CoauthorOmittedNote({ rec }) {
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
-export function ReviewPlan({ rec, loadDiff }) {
+export function ReviewPlan({ rec, loadDiff, fullDetail = false }) {
   const plan = rec.plan
   const [tab, setTab] = useState('description')
   const isPr = plan.action === 'pr' || rec.type === 'pr'
+  const totals = parseDiffStat(plan.diff_stat)
+  const fileCount = totals?.totalFiles
+  const tabs = fullDetail && isPr
+    ? [['description', 'Conversation'], ['commits', 'Commits'], ['files', 'Files changed']]
+    : [['description', 'Description'], ...(isPr ? [['files', 'Files']] : []), ['activity', 'Activity']]
   return <>
     <nav className="co-detail-tabs" aria-label="Prepared contribution details">
-      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}</button>)}
+      {tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}{key === 'files' && fullDetail && Number.isInteger(fileCount) ? <><span className="co-tab-count">{fileCount}</span><span className="co-change-total"><b>+{totals.additions}</b><em>−{totals.deletions}</em></span></> : null}</button>)}
     </nav>
+    <div className={fullDetail ? 'co-prepared-detail-body' : undefined}>
     {tab === 'description' ? <>
-      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} />
+      {fullDetail ? <article className="co-gh-comment co-prepared-description"><header><b>{rec.author?.login || 'Prepared contribution'}</b><span>{rec.status === 'prepared' ? 'private draft' : 'recorded description'}</span></header><MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} /></article>
+        : <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} />}
       {isPr ? <CoauthorOmittedNote rec={rec} /> : null}
       <PublicationReviewNote rec={rec} />
+      {fullDetail ? <details className="co-pr-metadata"><summary>Preparation notes</summary><div className="co-pr-metadata-body"><PriorWorkEvidence priorWork={plan.prior_work} /><PlanLabels rec={rec} /></div></details> : null}
     </> : null}
+    {tab === 'commits' ? <><p className="co-pr-note">Commit history is not available in this prepared record. The exact reviewed change is shown under Files changed.</p><details className="co-pr-metadata"><summary>Reviewed version</summary><div className="co-pr-metadata-body"><PlanMeta rec={rec} /><p>Prepared head: <code>{plan.head_sha || 'Not recorded'}</code></p><p>Comparison base: <code>{plan.base_sha || 'Not recorded'}</code></p></div></details></> : null}
     {tab === 'files' ? <FileDiffList rec={rec} loadDiff={loadDiff} /> : null}
     {tab === 'activity' ? <>
       <PriorWorkEvidence priorWork={plan.prior_work} />
@@ -535,6 +555,7 @@ export function ReviewPlan({ rec, loadDiff }) {
       <details className="co-pr-metadata"><summary>Technical details</summary><div className="co-pr-metadata-body"><PlanMeta rec={rec} /><p>Prepared head: <code>{plan.head_sha || 'Not recorded'}</code></p></div></details>
     </> : null}
     {typeof plan.target_url === 'string' && plan.target_url.startsWith('https://github.com/') ? <a className="co-review-link" href={plan.target_url} target="_blank" rel="noopener noreferrer">View target on GitHub</a> : null}
+    </div>
   </>
 }
 
@@ -678,7 +699,7 @@ function ReviewActions({
         </div>
       ) : (
         <div className="co-review-actions" role="group" aria-label="Contribution actions">
-          {blocked ? (
+          {blocked ? (typeof onFeedback === 'function' ? (
             <button
               type="button"
               className="co-icon-btn co-refresh-btn is-primary"
@@ -689,7 +710,7 @@ function ReviewActions({
               <Icon name="feedback" />
               <span>Fix in chat</span>
             </button>
-          ) : isPr ? (
+          ) : null) : isPr ? (
             <>
               {reviewIncomplete && typeof onReview === 'function' ? (
                 <AgentHandoffButton
@@ -709,11 +730,11 @@ function ReviewActions({
                   aria-label={sending
                     ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
                     : (isUpdate ? 'Send pull request update' : 'Send pull request')}
-                  title={isUpdate ? 'Send update' : 'Send PR'}
+                  title={isUpdate ? 'Contribute update' : 'Contribute'}
                 >
                   <Icon name="send" />
                   <span className="co-action-label">
-                    <span>{sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
+                    <span>{sending ? 'Sending…' : (isUpdate ? 'Contribute update' : 'Contribute')}</span>
                     {sending ? (
                       <span className="co-action-label-sweep" aria-hidden="true">
                         Sending…
@@ -735,7 +756,7 @@ function ReviewActions({
               <span>Chat</span>
             </button>
           ) : null}
-          {!blocked && !attentionBlocked && isPr ? (
+          {!blocked && !attentionBlocked && isPr && typeof onFeedback === 'function' ? (
             <button
               type="button"
               className="co-icon-btn co-secondary-action"
@@ -1113,7 +1134,8 @@ export function ContributionCard({
   // repo, optionally with a #number; both tolerate absence.
   let where = rec.repo || ''
   if (where && rec.number) where += ' #' + rec.number
-  const meta = [typeLabel, where, when].filter(Boolean)
+  const collection = rec.type === 'issue' || rec.type === 'issue_comment' ? 'issues' : 'pull'
+  const meta = [typeLabel, rec.repo ? <RepoLink key="repo" repo={rec.repo} number={rec.number} collection={collection} /> : '', when].filter(Boolean)
 
   const title = rec.title || where || 'Untitled contribution'
   const hasLink =
@@ -1129,9 +1151,28 @@ export function ContributionCard({
   const planSummary = hasPlan && rec.summary && rec.summary !== displayTitle
     ? rec.summary
     : ''
+  const fullDetail = initialExpanded && !showDecision && hasPlan && isPr
+  const publicState = ['open', 'draft', 'merged', 'closed'].includes(status)
+  const baseBranch = rec.plan?.stack?.base_branch || rec.plan?.base_branch || rec.plan?.base_ref || rec.base_branch || ''
+  const headBranch = rec.plan?.branch || rec.branch || ''
+  const detailLabels = showPublishedLabelOutcome && labelOutcome.applied?.length
+    ? labelOutcome.applied
+    : !labelOutcome.published ? labelOutcome.requested : []
 
   return (
-    <div id={recordAnchorId(rec)} className={`co-card${blocked ? ' is-blocked' : ''}`}>
+    <div id={recordAnchorId(rec)} className={`co-card${blocked ? ' is-blocked' : ''}${fullDetail ? ' co-card-full-detail' : ''}`}>
+      {fullDetail ? <div className="co-prepared-pr-head">
+        <h3 className="co-prepared-pr-title">{displayTitle}{rec.number ? <span> #{rec.number}</span> : null}</h3>
+        <div className="co-prepared-pr-sub">
+          {publicState ? <PullStateBadge pr={{ state: status.toUpperCase(), isDraft: status === 'draft' }} /> : <span className="co-gh-badge is-private">{status === 'prepared' ? 'Not sent yet' : (STATUS_LABELS[status] || status)}</span>}
+          {/* A record without an author is the owner's own proposal. */}
+          <span>{rec.author?.login ? <b>{rec.author.login}</b> : 'You'} {status === 'merged' ? 'merged' : status === 'closed' ? 'proposed merging' : rec.author?.login ? 'wants to merge' : 'want to merge'} into {baseBranch ? <code>{baseBranch}</code> : 'the default branch'}{headBranch ? <> from <code>{headBranch}</code></> : null}</span>
+        </div>
+        {rec.plan?.repo || rec.repo ? <p className="co-prepared-pr-repo"><RepoLink repo={rec.plan?.repo || rec.repo} /></p> : null}
+        {detailLabels?.length ? <div className="co-gh-labels" aria-label={publicState ? 'Confirmed labels' : 'Reviewed labels'}>{detailLabels.map(label => <GithubLabel key={label} name={label} />)}</div> : null}
+        {qualityState.state === 'all_clear' && status === 'prepared' ? <div className="co-private-review"><strong><Icon name="check" size={16} /> All clear</strong><span>Private review of this exact version · not GitHub CI</span><details className="co-inline-review-note"><summary>What “All clear” means</summary><p>An agent privately reviewed this exact version: it read the whole change for correctness, simplicity, tests, security and privacy, fixed what it found, and ran the project's checks in a separate copy. It is not GitHub CI. The project's own checks run on GitHub after you contribute, and nothing merges until they pass and you approve it.</p>{qualityState.summary ? <p><b>Reviewer note:</b> {qualityState.summary}</p> : null}</details></div> : null}
+      </div> : null}
+      {!fullDetail ? <>
       <div className="co-card-top">
         <h3 className="co-card-heading">
           {hasLink ? (
@@ -1191,7 +1232,10 @@ export function ContributionCard({
         <PlanLabels rec={rec} outcome={labelOutcome} />
       ) : null}
       {showDecision ? <PublicationConnectionAction rec={rec} /> : null}
-      {hasPlan && (
+      </> : null}
+      {fullDetail && status !== 'prepared' && autopilotState(rec) ? <AutopilotPanel rec={rec} onSetAutopilot={onSetAutopilot} /> : null}
+      {fullDetail && showPublishedLabelOutcome ? <PlanLabels rec={rec} outcome={labelOutcome} /> : null}
+      {hasPlan && !fullDetail && (
         <div className={`co-card-footer${rec.reconciliation_hint ? ' is-reconciliation' : ''}`}>
           <button
             type="button"
@@ -1230,8 +1274,8 @@ export function ContributionCard({
       )}
       {hasPlan && expanded && (
         <div className="co-review">
-          <PlanSummary rec={rec} />
-          <ReviewPlan rec={rec} loadDiff={loadDiff} />
+          {!fullDetail ? <PlanSummary rec={rec} /> : null}
+          <ReviewPlan rec={rec} loadDiff={loadDiff} fullDetail={fullDetail} />
         </div>
       )}
       {showDecision && status === 'abandoned' && typeof onRestore === 'function' && (

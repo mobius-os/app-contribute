@@ -1,5 +1,14 @@
-// Transcript blocks are read-only destinations. No run or public action starts.
+// Transcript blocks name an identity, never an action. Opening one starts no
+// run; a prepared contribution's view offers the same guarded Send as the queue.
 export function contributeBlockTarget(intent) {
+  // A batch names up to 12 prepared records to confirm and send together.
+  const batch = /^chat-send-batch:([A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:,[A-Za-z0-9][A-Za-z0-9_.-]{0,127}){0,11})$/.exec(String(intent || ''))
+  if (batch) return { kind: 'batch', ids: [...new Set(batch[1].split(','))], embedded: true }
+  // chat-send opens the same view with the send confirmation already shown.
+  // Legacy chat-prepared titles enter the project workspace through review.js.
+  // Only chat-send is the deliberately headerless in-transcript confirmation.
+  const prepared = /^chat-send:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/.exec(String(intent || ''))
+  if (prepared) return { kind: 'prepared', id: prepared[1], embedded: true, confirm: true }
   const pull = /^(chat-pull|pull-request):([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$/.exec(String(intent || ''))
   if (pull && !pull[2].split('/').some(part => ['.', '..'].includes(part))) return { kind: 'pull', repo: pull[2], number: Number(pull[3]), embedded:pull[1] === 'chat-pull' }
   const run = /^chat-review-run:([A-Za-z0-9_-]{1,64})$/.exec(String(intent || ''))
