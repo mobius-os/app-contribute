@@ -60,7 +60,8 @@ position. Agent work progresses in place; only actual questions need the owner.
 
 Keep the local/upstream overview and prepare/pull loop; extend their project
 workspace rather than introducing a replacement Reviews room. PR body, checks,
-labels, reviewers/comments and source conversation are deliberate detail.
+labels, reviewers/comments and source conversation are deliberate detail, also
+available through read-only chat snapshots when Contribute is installed.
 
 Review-only, legacy pinned conditional merge and explicit named-PR
 review/fix/merge are distinct scopes. Takeover is bounded to server-frozen PR
@@ -110,11 +111,11 @@ Keyboard-accessible controls, state labels that do not depend on color, readable
 
 ## Minimal daily workflow (owner direction, 2026-10-02)
 
-Use a linked project repository, real status refresh, prepare/pull launch panels, actionable prepared work above PRs, compact PR authors/labels/check counts and person assignment. Agent launch offers private review with optional review-only autopilot, or scoped review/fix/merge with automatic continuation; model and effort belong to that launch. Settings contains one grouped prompt editor, not a second automation or model console. Full merge cycles and History retain meaningful current/past work; hiding archived proposals never deletes their records. Version/scope/prompt freezing stays mandatory underneath but does not require routine disclosures or duplicate decisions. Read-only guards remain intentional. New explicitly approved draft takeover reviews and fixes while draft, then marks ready only after fresh independent review and checks. Old grants retain their draft boundary.
+Use a linked project repository, real status refresh, prepare/pull launch panels, actionable prepared work above PRs, compact PR authors/labels/check counts and person assignment. Agent launch offers private review with optional review-only autopilot, or scoped review/fix/merge with automatic continuation; model and effort belong to that launch. Settings contains one grouped prompt editor, not a second automation or model console. Full merge cycles and History retain meaningful current/past work; hiding archived proposals never deletes their records. New PR chat snapshots navigate to and highlight the exact Contribute row. Version/scope/prompt freezing stays mandatory underneath but does not require routine disclosures or duplicate decisions. Read-only guards remain intentional. New explicitly approved draft takeover reviews and fixes while draft, then marks ready only after fresh independent review and checks. Old grants retain their draft boundary.
 
 ## GitHub alignment and live versions (2026-10-03)
 
-The PR list and detail follow GitHub's own presentation
+The PR list, detail and chat PR snapshot follow GitHub's own presentation
 (state icons, colored labels, "#123 · author opened …", ✓ n/m checks). A run is
 bound to each PR's exact head and to the target branch's live tip at the moment
 of consent; GitHub's PR comparison base is not used for that binding. At Start

@@ -167,6 +167,14 @@ Interpret the request in context, using Hard stop #1:
 - **Not now** declines the proposed action. Do not re-offer the same version.
   An unanswered, preselected, or empty card is not approval.
 
+## Chat PR details and review runs
+
+Use [maintainer.md](maintainer.md) for the read-only PR block helper, saved
+prompt/model preview, run blocks and scoped review modes. Rich chat detail is
+not a new approval surface: opening a block never starts work or authorizes
+comments, repairs or merges. The source or bound review chat owns continuation;
+a helper supplies evidence, not an alternative owner-facing workflow.
+
 ## GitHub without Contribute
 
 GitHub is connected in **Möbius Settings → Accounts → GitHub**, independently of

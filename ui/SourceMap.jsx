@@ -354,11 +354,16 @@ export function SourceMap({
 
   useEffect(() => {
     if (!focusKey?.nonce || handledFocusRef.current === focusKey.nonce) return
-    if (focusKey.key && !projects.some(project => project.key === focusKey.key)) return
+    // A cold repository lookup may finish before local source discovery.
+    // Once deduplicated, that repository belongs to its local project key.
+    const target = projects.find(project => project.key === focusKey.key)
+      || (focusKey.repository?.nameWithOwner && projects.find(project =>
+        project.canonical_repo?.toLowerCase() === focusKey.repository.nameWithOwner.toLowerCase()))
+    if (focusKey.key && !target) return
     handledFocusRef.current = focusKey.nonce
     if (!focusKey.key) { closeProject(); return }
     setFilter('all')
-    void openProject(focusKey.key)
+    void openProject(target.key)
   }, [focusKey, projects])
 
   const selectedProject = selected

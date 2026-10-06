@@ -359,6 +359,7 @@ export const WORKSPACE_CSS = `
 .co-pr-row { display:grid; grid-template-columns:40px 20px minmax(0,1fr) auto; column-gap:6px; align-items:start; padding:8px 12px 8px 4px; border-top:1px solid var(--border); transition:background .12s; }
 .co-pr-row:hover { background:color-mix(in srgb,var(--surface) 60%,transparent); }
 .co-pr-row.is-selected { background:var(--accent-dim); }
+.co-pr-row.is-highlighted { background:var(--accent-dim); box-shadow:inset 3px 0 var(--accent); }
 .co-pr-select { display:grid; place-items:center; width:40px; min-height:40px; cursor:pointer; }
 .co-pr-select input,.co-pr-box-head input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
 .co-pr-row > .co-gh-state { padding-top:11px; }
@@ -407,6 +408,8 @@ export const WORKSPACE_CSS = `
 .co-gh-pr-sub code { padding:1px 6px; border-radius:6px; background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:14px var(--mono,monospace); }
 .co-pr-detail-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:16px 0 4px; }
 .co-pr-detail-actions .co-btn { min-height:40px; display:inline-flex; align-items:center; gap:6px; }
+.co-gh-provenance { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:8px 0 0; color:var(--muted); font-size:14px; }
+.co-gh-chat-link { min-height:32px; padding:0 4px; border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
 .co-pr-detail .co-detail-tabs { display:flex; width:100%; gap:20px; margin:14px 0 0; border-bottom:1px solid var(--border); overflow-x:auto; }
 .co-pr-detail .co-detail-tabs button { display:inline-flex; align-items:center; gap:6px; flex:none; min-height:44px; font-size:14px; }
 .co-tab-count { min-width:22px; padding:0 7px; border-radius:2em; background:var(--surface-2,var(--surface)); color:var(--text); font-size:14px; line-height:20px; text-align:center; }

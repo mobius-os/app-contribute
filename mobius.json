@@ -103,7 +103,10 @@
     "pull-details.js",
     "service.py",
     "ui/PullRequestDetail.jsx",
+    "chat-blocks.js",
     "review-prompts.js",
-    "ui/ReviewPromptSettings.jsx"
+    "ui/ReviewPromptSettings.jsx",
+    "pr_block.py",
+    "ui/InlinePullView.jsx"
   ]
 }

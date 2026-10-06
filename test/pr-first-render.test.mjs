@@ -9,8 +9,9 @@ async function render(t, name, props) {
   renderer ||= renderModule(`
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
-    import { ReviewConfirmation, PullRequests } from './ui/PullRequests.jsx'
+    import { ReviewConfirmation, PullRequests, isOpenPull } from './ui/PullRequests.jsx'
     import { PullRequestDetail } from './ui/PullRequestDetail.jsx'
+    export { isOpenPull }
     export { draftCapabilityBlocker } from './ui/PullRequests.jsx'
     export function render(name, props) { return renderToStaticMarkup(React.createElement({ ReviewConfirmation, PullRequestDetail, PullRequests }[name], props)) }
   `)
@@ -89,6 +90,15 @@ test('detail keeps actions and tabs outside reserved independently loaded contex
   assert.match(html, /Loading description/)
   assert.doesNotMatch(html, /Take over review &amp; merge/)
 })
+
+test('focused closed or merged PRs cannot enter a new run', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { isOpenPull } = await renderer || await renderModule(`import { isOpenPull } from './ui/PullRequests.jsx'; export { isOpenPull }`)
+  assert.equal(isOpenPull({...pr,state:'OPEN'}), true)
+  assert.equal(isOpenPull({...pr,state:'CLOSED'}), false)
+  assert.equal(isOpenPull({...pr,state:'MERGED'}), false)
+})
+
 
 test('unwritable source forks explain why repair-and-merge is unavailable', async t => {
   const html = await render(t, 'ReviewConfirmation', { choice:{ pulls:[{...pr, headRepository:{ nameWithOwner:'fork/repo', viewerPermission:'READ' }}], mode:'review' }, onModeChange:()=>{} })

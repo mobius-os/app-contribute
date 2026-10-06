@@ -62,6 +62,8 @@ import {
   withdrawMobiusContribution,
 } from './api.js'
 import { ConnectionSettings } from './ui/ConnectionCard.jsx'
+import { contributeBlockTarget } from './chat-blocks.js'
+import { InlinePullView } from './ui/InlinePullView.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
@@ -73,7 +75,7 @@ import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { TaskPane } from './ui/TaskPane.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { discoverRepositories } from './collaboration.js'
+import { discoverRepositories, discoverRepository } from './collaboration.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -141,6 +143,7 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
 }
 
 export default function ContributeApp({ appId, token }) {
+  const [inlineTarget, setInlineTarget] = useState(null)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'checking' })
@@ -149,6 +152,9 @@ export default function ContributeApp({ appId, token }) {
   const [omittedCount, setOmittedCount] = useState(0)
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [projectFocus, setProjectFocus] = useState(null)
+  const [pullFocus, setPullFocus] = useState(null)
+  const sourceProjectsRef = useRef([])
+  const pullNavigationRequest = useRef(0)
   const [projectOpen, setProjectOpen] = useState(false)
   const [sourceLoading, setSourceLoading] = useState(true)
   const [sourceError, setSourceError] = useState('')
@@ -573,6 +579,22 @@ export default function ContributeApp({ appId, token }) {
     function onReviewIntent(event) {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
       if (event.data?.type !== 'moebius:app-intent') return
+      const request = ++pullNavigationRequest.current
+      const blockTarget = contributeBlockTarget(event.data.intent)
+      if (blockTarget) {
+        closeSelection()
+        if (blockTarget.kind !== 'pull' || blockTarget.embedded) { setInlineTarget(blockTarget); return }
+        setInlineTarget(null)
+        const focus = { repo:blockTarget.repo, number:blockTarget.number, nonce:String(event.data.nonce ?? crypto.randomUUID()) }
+        setPullFocus(focus)
+        const project = sourceProjectsRef.current.find(item => item.canonical_repo?.toLowerCase() === focus.repo.toLowerCase())
+        if (project) setProjectFocus({ key:project.key, nonce:focus.nonce })
+        else void discoverRepository(token, focus.repo).then(repository => {
+          if (request === pullNavigationRequest.current) setProjectFocus({ key:`external:${repository.nameWithOwner.toLowerCase()}`, repository, nonce:focus.nonce })
+        }).catch(error => { if (request === pullNavigationRequest.current) setSelectionError(error.message) })
+        return
+      }
+      setInlineTarget(null)
       const selectionId = reviewSelectionIdFromIntent(event.data.intent)
       if (selectionId) { void openSelection(selectionId); return }
       const target = contributionReviewTargetFromIntent(event.data.intent)
@@ -1340,9 +1362,12 @@ export default function ContributeApp({ appId, token }) {
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   const sourceProjects = useMemo(
-    () => attachSourceProjects(sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos),
-    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos],
+    () => attachSourceProjects(sourceSnapshot, records, incomingReviews,
+      projectFocus?.repository ? [...repositoryAccess.repositories, projectFocus.repository] : repositoryAccess.repositories,
+      projectFocus?.repository ? [...followedRepos, projectFocus.repository.nameWithOwner] : followedRepos),
+    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, projectFocus?.repository],
   )
+  sourceProjectsRef.current = sourceProjects
   const contributionRun = useMemo(() => buildContributionRun({
     records,
     reviewStatus,
@@ -1367,7 +1392,7 @@ export default function ContributeApp({ appId, token }) {
   }
   function renderPullRequests(project, navigation) {
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
-      project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
+      project={project} conn={conn} refreshKey={refreshKey} focusPull={pullFocus?.repo?.toLowerCase() === project?.canonical_repo?.toLowerCase() ? pullFocus : null} onChanged={refreshIncomingReviews}
       records={recordsForProject(records, project)} onRecord={record => {
         const found = findRunItemByRecord(projectRun(project), record.id)
         if (found) navigation.onSelect(found.item.id)
@@ -1383,17 +1408,21 @@ export default function ContributeApp({ appId, token }) {
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
-      <div className="co-header-shell">
+      {!inlineTarget?.embedded ? <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
           />
         </Header>
-      </div>
+      </div> : null}
       <main ref={pageRef} className="co-page is-sources">
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
-        {selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} /> : <SourceMap
+        {inlineTarget ? <InlinePullView target={inlineTarget} appId={appId} token={token} records={records} onClose={() => setInlineTarget(null)} onProject={repository => {
+          const repo=repository.nameWithOwner
+          setInlineTarget(null)
+          setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.toLowerCase())?.key || `external:${repo.toLowerCase()}`, repository, nonce: crypto.randomUUID() })
+        }} /> : selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} /> : <SourceMap
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus}
           onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}

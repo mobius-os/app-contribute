@@ -98,7 +98,8 @@ export async function discoverPulls(token, repo = '', cursor = null) {
   return { pulls: data.search.nodes.filter(pr => pr?.repository?.nameWithOwner && pr.headRefOid),
     total: data.search.issueCount, ...data.search.pageInfo }
 }
-// Re-read one exact PR identity without scanning all open PR pages.
+// An explicit transcript link may name a closed PR or a later search page.
+// Resolve that exact identity without scanning all open PR pages.
 export async function discoverPull(token, repo, number) {
   const name = repositoryName(repo)
   if (!name || !Number.isSafeInteger(number) || number < 1) throw new Error('Choose a valid pull request.')
