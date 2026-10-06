@@ -97,6 +97,8 @@ class PreparedBlockTests(unittest.TestCase):
     self.assertEqual([item['intent'] for item in block['items']], ['review:rec-1', 'review:rec-9'])
     self.assertEqual(block['action'], {'label': 'Contribute all', 'intent': 'chat-send-batch:rec-1'})
     self.assertEqual(block['title'], '2 contributions ready')
+    self.assertEqual(block['items'][0]['action'], {'label': 'Contribute', 'intent': 'chat-send:rec-1'})
+    self.assertNotIn('action', block['items'][1])
     with self.assertRaises(ValueError):
       module.batch_block([RECORD], None, lambda _path: None)
 

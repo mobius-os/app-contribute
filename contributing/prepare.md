@@ -238,7 +238,8 @@ python3 /data/apps/contribute/prepared_block.py '<record-id>'
 
 Paste the printed `mobius-app` fence unchanged, once per record (one per
 linked stack). For several records, pass every id to the same helper to print
-one batch block whose **Contribute all** confirms and sends them together. It shows the proposed PR in the chat; its **Contribute** button
+one batch block: each row has its own **Contribute**, and **Contribute all**
+confirms once and sends every ready item. It shows the proposed PR in the chat; its **Contribute** button
 opens Contribute's live view of that exact record with one send confirmation
 above the diff, using the same freshness checks as Contribute itself. That
 button is the approval surface: do not also tell the owner to open Contribute, ask for the same send

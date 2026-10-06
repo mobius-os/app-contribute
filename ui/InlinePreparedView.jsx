@@ -194,17 +194,19 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   const ready = items.filter(item => !item.blocker && !progress[item.id])
   const loading = items.some(item => (!item.record && !item.read)
     || (item.unit && !ledgerReady && stackReadiness(item.unit).code === 'incomplete'))
+  // Every ready item starts at once; the server serializes whatever must not
+  // overlap, and each row reports its own result as it lands.
   async function sendAll() {
     setBusy(true)
-    for (const item of ready) {
-      setProgress(current => ({ ...current, [item.id]: { state: 'sending' } }))
+    setProgress(current => ({ ...current, ...Object.fromEntries(ready.map(item => [item.id, { state: 'sending' }])) }))
+    await Promise.all(ready.map(async item => {
       let outcome
       try {
         outcome = (item.unit ? await onSendStack(item.unit.records) : await onSend(item.record)) || {}
       } catch { outcome = { error: 'The result could not be confirmed. Refresh before trying again.' } }
       const sent = outcome.ok || outcome.pending || outcome.alreadyHandled
       setProgress(current => ({ ...current, [item.id]: sent ? { state: 'sent' } : { state: 'failed', note: outcome.error || 'Could not send. Refresh before trying again.' } }))
-    }
+    }))
     setBusy(false)
   }
   async function refresh() {
@@ -226,7 +228,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     <div className="co-inline-confirm" role="group" aria-label="Confirm contributing several">
       <div>
         <strong>{finished ? 'Contribution results' : `Contribute ${ready.length} of ${items.length}?`}</strong>
-        <span>Each one opens publicly from your GitHub account, one at a time in this order; a linked chain opens parent first. Nothing merges. Anything not ready is skipped and says why.</span>
+        <span>Each one opens publicly from your GitHub account, all at once; a linked chain opens parent first. Nothing merges. Anything not ready is skipped and says why.</span>
       </div>
       <ul className="co-batch-list">
         {items.map(item => {

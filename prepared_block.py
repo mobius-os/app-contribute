@@ -8,7 +8,8 @@ Contribute's live view of it in the chat with the send confirmation shown;
 Contribute's own checks decide whether it can send. The
 `pull` row and `facts` are only a snapshot (facts serve older chat views).
 Several ids print one batch block: each record as its own row, with one
-"Contribute all" action that confirms and sends them together, in order.
+own Contribute button and one "Contribute all" that confirms once and then
+sends every ready item in parallel.
 """
 import argparse
 import json
@@ -119,7 +120,8 @@ def batch_block(records, ledger=None, read=gh_json):
       cache[path] = read(path)
     return cache[path]
   blocks = [prepared_block(record, ledger, cached) for record in records]
-  items = [{'title': block['title'], 'intent': block['intent'], 'pull': block['pull']} for block in blocks]
+  items = [{'title': block['title'], 'intent': block['intent'], 'pull': block['pull'],
+    **({'action': block['action']} if 'action' in block else {})} for block in blocks]
   sendable = [record['id'] for record, block in zip(records, blocks) if 'action' in block]
   batch = {'app': 'contribute', 'intent': 'reviews:queue',
     'title': f'{len(records)} contributions ready', 'inline': True, 'height': 640, 'items': items}
