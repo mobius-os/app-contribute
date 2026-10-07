@@ -1,10 +1,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createInlineSession } from '../inline-session.js'
+import { createInlineSession, pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
 
 const record = (id, extra = {}) => ({ id, type: 'pr', status: 'prepared', repo: 'team/repo', revision: 1,
   plan: { action: 'pr', repo: 'team/repo', head_sha: 'a'.repeat(40) },
   quality_review: { state: 'all_clear', reviewed_head_sha: 'a'.repeat(40) }, ...extra })
+
+test('legacy batch marks only canonically linked current phase sent', () => {
+  const a = record('a')
+  const b = record('b')
+  const linked = { ...a, status: 'open', number: 12, url: 'https://github.com/team/repo/pull/12' }
+  assert.deepEqual(publicationPhaseResult([a], [], { ok: true }), { state: 'checking' })
+  assert.deepEqual(publicationPhaseResult([a], [{ ...linked, url: '' }], { ok: true }), { state: 'checking' })
+  assert.deepEqual(publicationPhaseResult([a], [linked], { ok: true }), { state: 'sent' })
+  assert.deepEqual(settled(linked), { label: 'View PR #12', url: 'https://github.com/team/repo/pull/12' })
+  assert.deepEqual(publicationPhaseResult([a, b], [linked], { ok: true }), { state: 'checking' })
+  assert.deepEqual(publicationPhaseResult([a], [], { pending: true }), { state: 'checking' })
+  assert.deepEqual(publicationPhaseResult([a], [], { failure: { owner: 'automatic' } }), { state: 'checking' })
+})
+
+test('legacy batch pending suffix cannot borrow approval; settled phase gets a new key', () => {
+  const a = record('a'), b = record('b')
+  const prefix = { key: 'stack:s', ready: [a, b] }
+  const suffix = { key: 'stack:s', ready: [b] }
+  assert.notEqual(publicationPhaseKey(prefix), publicationPhaseKey(suffix))
+  const progress = { [publicationPhaseKey(prefix)]: { state: 'checking', unitKey: 'stack:s', phaseIds: ['a', 'b'] } }
+  const item = { unitKey: 'stack:s', phase: [b] }
+  assert.equal(pendingPhaseBlocks(progress, item, [a, b]), true)
+  assert.equal(pendingPhaseBlocks(progress, item, [{ ...a, status: 'open', number: 1, url: 'https://github.com/team/repo/pull/1' }, b]), true)
+  assert.equal(pendingPhaseBlocks(progress, item, [
+    { ...a, status: 'open', number: 1, url: 'https://github.com/team/repo/pull/1' },
+    { ...b, status: 'open', number: 2, url: 'https://github.com/team/repo/pull/2' },
+  ]), false)
+})
 function fixture(actions, initial, options = {}) {
   let current = initial
   const states = []

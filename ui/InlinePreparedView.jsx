@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { qualityReviewFor, reviewStateFor } from '../review.js'
+import { pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
 import { loadFreshContributionRecord } from '../storage.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords, stackReadiness } from '../stack.js'
 import { ContributionCard, RepoLink } from './ContributionCard.jsx'
@@ -172,6 +173,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   const key = ids.join(',')
   const [exact, setExact] = useState({ key: '', byId: {} })
   const [progress, setProgress] = useState({})
+  const [canonical, setCanonical] = useState({})
   const [busy, setBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   useEffect(() => {
@@ -184,30 +186,42 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     }
     return () => { alive = false }
   }, [key])
+  const currentRecords = [...records.map(record => newerRecord(record, canonical[record.id])),
+    ...Object.values(canonical).filter(record => !records.some(item => item.id === record.id))]
   const items = ids.map(id => {
     const read = exact.key === key && Boolean(exact.byId[id])
-    const record = newerRecord(records.find(item => item.id === id), read ? exact.byId[id].record : null)
-    const unit = record ? preparedStackUnit(record, [record, ...records.filter(item => item.id !== record.id)]) : null
+    const record = newerRecord(currentRecords.find(item => item.id === id), read ? exact.byId[id].record : null)
+    const unit = record ? preparedStackUnit(record, [record, ...currentRecords.filter(item => item.id !== record.id)]) : null
     const item = { id, read: read && ledgerReady, record, unit }
-    return { ...item, blocker: batchItemBlocker(item, reviewStatus, ledgerReady) }
+    const phase = unit ? stackPublicationRecords(unit) : record?.status === 'prepared' ? [record] : []
+    const unitKey = unit ? `stack:${unit.id}` : `record:${id}`
+    return { ...item, phase, unitKey, phaseKey: publicationPhaseKey({ key: unitKey, ready: phase }),
+      blocker: batchItemBlocker(item, reviewStatus, ledgerReady) }
   })
-  const ready = items.filter(item => !item.blocker && !progress[item.id])
+  // One stack is one publication unit, even if the block names two layers.
+  // A later phase gets a fresh key and therefore needs a fresh confirmation.
+  const ready = [...new Map(items.filter(item => !item.blocker && item.phase.length && !progress[item.phaseKey] && !pendingPhaseBlocks(progress, item, currentRecords))
+    .map(item => [item.unitKey, item])).values()]
   const loading = items.some(item => (!item.record && !item.read)
     || (item.unit && !ledgerReady && stackReadiness(item.unit).code === 'incomplete'))
   // Every ready item starts at once; the server serializes whatever must not
   // overlap, and each row reports its own result as it lands.
   async function sendAll() {
     setBusy(true)
-    setProgress(current => ({ ...current, ...Object.fromEntries(ready.map(item => [item.id, { state: 'sending' }])) }))
+    setProgress(current => ({ ...current, ...Object.fromEntries(ready.map(item => [item.phaseKey, {
+      state: 'sending', unitKey: item.unitKey, phaseIds: item.phase.map(record => record.id),
+    }])) }))
     await Promise.all(ready.map(async item => {
       let outcome
       try {
         outcome = (item.unit ? await onSendStack(item.unit.records) : await onSend(item.record)) || {}
-      } catch { outcome = { error: 'The result could not be confirmed. Refresh before trying again.' } }
-      const next = outcome.ok ? { state: 'sent' }
-        : outcome.pending || outcome.alreadyHandled ? { state: 'checking' }
-        : { state: 'failed', note: outcome.error || 'Could not send. Refresh before trying again.' }
-      setProgress(current => ({ ...current, [item.id]: next }))
+      } catch { outcome = { pending: true } }
+      const fresh = await Promise.all(item.phase.map(async member => {
+        try { return await loadFreshContributionRecord(member.id) } catch { return null }
+      }))
+      setCanonical(current => ({ ...current, ...Object.fromEntries(fresh.filter(Boolean).map(record => [record.id, record])) }))
+      const next = publicationPhaseResult(item.phase, fresh, outcome)
+      setProgress(current => ({ ...current, [item.phaseKey]: { ...next, unitKey: item.unitKey, phaseIds: item.phase.map(record => record.id) } }))
     }))
     setBusy(false)
   }
@@ -216,19 +230,20 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     try { await onRefresh?.() } finally { setRefreshing(false) }
   }
   const status = item => {
-    const done = progress[item.id]
+    const done = progress[item.phaseKey]
+    const pendingEarlier = pendingPhaseBlocks(progress, item, currentRecords)
+    const members = item.unit?.records || (item.record ? [item.record] : [])
+    const links = [...new Map(members.map(settled).filter(Boolean).map(link => [link.url, link])).values()]
+    const linkView = links.map(link => <a key={link.url} className="co-repo-link" href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>)
     if (done?.state === 'sending') return <span className="co-batch-status is-busy">Sending…</span>
-    if (done?.state === 'checking') return <span className="co-batch-status is-busy">Checking result…</span>
-    if (done?.state === 'sent') return <span className="co-batch-status is-sent">Sent</span>
-    if (done?.state === 'failed') return <span className="co-batch-status is-failed">{done.note}</span>
+    if (done?.state === 'checking') return <span className="co-batch-status is-busy">Checking result… {linkView}</span>
+    if (done?.state === 'sent') return <span className="co-batch-status is-sent">Sent {linkView}</span>
+    if (done?.state === 'failed') return <span className="co-batch-status is-failed">{done.note} {linkView}</span>
+    if (pendingEarlier) return <span className="co-batch-status is-busy">Checking earlier result… {linkView}</span>
     if (item.record && item.record.status !== 'prepared') {
-      const repo = item.record.plan?.repo || item.record.repo || ''
-      const number = Number(item.record.number)
-      const confirmed = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && Number.isSafeInteger(number) && number > 0 &&
-        item.record.url === `https://github.com/${repo}/pull/${number}` && ['draft', 'open', 'landing', 'merged', 'closed'].includes(item.record.status)
-      return <span className="co-batch-status">{confirmed ? 'Already sent' : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
+      return <span className="co-batch-status">{links.length ? <>Already sent {linkView}</> : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
     }
-    return item.blocker ? <span className="co-batch-status">{item.blocker}</span> : <span className="co-batch-status is-ready">Ready</span>
+    return item.blocker ? <span className="co-batch-status">{item.blocker} {linkView}</span> : <span className="co-batch-status is-ready">Ready {linkView}</span>
   }
   const finished = Object.keys(progress).length > 0 && !busy
   return <section className="co-projects-view co-workspace co-inline-view is-embedded" aria-label="Contribute several">

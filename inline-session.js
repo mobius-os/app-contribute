@@ -5,14 +5,23 @@ import { qualityReviewFor, reviewStateFor } from './review.js'
 import { stackMeta, sortStackRecords, stackPublicationRecords, stackReadiness } from './stack.js'
 
 const copy = value => JSON.parse(JSON.stringify(value))
-const githubPull = record => {
+export const githubPull = record => {
   const repo = record?.plan?.repo || record?.repo || ''
   const number = Number(record?.number)
   const url = record?.url
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && Number.isSafeInteger(number) && number > 0 &&
     url === `https://github.com/${repo}/pull/${number}` ? { label: `View PR #${number}`, url } : null
 }
-const settled = record => ['draft', 'open', 'landing', 'merged', 'closed'].includes(record?.status) && githubPull(record)
+export const settled = record => ['draft', 'open', 'landing', 'merged', 'closed'].includes(record?.status) && githubPull(record)
+export const publicationPhaseKey = unit => JSON.stringify([unit.key, unit.ready.map(rec => [rec.id, rec.plan?.action, rec.plan?.head_sha])])
+export function publicationPhaseResult(phase, fresh, outcome = {}) {
+  if (phase.length && phase.every(member => settled(fresh.find(record => record?.id === member.id)))) return { state: 'sent' }
+  if (outcome.pending || outcome.ok || outcome.alreadyHandled || outcome.failure?.owner === 'automatic') return { state: 'checking' }
+  return { state: 'failed', note: outcome.error || 'Could not confirm the result. Check Contribute before trying again.' }
+}
+export const pendingPhaseBlocks = (progress, item, records) => Object.values(progress).some(result => result.unitKey === item.unitKey &&
+  result.state === 'checking' && result.phaseIds.some(id => item.phase.some(record => record.id === id)) &&
+  !result.phaseIds.every(id => settled(records.find(record => record.id === id))))
 const blocker = (record, reviewStatus) => {
   if (!record) return 'Reading this contribution…'
   if (record.status !== 'prepared') return record.status === 'abandoned' ? 'This contribution was dismissed.' : 'This contribution is not ready to send.'
@@ -65,7 +74,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   const unitsFor = key => [...new Map(idsFor(key).map(id => { const unit = unitFor(id); return [unit.key, unit] })).values()]
   // A new phase of one stack is a new approval; an ambiguous phase remains
   // locked, while a reviewed suffix can receive its own explicit confirmation.
-  const phaseKey = unit => JSON.stringify([unit.key, unit.ready.map(rec => [rec.id, rec.plan?.action, rec.plan?.head_sha])])
+  const phaseKey = publicationPhaseKey
   const reconciled = phaseIds => phaseIds.length > 0 && phaseIds.every(id => settled(byId.get(id)))
   const reconcileResults = () => {
     for (const [key, result] of results) if (reconciled(result.phaseIds)) results.delete(key)
