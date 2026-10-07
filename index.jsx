@@ -17,6 +17,9 @@
 // submit endpoint; Feedback returns to the source chat; Dismiss CAS-abandons),
 // and composes header, tiles, connection card, feed.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+// Allows generic hosts to negotiate an in-place session for legacy blocks.
+export const appBlockSessions = true
 import { CSS } from './theme.js'
 import {
   attachSourceProjects,
@@ -65,6 +68,7 @@ import { ConnectionSettings } from './ui/ConnectionCard.jsx'
 import { contributeBlockTarget } from './chat-blocks.js'
 import { InlinePullView } from './ui/InlinePullView.jsx'
 import { InlineBatchView, InlinePreparedView } from './ui/InlinePreparedView.jsx'
+import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
@@ -1415,6 +1419,8 @@ export default function ContributeApp({ appId, token }) {
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
+      <InlineBlockSession records={records} ledgerReady={ledgerReady} reviewStatus={reviewStatus}
+        onSend={onSend} onSendStack={onSendStack} onRefresh={() => refreshCoordinatorRef.current()} />
       {!inlineTarget?.embedded ? <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen || reviewFocus || selectionFocus || inlineTarget ? () => {
           setInlineTarget(null)

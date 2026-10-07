@@ -104,7 +104,7 @@ def prepared_block(record, ledger=None, read=gh_json):
   # the full app; the in-chat view opens through the action.
   block = {'app': 'contribute', 'intent': f'review:{record["id"]}',
     'title': plan.get('title') or record.get('title') or 'Prepared contribution',
-    'inline': True, 'height': 600, 'pull': pull, 'facts': facts}
+    'inline': True, 'interaction': 'inline', 'height': 600, 'pull': pull, 'facts': facts}
   if verdict == 'all_clear' and (len(layers) < 2 or waiting):
     block['action'] = {'label': 'Contribute', 'intent': f'chat-send:{record["id"]}'}
   return block
@@ -124,7 +124,7 @@ def batch_block(records, ledger=None, read=gh_json):
     **({'action': block['action']} if 'action' in block else {})} for block in blocks]
   sendable = [record['id'] for record, block in zip(records, blocks) if 'action' in block]
   batch = {'app': 'contribute', 'intent': 'reviews:queue',
-    'title': f'{len(records)} contributions ready', 'inline': True, 'height': 640, 'items': items}
+    'title': f'{len(records)} contributions ready', 'inline': True, 'interaction': 'inline', 'height': 640, 'items': items}
   if sendable:
     batch['action'] = {'label': 'Contribute all', 'intent': 'chat-send-batch:' + ','.join(sendable)}
   return batch

@@ -96,7 +96,7 @@ test('a batch lists every named record, counts only the ready ones, and says why
   const module = await load(t)
   if (!module) return
   const unreviewed = { ...reviewed, id: 'rec-2', title: 'Not reviewed yet', plan: { ...plan, title: 'Not reviewed yet' }, quality_review: { state: 'changes_needed' } }
-  const sent = { ...reviewed, id: 'rec-3', status: 'open', plan: { ...plan, title: 'Already out' } }
+  const sent = { ...reviewed, id: 'rec-3', status: 'open', number: 3, url: 'https://github.com/team/repo/pull/3', plan: { ...plan, title: 'Already out' } }
   const html = (await module).renderBatch({ ...base, target: { kind: 'batch', ids: ['rec-1', 'rec-2', 'rec-3'], embedded: true }, records: [reviewed, unreviewed, sent] })
   assert.match(html, /Contribute 1 of 3\?/)
   assert.match(html, />Contribute all 1</)
@@ -104,4 +104,14 @@ test('a batch lists every named record, counts only the ready ones, and says why
   assert.match(html, /still needs a review before it can be sent/)
   assert.match(html, /Already sent/)
   assert.match(html, /What “All clear” means/)
+})
+
+
+test('an open record without a verified PR link is not called sent', async t => {
+  const module = await load(t)
+  if (!module) return
+  const unverified = { ...reviewed, id: 'rec-4', status: 'open' }
+  const html = (await module).renderBatch({ ...base, target: { kind: 'batch', ids: ['rec-1', 'rec-4'], embedded: true }, records: [reviewed, unverified] })
+  assert.match(html, /Not ready/)
+  assert.doesNotMatch(html, /Already sent/)
 })

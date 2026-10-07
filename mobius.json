@@ -109,6 +109,8 @@
     "pr_block.py",
     "prepared_block.py",
     "ui/InlinePullView.jsx",
-    "ui/InlinePreparedView.jsx"
+    "ui/InlinePreparedView.jsx",
+    "inline-session.js",
+    "ui/InlineBlockSession.jsx"
   ]
 }

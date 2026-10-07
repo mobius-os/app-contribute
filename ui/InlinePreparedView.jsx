@@ -204,8 +204,10 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
       try {
         outcome = (item.unit ? await onSendStack(item.unit.records) : await onSend(item.record)) || {}
       } catch { outcome = { error: 'The result could not be confirmed. Refresh before trying again.' } }
-      const sent = outcome.ok || outcome.pending || outcome.alreadyHandled
-      setProgress(current => ({ ...current, [item.id]: sent ? { state: 'sent' } : { state: 'failed', note: outcome.error || 'Could not send. Refresh before trying again.' } }))
+      const next = outcome.ok ? { state: 'sent' }
+        : outcome.pending || outcome.alreadyHandled ? { state: 'checking' }
+        : { state: 'failed', note: outcome.error || 'Could not send. Refresh before trying again.' }
+      setProgress(current => ({ ...current, [item.id]: next }))
     }))
     setBusy(false)
   }
@@ -216,9 +218,16 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   const status = item => {
     const done = progress[item.id]
     if (done?.state === 'sending') return <span className="co-batch-status is-busy">Sending…</span>
+    if (done?.state === 'checking') return <span className="co-batch-status is-busy">Checking result…</span>
     if (done?.state === 'sent') return <span className="co-batch-status is-sent">Sent</span>
     if (done?.state === 'failed') return <span className="co-batch-status is-failed">{done.note}</span>
-    if (item.record && item.record.status !== 'prepared') return <span className="co-batch-status is-sent">Already sent</span>
+    if (item.record && item.record.status !== 'prepared') {
+      const repo = item.record.plan?.repo || item.record.repo || ''
+      const number = Number(item.record.number)
+      const confirmed = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && Number.isSafeInteger(number) && number > 0 &&
+        item.record.url === `https://github.com/${repo}/pull/${number}` && ['draft', 'open', 'landing', 'merged', 'closed'].includes(item.record.status)
+      return <span className="co-batch-status">{confirmed ? 'Already sent' : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
+    }
     return item.blocker ? <span className="co-batch-status">{item.blocker}</span> : <span className="co-batch-status is-ready">Ready</span>
   }
   const finished = Object.keys(progress).length > 0 && !busy

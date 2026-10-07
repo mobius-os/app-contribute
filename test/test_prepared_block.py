@@ -26,6 +26,7 @@ class PreparedBlockTests(unittest.TestCase):
     block = block_for(RECORD)
     self.assertEqual(block['intent'], 'review:rec-1')
     self.assertIs(block['inline'], True)
+    self.assertEqual(block['interaction'], 'inline')
     self.assertNotIn('expand_label', block)
     self.assertIn({'label': 'Change', 'value': '3 files · +53 −49'}, block['facts'])
     self.assertIn({'label': 'Review', 'value': 'All clear'}, block['facts'])
