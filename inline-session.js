@@ -86,7 +86,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const status = unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
       : ready.length ? 'Ready' : loading ? 'Loading' : reason ? 'Needs attention' : links.length ? 'Sent' : ''
     const note = failure?.note || failures.find(result => result.state === 'pending')?.note ||
-      (!ready.length ? reason || (loading ? 'Reading this contribution…' : links.length ? 'Contribution settled.' : 'Nothing is ready to contribute.') : reason || '')
+      reason || (loading ? 'Reading this contribution…' : anyBusy || links.length || ready.length ? '' : 'Nothing is ready to contribute.')
     return {
       key: item.key,
       label: item.label || 'Contribute',
