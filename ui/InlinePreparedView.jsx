@@ -34,6 +34,7 @@ export function sendBlocker(record, reviewState) {
   if (reviewState?.state === 'needs_refresh' || record.needs_attention === true) return 'The staged source changed after review. Ask the agent in this chat to refresh it.'
   if (String(record.last_submit_error || '').trim()) return 'The last send attempt failed. Open Contribute to see why.'
   if (qualityReviewFor(record).state !== 'all_clear') return 'This version still needs a review before it can be sent.'
+  if (reviewState?.state !== 'ready') return 'This contribution still needs a current source check in Contribute.'
   return ''
 }
 
@@ -78,7 +79,7 @@ function SendConfirm({ record, reviewState, onSend, onClose }) {
   </div>
 }
 
-function StackSend({ unit, ledgerReady, onSendStack }) {
+function StackSend({ unit, ledgerReady, reviewStatus, onSendStack }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const readiness = stackReadiness(unit)
@@ -87,6 +88,8 @@ function StackSend({ unit, ledgerReady, onSendStack }) {
   // looks incomplete.
   if (!ledgerReady && readiness.code === 'incomplete') return <p role="status" className="co-review-note">Loading the linked changes…</p>
   if (!readiness.ok) return readiness.code === 'settled' ? null : <p className="co-review-note">{readiness.message}</p>
+  const blocked = phase.map(record => sendBlocker(record, reviewStateFor(record, reviewStatus))).find(Boolean)
+  if (blocked) return <p className="co-review-note" role="status">{blocked}</p>
   const label = readiness.updating ? `Contribute ${phase.length} ${phase.length === 1 ? 'update' : 'updates'}` : `Contribute ${phase.length} linked ${phase.length === 1 ? 'PR' : 'PRs'}`
   async function send() {
     setBusy(true); setNote('')
@@ -141,18 +144,18 @@ export function InlinePreparedView({ target, appId, records, ledgerReady, review
         <div><strong>Contribute this linked chain to <RepoLink repo={unit.records[0]?.plan?.repo || unit.records[0]?.repo} />?</strong>
           <span>Opens each layer publicly from your GitHub account, parent first. Nothing merges. Every reviewed change is below.</span></div>
         <div className="co-inline-confirm-actions"><button type="button" className="co-btn" onClick={() => setConfirming(false)}>Not now</button>
-          <StackSend unit={unit} ledgerReady={ledgerReady} onSendStack={onSendStack} /></div>
+          <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={onSendStack} /></div>
         <ReviewNote records={unit.records.filter(member => member.status === 'prepared')} />
       </div> : null}
       {unit.records.map(member => <ContributionCard key={member.id} rec={member} reviewState={reviewStateFor(member, reviewStatus)}
         loadDiff={loadDiff} initialExpanded={member.id === record.id} showDecision={false} />)}
-      {confirming ? null : <StackSend unit={unit} ledgerReady={ledgerReady} onSendStack={onSendStack} />}
+      {confirming ? null : <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={onSendStack} />}
     </div> : null}
     {record && !unit && confirming ? <SendConfirm record={record} reviewState={reviewStateFor(record, reviewStatus)} onSend={onSend} onClose={() => setConfirming(false)} /> : null}
     {/* No source-chat button here: the reader is already in a chat. While the
         confirmation is open it is the only Send, so the card shows none. */}
     {record && !unit ? <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)}
-      onSend={confirming ? undefined : onSend} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
+      onSend={confirming || reviewStateFor(record, reviewStatus)?.state !== 'ready' ? undefined : onSend} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
   </section>
 }
 

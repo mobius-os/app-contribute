@@ -22,7 +22,7 @@ const plan = { action: 'pr', repo: 'team/repo', title: 'Fix the thing', branch: 
 const reviewed = { id: 'rec-1', type: 'pr', status: 'prepared', repo: 'team/repo', title: 'Fix the thing', plan,
   quality_review: { state: 'all_clear', reviewed_head_sha: plan.head_sha } }
 const base = { target: { kind: 'prepared', id: 'rec-1', embedded: true }, appId: 1, ledgerReady: true,
-  reviewStatus: { state: 'ready', byId: {} }, onSend() {}, onSendStack() {}, onDismiss() {}, onFeedback() {}, loadDiff: async () => '' }
+  reviewStatus: { state: 'ready', byId: { 'rec-1': { state: 'ready' } } }, onSend() {}, onSendStack() {}, onDismiss() {}, onFeedback() {}, loadDiff: async () => '' }
 
 test('a reviewed prepared record shows its own Contribute button inside the transcript view', async t => {
   const html = await render(t, { ...base, records: [reviewed] })
@@ -80,6 +80,13 @@ test('the confirmation explains instead of sending when the version is not revie
   const html = await render(t, { ...base, target: { ...base.target, confirm: true }, records: [{ ...reviewed, quality_review: { state: 'changes_needed' } }] })
   if (!html) return
   assert.match(html, /still needs a review before it can be sent/)
+  assert.doesNotMatch(html, />Contribute</)
+})
+
+test('the confirmation requires a current per-record source verdict, not an empty response', async t => {
+  const html = await render(t, { ...base, target: { ...base.target, confirm: true }, records: [reviewed], reviewStatus: { state: 'ready', byId: {} } })
+  if (!html) return
+  assert.match(html, /current source check/)
   assert.doesNotMatch(html, />Contribute</)
 })
 

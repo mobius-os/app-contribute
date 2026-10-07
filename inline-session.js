@@ -32,6 +32,8 @@ const blocker = (record, reviewStatus) => {
   return ''
 }
 const bounded = value => String(value || '').slice(0, 500)
+const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, reviewStatus)?.state === 'ready'
+  ? '' : 'This contribution still needs a current source check in Contribute.'
 
 export function createInlineSession({ sessionId, actions, publish, loadExact, send, sendStack, refresh }) {
   const advertised = [...new Map((actions || []).filter(item => typeof item?.key === 'string').map(item => [item.key, item])).values()]
@@ -63,7 +65,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const meta = stackMeta(record)
     if (!meta) {
       const reason = settled(record) ? '' : ledgerReady && !inLedger(record)
-        ? 'This contribution is no longer in Contribute.' : blocker(record, reviewStatus)
+        ? 'This contribution is no longer in Contribute.' : blocker(record, reviewStatus) || (ledgerReady ? currentReviewBlocker(record, reviewStatus) : '')
       return { id, key: `record:${id}`, records: [record], ready: !reason && record.status === 'prepared' ? [record] : [], reason }
     }
     const members = sortStackRecords(records().filter(rec => stackMeta(rec)?.id === meta.id))
@@ -73,7 +75,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const reason = ledgerReady && members.some(member => !inLedger(member))
       ? 'The linked changes are no longer in Contribute.'
       : !state.ok ? (state.code === 'settled' ? '' : loading ? 'Loading the linked changes…' : state.message)
-      : stackPublicationRecords(unit).map(rec => blocker(rec, reviewStatus)).find(Boolean) || ''
+      : stackPublicationRecords(unit).map(rec => blocker(rec, reviewStatus) || (ledgerReady ? currentReviewBlocker(rec, reviewStatus) : '')).find(Boolean) || ''
     return { id, key: `stack:${meta.id}`, records: members, ready: reason ? [] : stackPublicationRecords(unit), stack: true, reason, loading }
   }
   // A batch may name two layers of one chain. It still has one publication unit.

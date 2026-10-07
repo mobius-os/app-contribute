@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createInlineSession, pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
 
+const readyReview = records => ({ state: 'ready', byId: Object.fromEntries(records.map(rec => [rec.id, { state: 'ready' }])) })
+
 const record = (id, extra = {}) => ({ id, type: 'pr', status: 'prepared', repo: 'team/repo', revision: 1,
   plan: { action: 'pr', repo: 'team/repo', head_sha: 'a'.repeat(40) },
   quality_review: { state: 'all_clear', reviewed_head_sha: 'a'.repeat(40) }, ...extra })
@@ -56,8 +58,8 @@ function fixture(actions, initial, options = {}) {
     send: options.send || (async rec => { sends.push(rec.id); return { ok: true, record: { ...rec, status: 'open', number: 7, url: 'https://github.com/team/repo/pull/7' } } }),
     sendStack: options.sendStack || (async recs => { sends.push(recs.map(rec => rec.id).join(',')); return { ok: true } }),
     refresh: async () => {}, })
-  session.updateLedger(current, true, {})
-  return { session, states, sends, setRecords(next) { current = next; session.updateLedger(next, true, {}) },
+  session.updateLedger(current, true, readyReview(current))
+  return { session, states, sends, setRecords(next) { current = next; session.updateLedger(next, true, readyReview(next)) },
     action(key) { return states.at(-1).actions.find(item => item.key === key) } }
 }
 
@@ -231,7 +233,7 @@ test('prepared focused activation waits for authoritative ledger and review, the
   assert.equal(states.at(-1).actions[0].confirming, false)
   session.updateLedger([current], false, { state: 'loading', byId: {} })
   assert.equal(states.at(-1).actions[0].confirming, false)
-  session.updateLedger([current], true, { state: 'ready', byId: {} })
+  session.updateLedger([current], true, readyReview([current]))
   assert.equal(states.at(-1).actions[0].confirming, true)
   assert.deepEqual(sends, [])
   session.cancel('chat-send:a')
@@ -296,6 +298,20 @@ test('a failed focused read is not an indefinite loading placeholder', async () 
   assert.equal(states.at(-1).actions[0].disabled, true)
 })
 
+test('an all-clear local review cannot replace a missing current source verdict', async () => {
+  const current = record('a'), states = [], sends = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }], publish: s => states.push(s), loadExact: async () => current,
+    send: async rec => { sends.push(rec.id) } })
+  await session.hydrate()
+  session.updateLedger([current], true, { state: 'ready', byId: {} })
+  session.activate('chat-send:a')
+  assert.equal(states.at(-1).actions[0].status, 'Needs attention')
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  assert.match(states.at(-1).actions[0].note, /current source check/)
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
+})
+
 test('mixed stack update prefix settles, then new-PR suffix needs a new explicit confirmation', async () => {
   const stack = (id, position, action, parent = '') => record(id, { branch: `stack/s/${id}`, plan: { action, repo: 'team/repo', head_sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
   const a = stack('a', 1, 'pr_update'), b = stack('b', 2, 'pr', 'a')
@@ -333,7 +349,7 @@ test('activation before authoritative hydration opens confirmation later without
   session.activate('chat-send:a')
   assert.equal(states.at(-1).actions[0].confirming, false)
   const hydration = session.hydrate()
-  session.updateLedger([record('a')], true, {})
+  session.updateLedger([record('a')], true, readyReview([record('a')]))
   assert.equal(states.at(-1).actions[0].confirming, false)
   resolveExact(record('a'))
   await hydration
@@ -350,7 +366,7 @@ test('cancel clears an activation requested before hydration', async () => {
   session.activate('chat-send:a')
   session.cancel('chat-send:a')
   const hydration = session.hydrate()
-  session.updateLedger([record('a')], true, {})
+  session.updateLedger([record('a')], true, readyReview([record('a')]))
   resolveExact(record('a'))
   await hydration
   assert.equal(states.at(-1).actions[0].confirming, false)
