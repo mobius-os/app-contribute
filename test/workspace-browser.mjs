@@ -656,10 +656,13 @@ window.runWorkspaceChecks = async () => {
       const originalGet = window.mobius.storage.get
       const originalList = window.mobius.storage.listWithStatus
       let focusedAction = null
-      const observeBlock = event => {
-        if (event.data?.type === 'moebius:app-block-state' && event.data.sessionId === 'focused-fixture') focusedAction = event.data.actions[0]
+      // This file:// fixture has no concrete shell origin. Capture only the
+      // outbound transport boundary; production attribution checks stay real.
+      const originalPost = window.parent.postMessage
+      window.parent.postMessage = (message, ...args) => {
+        if (message?.type === 'moebius:app-block-state' && message.sessionId === 'focused-fixture') focusedAction = message.actions[0]
+        else originalPost.call(window.parent, message, ...args)
       }
-      window.addEventListener('message', observeBlock)
       window.mobius.storage.getWithVersion = async (...args) => { exactReads++; return originalVersioned(...args) }
       window.mobius.storage.get = async (...args) => { settingsReads++; return originalGet(...args) }
       window.mobius.storage.listWithStatus = async () => { ledgerReads++; return {complete:true,entries:[{type:'file',name:exact.id+'.json',content:exact}]} }
@@ -681,7 +684,7 @@ window.runWorkspaceChecks = async () => {
       window.mobius.storage.getWithVersion = originalVersioned
       window.mobius.storage.get = originalGet
       window.mobius.storage.listWithStatus = originalList
-      window.removeEventListener('message', observeBlock)
+      window.parent.postMessage = originalPost
     })
     await check('returning from Settings refreshes the full app account and live feed exactly once', async () => {
       // Mount the actual app, not a refresh helper. Only external storage and
