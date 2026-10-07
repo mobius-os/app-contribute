@@ -37,7 +37,6 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   let confirming = null
   let requestedActivation = null
   let frozen = null
-  let notice = ''
   let alive = true
   const idsFor = key => {
     const target = contributeBlockTarget(key)
@@ -101,7 +100,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
       links,
     }
   }
-  const emit = () => { if (alive) publish({ type: 'moebius:app-block-state', sessionId, actions: advertised.map(makeAction), notice }) }
+  const emit = () => { if (alive) publish({ type: 'moebius:app-block-state', sessionId, actions: advertised.map(makeAction), notice: '' }) }
   async function hydrate() {
     await Promise.all(ids.map(async id => {
       try {
@@ -124,7 +123,6 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     if (!ready.length) return false
     frozen = { key, units: copy(ready) }
     confirming = key
-    notice = `Contribute ${ready.length} ${ready.length === 1 ? 'change' : 'changes'} publicly from your GitHub account? Nothing merges.`
     return true
   }
   function fulfillRequestedActivation() {
@@ -135,7 +133,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   }
   function activate(key) {
     if (busyUnits.size || !advertised.some(item => item.key === key)) return
-    if (confirming && confirming !== key) { confirming = null; frozen = null; notice = '' }
+    if (confirming && confirming !== key) { confirming = null; frozen = null }
     else if (confirming) return
     requestedActivation = null
     if (!authoritative(key)) requestedActivation = key
@@ -144,14 +142,14 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   }
   function cancel(key) {
     if (busyUnits.size || key !== confirming && key !== requestedActivation) return
-    requestedActivation = null; confirming = null; frozen = null; notice = ''; emit()
+    requestedActivation = null; confirming = null; frozen = null; emit()
   }
   async function confirm(key) {
     if (busyUnits.size || confirming !== key || frozen?.key !== key || !frozen.units.length) return
     const approval = frozen
     if (approval.units.some(unit => attempted.has(phaseKey(unit)))) return
     approval.units.forEach(unit => { attempted.add(phaseKey(unit)); busyUnits.add(unit.key) })
-    confirming = null; notice = ''; emit()
+    confirming = null; emit()
     await Promise.all(approval.units.map(async unit => {
       let outcome
       try { outcome = (unit.stack ? await sendStack(unit.records) : await send(unit.records[0])) || {} }

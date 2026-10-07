@@ -24,6 +24,7 @@ test('init and canonical hydration are read-only; activate and cancel are read-o
   await f.session.hydrate()
   f.session.activate('chat-send:a')
   assert.equal(f.action('chat-send:a').confirming, true)
+  assert.equal(f.states.at(-1).notice, '', 'confirmation stays in the two buttons without extra prose')
   f.session.cancel('chat-send:a')
   assert.equal(f.action('chat-send:a').confirming, false)
   assert.deepEqual(f.sends, [])
