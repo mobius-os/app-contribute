@@ -33,6 +33,20 @@ test('legacy batch pending suffix cannot borrow approval; settled phase gets a n
     { ...b, status: 'open', number: 2, url: 'https://github.com/team/repo/pull/2' },
   ]), false)
 })
+
+test('a settled stack card links only its own PR and clears old snapshot badges', async () => {
+  const stack = (id, position, parent = '') => record(id, { status: 'open', number: position,
+    url: `https://github.com/team/repo/pull/${position}`, branch: `stack/s/${id}`,
+    plan: { action: 'pr', repo: 'team/repo', head_sha: 'a'.repeat(40), base_sha: 'a'.repeat(40),
+      branch: `stack/s/${id}`, stack: { id: 's', position, total: 2,
+        base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
+  const f = fixture(['chat-send:b'], [stack('a', 1), stack('b', 2, 'a')])
+  await f.session.hydrate()
+  assert.deepEqual(f.action('chat-send:b').links, [{ label: 'View PR #2', url: 'https://github.com/team/repo/pull/2' }])
+  assert.equal(f.action('chat-send:b').status, 'Open')
+  assert.deepEqual(f.action('chat-send:b').badges, [])
+  assert.deepEqual(f.sends, [])
+})
 function fixture(actions, initial, options = {}) {
   let current = initial
   const states = []
@@ -133,7 +147,7 @@ test('batch reports each row as it settles while sibling remains busy', async ()
   assert.equal(f.action('chat-send-batch:a,b').note, '')
   pending.get('a')({ ok: true, record: { ...record('a'), status: 'open', number: 1, url: 'https://github.com/team/repo/pull/1' } })
   await new Promise(resolve => setImmediate(resolve))
-  assert.equal(f.action('chat-send:a').status, 'Sent')
+  assert.equal(f.action('chat-send:a').status, 'Open')
   assert.equal(f.action('chat-send:a').links.length, 1)
   assert.equal(f.action('chat-send:b').status, 'Contributing')
   assert.equal(f.action('chat-send-batch:a,b').status, 'Contributing')
@@ -162,7 +176,7 @@ test('pending reconciles on a later canonical ledger update, but not without a v
   f.setRecords([record('a', { status: 'open', number: 4 })])
   assert.equal(f.action('chat-send:a').status, 'Checking result')
   f.setRecords([record('a', { status: 'open', number: 4, url: 'https://github.com/team/repo/pull/4' })])
-  assert.equal(f.action('chat-send:a').status, 'Sent')
+  assert.equal(f.action('chat-send:a').status, 'Open')
 })
 
 test('successful response without a verified link remains Checking result', async () => {
@@ -182,6 +196,104 @@ test('initial hydration says Loading, and empty footer keeps its original label'
   f.updateLedger([], true, {})
   assert.equal(states.at(-1).actions[0].status, 'Needs attention')
   assert.equal(states.at(-1).actions[0].hidden, true)
+})
+
+test('focused hydration resolves a public PR before the ledger and queues activation until authority arrives', async () => {
+  const linked = { ...record('a'), status: 'open', number: 9, url: 'https://github.com/team/repo/pull/9' }
+  const states = [], sends = []
+  const session = createInlineSession({ sessionId: 'focused', actions: [{ key: 'chat-send:a', label: 'Contribute' }],
+    publish: state => states.push(state), loadExact: async () => linked,
+    send: async rec => { sends.push(rec); return { ok: true } }, sendStack: async () => { throw Error('unexpected stack') } })
+  session.updateLedger([], false, null)
+  await session.hydrate()
+  assert.equal(states.at(-1).actions[0].status, 'Open')
+  assert.equal(states.at(-1).actions[0].note, '')
+  assert.deepEqual(states.at(-1).actions[0].links, [{ label: 'View PR #9', url: linked.url }])
+  session.activate('chat-send:a')
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  session.updateLedger([linked], true, { state: 'ready', byId: {} })
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  assert.deepEqual(sends, [])
+})
+
+test('prepared focused activation waits for authoritative ledger and review, then still requires confirm', async () => {
+  const current = record('a')
+  const states = [], sends = []
+  const session = createInlineSession({ sessionId: 'focused', actions: [{ key: 'chat-send:a' }],
+    publish: state => states.push(state), loadExact: async () => current,
+    send: async rec => { sends.push(rec.id); return { pending: true } }, sendStack: async () => { throw Error('unexpected stack') } })
+  session.updateLedger([], false, null)
+  await session.hydrate()
+  assert.equal(states.at(-1).actions[0].status, 'Prepared')
+  assert.equal(states.at(-1).actions[0].hidden, false)
+  assert.equal(states.at(-1).actions[0].disabled, false)
+  session.activate('chat-send:a')
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  session.updateLedger([current], false, { state: 'loading', byId: {} })
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  session.updateLedger([current], true, { state: 'ready', byId: {} })
+  assert.equal(states.at(-1).actions[0].confirming, true)
+  assert.deepEqual(sends, [])
+  session.cancel('chat-send:a')
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
+})
+
+test('exact prepared record missing from the complete ledger cannot activate or send', async () => {
+  const current = record('a'), states = [], sends = []
+  const session = createInlineSession({ sessionId: 'removed', actions: [{ key: 'chat-send:a' }],
+    publish: state => states.push(state), loadExact: async () => current,
+    send: async rec => { sends.push(rec.id); return { ok: true } } })
+  session.updateLedger([], true, { state: 'ready', byId: {} })
+  await session.hydrate()
+  session.activate('chat-send:a')
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  assert.match(states.at(-1).actions[0].note, /no longer in Contribute/)
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
+})
+
+test('focused public stack receipt does not wait for linked members that were not requested', async () => {
+  const linked = record('b', { status: 'open', number: 9, url: 'https://github.com/team/repo/pull/9',
+    plan: { repo: 'team/repo', stack: { id: 's', position: 2, total: 2, parent_record_id: 'a', base_branch: 'stack/s/a' } } })
+  const states = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:b' }], publish: s => states.push(s), loadExact: async () => linked })
+  await session.hydrate()
+  assert.equal(states.at(-1).actions[0].status, 'Open')
+  assert.equal(states.at(-1).actions[0].note, '')
+  assert.equal(states.at(-1).actions[0].hidden, true)
+})
+
+test('a partially resolved batch cannot claim the missing contribution was sent', async () => {
+  const linked = record('a', { status: 'open', number: 9, url: 'https://github.com/team/repo/pull/9' })
+  const states = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send-batch:a,b' }], publish: s => states.push(s), loadExact: async id => id === 'a' ? linked : null })
+  await session.hydrate()
+  assert.notEqual(states.at(-1).actions[0].status, 'Sent')
+})
+
+test('unavailable review settles checking to an actionable refusal without sending', async () => {
+  const current = record('a'), states = [], sends = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }], publish: s => states.push(s),
+    loadExact: async () => current, send: async rec => { sends.push(rec.id) } })
+  await session.hydrate()
+  session.activate('chat-send:a')
+  assert.equal(states.at(-1).actions[0].status, 'Checking')
+  session.updateLedger([current], true, { state: 'unavailable', byId: {} })
+  assert.equal(states.at(-1).actions[0].status, 'Needs attention')
+  assert.match(states.at(-1).actions[0].note, /Could not verify/)
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
+})
+
+test('a failed focused read is not an indefinite loading placeholder', async () => {
+  const states = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }], publish: s => states.push(s), loadExact: async () => { throw Error('offline') } })
+  await session.hydrate()
+  assert.equal(states.at(-1).actions[0].status, 'Needs attention')
+  assert.match(states.at(-1).actions[0].note, /Could not read/)
+  assert.equal(states.at(-1).actions[0].disabled, true)
 })
 
 test('mixed stack update prefix settles, then new-PR suffix needs a new explicit confirmation', async () => {
@@ -207,8 +319,8 @@ test('mixed stack update prefix settles, then new-PR suffix needs a new explicit
   assert.equal(f.action('chat-send:a').status, 'Checking result')
   assert.equal(f.action('chat-send:a').links.length, 1)
   f.setRecords([{ ...a, status: 'open', number: 8, url: 'https://github.com/team/repo/pull/8' }, { ...b, status: 'open', number: 9, url: 'https://github.com/team/repo/pull/9' }])
-  assert.equal(f.action('chat-send:a').status, 'Sent')
-  assert.equal(f.action('chat-send:a').links.length, 2)
+  assert.equal(f.action('chat-send:a').status, 'Open')
+  assert.equal(f.action('chat-send:a').links.length, 1)
 })
 
 test('activation before authoritative hydration opens confirmation later without sending', async () => {
@@ -263,7 +375,7 @@ test('partial stack failure note clears only after explicit recovery settles rem
   assert.equal(calls, 1) // no retry before a second explicit confirm
   await f.session.confirm('chat-send:a')
   assert.equal(calls, 2)
-  assert.equal(f.action('chat-send:a').status, 'Sent')
-  assert.equal(f.action('chat-send:a').links.length, 2)
+  assert.equal(f.action('chat-send:a').status, 'Open')
+  assert.equal(f.action('chat-send:a').links.length, 1)
   assert.equal(f.action('chat-send:a').note, '')
 })

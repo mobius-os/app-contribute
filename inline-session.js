@@ -57,16 +57,22 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const record = byId.get(id) || ledger.find(rec => rec.id === id)
     if (!record) return { id, key: `record:${id}`, records: [], ready: [], loading: !exactRead.has(id) || !ledgerReady,
       reason: exactRead.has(id) && ledgerReady ? 'This contribution is no longer in Contribute.' : 'Reading this contribution…' }
+    // A fresh exact read proves the record's content, not that it belongs to
+    // the complete current ledger. Removed work cannot borrow its old review.
+    const inLedger = member => ledger.some(current => current.id === member.id)
     const meta = stackMeta(record)
     if (!meta) {
-      const reason = settled(record) ? '' : blocker(record, reviewStatus)
+      const reason = settled(record) ? '' : ledgerReady && !inLedger(record)
+        ? 'This contribution is no longer in Contribute.' : blocker(record, reviewStatus)
       return { id, key: `record:${id}`, records: [record], ready: !reason && record.status === 'prepared' ? [record] : [], reason }
     }
     const members = sortStackRecords(records().filter(rec => stackMeta(rec)?.id === meta.id))
     const unit = { type: 'stack', records: members, total: meta.total }
     const state = stackReadiness(unit)
     const loading = !ledgerReady && state.code === 'incomplete'
-    const reason = !state.ok ? (state.code === 'settled' ? '' : loading ? 'Loading the linked changes…' : state.message)
+    const reason = ledgerReady && members.some(member => !inLedger(member))
+      ? 'The linked changes are no longer in Contribute.'
+      : !state.ok ? (state.code === 'settled' ? '' : loading ? 'Loading the linked changes…' : state.message)
       : stackPublicationRecords(unit).map(rec => blocker(rec, reviewStatus)).find(Boolean) || ''
     return { id, key: `stack:${meta.id}`, records: members, ready: reason ? [] : stackPublicationRecords(unit), stack: true, reason, loading }
   }
@@ -79,34 +85,54 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   const reconcileResults = () => {
     for (const [key, result] of results) if (reconciled(result.phaseIds)) results.delete(key)
   }
-  const authoritative = key => ledgerReady && idsFor(key).every(id => exactRead.has(id))
+  const authoritative = key => ledgerReady && !['loading', 'unavailable'].includes(reviewStatus?.state) && idsFor(key).every(id => exactRead.has(id))
   const makeAction = item => {
     const units = unitsFor(item.key)
-    const ready = units.filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)))
-    const links = [...new Map(units.flatMap(unit => unit.records.map(settled).filter(Boolean)).map(link => [link.url, link])).values()].slice(0, 12)
-    const loading = !authoritative(item.key) || units.some(unit => unit.loading)
-    const reason = units.map(unit => unit.reason).find(Boolean)
+    const ready = authoritative(item.key) ? units.filter(unit => unit.ready.length && !attempted.has(phaseKey(unit))) : []
+    // Display identities are not publication units. A row links its own PR;
+    // confirmation still freezes the complete parent-first stack below.
+    const addressed = idsFor(item.key)
+    const focused = addressed.map(id => byId.get(id) || ledger.find(rec => rec.id === id)).filter(Boolean)
+    const links = [...new Map(focused.map(settled).filter(Boolean).map(link => [link.url, link])).values()]
+    const readComplete = addressed.length > 0 && addressed.every(id => exactRead.has(id))
+    const focusedResolved = readComplete && focused.length === addressed.length
+    const publicResolved = focusedResolved && focused.every(settled)
+    const reviewUnavailable = reviewStatus?.state === 'unavailable'
+    // This first tap starts authoritative checks; it is not Send approval.
+    const canActivate = !authoritative(item.key) && !reviewUnavailable && focusedResolved && focused.every(rec => rec.status === 'prepared' && !blocker(rec, reviewStatus))
+    const publicStatus = focused.length === 1
+      ? ({ draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }[focused[0].status] || 'Sent')
+      : 'Sent'
+    const checkingAuthority = requestedActivation === item.key && !authoritative(item.key) && !reviewUnavailable
+    const loading = !readComplete || checkingAuthority
+    const focusedReason = readComplete && !focusedResolved ? 'Could not read this contribution. Open it in Contribute to check its current state.'
+      : focused.map(rec => !settled(rec) && blocker(rec, reviewStatus)).find(Boolean)
+    const reason = reviewUnavailable && !publicResolved ? 'Could not verify the current review. Open Contribute to retry; nothing was sent.'
+      : !ledgerReady && !checkingAuthority ? focusedReason : units.map(unit => unit.reason).find(Boolean)
     const unitBusy = units.some(unit => busyUnits.has(unit.key))
     const anyBusy = busyUnits.size > 0
     const failures = [...results.values()].filter(result => units.some(unit => unit.key === result.unitKey))
     const failure = failures.find(result => result.tone === 'danger')
     const checking = failures.some(result => result.state === 'pending') || units.some(unit => unit.records.some(rec => rec.status === 'submitting'))
     const status = unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
-      : ready.length ? 'Ready' : loading ? 'Loading' : reason ? 'Needs attention' : links.length ? 'Sent' : ''
+      : checkingAuthority ? 'Checking' : ready.length ? 'Ready' : publicResolved ? publicStatus : canActivate ? 'Prepared' : loading ? 'Loading' : reason ? 'Needs attention' : ''
     const note = failure?.note || failures.find(result => result.state === 'pending')?.note ||
-      reason || (loading ? 'Reading this contribution…' : anyBusy || links.length || ready.length ? '' : 'Nothing is ready to contribute.')
+      (checkingAuthority ? 'Checking linked changes and the current review…' : '') ||
+      (!ledgerReady && (publicResolved || canActivate) ? '' : reason) ||
+      (loading && !publicResolved && !canActivate ? 'Reading this contribution…' : anyBusy || links.length || ready.length || canActivate ? '' : 'Nothing is ready to contribute.')
     return {
       key: item.key,
       label: item.label || 'Contribute',
-      disabled: confirming === item.key ? anyBusy : !ready.length || anyBusy || checking || Boolean(confirming),
+      disabled: confirming === item.key ? anyBusy : !ready.length && !canActivate || anyBusy || checking || checkingAuthority || Boolean(confirming),
       busy: unitBusy,
       confirming: confirming === item.key,
-      hidden: !ready.length && !unitBusy && confirming !== item.key,
+      hidden: !ready.length && !canActivate && !unitBusy && confirming !== item.key,
       note: bounded(note),
       tone: failure ? 'danger' : checking || reason && !loading ? 'attention' : 'neutral',
       status,
       statusTone: failure ? 'danger' : checking || reason && !loading ? 'attention' : status === 'Sent' ? 'success' : 'neutral',
       links,
+      badges: [],
     }
   }
   const emit = () => { if (alive) publish({ type: 'moebius:app-block-state', sessionId, actions: advertised.map(makeAction), notice: '' }) }

@@ -646,6 +646,43 @@ window.runWorkspaceChecks = async () => {
       await until(() => query('[data-pr-key="owner/project#7"]'), 'Cold destination did not show its PR inventory')
       ensure(calls.starts.length === beforeColdStarts, 'Opening a cold destination started agent work')
     })
+    await check('focused block hydration reads only its own record before activation', async () => {
+      root.render(null); await frame(); await frame()
+      values.clear()
+      const exact = {...prepared, id:'focused-record'}
+      values.set('contributions/focused-record.json', exact)
+      let exactReads = 0, ledgerReads = 0, settingsReads = 0
+      const originalVersioned = window.mobius.storage.getWithVersion
+      const originalGet = window.mobius.storage.get
+      const originalList = window.mobius.storage.listWithStatus
+      let focusedAction = null
+      const observeBlock = event => {
+        if (event.data?.type === 'moebius:app-block-state' && event.data.sessionId === 'focused-fixture') focusedAction = event.data.actions[0]
+      }
+      window.addEventListener('message', observeBlock)
+      window.mobius.storage.getWithVersion = async (...args) => { exactReads++; return originalVersioned(...args) }
+      window.mobius.storage.get = async (...args) => { settingsReads++; return originalGet(...args) }
+      window.mobius.storage.listWithStatus = async () => { ledgerReads++; return {complete:true,entries:[{type:'file',name:exact.id+'.json',content:exact}]} }
+      const initialRequests = calls.requests.length
+      root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{sessionId:'focused-fixture',actions:[{key:'chat-send:focused-record',intent:'chat-send:focused-record',label:'Contribute'}]}} />)
+      await until(() => exactReads > 0, 'Focused exact read did not resolve')
+      await frame(); await frame()
+      await until(() => focusedAction?.status === 'Prepared', 'Focused card did not resolve its prepared status')
+      ensure(!focusedAction.hidden && !focusedAction.disabled, 'Prepared card hid or disabled the activation control')
+      ensure(ledgerReads === 0 && settingsReads === 0 && calls.requests.length === initialRequests, 'Focused hydration started workspace, account, or settings reads')
+      ensure(!query('.co-root'), 'Focused hydration mounted the workspace')
+      window.fullAppFixture = true
+      window.fullAppConnected = false
+      const priorPublications = calls.publications.length
+      window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record'}}))
+      await until(() => ledgerReads > 0, 'Activation did not start the authoritative ledger')
+      ensure(calls.publications.length === priorPublications, 'Activation published without confirmation')
+      window.mobius.storage.getWithVersion = originalVersioned
+      window.mobius.storage.get = originalGet
+      window.mobius.storage.listWithStatus = originalList
+      window.removeEventListener('message', observeBlock)
+    })
     await check('returning from Settings refreshes the full app account and live feed exactly once', async () => {
       // Mount the actual app, not a refresh helper. Only external storage and
       // fetch boundaries are faked; hooks, coordinator and reconciliation run.

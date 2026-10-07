@@ -98,8 +98,6 @@ def prepared_block(record, ledger=None, read=gh_json):
     pull['author'] = me['login']
   layers = stack_layers(record, ledger)
   waiting = [layer for layer in layers if layer.get('status') == 'prepared']
-  if len(layers) > 1:
-    pull['badges'].append({'label': f'{len(layers)} linked PRs', 'tone': 'neutral'})
   # The block's own intent is only the title link, so it opens the record in
   # the full app; the in-chat view opens through the action.
   block = {'app': 'contribute', 'intent': f'review:{record["id"]}',

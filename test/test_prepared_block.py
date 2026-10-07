@@ -89,7 +89,7 @@ class PreparedBlockTests(unittest.TestCase):
         Path(tmp, f"{record['id']}.json").write_text(json.dumps(record))
       block = block_for(first, tmp)
     self.assertEqual(block['action'], {'label': 'Contribute', 'intent': 'chat-send:rec-1'})
-    self.assertIn({'label': '2 linked PRs', 'tone': 'neutral'}, block['pull']['badges'])
+    self.assertEqual(block['pull']['badges'], [{'label': 'All clear', 'tone': 'success'}])
 
 
   def test_batch_lists_each_record_and_sends_only_reviewed_ones_together(self):

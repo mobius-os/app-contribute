@@ -147,7 +147,20 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
     }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></TaskPane>
 }
 
-export default function ContributeApp({ appId, token }) {
+// Inline cards start with exact record reads only. The ordinary workspace and
+// its account, preferences, source and ledger reads are mounted on activation,
+// where the existing guarded Send handlers remain the sole publication path.
+export default function ContributeAppEntry({ appId, token, blockSession = null }) {
+  const [activatedKey, setActivatedKey] = useState('')
+  if (blockSession && !activatedKey) return <InlineBlockSession blockSession={blockSession}
+    records={[]} ledgerReady={false} reviewStatus={null}
+    onActivateRequest={setActivatedKey}
+    onSend={() => ({ error: 'This card must be activated before sending.' })}
+    onSendStack={() => ({ error: 'This card must be activated before sending.' })} />
+  return <ContributeApp appId={appId} token={token} blockSession={blockSession} autoActivateKey={activatedKey} />
+}
+
+function ContributeApp({ appId, token, blockSession, autoActivateKey }) {
   const [inlineTarget, setInlineTarget] = useState(null)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
@@ -1419,7 +1432,8 @@ export default function ContributeApp({ appId, token }) {
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
-      <InlineBlockSession records={records} ledgerReady={ledgerReady} reviewStatus={reviewStatus}
+      <InlineBlockSession blockSession={blockSession} autoActivateKey={autoActivateKey}
+        records={records} ledgerReady={ledgerReady && ledgerCurrentRef.current} reviewStatus={reviewStatus}
         onSend={onSend} onSendStack={onSendStack} onRefresh={() => refreshCoordinatorRef.current()} />
       {!inlineTarget?.embedded ? <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen || reviewFocus || selectionFocus || inlineTarget ? () => {
