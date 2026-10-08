@@ -165,9 +165,26 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
   const failedStatus = mode === 'ready'
     ? current.status === 'draft' && !current.readying
     : current.status === 'prepared'
-  const exactFailureIntent = ['action', 'branch', 'base_branch', 'base_sha'].every(
-    key => !record.plan?.[key] || current.plan?.[key] === record.plan[key],
-  )
+  // Stack publication uses its nested target and parent, not just the flat
+  // plan. Missing or invalid descriptors cannot identify the frozen attempt.
+  const frozenStack = stackMeta(record)
+  const currentStack = stackMeta(current)
+  const hasFrozenStack = Object.hasOwn(record.plan || {}, 'stack')
+  const hasCurrentStack = Object.hasOwn(current.plan || {}, 'stack')
+  const exactStack = hasFrozenStack === hasCurrentStack && (!hasFrozenStack || (
+    frozenStack && currentStack
+    && Object.hasOwn(record.plan.stack, 'parent_record_id') === Object.hasOwn(current.plan.stack, 'parent_record_id')
+    && (!Object.hasOwn(record.plan.stack, 'parent_record_id') || typeof record.plan.stack.parent_record_id === 'string')
+    && record.plan.stack.parent_record_id === current.plan.stack.parent_record_id
+    && ['id', 'position', 'total', 'baseBranch', 'parentRecordId'].every(
+      key => currentStack[key] === frozenStack[key],
+    )
+  ))
+  const exactFailureIntent = exactStack
+    && (current.plan?.branch || current.branch || '') === (record.plan?.branch || record.branch || '')
+    && ['action', 'branch', 'base_branch', 'base_sha'].every(
+      key => current.plan?.[key] === record.plan?.[key],
+    )
   if (failedStatus && exactFailureIntent && typeof error === 'string' && error.trim()
     && /^[a-f0-9]{40}$/i.test(record.plan?.head_sha || '')
     && after > before && (newDiagnostic || newSubmitAttempt)

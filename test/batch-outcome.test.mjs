@@ -92,3 +92,69 @@ test('missing frozen versions cannot attribute a canonical diagnostic to this co
  assert.equal(api.canonicalBatchRecordOutcome({...opened,status:'draft'},{...opened,status:'draft',updated_at:failed.updated_at,last_ready_error:'New failure',last_ready_error_code:'ready_failed'},'ready'),null)
  assert.deepEqual(api.canonicalBatchRecordOutcome({...phase,updated_at:undefined,created_at:phase.updated_at},failed,'send'),{error:failed.last_submit_error})
 })
+
+const stacked={...phase,plan:{...phase.plan,branch:'stack/chain/2',base_branch:undefined,base_sha:'b'.repeat(40),stack:{id:'chain',position:2,total:2,base_branch:'stack/chain/1',parent_record_id:'parent'}}}
+test('late stack failures belong only to the frozen effective target and member identity',async t=>{
+ const api=await load(t);if(!api)return
+ for(const mode of ['send','ready']) {
+  const frozen=mode==='ready'?{...stacked,status:'draft',number:2,url:'https://github.com/team/repo/pull/2'}:stacked
+  const errorKey=mode==='ready'?'last_ready_error':'last_submit_error'
+  const current={...frozen,updated_at:failed.updated_at,[errorKey]:'Exact stack phase failed'}
+  assert.deepEqual(api.canonicalBatchRecordOutcome(frozen,current,mode),{error:current[errorKey]})
+  const alternatives=[
+   {...frozen.plan,stack:{...frozen.plan.stack,base_branch:'stack/other/1'}},
+   {...frozen.plan,stack:{...frozen.plan.stack,parent_record_id:'other'}},
+   {...frozen.plan,stack:{...frozen.plan.stack,id:'other'}},
+   {...frozen.plan,stack:{...frozen.plan.stack,position:1}},
+   {...frozen.plan,stack:{...frozen.plan.stack,total:3}},
+   {...frozen.plan,stack:undefined}, {...frozen.plan,stack:null},
+   {...frozen.plan,stack:{...frozen.plan.stack,position:'invalid'}},
+   {...frozen.plan,base_branch:'stack/chain/1'},
+  ]
+  for(const plan of alternatives) {
+   assert.equal(api.canonicalBatchRecordOutcome(frozen,{...current,plan},mode),null,mode+' '+JSON.stringify(plan))
+   assert.equal(api.batchRecordOutcome(frozen,{...current,plan},{pending:true},mode),'checking')
+  }
+  const noStack={...frozen,plan:{...frozen.plan}};delete noStack.plan.stack
+  assert.equal(api.canonicalBatchRecordOutcome(noStack,current,mode),null,'added stack is a different phase')
+  const removed={...current,plan:{...current.plan}};delete removed.plan.stack
+  assert.equal(api.canonicalBatchRecordOutcome(frozen,removed,mode),null,'removed stack is a different phase')
+  const malformed={...frozen,plan:{...frozen.plan,stack:{...frozen.plan.stack,total:1}}}
+  assert.equal(api.canonicalBatchRecordOutcome(malformed,{...current,plan:malformed.plan},mode),null,'invalid descriptors cannot identify failure')
+  assert.deepEqual(api.canonicalBatchRecordOutcome(frozen,{...current,plan:{...current.plan,stack:{...current.plan.stack,name:'New display label'}}},mode),{error:current[errorKey]},'display label is not publication identity')
+ }
+})
+
+test('flat descriptor additions, removals and fallback branch drift cannot attribute another publication phase',async t=>{
+ const api=await load(t);if(!api)return
+ for(const mode of ['send','ready']) {
+  const frozen=mode==='ready'?{...phase,status:'draft',number:1,url:'https://github.com/team/repo/pull/1'}:phase
+  const current={...frozen,updated_at:failed.updated_at,[mode==='ready'?'last_ready_error':'last_submit_error']:'New diagnostic'}
+  for(const key of ['action','branch','base_branch']) {
+   const plan={...current.plan};delete plan[key]
+   assert.equal(api.canonicalBatchRecordOutcome(frozen,{...current,plan},mode),null,'removed '+key)
+  }
+  assert.equal(api.canonicalBatchRecordOutcome(frozen,{...current,plan:{...current.plan,base_sha:'c'.repeat(40)}},mode),null,'added base SHA')
+  const fallback={...frozen,branch:'fix/a',plan:{...frozen.plan}};delete fallback.plan.branch
+  assert.equal(api.canonicalBatchRecordOutcome(fallback,{...current,branch:'fix/other',plan:fallback.plan},mode),null,'effective fallback branch changed')
+ }
+})
+
+test('first-layer parent absence and invalid values cannot impersonate its frozen descriptor',async t=>{
+ const api=await load(t);if(!api)return
+ for(const mode of ['send','ready']) {
+  const frozen={...stacked,status:mode==='ready'?'draft':'prepared',number:mode==='ready'?1:undefined,url:mode==='ready'?'https://github.com/team/repo/pull/1':undefined,plan:{...stacked.plan,branch:'stack/chain/1',stack:{...stacked.plan.stack,position:1,base_branch:'main',parent_record_id:''}}}
+  const current={...frozen,updated_at:failed.updated_at,[mode==='ready'?'last_ready_error':'last_submit_error']:'Exact first-layer diagnostic'}
+  for(const parent of [null,undefined,42]) {
+   const plan={...current.plan,stack:{...current.plan.stack,parent_record_id:parent}}
+   assert.equal(api.canonicalBatchRecordOutcome(frozen,{...current,plan},mode),null)
+  }
+  const missing={...current,plan:{...current.plan,stack:{...current.plan.stack}}};delete missing.plan.stack.parent_record_id
+  assert.equal(api.canonicalBatchRecordOutcome(frozen,missing,mode),null)
+  const absent={...frozen,plan:missing.plan}
+  assert.deepEqual(api.canonicalBatchRecordOutcome(absent,missing,mode),{error:current[mode==='ready'?'last_ready_error':'last_submit_error']},'unchanged optional root parent stays valid')
+  assert.equal(api.canonicalBatchRecordOutcome(absent,current,mode),null,'adding the parent descriptor is not this frozen phase')
+  const invalid={...frozen,plan:{...frozen.plan,stack:{...frozen.plan.stack,parent_record_id:null}}}
+  assert.equal(api.canonicalBatchRecordOutcome(invalid,{...current,plan:invalid.plan},mode),null)
+ }
+})
