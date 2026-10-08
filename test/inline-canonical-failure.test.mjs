@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { targetDrifts, targetCaseRecords } from './inline-target-cases.mjs'
 import { createInlineSession } from '../inline-session.js'
 
 const record = (id, extra = {}) => ({ id, type: 'pr', status: 'prepared', repo: 'team/repo',
@@ -13,7 +14,7 @@ function fixture(initial, options = {}) {
   let records = initial, exact = initial, state, calls = 0
   const key = options.key || `chat-send:${initial[0].id}`
   const session = createInlineSession({ sessionId: 'failure', actions: [{ key }, ...initial.map(rec => ({ key: `chat-send:${rec.id}` }))],
-    loadExact: async id => { if (exact instanceof Error) throw exact; return exact.find(rec => rec.id === id) },
+    loadExact: options.loadExact || (async id => { if (exact instanceof Error) throw exact; return exact.find(rec => rec.id === id) }),
     send: async rec => { calls++; return options.send ? options.send(rec) : { pending: true } },
     sendStack: async recs => { calls++; return options.sendStack ? options.sendStack(recs) : { pending: true } },
     checkpoint: options.checkpoint, retain: options.retain,
@@ -133,4 +134,68 @@ test('checkpoint observation decoding strips foreign approval fields and invalid
     const locked = fixture([a], { checkpoint: { id: 'invalid-observation', data: JSON.stringify(invalid) }, retain: true }); await locked.session.hydrate()
     assert.equal(locked.state.recoveryError, true); assert.equal(locked.action.disabled, true); assert.equal(locked.calls, 0)
   }
+})
+
+
+for (const item of targetDrifts) test(`another publication target cannot diagnose the attempted phase: ${item.name}`, async () => {
+  const original = targetCaseRecords(item), f = fixture(original); await f.start()
+  const changed = structuredClone(original); item.mutate(changed)
+  const attemptedId = original.at(-1).id
+  const next = changed.map(rec => rec.id === attemptedId ? { ...failed(rec), last_submit_error: 'Failure from different target' } : rec)
+  f.ledger(next); await f.read(next)
+  assert.equal(f.action.status, 'Checking result', item.name)
+  assert.doesNotMatch(f.action.note, /Failure from different target/)
+  assert.equal(f.state.retain, true); assert.equal(f.action.disabled, true); assert.equal(f.calls, 1)
+})
+
+test('pre-hash baseline cannot rebind frozen intent to a changed current target', async () => {
+  const original = targetCaseRecords({}), f = fixture(original)
+  await f.session.hydrate(); f.session.activate(f.key)
+  const changed = structuredClone(original); changed[0].plan.branch = 'fix/different'; changed[0].plan.base_branch = 'release'
+  f.ledger(changed); await f.session.confirm(f.key)
+  const next = changed.map(failed); f.ledger(next); await f.read(next)
+  assert.equal(f.action.status, 'Checking result'); assert.equal(f.calls, 1); assert.equal(f.state.retain, true)
+})
+
+test('hash await snapshots the baseline metadata and cannot adopt a mutated error or target', async () => {
+  const original = targetCaseRecords({}), f = fixture(original)
+  await f.session.hydrate(); f.session.activate(f.key)
+  const digest = crypto.subtle.digest.bind(crypto.subtle); let release
+  crypto.subtle.digest = (algorithm, bytes) => new Promise(resolve => { release = () => digest(algorithm, bytes).then(resolve) })
+  let sending
+  try {
+    sending = f.session.confirm(f.key)
+    original[0].plan.branch = 'fix/different'; original[0].last_submit_error = 'Injected during hash'; original[0].updated_at = '2026-10-08T22:01:00Z'
+    release()
+  } finally { crypto.subtle.digest = digest }
+  await sending
+  const baseline = JSON.parse(f.state.checkpoint.data).phases[0].observations[0]
+  assert.equal(baseline.error, ''); assert.equal(baseline.at, Date.parse('2026-10-08T22:00:00Z'))
+  const changed = original.map(failed); f.ledger(changed); await f.read(changed)
+  assert.equal(f.action.status, 'Checking result'); assert.equal(f.calls, 1)
+})
+
+test('held old exact target read loses to a newer exact generation without misdiagnosis', async () => {
+  const original = targetCaseRecords({}); let next = original, release, hold = false
+  const f = fixture(original,{loadExact:id=>hold?new Promise(resolve=>{release=resolve}):Promise.resolve(next.find(rec=>rec.id===id))})
+  await f.start(); hold = true; const older = f.session.hydrate(); hold = false
+  const changed = structuredClone(original); changed[0].plan.base_branch = 'release'; next = changed.map(failed); f.ledger(next)
+  await f.session.hydrate(); release(failed(original[0])); await older
+  assert.equal(f.action.status, 'Checking result'); assert.equal(f.calls,1); assert.equal(f.state.retain,true)
+  next = original.map(rec=>({...failed(rec),updated_at:'2026-10-08T22:03:00Z'})); f.ledger(next); await f.session.hydrate(); attention(f)
+})
+
+
+for (const kind of ['missing', 'missing-timestamp', 'failed']) test(`latest ${kind} linked-parent exact read cannot lend a stale identity to child failure`, async () => {
+  const original = targetCaseRecords({stack:true}); let next = original
+  const f = fixture(original,{loadExact:async id=>{
+    if(id===original[0].id && next!==original) {
+      if(kind==='failed') throw Error('parent unavailable')
+      if(kind==='missing') return null
+      const parent={...next[0]}; delete parent.updated_at; return parent
+    }
+    return next.find(rec=>rec.id===id)
+  }})
+  await f.start(); next=original.map((rec,index)=>index?failed(rec):rec); f.ledger(next); await f.session.hydrate()
+  assert.equal(f.action.status,'Checking result'); assert.equal(f.calls,1); assert.equal(f.state.retain,true)
 })

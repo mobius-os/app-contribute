@@ -1,7 +1,7 @@
 // Source-attributed chat-block session. Hydration is read-only; only a
 // confirmed frozen approval reaches Contribute's existing guarded handlers.
 import { contributeBlockTarget, validContributeRecordId } from './chat-blocks.js'
-import { qualityReviewFor, reviewStateFor } from './review.js'
+import { contributionApprovalFingerprint, qualityReviewFor, reviewStateFor } from './review.js'
 import { publicationStackUnit, stackIntent, stackPublicationRecords, stackReadiness } from './stack.js'
 
 const copy = value => JSON.parse(JSON.stringify(value))
@@ -49,14 +49,25 @@ const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, re
 // This is observational ownership, not a saved approval. No record contents,
 // frozen confirmation, action nonce, or publication arguments cross reloads.
 const CHECKPOINT_BYTES = 32768
-// Content-less target fingerprint: an observation can diagnose only the exact
-// attempted repository/action/version, and is never a reusable approval.
+// Reuse the approval schema's stable full-plan projection, excluding lifecycle
+// facts. New-PR receipt fields are generated outcomes, not named update targets.
+const attemptTarget = record => contributionApprovalFingerprint(record && {
+  id: record.id, type: record.type, repo: record.plan?.repo || record.repo,
+  title: record.plan?.title || record.title,
+  branch: record.plan?.branch || record.branch,
+  ...(record.plan?.action === 'pr_update' ? { number: record.number, url: record.url,
+    head_repository: record.head_repository, relay_contribution_id: record.relay_contribution_id } : {}),
+  submission_mode: record.submission_mode, plan: record.plan,
+})
+// Only the digest crosses reload. Capture identity AND baseline metadata before
+// awaiting hashing so a mutable ledger object cannot rebind the observation.
 async function attemptObservation(record) {
-  const target = JSON.stringify([record.id, record.plan?.repo || record.repo, record.plan?.action, record.plan?.head_sha])
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(target))
-  return { id: record.id, target: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join(''),
+  const identity = attemptTarget(record)
+  const baseline = { id: record.id,
     at: Number.isFinite(Date.parse(record.updated_at)) ? Date.parse(record.updated_at) : null,
     error: bounded(record.last_submit_error) }
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))
+  return { ...baseline, target: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('') }
 }
 const validObservation = value => validContributeRecordId(value?.id) && typeof value.target === 'string' && /^[a-f0-9]{64}$/.test(value.target)
   && (value.at === null || Number.isSafeInteger(value.at) && value.at >= 0 && value.at <= 8640000000000000)
@@ -73,8 +84,10 @@ function checkpointPhases(checkpoint) {
       || seen.has(phase.unitKey) || !Array.isArray(phase.phaseIds) || !phase.phaseIds.length || phase.phaseIds.length > 256
       || phase.phaseIds.some(id => !validContributeRecordId(id)) || new Set(phase.phaseIds).size !== phase.phaseIds.length
       || !['pending', 'failed'].includes(phase.state) || typeof phase.note !== 'string' || phase.note.length > 500) throw new Error('Invalid recovery phase')
-    if (phase.observations !== undefined && (!Array.isArray(phase.observations) || phase.observations.length !== phase.phaseIds.length
-      || phase.observations.some((observation, index) => !validObservation(observation) || observation.id !== phase.phaseIds[index]))) throw new Error('Invalid recovery observations')
+    if (phase.observations !== undefined && (!Array.isArray(phase.observations) || !phase.observations.length || phase.observations.length > 256
+      || phase.observations.some(observation => !validObservation(observation))
+      || new Set(phase.observations.map(observation => observation.id)).size !== phase.observations.length
+      || phase.phaseIds.some(id => !phase.observations.some(observation => observation.id === id)))) throw new Error('Invalid recovery observations')
     if (phase.canonicalFailure !== undefined && typeof phase.canonicalFailure !== 'boolean') throw new Error('Invalid recovery diagnosis')
     seen.add(phase.unitKey)
   }
@@ -113,6 +126,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
       for (const [index, phase] of checkpointPhases(checkpoint).entries()) {
         results.set('recovery:' + index, { ...phase, recovered: true, tone: phase.state === 'failed' || phase.canonicalFailure ? 'danger' : 'attention' })
         phase.phaseIds.forEach(id => recoveryIds.add(id))
+        phase.observations?.forEach(observation => recoveryIds.add(observation.id))
       }
       lastCheckpoint = { id: checkpoint.id, data: checkpoint.data }
     }
@@ -165,12 +179,19 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   const reconcileResults = () => {
     for (const [key, result] of results) {
       if (!busyUnits.has(result.unitKey) && reconciled(result.phaseIds)) { results.delete(key); continue }
-      const failed = result.observations?.find(before => {
+      // A stack failure belongs to its whole frozen parent/member context.
+      // Pending reads and newer ledger intent cannot borrow stale exact hashes.
+      const sameContext = result.observations?.every(before => {
         const current = exactObservations.get(before.id)
-        return ledgerReady && ledger.some(record => record.id === before.id) && current?.status === 'prepared'
-          && before.at !== null && current.at !== null && current.at > before.at
+        return !pendingRead.has(before.id) && ledgerReady && ledger.some(record => record.id === before.id)
+          && current?.target === before.target && current.identity === attemptTarget(byId.get(before.id))
           && current.at >= Date.parse(byId.get(before.id)?.updated_at)
-          && current.target === before.target && current.error && current.error !== before.error
+      })
+      const failed = sameContext && result.observations.find(before => {
+        const current = exactObservations.get(before.id)
+        return result.phaseIds.includes(before.id) && current?.status === 'prepared'
+          && before.at !== null && current.at !== null && current.at > before.at
+          && current.error && current.error !== before.error
       })
       if (failed) {
         // Diagnosis never settles ownership. Even during a held response,
@@ -267,7 +288,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
       units.set(result.unitKey, { unitKey: result.unitKey, phaseIds,
         state: previous?.state === 'pending' || result.state === 'pending' ? 'pending' : 'failed',
         note: bounded(previous?.canonicalFailure ? previous.note : result.note),
-        ...(phaseIds.every(id => observations.has(id)) ? { observations: phaseIds.map(id => observations.get(id)) } : {}),
+        ...(phaseIds.every(id => observations.has(id)) ? { observations: [...observations.values()] } : {}),
         ...(previous?.canonicalFailure || result.canonicalFailure ? { canonicalFailure: true } : {}) })
     }
     const phases = [...units.values()]
@@ -297,21 +318,25 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   } }
   async function observeExact(id, rec, generation) {
     if (rec?.id !== id) return
+    rec = copy(rec)
+    const identity = attemptTarget(rec)
     const observation = Number.isFinite(Date.parse(rec.updated_at)) ? await attemptObservation(rec) : null
     if (!alive || readGeneration.get(id) !== generation) return
     exactRead.add(id); displayRead.add(id)
-    const previous = exactObservations.get(id)
-    if (observation && (!previous || observation.at >= previous.at)) {
-      exactObservations.set(id, { ...observation, status: rec.status })
+    if (observation) {
+      exactObservations.set(id, { ...observation, status: rec.status, identity })
     }
     if ((!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || ''))
       && !(settled(byId.get(id)) && !settled(rec) && String(rec.updated_at || '') <= String(byId.get(id).updated_at || ''))) byId.set(id, rec)
   }
-  async function hydrate(wanted = ids) {
-    await Promise.all(wanted.map(async id => {
+  async function hydrate(wanted) {
+    const addressed = wanted || [...new Set([...ids, ...[...results.values()]
+      .flatMap(result => result.observations?.map(observation => observation.id) || [])])]
+    await Promise.all(addressed.map(async id => {
       const generation = (readGeneration.get(id) || 0) + 1
       readGeneration.set(id, generation)
       pendingRead.add(id)
+      exactObservations.delete(id) // an unavailable latest read cannot lend an older target hash
       try {
         const rec = await loadExact(id)
         if (!alive || readGeneration.get(id) !== generation) return
@@ -351,7 +376,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   function activate(key) {
     if (!advertised.some(item => item.key === key)) return
     if (recoveryError || unitsFor(key).some(pendingUnit)) {
-      void hydrate(ids)
+      void hydrate()
       emit()
       return
     }
@@ -387,12 +412,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (approval.units.some(unit => unit.ready.some(rec => Number.isFinite(Date.parse(rec.updated_at))))) {
       try {
         await Promise.all(approval.units.map(async unit => {
-          const observations = await Promise.all(unit.ready.map(async approved => {
+          const observations = await Promise.all(unit.records.map(async approved => {
             const current = byId.get(approved.id)
-            const sameTarget = current?.plan?.head_sha === approved.plan?.head_sha
-              && (current?.plan?.repo || current?.repo) === (approved.plan?.repo || approved.repo)
-              && current?.plan?.action === approved.plan?.action
-            return attemptObservation(sameTarget ? current : approved)
+            const sameTarget = attemptTarget(current) === attemptTarget(approved)
+            return attemptObservation(copy(sameTarget ? current : approved))
           }))
           results.get(phaseKey(unit)).observations = observations
         }))

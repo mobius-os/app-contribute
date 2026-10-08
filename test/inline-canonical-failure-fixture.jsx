@@ -2,6 +2,7 @@
 // The browser runner supplies that read-only host export; no live shell/API.
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { targetDrifts, targetCaseRecords } from './inline-target-cases.mjs'
 import { InlineBlockSession } from '../ui/InlineBlockSession.jsx'
 import { PullSnapshot, hostCSS } from '@fixture/inline-shell'
 
@@ -18,17 +19,20 @@ const failed = rec => ({ ...rec, updated_at: '2026-10-08T22:02:00Z', last_submit
 const reviews = records => ({ state: 'ready', byId: Object.fromEntries(records.map(rec => [rec.id, { state: 'ready' }])) })
 
 export async function runInlineCanonicalFailureChecks() {
+  const originalDigest = crypto.subtle.digest.bind(crypto.subtle)
   const checks = [], originalPost = window.postMessage, originalRead = window.mobius.storage.getWithVersion
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
-  let state, present, update, reads = [], records, calls = 0, release
+  let state, present, update, reads = [], records, calls = 0, release, sent, holdRead = false, heldReads = []
   const actions = [{ key: 'chat-send:phase.1', label: 'Contribute' }, { key: 'chat-send-batch:phase.1,other.2', label: 'Contribute all' }]
   const key = actions[0].key
   const message = (event, target = key) => window.dispatchEvent(new MessageEvent('message', { source: window.parent, origin: window.location.origin,
     data: { type: 'moebius:app-block-action', sessionId: 'mounted-failure', key: target, nonce: crypto.randomUUID(), event } }))
   window.postMessage = next => { if (next.type === 'moebius:app-block-state') { state = next; present?.(next) } }
   window.mobius.storage.getWithVersion = async path => {
-    reads.push(path); return { value: records.find(rec => path === `contributions/${rec.id}.json`) || null, version: 'fixture' }
+    reads.push(path)
+    if (holdRead && records.some(rec => path === `contributions/${rec.id}.json`)) return new Promise(resolve => heldReads.push({ path, resolve }))
+    return { value: records.find(rec => path === `contributions/${rec.id}.json`) || null, version: 'fixture' }
   }
   function Mount({ checkpoint = null }) {
     const [ledger, setLedger] = useState(records), [display, setDisplay] = useState(null)
@@ -36,7 +40,7 @@ export async function runInlineCanonicalFailureChecks() {
     const action = display?.actions.find(action => action.key === key)
     return <><style>{hostCSS}</style><InlineBlockSession blockSession={{ sessionId: 'mounted-failure', actions, checkpoint, retain: !!checkpoint }}
       records={ledger} ledgerReady reviewStatus={reviews(ledger)}
-      onSend={() => { calls++; return new Promise(resolve => { release = resolve }) }} onSendStack={() => { throw Error('unexpected stack') }} />
+      onSend={rec => { calls++; sent = rec; return new Promise(resolve => { release = resolve }) }} onSendStack={recs => { calls++; sent = recs; return new Promise(resolve => { release = resolve }) }} />
       {action && PullSnapshot ? <PullSnapshot block={{ title: 'Reviewed local change' }}
         pull={{ repo: 'team/repo', repoUrl: 'https://github.com/team/repo', state: 'proposed', number: null, files: null, labels: [], badges: [] }}
         href="#" open={event => event.preventDefault()} compact session={action}
@@ -70,8 +74,56 @@ export async function runInlineCanonicalFailureChecks() {
     message('confirm'); message('activate'); message('confirm'); await frame()
     ensure(calls === 1 && state.actions[0].disabled && state.retain, 'Reloaded failure replayed approval')
     checks.push({ name: 'actual mounted failed checkpoint cold reload has no Confirm/nonce transfer or repeat handler', status: 'pass' })
+    for (const item of [...targetDrifts, { name: 'pre-hash changed frozen branch', preHash: true, mutate: records => { records[0].plan.branch = 'fix/different' } },
+      { name: 'held old exact generation', race: true, mutate: records => { records[0].plan.base_branch = 'release' } },
+      { name: 'held hash immutable baseline', hashRace: true, mutate: records => { records[0].plan.branch = 'fix/different' } }]) {
+      root.render(null); await frame(); state = null; present = null; calls = 0; sent = null
+      const original = targetCaseRecords(item); records = structuredClone(original)
+      root.render(<Mount />)
+      await until(() => state?.actions[0]?.status === 'Ready', 'Identity case did not mount ready: ' + item.name)
+      message('activate'); await until(() => state.actions[0].confirming, 'Identity case did not confirm: ' + item.name)
+      if (item.preHash) { records = structuredClone(original); item.mutate(records); update([...records]); await frame() }
+      const hashReleases = []
+      if (item.hashRace) crypto.subtle.digest = (algorithm, bytes) => new Promise(resolve => hashReleases.push(() => originalDigest(algorithm, bytes).then(resolve)))
+      message('confirm'); message('confirm')
+      if (item.hashRace) {
+        await until(() => hashReleases.length === original.length, 'Baseline hash was not held')
+        item.mutate(records); records[0].last_submit_error = 'Injected during hash'; records[0].updated_at = '2026-10-08T22:01:00Z'
+        crypto.subtle.digest = originalDigest; hashReleases.forEach(release => release())
+      }
+      await until(() => calls === 1, 'Identity case did not call once: ' + item.name)
+      ensure((Array.isArray(sent) ? sent[0] : sent).plan.branch === original[0].plan.branch, 'Handler borrowed changed intent before hash')
+      if (item.hashRace) {
+        const baseline = JSON.parse(state.checkpoint.data).phases[0].observations[0]
+        ensure(baseline.error === '' && baseline.at === Date.parse(original[0].updated_at), 'Hash await rebound baseline metadata')
+      }
+      release({ pending: true }); await until(() => !state.actions[0].busy, 'Identity handler did not finish: ' + item.name)
+      if (item.race) {
+        holdRead = true; heldReads = []; message('activate')
+        await until(() => heldReads.length === original.length, 'Old exact generation was not held')
+      }
+      records = structuredClone(original); item.mutate(records)
+      records = records.map(rec => rec.id === original.at(-1).id ? { ...failed(rec), last_submit_error: 'Failure from different target' } : rec)
+      const before = reads.length; holdRead = false; update([...records]); await frame(); message('activate')
+      await until(() => reads.length >= before + original.length, 'Changed identity did not get exact reads: ' + item.name); await frame()
+      if (item.race) {
+        for (const held of heldReads) held.resolve({ value: failed(original.find(rec => held.path === `contributions/${rec.id}.json`)), version: 'old' })
+        await frame()
+      }
+      ensure(state.actions[0].status === 'Checking result', 'Another target diagnosed original phase: ' + item.name)
+      ensure(!state.actions[0].note.includes('Failure from different target'), 'Foreign failure prose leaked: ' + item.name)
+      ensure(state.retain && state.actions[0].disabled && calls === 1, 'Identity drift released or repeated Send: ' + item.name)
+      ensure(container.textContent.includes('Checking result') && !container.textContent.includes('Failure from different target'), 'Mounted shell misdiagnosed: ' + item.name)
+      records = original.map(rec => rec.id === original.at(-1).id ? { ...failed(rec), updated_at: '2026-10-08T22:03:00Z' } : rec)
+      update([...records]); await frame(); message('activate')
+      await until(() => state.actions[0].status === 'Needs attention', 'Later correct exact failure was not diagnosed: ' + item.name)
+      ensure(calls === 1 && state.retain && state.actions[0].disabled, 'Correct failure replayed Send')
+      ensure(!state.checkpoint.data.includes('fix/original') && !state.checkpoint.data.includes('base_branch') && !state.checkpoint.data.includes('target_url'), 'Publication identity bytes crossed checkpoint')
+      checks.push({ name: 'actual mounted full attempt identity: ' + item.name, status: 'pass' })
+    }
+
   } finally {
-    root.unmount(); container.remove(); window.postMessage = originalPost; window.mobius.storage.getWithVersion = originalRead
+    crypto.subtle.digest = originalDigest; root.unmount(); container.remove(); window.postMessage = originalPost; window.mobius.storage.getWithVersion = originalRead
   }
   return checks
 }
