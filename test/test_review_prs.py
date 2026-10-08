@@ -161,6 +161,21 @@ class ApprovalHelperTests(unittest.TestCase):
     self.assertIsNone(body["options"]["max_rounds"])
     self.assertEqual(body["preview_sha256"], preview["preview_sha256"])
 
+  def test_public_review_opt_in_is_frozen_and_forwarded_without_becoming_default(self):
+    for enabled in (False, True):
+      snapshot = {**SNAPSHOT, "post_review": enabled}
+      preview = {"options": snapshot, "preview_sha256": hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()}
+      with patch.object(helper, "api", return_value=preview):
+        selected = helper.freeze_preview(80, {**self.selection(), "mode": "review_fix_merge"})
+      self.assertIs(selected["options"].get("post_review"), enabled)
+      self.assertIs(helper.start_body(selected)["options"].get("post_review"), enabled)
+      helper.verify_selection(selected)
+    # Existing immutable saved previews predate this opt-in and stay valid.
+    with patch.object(helper, "api", return_value=PREVIEW):
+      legacy = helper.freeze_preview(80, self.selection())
+    self.assertNotIn("post_review", legacy["options"])
+    helper.verify_selection(legacy)
+
   def test_saved_takeover_cannot_use_legacy_grant_without_preview(self):
     with self.assertRaisesRegex(ValueError, "frozen"):
       helper.start_body({**self.selection(), "mode": "review_fix_merge"})
