@@ -19,6 +19,9 @@ export function InlineBlockSession({ blockSession = null, onActivateRequest, rec
       const next = createInlineSession({
         sessionId: data.sessionId,
         actions: data.actions,
+        checkpoint: data.checkpoint,
+        retain: data.retain,
+        recoveryError: data.recoveryError,
         publish: message => window.parent.postMessage(message, window.location.origin),
         loadExact: loadFreshContributionRecord,
         send: rec => latest.current.onSend(rec),

@@ -46,7 +46,28 @@ const publicationIdentity = record => {
 const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, reviewStatus)?.state === 'ready'
   ? '' : 'This contribution still needs a current source check in Contribute.'
 
-export function createInlineSession({ sessionId, actions, publish, loadExact, send, sendStack, refresh }) {
+// This is observational ownership, not a saved approval. No record contents,
+// frozen confirmation, action nonce, or publication arguments cross reloads.
+const CHECKPOINT_BYTES = 32768
+const checkpointId = value => typeof value === 'string' && value.length > 0 && value.length <= 128
+const recoveryRecordId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
+function checkpointPhases(checkpoint) {
+  if (!checkpointId(checkpoint?.id) || typeof checkpoint.data !== 'string'
+    || new TextEncoder().encode(checkpoint.data).length > CHECKPOINT_BYTES) throw new Error('Invalid recovery checkpoint')
+  const value = JSON.parse(checkpoint.data)
+  if (value?.version !== 1 || !Array.isArray(value.phases) || !value.phases.length || value.phases.length > 256) throw new Error('Invalid recovery phases')
+  const seen = new Set()
+  for (const phase of value.phases) {
+    if (typeof phase?.unitKey !== 'string' || !/^(record|stack):./.test(phase.unitKey) || phase.unitKey.length > 512
+      || seen.has(phase.unitKey) || !Array.isArray(phase.phaseIds) || !phase.phaseIds.length || phase.phaseIds.length > 256
+      || phase.phaseIds.some(id => !recoveryRecordId(id)) || new Set(phase.phaseIds).size !== phase.phaseIds.length
+      || !['pending', 'failed'].includes(phase.state) || typeof phase.note !== 'string' || phase.note.length > 500) throw new Error('Invalid recovery phase')
+    seen.add(phase.unitKey)
+  }
+  return value.phases.map(({ unitKey, phaseIds, state, note }) => ({ unitKey, phaseIds, state, note }))
+}
+
+export function createInlineSession({ sessionId, actions, checkpoint = null, retain = false, recoveryError: incomingRecoveryError = false, publish, loadExact, send, sendStack, refresh }) {
   const advertised = [...new Map((actions || []).filter(item => typeof item?.key === 'string').map(item => [item.key, item])).values()]
   const byId = new Map()
   const exactRead = new Set()
@@ -66,11 +87,27 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   let alive = true
   let lastSummary = ''
   let ackNonce = null
+  let recoveryError = ''
+  let checkpointAck = checkpointId(checkpoint?.id) ? checkpoint.id : null
+  let lastCheckpoint = null
+  const recoveryIds = new Set()
+  try {
+    if (incomingRecoveryError || retain && !checkpoint) throw new Error('Recovery ownership has no checkpoint')
+    if (checkpoint) {
+      for (const [index, phase] of checkpointPhases(checkpoint).entries()) {
+        results.set('recovery:' + index, { ...phase, recovered: true, tone: phase.state === 'failed' ? 'danger' : 'attention' })
+        phase.phaseIds.forEach(id => recoveryIds.add(id))
+      }
+      lastCheckpoint = { id: checkpoint.id, data: checkpoint.data }
+    }
+  } catch {
+    recoveryError = 'The previous contribution result could not be restored. Open Contribute to check it; nothing will be sent from this block.'
+  }
   const idsFor = key => {
     const target = contributeBlockTarget(key)
     return target?.kind === 'prepared' ? [target.id] : target?.kind === 'batch' ? target.ids : []
   }
-  const ids = [...new Set(advertised.flatMap(item => idsFor(item.key)))]
+  const ids = [...new Set([...advertised.flatMap(item => idsFor(item.key)), ...recoveryIds])]
   const hasBatch = advertised.some(item => contributeBlockTarget(item.key)?.kind === 'batch')
   const records = () => [...new Map([...ledger, ...byId.values()].filter(Boolean).map(rec => [rec.id, rec])).values()]
   const unitFor = id => {
@@ -101,14 +138,19 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   // A new phase of one stack is a new approval; an ambiguous phase remains
   // locked, while a reviewed suffix can receive its own explicit confirmation.
   const phaseKey = publicationPhaseKey
-  const reconciled = phaseIds => phaseIds.length > 0 && phaseIds.every(id => settled(byId.get(id)))
+  const reconciled = phaseIds => phaseIds.length > 0 && phaseIds.every(id => settled(byId.get(id))
+    && (exactRead.has(id) || ledgerReady && ledger.some(record => record.id === id && settled(record))))
+  // An uncertain prefix cannot become a newly approved suffix on reload or
+  // restaging. Lock the owning unit AND the attempted record identities.
+  const pendingUnit = unit => [...results.values()].some(result => (result.state === 'pending' || result.recovered)
+    && (result.unitKey === unit.key || result.phaseIds.some(id => unit.records.some(record => record.id === id))))
   const reconcileResults = () => {
-    for (const [key, result] of results) if (reconciled(result.phaseIds)) results.delete(key)
+    for (const [key, result] of results) if (!busyUnits.has(result.unitKey) && reconciled(result.phaseIds)) results.delete(key)
   }
   const authoritative = key => ledgerReady && !['loading', 'unavailable'].includes(reviewStatus?.state) && idsFor(key).every(id => exactRead.has(id))
   const makeAction = item => {
     const units = unitsFor(item.key)
-    const ready = authoritative(item.key) ? units.filter(unit => unit.ready.length && !attempted.has(phaseKey(unit))) : []
+    const ready = authoritative(item.key) ? units.filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit)) : []
     // Display identities are not publication units. A row links its own PR;
     // confirmation still freezes the complete parent-first stack below.
     const addressed = idsFor(item.key)
@@ -120,7 +162,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const reviewUnavailable = reviewStatus?.state === 'unavailable'
     const isBatch = contributeBlockTarget(item.key)?.kind === 'batch'
     // This first tap starts authoritative checks; it is not Send approval.
-    const canActivate = !authoritative(item.key) && focusedResolved && focused.every(rec => rec.status === 'prepared' && stackIntent(rec).kind !== 'invalid' && !blocker(rec, reviewStatus))
+    const canActivate = !recoveryError && !units.some(pendingUnit) && !authoritative(item.key) && focusedResolved && focused.every(rec => rec.status === 'prepared' && stackIntent(rec).kind !== 'invalid' && !blocker(rec, reviewStatus))
     const publicStatus = focused.length === 1
       ? ({ draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }[focused[0].status] || 'Sent')
       : 'Sent'
@@ -133,12 +175,12 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
       : focusedReason || (!ledgerReady && !checkingAuthority ? '' : units.map(unit => unit.reason).find(Boolean))
     const unitBusy = units.some(unit => busyUnits.has(unit.key))
     const anyBusy = busyUnits.size > 0
-    const failures = [...results.values()].filter(result => units.some(unit => unit.key === result.unitKey))
+    const failures = [...results.values()].filter(result => units.some(unit => unit.key === result.unitKey || result.phaseIds.some(id => unit.records.some(rec => rec.id === id))) || result.phaseIds.some(id => addressed.includes(id)))
     const failure = failures.find(result => result.tone === 'danger')
     const checking = failures.some(result => result.state === 'pending') || units.some(unit => unit.records.some(rec => rec.status === 'submitting'))
-    const status = unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
+    const status = recoveryError ? 'Needs attention' : unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
       : checkingAuthority ? 'Checking' : ready.length ? 'Ready' : publicResolved ? publicStatus : reviewUnavailable && canActivate ? 'Check unavailable' : canActivate ? 'Prepared' : loading ? 'Loading' : reason ? 'Needs attention' : ''
-    const note = failure?.note || failures.find(result => result.state === 'pending')?.note ||
+    const note = recoveryError || failure?.note || failures.find(result => result.state === 'pending')?.note ||
       (!ledgerReady && (publicResolved || canActivate) ? '' : checkingAuthority ? '' : reviewUnavailable && hasBatch && !isBatch && canActivate ? '' : reason) ||
       (!loading && !anyBusy && !links.length && !ready.length && !canActivate ? 'Nothing is ready to contribute.' : '')
     const quality = focused.length === 1 && focusedResolved && focused[0].status === 'prepared'
@@ -146,12 +188,12 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     return {
       key: item.key,
       label: checkingAuthority ? 'Checking…' : reviewUnavailable && canActivate ? 'Retry check' : unitBusy ? 'Contributing…' : item.label || 'Contribute',
-      disabled: confirming === item.key ? anyBusy : !ready.length && !canActivate || anyBusy || checking || checkingAuthority || Boolean(confirming),
+      disabled: recoveryError ? true : confirming === item.key ? anyBusy : !ready.length && !canActivate || anyBusy || checking || checkingAuthority || Boolean(confirming),
       busy: unitBusy,
       confirming: confirming === item.key,
       confirmation: confirming === item.key && frozen?.key === item.key
         ? frozen.units.flatMap(unit => unit.ready.map(publicationIdentity)) : null,
-      hidden: !ready.length && !canActivate && !unitBusy && confirming !== item.key,
+      hidden: !recoveryError && !failures.length && !ready.length && !canActivate && !unitBusy && confirming !== item.key,
       note: bounded(note),
       tone: failure ? 'danger' : checking || reason && !loading ? 'attention' : 'neutral',
       status,
@@ -180,11 +222,40 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
               : missingCount ? `${missingCount} unavailable` : ''
     return lastSummary
   }
+  const ownershipCheckpoint = () => {
+    if (recoveryError) return lastCheckpoint
+    const units = new Map()
+    for (const result of results.values()) {
+      const previous = units.get(result.unitKey)
+      units.set(result.unitKey, { unitKey: result.unitKey,
+        phaseIds: [...new Set([...(previous?.phaseIds || []), ...result.phaseIds])],
+        state: previous?.state === 'pending' || result.state === 'pending' ? 'pending' : 'failed',
+        note: bounded(result.note) })
+    }
+    const phases = [...units.values()]
+    if (!phases.length) {
+      if (lastCheckpoint) checkpointAck = lastCheckpoint.id
+      lastCheckpoint = null
+      return null
+    }
+    const data = JSON.stringify({ version: 1, phases })
+    try { checkpointPhases({ id: 'candidate', data }) } catch {
+      recoveryError = 'The contribution recovery checkpoint is invalid or too large. Open Contribute to check this work; nothing will be sent from this block.'
+      return lastCheckpoint
+    }
+    if (lastCheckpoint?.data !== data) {
+      if (lastCheckpoint) checkpointAck = lastCheckpoint.id
+      lastCheckpoint = { id: crypto.randomUUID(), data }
+    }
+    return lastCheckpoint
+  }
   const emit = () => { if (alive) {
+    const checkpoint = ownershipCheckpoint()
     const actions = advertised.map(makeAction)
-    const retain = Boolean(confirming || requestedActivation || busyUnits.size || results.size
+    const retain = Boolean(recoveryError || checkpoint || confirming || requestedActivation || busyUnits.size || results.size
       || advertised.some(item => unitsFor(item.key).some(unit => unit.records.some(rec => rec.status === 'submitting'))))
-    publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions), retain, ackNonce })
+    publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions), retain, ackNonce,
+      checkpoint, checkpointAck, recoveryError: Boolean(recoveryError) })
   } }
   async function hydrate(wanted = ids) {
     await Promise.all(wanted.map(async id => {
@@ -215,7 +286,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     reconcileResults(); fulfillRequestedActivation(); emit()
   }
   function freezeActivation(key) {
-    const ready = unitsFor(key).filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)))
+    const ready = unitsFor(key).filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit))
     if (!ready.length) return false
     frozen = { key, units: copy(ready) }
     confirming = key
@@ -232,6 +303,12 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     freezeActivation(key)
   }
   function activate(key) {
+    if (!advertised.some(item => item.key === key)) return
+    if (recoveryError || unitsFor(key).some(pendingUnit)) {
+      void hydrate(ids)
+      emit()
+      return
+    }
     if (busyUnits.size || !advertised.some(item => item.key === key)) return
     if (confirming && confirming !== key) { confirming = null; frozen = null }
     else if (confirming) return
@@ -249,11 +326,17 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     requestedActivation = null; confirming = null; frozen = null; emit()
   }
   async function confirm(key) {
-    if (busyUnits.size || confirming !== key || frozen?.key !== key || !frozen.units.length) return
+    if (recoveryError || busyUnits.size || confirming !== key || frozen?.key !== key || !frozen.units.length) return
     const approval = frozen
-    if (approval.units.some(unit => attempted.has(phaseKey(unit)))) return
+    if (approval.units.some(unit => attempted.has(phaseKey(unit)) || pendingUnit(unit))) return
     approval.units.forEach(unit => { attempted.add(phaseKey(unit)); busyUnits.add(unit.key) })
+    // Publish the checkpoint before crossing the public handler boundary,
+    // including the synchronous gap before any awaited response can arrive.
+    approval.units.forEach(unit => results.set(phaseKey(unit), {
+      unitKey: unit.key, phaseIds: unit.ready.map(rec => rec.id), state: 'pending', note: '', tone: 'attention',
+    }))
     confirming = null; emit()
+    if (recoveryError) { busyUnits.clear(); frozen = null; emit(); return }
     await Promise.all(approval.units.map(async unit => {
       let outcome
       try { outcome = (unit.stack ? await sendStack(unit.records) : await send(unit.records[0])) || {} }
@@ -271,7 +354,10 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
       await Promise.all(unit.records.map(async approved => {
         try {
           const rec = await loadExact(approved.id)
-          if (rec?.id === approved.id && !(settled(byId.get(rec.id)) && !settled(rec))) byId.set(rec.id, rec)
+          if (rec?.id === approved.id) {
+            exactRead.add(rec.id)
+            if (!(settled(byId.get(rec.id)) && !settled(rec))) byId.set(rec.id, rec)
+          }
         } catch { /* result remains uncertain */ }
       }))
       if (reconciled(resultBase.phaseIds)) results.delete(resultKey)
