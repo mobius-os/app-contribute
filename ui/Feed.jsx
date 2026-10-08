@@ -1,6 +1,6 @@
 import { isAutopilotResponding } from '../autopilot.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import {
   contributionFailureOwner,
@@ -136,9 +136,37 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   return route.error || ''
 }
 
+// A handler acknowledgement is not settlement. Only a canonical receipt for
+// this frozen phase may turn a row green; unavailable evidence stays owned.
+export function canonicalBatchRecordOutcome(record, current, mode) {
+  if (!current || current.id !== record.id) return null
+  const repo = record.plan?.repo || record.repo
+  if ((current.plan?.repo || current.repo) !== repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo || '')) return null
+  const number = Number(current.number)
+  if (!Number.isSafeInteger(number) || number < 1 || current.url !== `https://github.com/${repo}/pull/${number}`
+    || record.number && number !== Number(record.number)
+    || record.plan?.head_sha && current.plan?.head_sha !== record.plan.head_sha) return null
+  // A terminal public state is an observed outcome, not proof that this
+  // ready/update action succeeded. Keep its label distinct from completion.
+  if (['closed', 'merged'].includes(current.status)) return current.status
+  if (mode === 'ready') return current.status === 'open' && !current.readying ? 'done' : null
+  if (!['draft', 'open', 'landing'].includes(current.status)) return null
+  if (record.plan?.action === 'pr_update' && current.last_submit_push_sha !== record.plan?.head_sha) return null
+  return 'done'
+}
+
+export function batchRecordOutcome(record, current, outcome, mode) {
+  const canonical = canonicalBatchRecordOutcome(record, current, mode)
+  if (canonical) return canonical
+  if (outcome?.pending || outcome?.uncertain || outcome?.ok || outcome?.alreadyHandled
+    || !outcome?.failure || outcome.failure.owner === 'automatic') return 'checking'
+  return { error: outcome.error || (contributionFailureOwner(outcome) === 'agent'
+    ? 'Moved back to private preparation.' : 'Needs attention.') }
+}
+
 const PROGRESS_TEXT = {
-  ready: { working: 'Requesting review…', done: 'Review requested' },
-  send: { working: 'Sending…', done: 'Sent to GitHub' },
+  ready: { working: 'Requesting review…', checking: 'Checking result…', 'not-attempted': 'Not requested', closed: 'Pull request closed', merged: 'Merged', done: 'Review requested' },
+  send: { working: 'Sending…', checking: 'Checking result…', closed: 'Pull request closed', merged: 'Merged', done: 'Sent to GitHub' },
 }
 
 function ExactActionList({
@@ -189,6 +217,8 @@ function ExactActionList({
 
 function ExactBatchAction({
   items,
+  records,
+  onOwnershipChange,
   mode,
   publicationPreference,
   githubState,
@@ -211,6 +241,10 @@ function ExactBatchAction({
   const confirming = !!approval && (approval.locked || approval.fingerprint === fingerprint)
   const [progress, setProgress] = useState({})
   const [finished, setFinished] = useState(false)
+  const admitted = useRef(false)
+  const currentRecords = useRef(records)
+  currentRecords.current = records
+  const checking = Object.values(progress).some(value => value === 'checking')
   const activeItems = confirming ? approval.items : items
   const count = mode === 'ready' ? readyCount(activeItems) : actionCount(activeItems)
   const singleRecord = count === 1 ? runPrimaryRecord(activeItems[0]) : null
@@ -221,22 +255,42 @@ function ExactBatchAction({
 
   useEffect(() => {
     if (!approval || approval.locked || approval.fingerprint === fingerprint) return
-    setApproval({ fingerprint, items: captureBatchItems(items) })
+    setApproval((mode === 'ready' ? readyCount(items) : actionCount(items)) > 0
+      ? { fingerprint, items: captureBatchItems(items) } : null)
     setBusy(false)
     setNote('The reviewed set changed. The current actions are listed now; confirm this refreshed set when you are ready.')
-  }, [approval, fingerprint, items])
+  }, [approval, fingerprint, items, mode])
+
+  useEffect(() => { onOwnershipChange?.(mode, !!approval) }, [mode, !!approval, onOwnershipChange])
+  useEffect(() => {
+    if (!approval?.locked) return
+    const frozen = approval.items.flatMap(runUnitRecords)
+    setProgress(old => {
+      let next = old
+      for (const record of frozen) if (old[record.id] === 'checking') {
+        const canonical = canonicalBatchRecordOutcome(record, records.find(value => value.id === record.id), mode)
+        if (canonical) {
+          if (next === old) next = { ...old }
+          next[record.id] = canonical
+        }
+      }
+      return next
+    })
+  }, [approval, records, mode])
 
   if (count < 1 && !approval?.locked) return null
 
-  function failureText(outcome) {
-    return outcome?.error || (contributionFailureOwner(outcome) === 'agent'
-      ? 'Moved back to private preparation.'
-      : 'Needs attention.')
+  function outcomeFor(record, outcome) {
+    const current = currentRecords.current.find(value => value.id === record.id)
+    const receipt = outcome?.records?.find(value => value.id === record.id)
+      || (outcome?.record?.id === record.id ? outcome.record : null)
+    // A delayed pending response must not shadow canonical evidence already read.
+    return batchRecordOutcome(record, canonicalBatchRecordOutcome(record, current, mode)
+      ? current : receipt || current, outcome, mode)
   }
-  const handled = outcome => outcome?.ok || outcome?.alreadyHandled || outcome?.pending
 
-  // Drafts are independent, so review requests run a few at a time. A stack's
-  // own records stay in order; publication keeps its reviewed order too.
+  // Independent review requests can continue, but unconfirmed rows remain
+  // observationally pending rather than borrowing another member's receipt.
   async function requestReview(item) {
     const records = sortStackRecords(runUnitRecords(item)).filter(record => (
       record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
@@ -244,35 +298,38 @@ function ExactBatchAction({
     setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, 'working'])) }))
     for (const record of records) {
       let outcome
-      try { outcome = await onMarkReady?.(record) } catch { outcome = { error: 'Not confirmed. Refresh before trying again.' } }
-      if (!handled(outcome)) {
-        setProgress(old => ({ ...old, [record.id]: { error: failureText(outcome) } }))
+      try { outcome = await onMarkReady?.(record) } catch { outcome = { uncertain: true } }
+      const value = outcomeFor(record, outcome)
+      setProgress(old => ({ ...old, [record.id]: value }))
+      if (value?.error) {
+        const remaining = records.slice(records.indexOf(record) + 1)
+        setProgress(old => ({ ...old, ...Object.fromEntries(remaining.map(value => [value.id, 'not-attempted'])) }))
         return false
       }
-      setProgress(old => ({ ...old, [record.id]: 'done' }))
     }
     return true
   }
   async function send(item) {
-    const records = item?.unit?.type === 'stack' ? runUnitRecords(item) : [runPrimaryRecord(item)].filter(Boolean)
+    const records = itemPublicationRecords(item)
     setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, 'working'])) }))
     let outcome
     try {
       if (item?.unit?.type === 'stack') outcome = await onSendStack?.(runUnitRecords(item))
       else outcome = await onSend?.(runPrimaryRecord(item))
-    } catch { outcome = { error: 'Not confirmed. Refresh before trying again.' } }
-    const value = handled(outcome) ? 'done' : { error: failureText(outcome) }
-    setProgress(old => ({ ...old, ...Object.fromEntries(records.map(record => [record.id, value])) }))
-    return handled(outcome)
+    } catch { outcome = { uncertain: true } }
+    const values = records.map(record => [record.id, outcomeFor(record, outcome)])
+    setProgress(old => ({ ...old, ...Object.fromEntries(values) }))
+    return !values.some(([, value]) => value?.error)
   }
 
   async function applyAll() {
-    if (busy) return
+    if (admitted.current) return
     if (!approval || approval.fingerprint !== fingerprint) {
       setApproval({ fingerprint, items: captureBatchItems(items) })
       setNote('The reviewed set changed. The current actions are listed now; confirm this refreshed set when you are ready.')
       return
     }
+    admitted.current = true
     const approvedItems = approval.items
     setApproval({ ...approval, locked: true })
     setBusy(true)
@@ -289,9 +346,11 @@ function ExactBatchAction({
     const failed = results.filter(ok => !ok).length
     setBusy(false)
     setFinished(true)
-    setNote(failed ? `${failed} ${failed === 1 ? 'item needs' : 'items need'} attention; the rest finished.` : '')
+    setNote(failed ? `${failed} ${failed === 1 ? 'item needs' : 'items need'} attention.` : '')
   }
   function closeResults() {
+    if (checking || busy) return
+    admitted.current = false
     setApproval(null); setFinished(false); setProgress({}); setNote('')
     task?.close()
   }
@@ -350,8 +409,9 @@ function ExactBatchAction({
         progress={progress}
       />
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
+      {checking ? <p className="co-run-error" role="status">Checking the recorded result. Refresh Contribute to check it; nothing will be sent again from this confirmation.</p> : null}
       {finished ? <div className="co-run-approval-actions">
-        <button type="button" className="co-btn co-btn-primary" onClick={closeResults}>Done</button>
+        <button type="button" className="co-btn co-btn-primary" disabled={checking} onClick={closeResults}>{checking ? 'Checking result…' : 'Done'}</button>
       </div> : <div className="co-run-approval-actions">
         <button ref={safeRef} type="button" className="co-btn" disabled={busy} onClick={() => setApproval(null)}>
           {mode === 'ready' ? 'Keep drafts' : 'Keep private'}
@@ -732,6 +792,8 @@ export function ContributionRun({
   const task = useProjectTask()
   const [missingTarget, setMissingTarget] = useState(false)
   const [allDecisions, setAllDecisions] = useState(false)
+  const [batchOwnership, setBatchOwnership] = useState({})
+  const changeBatchOwnership = useCallback((mode, owned) => setBatchOwnership(old => old[mode] === owned ? old : { ...old, [mode]: owned }), [])
   const projectedDecisions = useMemo(() => (run?.decisions || []).map((item) => {
     const problem = publicationRouteProblem(
       item, publicationPreference, githubState,
@@ -847,20 +909,23 @@ export function ContributionRun({
       </TaskPane>
     ) : null
 
-  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount) return null
+  const currentBatchRecords = useMemo(() => allItems.flatMap(runUnitRecords), [allItems])
+  if (presentation === 'overview' && !actionCount(publishItems) && !readyCount(readyItems) && !omittedCount && !Object.values(batchOwnership).some(Boolean)) return null
 
   return (
     <section className="co-run" aria-label="Contributions">
       {focus}
-      {!actionCount(publishItems) ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
-      {!readyCount(readyItems) ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
+      {!actionCount(publishItems) && !batchOwnership.send ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
+      {!readyCount(readyItems) && !batchOwnership.ready ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
       {presentation === 'project' ? controls : null}
       {/* Everything that needs an owner decision sits in one GitHub-style box
           above the PRs and disappears when there is nothing to act on. */}
       <div className="co-decisions" aria-label="Ready for you">
       {needsYou}
       <ExactBatchAction
-        key={`send:${run?.revision || ''}:${publicationPreference}:${githubState}`}
+        key="send"
+        records={currentBatchRecords}
+        onOwnershipChange={changeBatchOwnership}
         items={publishItems}
         mode="send"
         publicationPreference={publicationPreference}
@@ -871,7 +936,9 @@ export function ContributionRun({
       />
 
       <ExactBatchAction
-        key={`ready:${run?.revision || ''}:${publicationPreference}:${githubState}`}
+        key="ready"
+        records={currentBatchRecords}
+        onOwnershipChange={changeBatchOwnership}
         items={readyItems}
         mode="ready"
         publicationPreference={publicationPreference}
