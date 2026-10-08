@@ -62,7 +62,7 @@ export function ReviewPromptPreview({ token, appId, choice, onResolved }) {
       // Frozen selections keep their exact options; defaults apply only to new work.
       const options=reviewOptions(choice.options,choice.preview_sha256 ? undefined : data.options)
       if(choice.mode === 'review_fix_merge' && !choice.preview_sha256) options.autopilot=true
-      if(choice.mode !== 'review') delete options.post_review
+      if(choice.mode !== 'review' && !choice.preview_sha256) delete options.post_review
       const agent=workflowAgent(choice.agent)
       const preview=await previewWorkflow(token,appId,choice.mode,options,agent)
       if(choice.preview_sha256 && choice.preview_sha256!==preview.preview_sha256) throw new Error('The saved instructions or model changed. Ask the agent to prepare a fresh review link; nothing was started.')
