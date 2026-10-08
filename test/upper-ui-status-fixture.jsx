@@ -112,7 +112,111 @@ export async function runUpperUiStatusChecks() {
       focus = async () => exact(pull(8, { title: 'Exact second-row snapshot' }))
       setFocus({ repo: 'team/repo', number: 8, nonce: 'second-row' }); await frame()
       ensure([...host.querySelectorAll('[data-pr-key]')].map(node => node.dataset.prKey).join('|') === 'team/repo#7|team/repo#8', 'Focus reordered the canonical list')
-      ensure(title(8) === 'Second row', 'Focus replaced the canonical second row')
+      ensure(title(8) === 'Exact second-row snapshot', 'New exact observation did not replace the older row value')
+    })
+    await runCheck('new explicit observations supersede settled inventory without transferring selection or frozen confirmation', async () => {
+      root.render(null); await frame(); runs = []
+      const initial = pull(), second = pull(8, { title: 'Listed second open' })
+      search = async () => page([initial, second]); focus = async () => exact(initial)
+      root.render(<App />); await until(() => row(8)); select(7); await frame()
+      host.querySelector('[aria-label="Take selected PRs on with agent"]').click(); await until(() => host.querySelector('.co-pr-confirm-list'))
+      const current = pull(7, { title: 'Explicit current head and base branch', headRefOid: 'e'.repeat(40), baseRefName: 'release' })
+      focus = async () => exact(current); setFocus({ repo: 'team/repo', number: 7, nonce: 'explicit-current' }); await frame(); await frame()
+      ensure(title(7) === current.title, 'New exact navigation lost to old inventory')
+      ensure(!row(7).querySelector('input').checked, 'Exact head/base drift transferred selection')
+      ensure(host.querySelector('.co-pr-confirm-list').textContent.includes(initial.title) && !host.querySelector('.co-pr-confirm-list').textContent.includes(current.title), 'Exact navigation transferred frozen confirmation')
+      setTask(''); await frame(); select(8); await frame()
+      focus = async () => exact({ ...second, title: 'Explicit second closed', state: 'CLOSED' })
+      setFocus({ repo: 'team/repo', number: 8, nonce: 'explicit-closed' }); await frame(); await frame()
+      ensure(title(8) === 'Explicit second closed', 'Closed exact navigation lost to old inventory')
+      ensure(row(8).querySelector('input').disabled && !row(8).querySelector('input').checked, 'Closed exact remained selectable/selected')
+    })
+    await runCheck('explicit navigation to an already listed closed PR invalidates selected open evidence', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull(), pull(8, { title: 'Listed open second' })]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(8)); select(8); await frame()
+      focus = async () => exact(pull(8, { title: 'Explicit now closed second', state: 'CLOSED' }))
+      setFocus({ repo: 'team/repo', number: 8, nonce: 'listed-now-closed' }); await frame(); await frame()
+      ensure(title(8) === 'Explicit now closed second', 'New exact closed state lost to old open inventory')
+      ensure(row(8).querySelector('input').disabled && !row(8).querySelector('input').checked, 'Closed exact retained selected open evidence')
+    })
+    await runCheck('list and exact use issuance order in both completion orders', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      for (const exactFirst of [true, false]) {
+        const inventoryRead = deferred(), exactRead = deferred()
+        search = () => inventoryRead.promise; refresh(); await frame()
+        focus = () => exactRead.promise; setFocus({ repo: 'team/repo', number: 7, nonce: 'newer-exact-' + exactFirst }); await frame()
+        const newer = pull(7, { title: 'New exact wins ' + exactFirst, headRefOid: 'e'.repeat(40) })
+        if (exactFirst) { exactRead.resolve(exact(newer)); await until(() => title(7) === newer.title) }
+        inventoryRead.resolve(page([pull(7, { title: 'Older inventory ' + exactFirst })])); await frame(); await frame()
+        if (!exactFirst) { exactRead.resolve(exact(newer)); await until(() => title(7) === newer.title) }
+        ensure(title(7) === newer.title, 'Older list beat a newer successful exact read')
+      }
+      for (const listFirst of [true, false]) {
+        const exactRead = deferred(), inventoryRead = deferred()
+        focus = () => exactRead.promise; setFocus({ repo: 'team/repo', number: 7, nonce: 'older-exact-' + listFirst }); await frame()
+        search = () => inventoryRead.promise; refresh(); await frame()
+        const newer = pull(7, { title: 'New inventory wins ' + listFirst, headRefOid: 'f'.repeat(40) })
+        if (!listFirst) { exactRead.resolve(exact(pull(7, { title: 'Older exact before inventory' }))); await frame(); await frame() }
+        inventoryRead.resolve(page([newer])); await until(() => title(7) === newer.title)
+        if (listFirst) { exactRead.resolve(exact(pull(7, { title: 'Older exact after inventory' }))); await frame(); await frame() }
+        ensure(title(7) === newer.title, 'Older exact beat a newer successful list read')
+      }
+    })
+    await runCheck('exact version drift checks latest selected state and each head/base/state boundary', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull(), pull(8, { title: 'Other selection' })]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(8))
+      let current = pull()
+      for (const [field, value] of [['headRefOid', 'e'.repeat(40)], ['baseRefOid', 'f'.repeat(40)], ['baseRefName', 'release'], ['state', 'CLOSED']]) {
+        const pending = deferred(); focus = () => pending.promise
+        setFocus({ repo: 'team/repo', number: 7, nonce: 'boundary-' + field }); await frame()
+        // Select AFTER the exact read starts. Its captured selection must not win.
+        select(7); if (!row(8).querySelector('input').checked) select(8); await frame()
+        current = { ...current, [field]: value, title: 'Changed ' + field }
+        pending.resolve(exact(current)); await until(() => title(7) === current.title)
+        ensure(!row(7).querySelector('input').checked, 'Latest selection survived ' + field + ' drift')
+        ensure(row(8).querySelector('input').checked, 'Unrelated latest selection was removed')
+      }
+      ensure(row(7).querySelector('input').disabled, 'Latest closed observation remained selectable')
+    })
+    await runCheck('failed explicit exact preserves the latest inventory snapshot and truthful error without stale failures', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7)); select(7); await frame()
+      focus = async () => { throw Error('explicit read unavailable') }
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'explicit-failed' }); await until(() => host.querySelector('.co-pr-note[role=alert]'))
+      ensure(title(7) === 'Initial title' && row(7).querySelector('input').checked, 'Failed explicit read erased previous selected snapshot')
+      ensure(host.innerText.includes('Showing the previous snapshot'), 'Failed explicit read concealed previous snapshot')
+      const old = deferred(); focus = () => old.promise
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'older-explicit-failure' }); await frame()
+      search = async () => page([pull(7, { title: 'Inventory after exact failure', headRefOid: 'e'.repeat(40) })]); refresh()
+      await until(() => title(7) === 'Inventory after exact failure')
+      old.reject(Error('obsolete exact failure')); await frame(); await frame()
+      ensure(!host.querySelector('.co-pr-note[role=alert]'), 'Older exact failure polluted newer inventory')
+    })
+    await runCheck('old missing inventory cannot reread over a newer explicit observation', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      const pending = deferred(); search = () => pending.promise; refresh(); await frame()
+      focus = async () => exact(pull(7, { title: 'Explicit closed after pending inventory', state: 'CLOSED' }))
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'newer-than-missing-list' }); await until(() => title(7) === 'Explicit closed after pending inventory')
+      const exactCalls = calls.filter(call => call.body?.query?.includes('ContributeExactPull')).length
+      pending.resolve(page([])); await frame(); await frame()
+      ensure(title(7) === 'Explicit closed after pending inventory', 'Missing older inventory erased newer exact')
+      ensure(calls.filter(call => call.body?.query?.includes('ContributeExactPull')).length === exactCalls, 'Older inventory launched a redundant exact observation over newer navigation')
+    })
+    await runCheck('pending inventory is canceled across connection and project changes', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      const disconnected = deferred(); search = () => disconnected.promise; refresh(); await frame()
+      setConnection({ state: 'disconnected' }); await frame()
+      search = async () => page([pull(7, { title: 'Reconnected inventory' })]); focus = async () => exact(pull(7, { title: 'Reconnected inventory' }))
+      setConnection({ state: 'connected', login: 'fixture' }); await until(() => title(7) === 'Reconnected inventory')
+      disconnected.reject(Error('old connection inventory failure')); await frame(); await frame()
+      ensure(!host.querySelector('.co-alert[role=alert]'), 'Old connection inventory failure appeared')
+      const leaving = deferred(); search = () => leaving.promise; refresh(); await frame()
+      search = async () => page([]); setProject({ ...project, key: 'other', canonical_repo: 'team/other' }); await frame()
+      leaving.resolve(page([pull(7, { title: 'Old project inventory' })])); await frame(); await frame()
+      ensure(!row(7), 'Old inventory crossed project')
     })
     await runCheck('late initial focus cannot override an already refreshed canonical row', async () => {
       root.render(null); await frame()
