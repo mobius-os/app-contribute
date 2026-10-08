@@ -43,7 +43,7 @@ test('new exact post-attempt failure replaces pending diagnosis without releasin
   const reload = fixture([bad], { checkpoint: f.state.checkpoint, retain: true }); await reload.session.hydrate(); attention(reload)
   reload.session.handleEvent({ key: f.key, event: 'confirm', nonce: 'old-confirm' })
   reload.session.activate(f.key); await reload.session.confirm(f.key); assert.equal(reload.calls, 0)
-  reload.ledger([opened(a)]); assert.equal(reload.state.retain, false)
+  await reload.session.hydrate(); reload.ledger([opened(a)]); assert.equal(reload.state.retain, false)
   assert.equal(reload.state.checkpoint, null)
 })
 
@@ -71,6 +71,7 @@ for (const mode of ['batch', 'stack']) test(`mixed ${mode} presents failed remai
   const reload = fixture(next, { key, checkpoint: f.state.checkpoint, retain: true }); await reload.session.hydrate(); attention(reload)
   for (const item of reload.state.actions) { reload.session.activate(item.key); await reload.session.confirm(item.key) }
   assert.equal(reload.calls, 0)
+  await reload.session.hydrate()
   assert.ok(reload.action.links.some(link => link.url === opened(a).url))
   reload.ledger([opened(a), opened(b, 2)]); assert.equal(reload.state.retain, false)
 })

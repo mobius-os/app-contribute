@@ -2,6 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createInlineSession, pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
 
+async function until(predicate) {
+  const end = Date.now() + 4000
+  while (!predicate()) { assert.ok(Date.now() < end, 'Required handler/read boundary did not arrive'); await new Promise(resolve => setImmediate(resolve)) }
+}
 const readyReview = records => ({ state: 'ready', byId: Object.fromEntries(records.map(rec => [rec.id, { state: 'ready' }])) })
 
 const record = (id, extra = {}) => ({ id, type: 'pr', status: 'prepared', repo: 'team/repo', revision: 1,
@@ -97,6 +101,7 @@ test('batch confirmations start independent ready entries concurrently and freez
   f.setRecords([record('a', { revision: 2 }), record('b')])
   assert.equal(f.action('chat-send-batch:a,b').disabled, false) // frozen approval stays confirmable; onSend rejects drift
   const sending = f.session.confirm('chat-send-batch:a,b')
+  await until(() => pending.length === 2)
   assert.deepEqual(pending.map(item => item.rec.id), ['a', 'b'])
   assert.equal(pending[0].rec.revision, 1)
   pending.forEach(({ rec, resolve }, i) => resolve({ ok: true, record: { ...rec, status: 'open', number: i + 1, url: `https://github.com/team/repo/pull/${i + 1}` } }))
@@ -114,6 +119,7 @@ test('duplicate confirm and overlapping row/batch cannot publish twice', async (
   await f.session.confirm('chat-send:a')
   f.session.activate('chat-send-batch:a,b')
   await f.session.confirm('chat-send-batch:a,b')
+  await until(() => calls === 1)
   assert.equal(calls, 1)
   resolve({ pending: true })
   await first
@@ -162,8 +168,9 @@ test('batch reports each row as it settles while sibling remains busy', async ()
   assert.equal(f.action('chat-send:b').status, 'Contributing')
   assert.equal(f.action('chat-send:a').note, '')
   assert.equal(f.action('chat-send-batch:a,b').note, '')
+  await until(() => pending.size === 2)
   pending.get('a')({ ok: true, record: { ...record('a'), status: 'open', number: 1, url: 'https://github.com/team/repo/pull/1' } })
-  await new Promise(resolve => setImmediate(resolve))
+  await until(() => f.action('chat-send:a').status === 'Open')
   assert.equal(f.action('chat-send:a').status, 'Open')
   assert.equal(f.action('chat-send:a').links.length, 1)
   assert.equal(f.action('chat-send:b').status, 'Contributing')
@@ -249,7 +256,7 @@ test('prepared focused activation waits for authoritative ledger and review, the
   session.updateLedger([current], false, { state: 'loading', byId: {} })
   assert.equal(states.at(-1).actions[0].confirming, false)
   session.updateLedger([current], true, readyReview([current]))
-  await new Promise(resolve => setImmediate(resolve))
+  await until(() => states.at(-1).actions[0].confirming)
   assert.equal(states.at(-1).actions[0].confirming, true)
   assert.deepEqual(sends, [])
   session.cancel('chat-send:a')
@@ -325,6 +332,7 @@ test('batch keeps one unavailable explanation and truthful prepared rows through
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').confirming, false)
   session.updateLedger(current, true, readyReview(current))
+  await until(() => states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').confirming)
   assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').confirming, true)
   assert.deepEqual(sends, [])
 })
@@ -395,7 +403,7 @@ test('an all-clear local review cannot replace a missing current source verdict'
 
 test('mixed stack update prefix settles, then new-PR suffix needs a new explicit confirmation', async () => {
   const stack = (id, position, action, parent = '') => record(id, { branch: `stack/s/${id}`, plan: { action, repo: 'team/repo', head_sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
-  const a = stack('a', 1, 'pr_update'), b = stack('b', 2, 'pr', 'a')
+  const a = { ...stack('a', 1, 'pr_update'), number: 8, url: 'https://github.com/team/repo/pull/8' }, b = stack('b', 2, 'pr', 'a')
   const phases = []
   const f = fixture(['chat-send:a'], [a, b], { sendStack: async recs => {
     const prepared = recs.filter(rec => rec.status === 'prepared')
@@ -521,7 +529,7 @@ test('event acknowledgement retains active and uncertain ownership but releases 
   assert.equal(f.states.at(-1).retain, false)
   f.session.handleEvent({ key: 'chat-send:a', event: 'activate', nonce: 'third' })
   f.session.handleEvent({ key: 'chat-send:a', event: 'confirm', nonce: 'fourth' })
-  await new Promise(resolve => setImmediate(resolve))
+  await until(() => f.action('chat-send:a').status === 'Checking result')
   assert.equal(f.states.at(-1).ackNonce, 'fourth')
   assert.equal(f.states.at(-1).retain, true)
   f.setRecords([record('a', { status: 'open', number: 7, url: 'https://github.com/team/repo/pull/7' })])

@@ -6,6 +6,10 @@ import { createInlineSession } from '../inline-session.js'
 const record = id => ({ id, type: 'pr', status: 'prepared', repo: 'team/repo', plan: { action: 'pr', repo: 'team/repo', head_sha: 'a'.repeat(40) }, quality_review: { state: 'all_clear', reviewed_head_sha: 'a'.repeat(40) } })
 const opened = (rec, number = 1) => ({ ...rec, status: 'open', number, url: `https://github.com/team/repo/pull/${number}`, updated_at: '2026-10-08T12:00:00Z' })
 const reviews = recs => ({ state: 'ready', byId: Object.fromEntries(recs.map(rec => [rec.id, { state: 'ready' }])) })
+async function until(predicate) {
+  const end = Date.now() + 4000
+  while (!predicate()) { assert.ok(Date.now() < end, 'Required handler/read boundary did not arrive'); await new Promise(resolve => setImmediate(resolve)) }
+}
 const actions = [{ key: 'chat-send:a', label: 'Contribute' }]
 function fixture(recs = [record('a')], options = {}) {
   let current = recs
@@ -23,6 +27,7 @@ for (const phase of ['busy', 'uncertain']) test(`${phase} ownership survives col
   first.ledger(); await first.session.hydrate(); first.session.activate(actions[0].key)
   const sending = first.session.confirm(actions[0].key)
   if (phase === 'uncertain') await sending
+  else await until(() => !!release)
   const checkpoint = first.state.checkpoint
   assert.ok(checkpoint, 'ownership is emitted before an unresolved handler can complete')
   assert.equal(checkpoint.data.includes('head_sha'), false)
@@ -32,11 +37,12 @@ for (const phase of ['busy', 'uncertain']) test(`${phase} ownership survives col
   assert.equal(next.state.checkpointAck, checkpoint.id)
   assert.equal(next.state.ackNonce, null)
   assert.equal(next.state.actions[0].disabled, true)
-  next.ledger(); await next.session.hydrate()
+  next.ledger([record('a')]); await next.session.hydrate()
   assert.equal(next.state.actions[0].disabled, true)
   assert.equal(next.state.actions[0].hidden, false)
   next.session.activate(actions[0].key); await next.session.confirm(actions[0].key)
   assert.equal(next.calls, 0)
+  await next.session.hydrate() // activation's read must finish before a later ledger-only receipt
   next.ledger([opened(record('a'))])
   assert.equal(next.state.retain, false)
   assert.equal(next.state.checkpoint, null)
@@ -54,6 +60,7 @@ for (const phase of ['busy', 'uncertain']) test(`valid dotted record ID ${phase}
   first.ledger(); await first.session.hydrate(); first.session.activate(key)
   const sending = first.session.confirm(key)
   if (phase === 'uncertain') await sending
+  else await until(() => !!release)
   const checkpoint = first.state.checkpoint
   assert.ok(checkpoint, 'valid dotted identity must be checkpointed before handler completion')
   assert.equal(first.state.recoveryError, false)
@@ -61,11 +68,12 @@ for (const phase of ['busy', 'uncertain']) test(`valid dotted record ID ${phase}
   next.ledger([], false)
   assert.equal(next.state.retain, true); assert.equal(next.state.recoveryError, false)
   assert.equal(next.state.ackNonce, null); assert.equal(next.state.actions[0].disabled, true)
-  next.ledger(); await next.session.hydrate()
+  next.ledger([record(id)]); await next.session.hydrate()
   assert.equal(next.state.actions[0].disabled, true); assert.equal(next.state.actions[0].hidden, false)
   next.session.activate(key); await next.session.confirm(key)
   next.session.handleEvent({ key, event: 'confirm', nonce: 'old-confirm' })
   assert.equal(next.calls, 0)
+  await next.session.hydrate()
   next.ledger([opened(record(id))])
   assert.equal(next.state.retain, false); assert.equal(next.state.checkpoint, null)
   assert.equal(next.state.actions[0].links[0].url, 'https://github.com/team/repo/pull/1')
@@ -117,7 +125,7 @@ test('retained owner without recovery data cannot silently unlock', async () => 
   next.session.activate(actions[0].key); await next.session.confirm(actions[0].key); assert.equal(next.calls, 0)
 })
 
-for (const state of ['pending', 'failed']) test(`reloaded partial stack ${state} blocks a newly prepared suffix until all attempted identities settle`, async () => {
+for (const state of ['pending', 'failed']) test(`reloaded partial stack ${state} without historical target proof never invents success from same IDs`, async () => {
   const stack = (id, position, parent = '') => ({ ...record(id), plan: { ...record(id).plan, base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
   const a = stack('a.1', 1), b = stack('b.2', 2, 'a.1')
   const checkpoint = { id: 'partial', data: JSON.stringify({ version: 1, phases: [{ unitKey: 'stack:s', phaseIds: ['a.1', 'b.2'], state, note: 'Check the remainder' }] }) }
@@ -126,7 +134,8 @@ for (const state of ['pending', 'failed']) test(`reloaded partial stack ${state}
   next.ledger(); await next.session.hydrate(); next.session.activate(key); await next.session.confirm(key)
   assert.equal(next.calls, 0); assert.equal(next.state.retain, true); assert.equal(next.state.actions[0].disabled, true)
   next.ledger([opened(a), opened(b, 2)])
-  assert.equal(next.state.retain, false); assert.equal(next.state.actions[0].status, 'Open')
+  assert.equal(next.state.retain, true); assert.deepEqual(next.state.actions[0].links, [])
+  assert.equal(next.state.actions[0].disabled, true)
 })
 
 test('partial batch recovery keeps both exact units without sending a prepared remainder', async () => {
@@ -135,7 +144,8 @@ test('partial batch recovery keeps both exact units without sending a prepared r
   const next = fixture([opened(record('a.1')), record('b.2')], { actions: batch, checkpoint, retain: true })
   next.ledger(); await next.session.hydrate(); next.session.activate(batch[0].key); await next.session.confirm(batch[0].key)
   assert.equal(next.calls, 0); assert.equal(next.state.retain, true)
-  next.ledger([opened(record('a.1')), opened(record('b.2'), 2)]); assert.equal(next.state.retain, false)
+  next.ledger([opened(record('a.1')), opened(record('b.2'), 2)]); assert.equal(next.state.retain, true)
+  assert.deepEqual(next.state.actions[0].links, []); assert.doesNotMatch(next.state.summary, /sent/)
 })
 
 // Execute the actual component initializer, not a separate recovery adapter.
@@ -206,6 +216,7 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch', 'can
     publish: message => { firstState = message; receive(oldSource, message) } })
   first.updateLedger(recs, true, reviews(recs)); await first.hydrate(); first.activate(key)
   const sending = first.confirm(key); if (phase !== 'busy') await sending
+  else await until(() => sends === 1)
   if (phase === 'canonical-failure') {
     recs[0] = { ...recs[0], updated_at: '2026-10-08T22:02:00Z', last_submit_error: 'Branch protection rejected this exact attempt' }
     first.updateLedger(recs, true, reviews(recs)); await first.hydrate()
@@ -243,8 +254,20 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch', 'can
   }
   for (const event of ['activate', 'confirm']) mounted.message({ type: 'moebius:app-block-action', sessionId: 's', key, event, nonce: event === 'confirm' ? 'old-confirm' : 'new-activate' })
   assert.equal(nextCalls, 0)
+  await mounted.session.hydrate()
   const before = state; receive(oldSource, { type: 'moebius:app-block-state', sessionId: 's', actions: [], retain: false }); assert.equal(state, before)
-  const canonical = recs.map((rec, i) => ({ ...opened(rec, i + 1), updated_at: '2026-10-08T22:03:00Z' })); mounted.session.updateLedger(canonical, true, reviews(canonical))
+  // The real host must retain an acknowledged checkpoint through a foreign
+  // same-ID public observation, not merely suppress a new handler.
+  const originalRecords = structuredClone(recs)
+  const unresolvedIds = new Set(JSON.parse(state.checkpoint.data).phases.flatMap(phase => phase.phaseIds))
+  const foreign = recs.map(rec => unresolvedIds.has(rec.id) ? { ...opened(rec, 83), repo: 'elsewhere/repo',
+    plan: { ...rec.plan, repo: 'elsewhere/repo' }, url: 'https://github.com/elsewhere/repo/pull/83', updated_at: '2026-10-08T22:03:00Z' } : rec)
+  recs.splice(0, recs.length, ...foreign)
+  mounted.session.updateLedger(recs, true, reviews(recs)); await mounted.session.hydrate()
+  assert.equal(host.inlineSessionRetained(state, null), true); assert.ok(state.checkpoint)
+  assert.equal(state.actions[0].links.some(link => link.url.includes('elsewhere/repo')), false)
+  recs.splice(0, recs.length, ...originalRecords)
+  const canonical = recs.map((rec, i) => ({ ...opened(rec, i + 1), updated_at: '2026-10-08T22:03:00Z' })); recs.splice(0, recs.length, ...canonical); mounted.session.updateLedger(canonical, true, reviews(canonical)); await mounted.session.hydrate()
   assert.equal(host.inlineSessionRetained(state, null), false); assert.equal(state.checkpoint, null)
   assert.equal(state.actions[0].links[0].url, 'https://github.com/team/repo/pull/1')
   mounted.dispose(); if (release) { release({ uncertain: true }); await sending }

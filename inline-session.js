@@ -168,8 +168,30 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // A new phase of one stack is a new approval; an ambiguous phase remains
   // locked, while a reviewed suffix can receive its own explicit confirmation.
   const phaseKey = publicationPhaseKey
-  const reconciled = phaseIds => phaseIds.length > 0 && phaseIds.every(id => settled(byId.get(id))
-    && (exactRead.has(id) || ledgerReady && ledger.some(record => record.id === id && settled(record))))
+  // One historical target proof owns both diagnosis and successful receipts.
+  // Newer same-target ledger receipts may settle; failure additionally needs a
+  // fresh exact timestamp. Legacy ID-only ownership remains unknown, not consent.
+  const matchesContext = (result, fresh = false) => Boolean(result.observations?.length)
+    && result.phaseIds.every(id => unitFor(id).records.every(member => result.observations.some(before => before.id === member.id)))
+    && result.observations.every(before => {
+      const current = exactObservations.get(before.id)
+      return !pendingRead.has(before.id) && ledgerReady && ledger.some(record => record.id === before.id)
+        && current?.target === before.target && current.identity === attemptTarget(byId.get(before.id))
+        && (fresh ? current.at !== null && current.at >= Date.parse(byId.get(before.id)?.updated_at)
+          : current.status === 'prepared' || Boolean(current.receipt))
+    })
+  const reconciled = result => matchesContext(result) && result.phaseIds.length > 0
+    && result.phaseIds.every(id => settled(byId.get(id))
+      && (exactRead.has(id) || ledgerReady && ledger.some(record => record.id === id && settled(record))))
+  // A partial valid prefix may link its own receipt, but a foreign member or
+  // parent cannot contribute links/status/counts to an unresolved frozen phase.
+  const publicReceipt = record => {
+    const link = settled(record)
+    return link && [...results.values()].every(result =>
+      result.unitKey !== unitFor(record.id).key && !result.phaseIds.includes(record.id)
+        && !result.observations?.some(before => before.id === record.id)
+        || matchesContext(result)) ? link : null
+  }
   // An uncertain prefix cannot become a newly approved suffix on reload or
   // restaging. Lock the owning unit AND the attempted record identities.
   const pendingUnit = unit => [...results.values()].some(result => (result.state === 'pending' || result.recovered)
@@ -178,15 +200,8 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // complete-ledger membership and monotonic observations exclude stale errors.
   const reconcileResults = () => {
     for (const [key, result] of results) {
-      if (!busyUnits.has(result.unitKey) && reconciled(result.phaseIds)) { results.delete(key); continue }
-      // A stack failure belongs to its whole frozen parent/member context.
-      // Pending reads and newer ledger intent cannot borrow stale exact hashes.
-      const sameContext = result.observations?.every(before => {
-        const current = exactObservations.get(before.id)
-        return !pendingRead.has(before.id) && ledgerReady && ledger.some(record => record.id === before.id)
-          && current?.target === before.target && current.identity === attemptTarget(byId.get(before.id))
-          && current.at >= Date.parse(byId.get(before.id)?.updated_at)
-      })
+      if (!busyUnits.has(result.unitKey) && reconciled(result)) { results.delete(key); continue }
+      const sameContext = matchesContext(result, true)
       const failed = sameContext && result.observations.find(before => {
         const current = exactObservations.get(before.id)
         return result.phaseIds.includes(before.id) && current?.status === 'prepared'
@@ -211,10 +226,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     // confirmation still freezes the complete parent-first stack below.
     const addressed = idsFor(item.key)
     const focused = addressed.map(id => byId.get(id) || ledger.find(rec => rec.id === id)).filter(Boolean)
-    const links = [...new Map(focused.map(settled).filter(Boolean).map(link => [link.url, link])).values()]
+    const links = [...new Map(focused.map(publicReceipt).filter(Boolean).map(link => [link.url, link])).values()]
     const readComplete = addressed.length > 0 && addressed.every(id => readFinished.has(id))
     const focusedResolved = readComplete && addressed.every(id => exactRead.has(id) || pendingRead.has(id) && displayRead.has(id)) && focused.length === addressed.length
-    const publicResolved = focusedResolved && focused.every(settled)
+    const publicResolved = focusedResolved && focused.every(publicReceipt)
     const reviewUnavailable = reviewStatus?.state === 'unavailable'
     const isBatch = contributeBlockTarget(item.key)?.kind === 'batch'
     // This first tap starts authoritative checks; it is not Send approval.
@@ -265,10 +280,13 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const addressed = idsFor(batch.key)
     if (!addressed.length || !addressed.every(id => readFinished.has(id)) || addressed.some(id => pendingRead.has(id))) return lastSummary || `${addressed.length} contributions`
     const found = addressed.map(id => exactRead.has(id) ? byId.get(id) || ledger.find(rec => rec.id === id) : null)
-    const publicCount = found.filter(settled).length
+    const publicCount = found.filter(publicReceipt).length
     const preparedCount = found.filter(rec => rec?.status === 'prepared').length
+    const checkingCount = found.filter(rec => settled(rec) && !publicReceipt(rec)).length
     const missingCount = addressed.length - found.filter(Boolean).length
-    lastSummary = reviewStatus?.state === 'unavailable' && preparedCount
+    lastSummary = checkingCount
+      ? [publicCount && `${publicCount} sent`, preparedCount && `${preparedCount} prepared`, `${checkingCount} checking`, missingCount && `${missingCount} unavailable`].filter(Boolean).join(' · ')
+      : reviewStatus?.state === 'unavailable' && preparedCount
       ? `${preparedCount} prepared · Current review unavailable`
       : actions.find(action => action.key === batch.key)?.busy
         ? `${publicCount ? `${publicCount} sent · ` : ''}${preparedCount} contributing`
@@ -320,12 +338,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (rec?.id !== id) return
     rec = copy(rec)
     const identity = attemptTarget(rec)
-    const observation = Number.isFinite(Date.parse(rec.updated_at)) ? await attemptObservation(rec) : null
+    const observation = await attemptObservation(rec)
     if (!alive || readGeneration.get(id) !== generation) return
     exactRead.add(id); displayRead.add(id)
-    if (observation) {
-      exactObservations.set(id, { ...observation, status: rec.status, identity })
-    }
+    exactObservations.set(id, { ...observation, status: rec.status, receipt: settled(rec), identity })
     if ((!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || ''))
       && !(settled(byId.get(id)) && !settled(rec) && String(rec.updated_at || '') <= String(byId.get(id).updated_at || ''))) byId.set(id, rec)
   }
@@ -407,23 +423,22 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
       unitKey: unit.key, phaseIds: unit.ready.map(rec => rec.id), state: 'pending', note: '', tone: 'attention',
     }))
     confirming = null; emit()
-    // Exact target hashes are observational only. Missing timestamps remain
-    // unknown; older checkpoints retain their no-repeat guard without a diagnosis.
-    if (approval.units.some(unit => unit.ready.some(rec => Number.isFinite(Date.parse(rec.updated_at))))) {
-      try {
-        await Promise.all(approval.units.map(async unit => {
-          const observations = await Promise.all(unit.records.map(async approved => {
-            const current = byId.get(approved.id)
-            const sameTarget = attemptTarget(current) === attemptTarget(approved)
-            return attemptObservation(copy(sameTarget ? current : approved))
-          }))
-          results.get(phaseKey(unit)).observations = observations
+    if (recoveryError) { busyUnits.clear(); frozen = null; emit(); return }
+    // Every live attempt records its complete target before the handler. A
+    // missing timestamp cannot diagnose failure, but never omits target proof.
+    try {
+      await Promise.all(approval.units.map(async unit => {
+        const observations = await Promise.all(unit.records.map(async approved => {
+          const current = byId.get(approved.id)
+          const sameTarget = attemptTarget(current) === attemptTarget(approved)
+          return attemptObservation(copy(sameTarget ? current : approved))
         }))
-      } catch {
-        recoveryError = 'The contribution recovery observation could not be saved. Open Contribute; nothing was sent.'
-      }
-      reconcileResults(); emit()
+        results.get(phaseKey(unit)).observations = observations
+      }))
+    } catch {
+      recoveryError = 'The contribution recovery observation could not be saved. Open Contribute; nothing was sent.'
     }
+    reconcileResults(); emit()
     if (recoveryError) { busyUnits.clear(); frozen = null; emit(); return }
     await Promise.all(approval.units.map(async unit => {
       let outcome
