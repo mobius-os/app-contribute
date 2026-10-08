@@ -29,7 +29,7 @@ const status={byId:{a:{state:'ready'},b:{state:'ready'}}};
 const stack=(id,position)=>({...rec(id),plan:{...rec(id).plan,branch:'stack/chain/'+position,base_sha:position===1?undefined:sha,stack:{id:'chain',name:'Chain',total:2,position,base_branch:position===1?'main':'stack/chain/1',parent_record_id:position===1?'':'a'}}});
 let controls={}, release;
 function App({mode}){
- const[records,setRecords]=useState(mode==='batch'||mode==='batch-late'||mode==='cancel'?[rec('a'),rec('b')]:(mode==='stack'||mode==='stack-failure')?[stack('a',1),stack('b',2)]:(mode==='readyfail'||mode==='ready-stack-failure')?[{...stack('a',1),status:'draft',number:1,url:'https://github.com/team/repo/pull/1'},{...stack('b',2),status:'draft',number:2,url:'https://github.com/team/repo/pull/2'}]:mode==='ready-failure'?[canonical(rec('a','draft'),'draft')]:mode==='ready'?[rec('a','draft')]:[rec('a')]);
+ const[records,setRecords]=useState(mode==='batch'||mode==='batch-late'||mode==='cancel'?[rec('a'),rec('b')]:(mode==='stack'||mode==='stack-failure'||mode==='stack-held-failure')?[stack('a',1),stack('b',2)]:(mode==='readyfail'||mode==='ready-stack-failure')?[{...stack('a',1),status:'draft',number:1,url:'https://github.com/team/repo/pull/1'},{...stack('b',2),status:'draft',number:2,url:'https://github.com/team/repo/pull/2'}]:mode==='ready-failure'?[canonical(rec('a','draft'),'draft')]:mode==='ready'?[rec('a','draft')]:[rec('a')]);
  const[activeId,setActiveId]=useState('');const[activation,setActivation]=useState(0);
  const calls=useRef([]);const run=buildContributionRun({records,reviewStatus:status});
  controls={calls:calls.current,records,revision:run.revision,update:(id,patch)=>setRecords(old=>old.map(r=>r.id===id?{...r,...patch}:r)),activate:()=>setActivation(x=>x+1)};
@@ -46,7 +46,7 @@ function App({mode}){
   return {ok:true,record:canonical(record)};
  }
  async function ready(record){calls.current.push('ready:'+record.id);if(mode==='readyfail')return {error:'Review changed',failure:{owner:'agent'}};if(mode==='ready-stack-failure'&&record.id==='a'){setRecords(old=>old.map(r=>r.id==='a'?canonical(r):r));return {ok:true,record:canonical(record)}};return {pending:true,record:{...record,readying:true}}}
- async function sendStack(records){calls.current.push('stack:'+records.map(r=>r.id).join(','));setRecords(old=>old.map(r=>r.id==='a'?canonical(r):r));return {pending:true,published:1,publishing:1}}
+ async function sendStack(records){calls.current.push('stack:'+records.map(r=>r.id).join(','));setRecords(old=>old.map(r=>r.id==='a'?canonical(r):r));if(mode==='stack-held-failure')return new Promise(resolve=>{release=()=>resolve({pending:true,published:1,publishing:1})});return {pending:true,published:1,publishing:1}}
  return <div className='co-root'><style>{CSS+WORKSPACE_CSS}</style><main className='co-page co-workspace'><TaskContext.Provider value={{activeId,explicit:true,open:setActiveId,close:()=>setActiveId('')}}><ContributionRun run={run} reviewStatus={status} publicationPreference='github' githubState='connected' onSend={send} onSendStack={sendStack} onMarkReady={ready}/></TaskContext.Provider></main></div>
 }
 const root=createRoot(document.getElementById('root'));
@@ -78,6 +78,82 @@ window.runWorkspaceChecks=async()=>{const reports=[];try{
  root.render(<App key='ready-stack-failure' mode='ready-stack-failure'/>);await pause();await wait(()=>!!button('Request review'),'ready-stack-failure offer');button('Request review').click();await wait(approval,'ready-stack-failure approval');button('Request review for 2 on GitHub').click();await wait(()=>controls.calls.length===2,'ready-stack-failure B handler');await wait(()=>document.body.innerText.includes('Checking result'),'ready-stack-failure pending');check(approval()&&!button('Done'),'ready-stack-failure ownership lost');controls.update('b',{readying:false,updated_at:'2026-10-08T22:00:02Z',last_ready_error:'Connected account no longer matches',last_ready_error_code:'github_not_connected'});await wait(()=>!!button('Done'),'ready-stack-failure mixed outcome');const readyMixed=[...document.querySelectorAll('.co-run-approval-list li')].map(x=>x.innerText);check(readyMixed.length===2&&readyMixed[0].includes('Review requested')&&readyMixed[1].includes('Connected account no longer matches'),'ready-stack failure borrowed sibling outcome');check(controls.calls.join(',')==='ready:a,ready:b','ready-stack-failure replayed');reports.push({case:'ready-stack-failure',calls:[...controls.calls]});
  await begin('old-error');sendConfirmation().click();await wait(()=>controls.calls.length===1,'old-error handler');await wait(()=>document.body.innerText.includes('Checking result'),'old-error checking');controls.update('a',{last_submit_error:'Prior failure',updated_at:'2026-10-08T21:59:59Z'});await pause();check(!button('Done')&&!sendOffer()&&approval(),'old error freed owner');check(controls.calls.length===1,'old error replayed');reports.push({case:'old-error',calls:[...controls.calls]});
  await begin('wrong-failure');sendConfirmation().click();await wait(()=>controls.calls.length===1,'wrong-failure handler');await wait(()=>document.body.innerText.includes('Checking result'),'wrong-failure checking');const original=controls.records[0];controls.update('a',{...failPatch,plan:{...original.plan,head_sha:'b'.repeat(40)}});await pause();check(!button('Done')&&approval(),'unrelated failed head settled');controls.update('a',{id:'different'});await pause();check(!button('Done')&&approval(),'missing record freed owner');controls.update('different',{...original,...failPatch});await wait(()=>!!button('Done'),'exact failure restored');check(controls.calls.join(',')==='a','wrong-failure replayed');reports.push({case:'wrong-failure',calls:[...controls.calls]});
+ // A newer diagnostic belongs to this frozen phase only when the complete
+ // stack identity still matches. Every case starts with A done and B checking.
+ const stackDrifts=[
+  ['base',s=>({...s,base_branch:'stack/other/1'})],
+  ['parent',s=>({...s,parent_record_id:'other'})],
+  ['id',s=>({...s,id:'other'})],
+  ['position',s=>({...s,position:1})],
+  ['total',s=>({...s,total:3})],
+  ['missing',()=>undefined],
+  ['malformed',s=>({...s,position:'not-a-position'})],
+ ];
+ for(const mode of ['send','ready'])for(const [drift,change] of stackDrifts){
+  root.render(null);await pause();
+  const appMode=mode==='send'?'stack-failure':'ready-stack-failure';
+  if(mode==='send'){await begin(appMode);sendConfirmation().click()}
+  else {root.render(<App key={appMode} mode={appMode}/>);await pause();await wait(()=>!!button('Request review'),drift+' ready offer');button('Request review').click();await wait(approval,drift+' ready confirmation');button('Request review for 2 on GitHub').click()}
+  const expected=mode==='send'?'stack:a,b':'ready:a,ready:b';
+  await wait(()=>controls.calls.join(',')===expected,drift+' handlers');
+  await wait(()=>document.querySelectorAll('.co-run-approval-list li').length===2,drift+' rows');
+  await pause();
+  const originalB=controls.records.find(r=>r.id==='b');
+  check(approval()&&!button('Done'),drift+' lost pending owner');
+  check(document.querySelectorAll('.co-run-approval-list li')[0].innerText.includes(mode==='send'?'Sent to GitHub':'Review requested'),drift+' A not done');
+  const diagnostic='Unrelated '+mode+' '+drift+' failure';
+  const badStack=change(originalB.plan.stack),badPlan={...originalB.plan};
+  if(badStack===undefined)delete badPlan.stack;else badPlan.stack=badStack;
+  controls.update('b',{...originalB,status:mode==='send'?'prepared':'draft',readying:false,updated_at:'2026-10-08T22:00:02Z',last_submit_error:mode==='send'?diagnostic:undefined,last_ready_error:mode==='ready'?diagnostic:undefined,last_ready_error_code:mode==='ready'?'blocked':undefined,plan:badPlan});
+  await pause();
+  const rows=[...document.querySelectorAll('.co-run-approval-list li')].map(x=>x.innerText);
+  check(approval()&&!button('Done')&&!sendOffer(),mode+' '+drift+' unrelated diagnostic settled/reoffered');
+  check(rows.length===2&&rows[0].includes(mode==='send'?'Sent to GitHub':'Review requested')&&rows[1].includes('Checking result'),mode+' '+drift+' borrowed sibling outcome');
+  check(rows[1].includes('stack/chain/1 → stack/chain/2')&&!rows[1].includes('stack/other/1'),mode+' '+drift+' frozen target changed');
+  check(controls.calls.join(',')===expected,mode+' '+drift+' handler replayed');
+  const exactDiagnostic='Exact '+mode+' '+drift+' failure';
+  controls.update('b',{...originalB,status:mode==='send'?'prepared':'draft',readying:false,updated_at:'2026-10-08T22:00:03Z',last_submit_error:mode==='send'?exactDiagnostic:undefined,last_ready_error:mode==='ready'?exactDiagnostic:undefined,last_ready_error_code:mode==='ready'?'blocked':undefined});
+  await wait(()=>!!button('Done'),mode+' '+drift+' exact failure');
+  const finalRows=[...document.querySelectorAll('.co-run-approval-list li')].map(x=>x.innerText);
+  check(finalRows.length===2&&finalRows[0].includes(mode==='send'?'Sent to GitHub':'Review requested')&&finalRows[1].includes(exactDiagnostic),mode+' '+drift+' exact failure not isolated to B');
+  check(controls.calls.join(',')===expected,mode+' '+drift+' handler repeated after exact failure');
+  reports.push({case:mode+'-stack-drift-'+drift,calls:[...controls.calls]});
+ }
+ // A flat frozen action cannot acquire a stack identity after confirmation
+ // and use its new diagnostic to settle the old standalone phase.
+ for(const mode of ['send','ready']){
+  root.render(null);await pause();
+  const appMode=mode==='send'?'send-failure':'ready-failure';
+  if(mode==='send'){await begin(appMode);sendConfirmation().click()}
+  else {root.render(<App key={appMode} mode={appMode}/>);await pause();await wait(()=>!!button('Request review'),'flat ready offer');button('Request review').click();await wait(approval,'flat ready confirmation');button('Request review on GitHub').click()}
+  const expected=mode==='send'?'a':'ready:a';
+  await wait(()=>controls.calls.join(',')===expected,'flat handler');
+  await wait(()=>document.body.innerText.includes('Checking result'),'flat checking');
+  const original=controls.records[0],bad='Unrelated added stack failure';
+  controls.update('a',{...original,status:mode==='send'?'prepared':'draft',readying:false,updated_at:'2026-10-08T22:00:02Z',last_submit_error:mode==='send'?bad:undefined,last_ready_error:mode==='ready'?bad:undefined,last_ready_error_code:mode==='ready'?'blocked':undefined,plan:{...original.plan,stack:{id:'other',name:'Other',position:1,total:2,base_branch:'main',parent_record_id:''}}});
+  await pause();
+  check(approval()&&!button('Done')&&!sendOffer(),mode+' added stack settled flat phase');
+  check(document.querySelector('.co-run-approval-list li')?.innerText.includes('Checking result')&&!document.querySelector('.co-run-approval-list li')?.innerText.includes(bad),mode+' added stack changed frozen row');
+  check(controls.calls.join(',')===expected,mode+' added stack replayed');
+  const exact='Exact flat '+mode+' failure';
+  controls.update('a',{...original,status:mode==='send'?'prepared':'draft',readying:false,updated_at:'2026-10-08T22:00:03Z',last_submit_error:mode==='send'?exact:undefined,last_ready_error:mode==='ready'?exact:undefined,last_ready_error_code:mode==='ready'?'blocked':undefined});
+  await wait(()=>!!button('Done'),mode+' flat exact failure');
+  check(document.querySelector('.co-run-approval-list li')?.innerText.includes(exact)&&controls.calls.join(',')===expected,mode+' flat exact result/replay');
+  reports.push({case:mode+'-flat-added-stack',calls:[...controls.calls]});
+ }
+ // The exact canonical failure can arrive before a delayed stack callback.
+ // A stale pending receipt must neither overrule it nor dispatch again.
+ root.render(null);await pause();await begin('stack-held-failure');sendConfirmation().click();
+ await wait(()=>controls.calls.join(',')==='stack:a,b','held stack handler');
+ await wait(()=>controls.records.find(r=>r.id==='a')?.status==='open','held stack A canonical record');
+ const heldB=controls.records.find(r=>r.id==='b');
+ controls.update('b',{...heldB,...failPatch,plan:{...heldB.plan,stack:{...heldB.plan.stack,base_branch:'stack/other/1'}}});
+ await pause();check(approval()&&!button('Done'),'held foreign failure settled');
+ controls.update('b',{...heldB,...failPatch,updated_at:'2026-10-08T22:00:03Z'});
+ await pause();check(approval()&&!button('Done'),'held exact failure released ownership before callback');
+ release();await wait(()=>!!button('Done'),'held exact failure after stale callback');
+ check(document.querySelectorAll('.co-run-approval-list li')[1]?.innerText.includes(failMessage)&&controls.calls.join(',')==='stack:a,b','held stale callback shadowed exact failure or replayed');
+ reports.push({case:'stack-held-canonical-before-stale',calls:[...controls.calls]});
  return {status:'pass',reports};}catch(e){return{status:'fail',error:e.stack,reports,dom:document.body.innerText}}};`;
 
 async function chromiumPath() {
