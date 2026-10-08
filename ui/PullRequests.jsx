@@ -13,6 +13,12 @@ import { AgentModelSettings } from './AgentModelSettings.jsx'
 const FILTERS = [['all', 'All'], ['unassigned', 'Unassigned'], ['assigned', 'Assigned'], ['authored', 'Mine']]
 export const isOpenPull = pr => !pr?.state || pr.state === 'OPEN'
 
+// Inventory owns membership/order, not the values of newer exact observations.
+function observedPulls(view, focusKey) {
+  const keys = view.inventory.includes(focusKey) ? view.inventory : [...view.inventory, focusKey]
+  return keys.map(key => view.observations.get(key)?.pr).filter(Boolean)
+}
+
 // GitHub-style list header: the count when nothing is selected, bulk actions
 // once something is. Selection never moves focus or interrupts browsing.
 function SelectionTray({ selection, busy, onClear, onReview, onAssign, visible, shown = visible.length, loading = false, onSelectVisible }) {
@@ -146,7 +152,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
 export function PullRequests({ appId, token, project, conn, onChanged, records = [], onRecord, refreshKey, focusPull }) {
   const repo = project?.canonical_repo || ''
   const task = useProjectTask()
-  const [data, setData] = useState({ pulls: [], loading: true, error: '' })
+  const [data, setData] = useState({ loading: true, error: '' })
   const [runs, setRuns] = useState([])
   const [runError, setRunError] = useState('')
   const [filter, setFilter] = useState('all')
@@ -157,7 +163,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const [opened, setOpened] = useState('')
   const [selected, setSelected] = useState(new Set())
   const [selectionNotice, setSelectionNotice] = useState('')
-  const [focusedPr, setFocusedPr] = useState(null)
+  const [view, setView] = useState({ inventory: [], observations: new Map() })
+  const currentView = useRef(view)
+  const observationOrder = useRef(0)
   const [focusError, setFocusError] = useState('')
   const focusRequest = useRef(0)
   const focusDone = useRef('')
@@ -166,10 +174,36 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const focusId = `${focusKey}:${focusPull?.nonce || ''}`
   const currentFocus = useRef(null)
   currentFocus.current = { key: focusKey, id: focusId, repo: focusPull?.repo, number: focusPull?.number, connected: conn.state === 'connected' && !!focusKey && focusPull.repo.toLowerCase() === repo.toLowerCase() }
-  // The exact deep-link read fills a missing page; current discovery owns rows.
-  const allPulls = useMemo(() => focusedPr && !data.pulls.some(pr => prKey(pr) === prKey(focusedPr)) ? [...data.pulls, focusedPr] : data.pulls, [focusedPr, data.pulls])
-  const currentSelection = useRef({ selected, pulls: allPulls })
-  currentSelection.current = { selected, pulls: allPulls }
+  const validFocusKey = currentFocus.current.connected ? focusKey : ''
+  const allPulls = useMemo(() => observedPulls(view, validFocusKey), [view, validFocusKey])
+  const focusedPr = allPulls.find(pr => prKey(pr) === validFocusKey)
+  const currentSelection = useRef(selected)
+  currentSelection.current = selected
+  // Both readers publish here. Request issuance (not completion order or source)
+  // determines which successful observation owns each identity and selection.
+  const publishPulls = useCallback((pulls, order, inventory) => {
+    const previous = currentView.current
+    const focusKey = currentFocus.current.connected ? currentFocus.current.key : ''
+    const observations = new Map(previous.observations)
+    for (const pr of pulls) {
+      const key = prKey(pr)
+      if (order >= (observations.get(key)?.order || 0)) observations.set(key, { pr, order })
+    }
+    const next = { inventory: inventory || previous.inventory, observations }
+    const currentPulls = observedPulls(next, focusKey)
+    const invalidated = [...previous.observations.values()].map(item => item.pr).filter(before => {
+      const after = currentPulls.find(pr => prKey(pr) === prKey(before))
+      return !after || !isOpenPull(after) || ['headRefOid', 'baseRefOid', 'baseRefName'].some(field => before[field] !== after[field])
+    }).map(prKey)
+    const removed = invalidated.filter(key => currentSelection.current.has(key))
+    if (removed.length) setSelectionNotice(`Selection updated: ${removed.join(', ')} changed or is no longer open. Select its current version again if needed.`)
+    setSelected(old => new Set([...old].filter(key => !invalidated.includes(key))))
+    // Retain only visible inventory plus the exact destination, including its
+    // prior snapshot on failure. Navigation cannot grow a permanent PR cache.
+    for (const key of observations.keys()) if (!next.inventory.includes(key) && key !== focusKey) observations.delete(key)
+    currentView.current = next
+    setView(next)
+  }, [])
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
   const [resolved, setResolved] = useState(null)
@@ -186,56 +220,39 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current += 1 } }, [])
   const load = useCallback(async (cursor = null) => {
-    const id = ++request.current
+    const id = ++request.current, order = ++observationOrder.current
     const focus = currentFocus.current, focusEpoch = focusRequest.current
     setData(old => ({ ...old, loading: true, error: '' }))
     try {
       let next = await discoverPulls(token, repo, cursor)
       // A first-page refresh must not discard selections from later pages.
-      while (!cursor && next.hasNextPage && [...currentSelection.current.selected].some(key => !next.pulls.some(pr => prKey(pr) === key))) {
+      while (!cursor && next.hasNextPage && [...currentSelection.current].some(key => !next.pulls.some(pr => prKey(pr) === key))) {
         if (id !== request.current || !alive.current) return
         const page = await discoverPulls(token, repo, next.endCursor)
         next = { ...page, pulls: mergeSelection(next.pulls, page.pulls) }
       }
       if (id !== request.current || !alive.current) return
-      // The open inventory cannot refresh a closed or missing-page destination.
-      // Re-read that exact focus, but never let an older list/nonce own its result.
-      let refreshedFocus = null, focusRead = focusEpoch
+      const inventory = cursor ? [...new Set([...currentView.current.inventory, ...next.pulls.map(prKey)])] : next.pulls.map(prKey)
+      publishPulls(next.pulls, order, inventory)
       const canonicalFocus = focus.connected && currentFocus.current.connected && focus.id === currentFocus.current.id ? next.pulls.find(pr => prKey(pr) === focus.key) : null
-      if (canonicalFocus) {
-        focusRead = ++focusRequest.current
-        refreshedFocus = canonicalFocus; setFocusedPr(canonicalFocus); setFocusError('')
-      } else if (!cursor && focus.connected && focusEpoch === focusRequest.current && !next.pulls.some(pr => prKey(pr) === focus.key)) {
-        focusRead = ++focusRequest.current
+      if (canonicalFocus && order >= (currentView.current.observations.get(focus.key)?.order || 0)) setFocusError('')
+      // Absence from the open page is not deletion. This exact read belongs to
+      // the refresh that requested it, so a newer explicit navigation still wins.
+      if (!cursor && focus.connected && currentFocus.current.connected && focus.id === currentFocus.current.id && focusEpoch === focusRequest.current && !canonicalFocus) {
+        const focusRead = ++focusRequest.current
+        const current = () => id === request.current && focusRead === focusRequest.current && alive.current && order >= (currentView.current.observations.get(focus.key)?.order || 0)
         try {
           const pr = await discoverPull(token, focus.repo, focus.number)
-          if (id === request.current && focusRead === focusRequest.current && alive.current) {
-            refreshedFocus = pr; setFocusedPr(pr); setFocusError('')
-          }
-        } catch (error) {
-          if (id === request.current && focusRead === focusRequest.current && alive.current) setFocusError(error.message)
-        }
+          if (current()) { publishPulls([pr], order); setFocusError('') }
+        } catch (error) { if (current()) setFocusError(error.message) }
       }
       if (id !== request.current || !alive.current) return
       if (!cursor) { detailSnapshots.current.clear(); setDetailRevision(value => value + 1) }
-      setData(old => ({ ...next, pulls: cursor ? mergeSelection(old.pulls, next.pulls) : next.pulls, loading: false, error: '' }))
-      if (!cursor || canonicalFocus) {
-        const previous = currentSelection.current
-        const currentPulls = cursor ? mergeSelection(previous.pulls, next.pulls) : next.pulls
-        const fallback = focus.connected && focusRead === focusRequest.current ? refreshedFocus || previous.pulls.find(pr => prKey(pr) === focus.key) : null
-        const retained = new Set([...previous.selected].filter(key => {
-          const before = previous.pulls.find(pr => prKey(pr) === key)
-          const after = currentPulls.find(pr => prKey(pr) === key) || (key === focus.key ? fallback : null)
-          return before && after && isOpenPull(after) && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
-        }))
-        const removed = [...previous.selected].filter(key => !retained.has(key))
-        setSelected(retained)
-        setSelectionNotice(removed.length ? `Selection updated: ${removed.join(', ')} changed or is no longer open. Select its current version again if needed.` : '')
-      }
+      setData({ total: next.total, hasNextPage: next.hasNextPage, endCursor: next.endCursor, loading: false, error: '' })
     } catch (error) {
       if (id === request.current && alive.current) setData(old => ({ ...old, loading: false, error: error.message }))
     }
-  }, [token, repo])
+  }, [token, repo, publishPulls])
   const loadRuns = useCallback(async () => {
     try {
       const show = next => { if (alive.current) { setRuns(next.runs || []); setRunError('') } }
@@ -249,20 +266,20 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     const refresh = () => { if (!document.hidden) void loadRuns() }
     const timer = setInterval(refresh, 20000)
     window.addEventListener('focus', refresh)
-    return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
+    return () => { request.current += 1; clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [conn.state, publicRevision, refreshKey, load, loadRuns])
   useEffect(() => {
-    const id = ++focusRequest.current
-    setFocusedPr(null); setFocusError(''); focusDone.current = ''
+    const id = ++focusRequest.current, order = ++observationOrder.current
+    setFocusError(''); focusDone.current = ''
     if (!focusKey || conn.state !== 'connected' || focusPull.repo.toLowerCase() !== repo.toLowerCase()) return
     setFilter('all'); setQuery('')
     void discoverPull(token, focusPull.repo, focusPull.number).then(pr => {
-      if (id === focusRequest.current && alive.current) setFocusedPr(pr)
+      if (id === focusRequest.current && alive.current && order >= (currentView.current.observations.get(focusKey)?.order || 0)) { publishPulls([pr], order); setFocusError('') }
     }).catch(error => {
-      if (id === focusRequest.current && alive.current) setFocusError(error.message)
+      if (id === focusRequest.current && alive.current && order >= (currentView.current.observations.get(focusKey)?.order || 0)) setFocusError(error.message)
     })
     return () => { focusRequest.current += 1 }
-  }, [token, conn.state, repo, focusKey, focusPull?.nonce])
+  }, [token, conn.state, repo, focusKey, focusPull?.nonce, publishPulls])
   useEffect(() => {
     if (!focusKey || focusDone.current === focusId) return
     const row = [...(listRef.current?.querySelectorAll('[data-pr-key]') || [])].find(item => item.dataset.prKey === focusKey)
@@ -344,7 +361,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     </TaskPane>
   const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation appId={appId} token={token} onResolved={setResolved} disabled={!resolved} onOptionsChange={options => { setResolved(null); setChoice(old => ({ ...old, options, request_id:crypto.randomUUID() })) }} onAgentChange={agent => { setResolved(null); setChoice(old => ({ ...old, agent, request_id:crypto.randomUUID() })) }} choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setResolved(null); setChoice(old => ({ ...old, mode, confirmation_scope:mode === 'review_fix_merge' ? (old.pulls.some(pr => pr.isDraft) ? DRAFT_TAKEOVER_SCOPE : TAKEOVER_SCOPE) : undefined, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
-      setData(old => ({ ...old, pulls: old.pulls.map(item => keys.includes(prKey(item)) ? { ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } } : item) }))
+      publishPulls(observedPulls(currentView.current, validFocusKey).filter(item => keys.includes(prKey(item))).map(item => ({ ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } })), ++observationOrder.current)
       void onChanged?.()
     }} /> : null}</TaskPane>
   const visibleKeys = new Set(visible.map(prKey))
