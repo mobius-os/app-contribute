@@ -44,6 +44,52 @@ for (const phase of ['busy', 'uncertain']) test(`${phase} ownership survives col
   if (release) { release({ uncertain: true }); await sending }
 })
 
+for (const phase of ['busy', 'uncertain']) test(`valid dotted record ID ${phase} checkpoint survives cold reload without replay`, async () => {
+  const id = 'release.1', key = `chat-send:${id}`, advertised = [{ key, label: 'Contribute' }]
+  let release, first
+  first = fixture([record(id)], { actions: advertised, send: () => {
+    assert.ok(first.state.checkpoint, 'dotted ownership must cross the checkpoint boundary before Send')
+    return phase === 'busy' ? new Promise(resolve => { release = resolve }) : { uncertain: true }
+  } })
+  first.ledger(); await first.session.hydrate(); first.session.activate(key)
+  const sending = first.session.confirm(key)
+  if (phase === 'uncertain') await sending
+  const checkpoint = first.state.checkpoint
+  assert.ok(checkpoint, 'valid dotted identity must be checkpointed before handler completion')
+  assert.equal(first.state.recoveryError, false)
+  const next = fixture([record(id)], { actions: advertised, checkpoint, retain: true })
+  next.ledger([], false)
+  assert.equal(next.state.retain, true); assert.equal(next.state.recoveryError, false)
+  assert.equal(next.state.ackNonce, null); assert.equal(next.state.actions[0].disabled, true)
+  next.ledger(); await next.session.hydrate()
+  assert.equal(next.state.actions[0].disabled, true); assert.equal(next.state.actions[0].hidden, false)
+  next.session.activate(key); await next.session.confirm(key)
+  next.session.handleEvent({ key, event: 'confirm', nonce: 'old-confirm' })
+  assert.equal(next.calls, 0)
+  next.ledger([opened(record(id))])
+  assert.equal(next.state.retain, false); assert.equal(next.state.checkpoint, null)
+  assert.equal(next.state.actions[0].links[0].url, 'https://github.com/team/repo/pull/1')
+  if (release) { release({ uncertain: true }); await sending }
+})
+
+test('recovery checkpoint accepts valid ID bounds and rejects unsafe identities', async () => {
+  const accepted = ['a', `a${'.'.repeat(127)}`, 'a_b-c.1']
+  for (const id of accepted) {
+    const key = `chat-send:${id}`, checkpoint = { id: 'valid', data: JSON.stringify({ version: 1, phases: [{ unitKey: `record:${id}`, phaseIds: [id], state: 'pending', note: '' }] }) }
+    const next = fixture([record(id)], { actions: [{ key }], checkpoint, retain: true })
+    next.ledger(); await next.session.hydrate()
+    assert.equal(next.state.recoveryError, false, id)
+    assert.equal(next.state.actions[0].disabled, true, id)
+  }
+  for (const id of ['.hidden', 'a/b', '../a', `a${'.'.repeat(128)}`]) {
+    const checkpoint = { id: 'unsafe', data: JSON.stringify({ version: 1, phases: [{ unitKey: 'record:a', phaseIds: [id], state: 'pending', note: '' }] }) }
+    const next = fixture(undefined, { checkpoint, retain: true })
+    next.ledger(); await next.session.hydrate()
+    assert.equal(next.state.recoveryError, true, id)
+    assert.equal(next.state.actions[0].disabled, true, id)
+  }
+})
+
 test('confirmation is not a checkpoint and a reloaded confirmation cannot replay Confirm', async () => {
   const first = fixture(); first.ledger(); await first.session.hydrate(); first.session.activate(actions[0].key)
   assert.equal(first.state.checkpoint, null)
@@ -73,22 +119,23 @@ test('retained owner without recovery data cannot silently unlock', async () => 
 
 for (const state of ['pending', 'failed']) test(`reloaded partial stack ${state} blocks a newly prepared suffix until all attempted identities settle`, async () => {
   const stack = (id, position, parent = '') => ({ ...record(id), plan: { ...record(id).plan, base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
-  const a = stack('a', 1), b = stack('b', 2, 'a')
-  const checkpoint = { id: 'partial', data: JSON.stringify({ version: 1, phases: [{ unitKey: 'stack:s', phaseIds: ['a', 'b'], state, note: 'Check the remainder' }] }) }
-  const next = fixture([opened(a), b], { checkpoint, retain: true })
-  next.ledger(); await next.session.hydrate(); next.session.activate(actions[0].key); await next.session.confirm(actions[0].key)
+  const a = stack('a.1', 1), b = stack('b.2', 2, 'a.1')
+  const checkpoint = { id: 'partial', data: JSON.stringify({ version: 1, phases: [{ unitKey: 'stack:s', phaseIds: ['a.1', 'b.2'], state, note: 'Check the remainder' }] }) }
+  const key = 'chat-send:a.1'
+  const next = fixture([opened(a), b], { actions: [{ key }], checkpoint, retain: true })
+  next.ledger(); await next.session.hydrate(); next.session.activate(key); await next.session.confirm(key)
   assert.equal(next.calls, 0); assert.equal(next.state.retain, true); assert.equal(next.state.actions[0].disabled, true)
   next.ledger([opened(a), opened(b, 2)])
   assert.equal(next.state.retain, false); assert.equal(next.state.actions[0].status, 'Open')
 })
 
 test('partial batch recovery keeps both exact units without sending a prepared remainder', async () => {
-  const batch = [{ key: 'chat-send-batch:a,b', label: 'Contribute all' }]
-  const checkpoint = { id: 'batch', data: JSON.stringify({ version: 1, phases: ['a', 'b'].map(id => ({ unitKey: `record:${id}`, phaseIds: [id], state: 'pending', note: '' })) }) }
-  const next = fixture([opened(record('a')), record('b')], { actions: batch, checkpoint, retain: true })
+  const batch = [{ key: 'chat-send-batch:a.1,b.2', label: 'Contribute all' }]
+  const checkpoint = { id: 'batch', data: JSON.stringify({ version: 1, phases: ['a.1', 'b.2'].map(id => ({ unitKey: `record:${id}`, phaseIds: [id], state: 'pending', note: '' })) }) }
+  const next = fixture([opened(record('a.1')), record('b.2')], { actions: batch, checkpoint, retain: true })
   next.ledger(); await next.session.hydrate(); next.session.activate(batch[0].key); await next.session.confirm(batch[0].key)
   assert.equal(next.calls, 0); assert.equal(next.state.retain, true)
-  next.ledger([opened(record('a')), opened(record('b'), 2)]); assert.equal(next.state.retain, false)
+  next.ledger([opened(record('a.1')), opened(record('b.2'), 2)]); assert.equal(next.state.retain, false)
 })
 
 // Execute the actual component initializer, not a separate recovery adapter.
@@ -137,8 +184,8 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch']) tes
   const { attributedFrameVersion } = await import(`${hostRoot}/frontend/src/components/AppCanvas/appFrameProtocol.js`)
   const canvas = readFileSync(`${hostRoot}/frontend/src/components/AppCanvas/AppCanvas.jsx`, 'utf8')
   const stack = (id, position, parent = '') => ({ ...record(id), plan: { ...record(id).plan, base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
-  const recs = phase === 'partial-stack' ? [stack('a', 1), stack('b', 2, 'a')] : phase === 'partial-batch' ? [record('a'), record('b')] : [record('a')]
-  const key = phase === 'partial-batch' ? 'chat-send-batch:a,b' : 'chat-send:a'
+  const recs = phase === 'partial-stack' ? [stack('a.1', 1), stack('b.2', 2, 'a.1')] : phase === 'partial-batch' ? [record('a.1'), record('b.2')] : [record('a.1')]
+  const key = phase === 'partial-batch' ? 'chat-send-batch:a.1,b.2' : 'chat-send:a.1'
   const advertised = [{ key, label: 'Contribute' }], keys = new Set([key])
   let state = null, release, firstState, sends = 0
   const oldSource = {}, newSource = {}, frames = new Map([['old', { contentWindow: oldSource }], ['new', { contentWindow: newSource }]])
@@ -150,7 +197,7 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch']) tes
   const send = async rec => {
     sends++; assert.ok(firstState.checkpoint, 'checkpoint must precede the handler boundary')
     if (phase === 'busy') return new Promise(resolve => { release = resolve })
-    if (phase === 'partial-batch' && rec.id === 'a') return { ok: true, record: opened(rec) }
+    if (phase === 'partial-batch' && rec.id === 'a.1') return { ok: true, record: opened(rec) }
     return { uncertain: true }
   }
   const first = createInlineSession({ sessionId: 's', actions: advertised, loadExact: async id => recs.find(rec => rec.id === id), send,

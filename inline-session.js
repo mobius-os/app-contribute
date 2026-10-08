@@ -1,6 +1,6 @@
 // Source-attributed chat-block session. Hydration is read-only; only a
 // confirmed frozen approval reaches Contribute's existing guarded handlers.
-import { contributeBlockTarget } from './chat-blocks.js'
+import { contributeBlockTarget, validContributeRecordId } from './chat-blocks.js'
 import { qualityReviewFor, reviewStateFor } from './review.js'
 import { publicationStackUnit, stackIntent, stackPublicationRecords, stackReadiness } from './stack.js'
 
@@ -50,7 +50,6 @@ const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, re
 // frozen confirmation, action nonce, or publication arguments cross reloads.
 const CHECKPOINT_BYTES = 32768
 const checkpointId = value => typeof value === 'string' && value.length > 0 && value.length <= 128
-const recoveryRecordId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
 function checkpointPhases(checkpoint) {
   if (!checkpointId(checkpoint?.id) || typeof checkpoint.data !== 'string'
     || new TextEncoder().encode(checkpoint.data).length > CHECKPOINT_BYTES) throw new Error('Invalid recovery checkpoint')
@@ -60,7 +59,7 @@ function checkpointPhases(checkpoint) {
   for (const phase of value.phases) {
     if (typeof phase?.unitKey !== 'string' || !/^(record|stack):./.test(phase.unitKey) || phase.unitKey.length > 512
       || seen.has(phase.unitKey) || !Array.isArray(phase.phaseIds) || !phase.phaseIds.length || phase.phaseIds.length > 256
-      || phase.phaseIds.some(id => !recoveryRecordId(id)) || new Set(phase.phaseIds).size !== phase.phaseIds.length
+      || phase.phaseIds.some(id => !validContributeRecordId(id)) || new Set(phase.phaseIds).size !== phase.phaseIds.length
       || !['pending', 'failed'].includes(phase.state) || typeof phase.note !== 'string' || phase.note.length > 500) throw new Error('Invalid recovery phase')
     seen.add(phase.unitKey)
   }

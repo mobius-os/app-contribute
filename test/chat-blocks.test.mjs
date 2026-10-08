@@ -30,3 +30,13 @@ test('a batch names 1 to 12 safe record ids, deduplicated, and nothing else', ()
   assert.equal(contributeBlockTarget('chat-send-batch:a,../b'),null)
   assert.equal(contributeBlockTarget('chat-send-batch:'+Array.from({length:13},(_, i)=>`r${i}`).join(',')),null)
 })
+test('prepared and batch targets share bounded dotted record ID grammar', () => {
+  for (const id of ['a', 'release.1', `a${'.'.repeat(127)}`]) {
+    assert.equal(contributeBlockTarget(`chat-send:${id}`)?.id, id)
+    assert.deepEqual(contributeBlockTarget(`chat-send-batch:${id},b`)?.ids, [id, 'b'])
+  }
+  for (const id of ['.hidden', 'a/b', '../a', `a${'.'.repeat(128)}`, 'a b']) {
+    assert.equal(contributeBlockTarget(`chat-send:${id}`), null, id)
+    assert.equal(contributeBlockTarget(`chat-send-batch:${id},b`), null, id)
+  }
+})
