@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reconcile prepared PRs that landed elsewhere or lost their update target.
 
-This is deliberately separate from job.sh's draft/open polling. It only reads
+This is deliberately separate from job.sh's draft/open polling logic, though
+job.sh runs it in the same process over the same ledger scan. It only reads
 prepared PR records. Exact landing evidence settles ordinary PRs; a settled
 target leaves an unsent PR update visible for agent recovery. Every write uses
 the storage version originally read, so a concurrent send, dismiss, or agent
@@ -46,6 +47,32 @@ def utc_now() -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+# A prepared record that has sat unsent for a week is rechecked at most daily.
+# Each recheck asks GitHub for the target's main and may fetch it, and a busy
+# upstream moves main many times a day; fresh records keep the full cadence.
+STALE_PREPARED_AFTER = dt.timedelta(days=7)
+STALE_PREPARED_RECHECK = dt.timedelta(hours=24)
+
+
+def _parse_time(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def recheck_due(record: dict[str, Any], now: dt.datetime) -> bool:
+    created = _parse_time(record.get("created_at"))
+    if not created or now - created < STALE_PREPARED_AFTER:
+        return True
+    probe = record.get("reconciliation_probe")
+    checked = _parse_time(probe.get("checked_at")) if isinstance(probe, dict) else None
+    return not checked or now - checked >= STALE_PREPARED_RECHECK
 
 
 def repo_slug(record: dict[str, Any]) -> str:
@@ -202,6 +229,8 @@ class Storage:
         self.api = api.rstrip("/")
         self.token = token
         self.app_id = app_id
+        # Record names this pass rewrote; their scanned versions are now stale.
+        self.written: set[str] = set()
 
     def call(
         self,
@@ -253,6 +282,7 @@ class Storage:
                 record,
                 headers={"If-Match": etag},
             )
+            self.written.add(name)
             return True
         except urllib.error.HTTPError as error:
             if error.code == 412:
@@ -958,7 +988,13 @@ def reconcile_record(
     return patch
 
 
-def run(storage: Storage, github: GitHub, dry_run: bool = False) -> dict[str, int]:
+def run(
+    storage: Storage,
+    github: GitHub,
+    dry_run: bool = False,
+    records: list[tuple[str, dict[str, Any], str | None]] | None = None,
+) -> dict[str, int]:
+    """Reconcile due prepared records from ``records`` or a fresh ledger scan."""
     counts = {
         "checked": 0,
         "merged": 0,
@@ -968,9 +1004,12 @@ def run(storage: Storage, github: GitHub, dry_run: bool = False) -> dict[str, in
         "written": 0,
     }
     now = utc_now()
+    moment = dt.datetime.now(dt.timezone.utc)
+    if records is None:
+        records = storage.records_needing_work()
     prepared: list[tuple[str, dict[str, Any], str]] = []
-    for name, record, etag in storage.records_needing_work():
-        if not is_prepared_pr(record):
+    for name, record, etag in records:
+        if not is_prepared_pr(record) or not recheck_due(record, moment):
             continue
         if not etag:
             print(
