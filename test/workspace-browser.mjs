@@ -754,6 +754,7 @@ window.runWorkspaceChecks = async () => {
       const originalGet = window.mobius.storage.get
       const originalList = window.mobius.storage.listWithStatus
       let focusedAction = null
+      let focusedMessage = null
       const focusedStates = []
       // This file:// fixture has no concrete shell origin. Capture only the
       // outbound transport boundary; production attribution checks stay real.
@@ -761,6 +762,7 @@ window.runWorkspaceChecks = async () => {
       window.parent.postMessage = (message, ...args) => {
         if (message?.type === 'moebius:app-block-state' && message.sessionId === 'focused-fixture') {
           focusedAction = message.actions[0]
+          focusedMessage = message
           focusedStates.push(focusedAction.status)
         }
         else originalPost.call(window.parent, message, ...args)
@@ -782,7 +784,7 @@ window.runWorkspaceChecks = async () => {
       window.fixtureReviewUnavailable = true
       const priorPublications = calls.publications.length
       window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
-        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record'}}))
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record',nonce:'focused-first'}}))
       await until(() => ledgerReads > 0, 'Activation did not start the authoritative ledger')
       await until(() => focusedAction?.label === 'Retry check', 'Unavailable review did not expose retry')
       ensure(focusedAction.status === 'Check unavailable' && focusedAction.note.includes('Could not verify'), 'Standalone unavailable review lost its explanation')
@@ -791,9 +793,11 @@ window.runWorkspaceChecks = async () => {
       window.fixtureReviewUnavailable = false
       window.fixtureInlineReviewReady = true
       window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
-        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record'}}))
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record',nonce:'focused-retry'}}))
       await until(() => focusedAction?.confirming, 'Retry did not recover to a fresh confirmation')
       ensure(calls.publications.length === priorPublications, 'Retry sent without frozen confirmation')
+      ensure(focusedMessage.ackNonce === 'focused-retry' && focusedMessage.retain === true, 'Confirmation lost its event acknowledgement or retained owner')
+      ensure(focusedAction.confirmation[0].facts.some(fact => fact.label === 'Repository' && fact.value === exact.plan.repo), 'Confirmation omitted its current repository')
       window.fixtureInlineReviewReady = false
       window.mobius.storage.getWithVersion = originalVersioned
       window.mobius.storage.get = originalGet

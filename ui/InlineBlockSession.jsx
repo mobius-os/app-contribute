@@ -35,12 +35,9 @@ export function InlineBlockSession({ blockSession = null, onActivateRequest, rec
       if (data?.type === 'moebius:app-block-init') {
         initialize(data)
       } else if (data?.type === 'moebius:app-block-action' && data.sessionId === session.current?.sessionId) {
-        if (data.event === 'activate') {
-          session.current.activate(data.key)
+        if (session.current.handleEvent(data) && data.event === 'activate') {
           latest.current.onActivateRequest?.(data.key)
         }
-        else if (data.event === 'cancel') session.current.cancel(data.key)
-        else if (data.event === 'confirm') void session.current.confirm(data.key)
       }
     }
     window.addEventListener('message', onMessage)

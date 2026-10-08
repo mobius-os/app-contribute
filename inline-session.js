@@ -32,6 +32,17 @@ const blocker = (record, reviewStatus) => {
   return ''
 }
 const bounded = value => String(value || '').slice(0, 500)
+// Present exactly the copied current publication phase, never a saved block's
+// title/repository or a mutable ledger projection after confirmation starts.
+const publicationIdentity = record => {
+  const plan = record.plan || {}
+  const facts = [{ label: 'Repository', value: plan.repo || record.repo },
+    { label: 'Action', value: plan.action === 'pr_update'
+      ? `Update pull request${record.number ? ` #${record.number}` : ''}` : 'Open pull request' }]
+  for (const [label, value] of [['Branch', plan.branch], ['Target', plan.stack?.base_branch || plan.base_branch],
+    ['Version', plan.head_sha], ['Reviewed diff', plan.diff_sha256]]) if (value) facts.push({ label, value })
+  return { title: plan.title || record.title || record.summary || record.id, facts }
+}
 const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, reviewStatus)?.state === 'ready'
   ? '' : 'This contribution still needs a current source check in Contribute.'
 
@@ -54,6 +65,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   let frozen = null
   let alive = true
   let lastSummary = ''
+  let ackNonce = null
   const idsFor = key => {
     const target = contributeBlockTarget(key)
     return target?.kind === 'prepared' ? [target.id] : target?.kind === 'batch' ? target.ids : []
@@ -137,6 +149,8 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
       disabled: confirming === item.key ? anyBusy : !ready.length && !canActivate || anyBusy || checking || checkingAuthority || Boolean(confirming),
       busy: unitBusy,
       confirming: confirming === item.key,
+      confirmation: confirming === item.key && frozen?.key === item.key
+        ? frozen.units.flatMap(unit => unit.ready.map(publicationIdentity)) : null,
       hidden: !ready.length && !canActivate && !unitBusy && confirming !== item.key,
       note: bounded(note),
       tone: failure ? 'danger' : checking || reason && !loading ? 'attention' : 'neutral',
@@ -166,7 +180,12 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
               : missingCount ? `${missingCount} unavailable` : ''
     return lastSummary
   }
-  const emit = () => { if (alive) { const actions = advertised.map(makeAction); publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions) }) } }
+  const emit = () => { if (alive) {
+    const actions = advertised.map(makeAction)
+    const retain = Boolean(confirming || requestedActivation || busyUnits.size || results.size
+      || advertised.some(item => unitsFor(item.key).some(unit => unit.records.some(rec => rec.status === 'submitting'))))
+    publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions), retain, ackNonce })
+  } }
   async function hydrate(wanted = ids) {
     await Promise.all(wanted.map(async id => {
       const generation = (readGeneration.get(id) || 0) + 1
@@ -262,5 +281,18 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     try { await refresh?.() } catch { /* read-only refresh failure keeps result visible */ }
     frozen = null; reconcileResults(); emit()
   }
-  return { sessionId, hydrate, updateLedger, activate, cancel, confirm, emit, dispose: () => { alive = false } }
+  function handleEvent(event) {
+    if (!advertised.some(item => item.key === event?.key)
+      || !['activate', 'cancel', 'confirm'].includes(event.event)
+      || typeof event.nonce !== 'string' || !event.nonce || event.nonce.length > 128) return false
+    if (event.nonce !== ackNonce) {
+      ackNonce = event.nonce
+      if (event.event === 'activate') activate(event.key)
+      else if (event.event === 'cancel') cancel(event.key)
+      else void confirm(event.key)
+    }
+    emit()
+    return true
+  }
+  return { sessionId, hydrate, updateLedger, activate, cancel, confirm, handleEvent, emit, dispose: () => { alive = false } }
 }

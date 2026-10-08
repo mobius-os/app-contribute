@@ -484,3 +484,48 @@ test('a cold batch heading never claims its saved contributions are still ready'
   assert.equal(states.at(-1).summary, '2 contributions')
   session.dispose()
 })
+
+test('confirmation identity comes from every frozen current phase member and survives later restaging', async () => {
+  const first = record('a', { title: 'Saved title', plan: { action: 'pr', repo: 'actual/repo', title: 'Current title',
+    branch: 'fix/current', head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40), diff_sha256: 'c'.repeat(64) } })
+  let approved
+  const f = fixture(['chat-send:a'], [first], { send: async rec => { approved = rec; return { pending: true } } })
+  await f.session.hydrate(); f.session.activate('chat-send:a')
+  const display = structuredClone(f.action('chat-send:a').confirmation)
+  assert.equal(display[0].title, 'Current title')
+  assert.deepEqual(display[0].facts.find(fact => fact.label === 'Repository'), { label: 'Repository', value: 'actual/repo' })
+  assert.deepEqual(display[0].facts.find(fact => fact.label === 'Version'), { label: 'Version', value: first.plan.head_sha })
+  assert.deepEqual(display[0].facts.find(fact => fact.label === 'Reviewed diff'), { label: 'Reviewed diff', value: first.plan.diff_sha256 })
+  f.setRecords([{ ...first, updated_at: '2099', plan: { ...first.plan, repo: 'other/repo', title: 'Restaged title', head_sha: 'd'.repeat(40) } }])
+  assert.deepEqual(f.action('chat-send:a').confirmation, display)
+  await f.session.confirm('chat-send:a')
+  assert.deepEqual(approved, first)
+  const layer = (id, position, parent = '') => record(id, { plan: { action: 'pr', repo: 'team/repo', title: 'Layer '+id,
+    head_sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), branch: 'stack/s/'+id,
+    stack: { id: 's', position, total: 2, base_branch: parent ? 'stack/s/'+parent : 'main', parent_record_id: parent } } })
+  const stack = fixture(['chat-send:b'], [layer('a', 1), layer('b', 2, 'a')])
+  await stack.session.hydrate(); stack.session.activate('chat-send:b')
+  assert.deepEqual(stack.action('chat-send:b').confirmation.map(item => item.title), ['Layer a', 'Layer b'])
+  assert.deepEqual(stack.action('chat-send:b').confirmation.map(item => item.facts.find(fact => fact.label === 'Target').value), ['main', 'stack/s/a'])
+})
+
+test('event acknowledgement retains active and uncertain ownership but releases cancellation and canonical settlement', async () => {
+  const f = fixture(['chat-send:a'], [record('a')], { send: async () => ({ pending: true }) })
+  await f.session.hydrate()
+  assert.equal(f.states.at(-1).retain, false)
+  f.session.handleEvent({ key: 'chat-send:a', event: 'activate', nonce: 'first' })
+  assert.equal(f.states.at(-1).ackNonce, 'first')
+  assert.equal(f.states.at(-1).retain, true)
+  f.session.handleEvent({ key: 'chat-send:a', event: 'cancel', nonce: 'second' })
+  assert.equal(f.states.at(-1).ackNonce, 'second')
+  assert.equal(f.states.at(-1).retain, false)
+  f.session.handleEvent({ key: 'chat-send:a', event: 'activate', nonce: 'third' })
+  f.session.handleEvent({ key: 'chat-send:a', event: 'confirm', nonce: 'fourth' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.states.at(-1).ackNonce, 'fourth')
+  assert.equal(f.states.at(-1).retain, true)
+  f.setRecords([record('a', { status: 'open', number: 7, url: 'https://github.com/team/repo/pull/7' })])
+  assert.equal(f.states.at(-1).retain, false)
+  assert.equal(f.session.handleEvent({ key: 'other', event: 'activate', nonce: 'unknown' }), false)
+  assert.equal(f.states.at(-1).ackNonce, 'fourth')
+})
