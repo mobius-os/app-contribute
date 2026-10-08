@@ -1,7 +1,9 @@
 #!/bin/bash
 # Contribute — scheduled ledger refresh (cron).
 #
-# First reconcile prepared PR records whose reviewed work already reached the
+# One Python process scans the ledger once (ledger_scan.py) and exits early
+# when no record needs scheduled work. It first reconciles prepared PR records
+# whose reviewed work already reached the
 # target repository's main by another path. Strong commit, reviewed-diff,
 # merged-branch, or distinctive-identifier evidence settles an ordinary PR
 # with a landing reference; partial identifier evidence only adds a dismissible
@@ -60,12 +62,8 @@ fi
 
 mkdir -p /data/cron-logs
 
-# Keep prepared reconciliation separate from the established live-PR polling
-# below: different target states, evidence, and failure modes should not turn
-# one proven path into a conditional branch of the other.
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 export SCRIPT_DIR
-python3 "$SCRIPT_DIR/prepared_reconcile.py" 2>>/data/cron-logs/contribute.log
 
 # The refresh logic is pure I/O against the local storage API (urllib) plus gh
 # for the GraphQL round-trip. A quoted heredoc keeps the shell out of it; all
@@ -121,6 +119,28 @@ from ledger_scan import LedgerScan, awaiting_publication_connection
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
 records = LEDGER.records_needing_work()
+if not records:
+  # Nothing live, prepared, awaiting connection, or holding a checkout.
+  LEDGER.save()
+  sys.exit(0)
+
+# Prepared reconciliation (prepared_reconcile.py) shares this process and this
+# one ledger scan, but stays a separate pass from the live-PR polling below:
+# different target states, evidence, and failure modes should not turn one
+# proven path into a conditional branch of the other, and its failure must not
+# stop the passes after it. A record it rewrote carries a stale version here,
+# so this pass leaves it to the next run's fresh scan.
+import prepared_reconcile
+
+PREPARED_STORAGE = prepared_reconcile.Storage(API, TOKEN, APP_ID)
+try:
+  prepared_reconcile.run(
+    PREPARED_STORAGE, prepared_reconcile.GitHub(), records=records,
+  )
+except Exception as exc:
+  print("contribute: prepared reconciliation error: %s" % exc, file=sys.stderr)
+if PREPARED_STORAGE.written:
+  records = [item for item in records if item[0] not in PREPARED_STORAGE.written]
 
 
 TERMINAL_STAGING_STATUSES = frozenset((
