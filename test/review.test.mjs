@@ -238,8 +238,7 @@ test('a confirmed batch stays on screen with per-item results until the owner cl
   assert.match(feedSource, /\[record\.id\]: \{ error: failureText\(outcome\) \}/)
   assert.match(feedSource, /approval\.fingerprint !== fingerprint/)
   assert.match(feedSource, /The reviewed set changed\. The current actions are listed now/)
-  assert.match(feedSource, /key="send"/)
-  assert.match(feedSource, /key="ready"/)
+  assert.match(feedSource, /key=\{`send:\$\{run\?\.revision/)
 })
 
 test('paused work exposes its existing conversation without starting another', () => {

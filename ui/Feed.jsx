@@ -845,11 +845,8 @@ export function ContributionRun({
           above the PRs and disappears when there is nothing to act on. */}
       <div className="co-decisions" aria-label="Ready for you">
       {needsYou}
-      {/* Identity outlives live ledger revisions. Before consent, the batch's
-          fingerprint refreshes changed scope; after consent, its locked snapshot
-          and progress stay mounted until Done. ProjectControls owns project identity. */}
       <ExactBatchAction
-        key="send"
+        key={`send:${run?.revision || ''}:${publicationPreference}:${githubState}`}
         items={publishItems}
         mode="send"
         publicationPreference={publicationPreference}
@@ -860,7 +857,7 @@ export function ContributionRun({
       />
 
       <ExactBatchAction
-        key="ready"
+        key={`ready:${run?.revision || ''}:${publicationPreference}:${githubState}`}
         items={readyItems}
         mode="ready"
         publicationPreference={publicationPreference}
