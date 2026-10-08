@@ -57,9 +57,19 @@ export function ReviewPromptPreview({ token, appId, choice, onResolved }) {
   useEffect(() => {
     if (!choice) return
     let alive=true; setState({loading:true});onResolved?.(null)
-    async function resolve() { const data=await loadWorkflowOptions(token,appId);const options=reviewOptions(choice.options,data.options);if(choice.mode === 'review_fix_merge') options.autopilot=true;if(choice.mode !== 'review') delete options.post_review;const agent=workflowAgent(choice.agent);const preview=await previewWorkflow(token,appId,choice.mode,options,agent);if(choice.preview_sha256 && choice.preview_sha256!==preview.preview_sha256)throw new Error('The saved instructions or model changed. Ask the agent to prepare a fresh review link; nothing was started.');return {options,agent,preview,capabilities:data.capabilities} }
+    async function resolve() {
+      const data=await loadWorkflowOptions(token,appId)
+      // Frozen selections keep their exact options; defaults apply only to new work.
+      const options=reviewOptions(choice.options,choice.preview_sha256 ? undefined : data.options)
+      if(choice.mode === 'review_fix_merge' && !choice.preview_sha256) options.autopilot=true
+      if(choice.mode !== 'review') delete options.post_review
+      const agent=workflowAgent(choice.agent)
+      const preview=await previewWorkflow(token,appId,choice.mode,options,agent)
+      if(choice.preview_sha256 && choice.preview_sha256!==preview.preview_sha256) throw new Error('The saved instructions or model changed. Ask the agent to prepare a fresh review link; nothing was started.')
+      return {options,agent,preview,capabilities:data.capabilities}
+    }
     resolve().then(value=>{if(alive){setState(value);onResolved?.(value)}}).catch(error=>{if(alive)setState({error:error.message})})
     return()=>{alive=false}
-  },[token,appId,choice?.request_id,choice?.mode,optionKey,agentKey,retry])
+  },[token,appId,choice?.request_id,choice?.mode,choice?.preview_sha256,optionKey,agentKey,retry])
   return state.error ? <p role="alert">Could not check this run: {state.error} <button className="co-quiet-action" onClick={()=>setRetry(x=>x+1)}>Retry</button></p> : null
 }
