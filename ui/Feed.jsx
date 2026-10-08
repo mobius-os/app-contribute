@@ -142,10 +142,39 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
   if (!current || current.id !== record.id) return null
   const repo = record.plan?.repo || record.repo
   if ((current.plan?.repo || current.repo) !== repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo || '')) return null
+  if (record.plan?.head_sha && current.plan?.head_sha !== record.plan.head_sha) return null
   const number = Number(current.number)
-  if (!Number.isSafeInteger(number) || number < 1 || current.url !== `https://github.com/${repo}/pull/${number}`
-    || record.number && number !== Number(record.number)
-    || record.plan?.head_sha && current.plan?.head_sha !== record.plan.head_sha) return null
+  const publicIdentity = Number.isSafeInteger(number) && number > 0
+    && current.url === `https://github.com/${repo}/pull/${number}`
+    && (!record.number || number === Number(record.number))
+  if ((mode === 'ready' || record.number) && !publicIdentity) return null
+
+  // An old diagnostic on unchanged intent is not this attempt's outcome.
+  // A later canonical version with a new diagnostic (or a new durable submit
+  // attempt) can settle a failure; a claim still in flight cannot.
+  const errorKey = mode === 'ready' ? 'last_ready_error' : 'last_submit_error'
+  const error = current[errorKey]
+  const before = Date.parse(record.updated_at || record.created_at || '')
+  const after = Date.parse(current.updated_at || '')
+  const started = Date.parse(current.submit_started_at || '')
+  const code = current[`${errorKey}_code`]
+  const newDiagnostic = error !== record[errorKey]
+    || typeof code === 'string' && !!code && code !== record[`${errorKey}_code`]
+  const newSubmitAttempt = mode === 'send' && started > before && after >= started
+    && current.submit_started_at !== record.submit_started_at
+  const failedStatus = mode === 'ready'
+    ? current.status === 'draft' && !current.readying
+    : current.status === 'prepared'
+  const exactFailureIntent = ['action', 'branch', 'base_branch', 'base_sha'].every(
+    key => !record.plan?.[key] || current.plan?.[key] === record.plan[key],
+  )
+  if (failedStatus && exactFailureIntent && typeof error === 'string' && error.trim()
+    && /^[a-f0-9]{40}$/i.test(record.plan?.head_sha || '')
+    && after > before && (newDiagnostic || newSubmitAttempt)
+    && !String(code || '').endsWith('unconfirmed')) {
+    return { error }
+  }
+  if (!publicIdentity) return null
   // A terminal public state is an observed outcome, not proof that this
   // ready/update action succeeded. Keep its label distinct from completion.
   if (['closed', 'merged'].includes(current.status)) return current.status
