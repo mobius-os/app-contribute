@@ -25,6 +25,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
+import { InlinePreparedView, InlineBatchView } from './ui/InlinePreparedView.jsx'
 import ContributeApp from './index.jsx'
 
 const HEAD = 'a'.repeat(40), SECOND_HEAD = 'c'.repeat(40), BASE = 'b'.repeat(40)
@@ -90,10 +91,15 @@ window.fetch = async (url, options = {}) => {
     if (call.body.query.includes('ContributeExactPull')) {
       const number=Number(call.body.query.match(/pullRequest\(number:(\d+)\)/)?.[1])
       const found=number===11 ? pull(11,{state:'CLOSED',title:'Closed contribution'}) : pulls.find(pr=>pr.number===number)
-      return response({data:{repository:{pullRequest:found || null}}})
+      return response({data:{repository:{pullRequest:found && window.fixtureRetarget ? {...found, baseRefName:'release', baseRef:{target:{oid:'d'.repeat(40)}}} : found || null}}})
     }
     if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
-    if (call.body.query.includes('ContributePullContext')) return response({data:{repository:{pullRequest:{headRefOid:pulls.find(pr=>pr.number===call.body.variables.number)?.headRefOid,baseRefOid:BASE,baseRefName:'main',closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},timelineItems:{nodes:[],pageInfo:{hasNextPage:false}}}}}})
+    if (call.body.query.includes('ContributePullContext')) {
+      const last = call.body.variables.after === 'thread-page-2'
+      return response({data:{repository:{pullRequest:{headRefOid:pulls.find(pr=>pr.number===call.body.variables.number)?.headRefOid,baseRefOid:BASE,baseRefName:'main',closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},
+        reviewThreads:{nodes:[{id:last?'thread-last':'thread-first',path:last?'last.js':'first.js',line:1,diffSide:'RIGHT',isResolved:false,comments:{nodes:[],pageInfo:{hasNextPage:false}}}],pageInfo:{hasNextPage:!last,endCursor:last?null:'thread-page-2'}},
+        timelineItems:{nodes:[],pageInfo:{hasNextPage:false}}}}}})
+    }
     let found = call.body.query.includes('repo:owner/other') ? [] : pulls
     const laterPage = call.body.query.includes('after:"fixture-page-2"')
     if (window.fixturePaging) found = laterPage ? found.slice(1) : found.slice(0,1)
@@ -289,6 +295,68 @@ window.runWorkspaceChecks = async () => {
   const checks = []
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
+    await check('mounted cycle Refresh recovers a lost start and ambiguous Stop without duplicate admission', async () => {
+      const originalChat={...window.mobius.chat}
+      let visible=false, offline=false, stopped=false, startCount=0, stopCount=0, recoveredScope=''
+      window.mobius.chat.start=async action=>{startCount++;recoveredScope=action.scope;throw Error('Lost fixture start response')}
+      window.mobius.chat.list=async({scope})=>{
+        ensure(scope===recoveredScope,'Recovery changed the exact saved reservation scope')
+        if(offline) throw Error('Fixture offline')
+        return visible?[{id:'recovered-cycle-chat',title:'Same admitted work',created_at:'2026-09-10T12:00:00Z'}]:[]
+      }
+      window.mobius.chat.status=async id=>{
+        ensure(id==='recovered-cycle-chat','Recovery observed another chat')
+        if(offline)throw Error('Fixture offline')
+        return stopped?{running:false,goal:{status:'stopped'}}:{running:true}
+      }
+      window.mobius.chat.stop=async id=>{stopCount++;ensure(id==='recovered-cycle-chat','Stop targeted another chat');stopped=true;return {stopped:false}}
+      root.render(<div className="co-root"><style>{CSS}</style><main className="co-page"><ProjectControls appId="fixture-app" token="fixture-only" project={projects[0]}
+        run={{privateAction:{title:'Prepare fixture',event:'private',count:1,draft:'Only app:fixture'}}} onStart={async action=>({ok:true,...await window.mobius.chat.start(action)})} /></main></div>)
+      await until(()=>button('Start fresh full merge cycle') && !button('Start fresh full merge cycle').disabled,'Recovery fixture did not restore idle')
+      await click(button('Start fresh full merge cycle'))
+      await until(()=>[...values.values()].some(value=>value?.pending?.id) && button('Start fresh full merge cycle').disabled,'Lost start was not kept uncertain')
+      const cycleKey=[...values.keys()].find(key=>key.startsWith('project-cycles/'))
+      ensure(values.get(cycleKey)?.pending?.id && startCount===1,'Lost start reservation was not saved exactly once')
+      ensure(button('Recheck saved work'),'Mounted unknown cycle offered no explicit read-only recovery')
+      await click(button('Recheck saved work'))
+      ensure(values.get(cycleKey)?.pending?.id && button('Start fresh full merge cycle').disabled,'Empty lookup released the reservation')
+      offline=true;await click(button('Recheck saved work'))
+      ensure(values.get(cycleKey)?.pending?.id && startCount===1,'Offline lookup released or readmitted work')
+      offline=false;visible=true
+      await click(button('Recheck saved work'))
+      await until(()=>values.get(cycleKey)?.chat_id==='recovered-cycle-chat' && button('Cancel active work'),'Explicit recheck did not recover the existing chat')
+      ensure(!values.get(cycleKey).pending && startCount===1,'Recheck started another cycle')
+      ensure(button('Open current conversation') && values.get(cycleKey).chat_id==='recovered-cycle-chat','Recovery lost its owning conversation link')
+      await click(button('Cancel active work'))
+      await until(()=>text(query('.co-cycle-outlet')).includes('Status unknown') && button('Start fresh full merge cycle').disabled,'Ambiguous Stop did not remain uncertain')
+      offline=true;await click(button('Recheck saved work'))
+      ensure(button('Start fresh full merge cycle').disabled,'Offline Stop recheck allowed duplicate admission')
+      offline=false;await click(button('Recheck saved work'))
+      await until(()=>text(query('main')).includes('Work stopped') && !button('Start fresh full merge cycle').disabled,'Stop status did not reconcile in the same mounted view')
+      ensure(startCount===1 && stopCount===1,'Read-only recovery started or stopped work again')
+      window.mobius.chat=originalChat
+      root.render(null);await frame();await frame()
+      values.clear();versions.clear()
+      for(const list of Object.values(calls))list.splice(0)
+      root.render(<Fixture />)
+    })
+    await check('legacy single and batch malformed stacks cannot call either publication handler', async () => {
+      const broken={...prepared,id:'broken-inline',plan:{...prepared.plan,stack:{id:'chain',total:2}}}
+      let singleCalls=0,stackCalls=0
+      const props={appId:'fixture-app',records:[broken],ledgerReady:true,reviewStatus:{state:'ready',byId:{[broken.id]:{state:'ready'}}},
+        onSend:async()=>{singleCalls++;return {ok:true}},onSendStack:async()=>{stackCalls++;return {ok:true}},loadDiff:async()=>''}
+      for (const confirm of [true,false]) {
+        root.render(<div className="co-root"><style>{CSS}</style><InlinePreparedView {...props} target={{kind:'prepared',id:broken.id,confirm}} /></div>)
+        await until(()=>text(query('.co-inline-view')).includes('invalid layer metadata'),'Malformed legacy single fell back to standalone')
+        ensure(![...document.querySelectorAll('button')].some(node=>!node.disabled && /^Contribute(?: |$)/.test(text(node))),'Malformed legacy single offered publication')
+      }
+      root.render(<div className="co-root"><style>{CSS}</style><InlineBatchView {...props} target={{kind:'batch',ids:[broken.id]}} /></div>)
+      await until(()=>button('Contribute all 0')?.disabled && text(query('.co-inline-view')).includes('invalid layer metadata'),'Malformed legacy batch became eligible')
+      button('Contribute all 0').click();await frame();await frame()
+      ensure(singleCalls===0 && stackCalls===0,'Malformed legacy metadata called a publication handler')
+      root.render(null);await frame();await frame()
+      root.render(<Fixture />)
+    })
     await until(() => query('.co-source-row'), 'Project list did not render')
     await check('project directory uses wrapped filter buttons instead of a dropdown or scroller', async () => {
       const filters=query('.co-directory-filters'), filterButtons=[...filters.querySelectorAll('button')]
@@ -404,6 +472,23 @@ window.runWorkspaceChecks = async () => {
       ensure([...query('.co-pr-list').querySelectorAll('input[type=checkbox]')].map(node=>node.checked).join(',')===before, 'Individual launch altered batch selection')
       ensure(mutationRequests().length===mutations, 'Opening or cancelling individual launch started public work')
     })
+    await check('retargeting the unchanged PR never posts a launch in either review mode', async () => {
+      for (const mode of ['Review only', 'Review, fix & merge']) {
+        await click(query('[aria-label="Take PR 7 on with an agent"]'))
+        await until(() => modeButton(mode,query('.co-pr-confirm')),'Retarget mode did not load')
+        if (mode !== 'Review only') await click(modeButton(mode,query('.co-pr-confirm')))
+        const launchName=mode==='Review only'?'Start private review':'Allow scoped takeover'
+        await until(() => button(launchName) && !button(launchName).disabled,'Retarget preflight did not settle')
+        const before=mutationRequests().filter(call=>call.url.endsWith('/review-runs')).length
+        window.fixtureRetarget=true
+        await click(button(launchName))
+        await until(() => text(query('.co-pr-confirm')).includes('changed since this list loaded') || !query('.co-pr-confirm'),'Retarget admission did not settle')
+        ensure(mutationRequests().filter(call=>call.url.endsWith('/review-runs')).length===before,'Retargeted '+mode+' posted a launch')
+        ensure(text(query('.co-pr-confirm')).includes('changed since this list loaded'),'Retarget did not ask for fresh consent')
+        window.fixtureRetarget=false
+        await click(button('Cancel',query('.co-pr-confirm')))
+      }
+    })
     await check('individual PR detail leads with its Conversation description without reading diff', async () => {
       const title=document.querySelectorAll('.co-pr-open')[1]; title.focus(); await click(title)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
@@ -412,6 +497,16 @@ window.runWorkspaceChecks = async () => {
       ensure(detailTab('Conversation')?.getAttribute('aria-pressed')==='true' && text(detailTab('Files changed'))==='Files changed1+1−0' && detailTab('Checks'),'Detail tabs absent')
       ensure(query('.co-pr-detail').closest('.co-pr-row') && !query('.co-task-dock'),'Detail escaped its row')
       ensure(mutationRequests().length===0 && navigation.length===inventoryNavigationDepth,'Opening detail changed work or screens')
+    })
+    await check('last discussion page keeps Previous and restores the prior cursor', async () => {
+      await until(() => button('More discussions'),'First discussion page did not load')
+      await click(button('More discussions'))
+      await until(() => text(query('.co-pr-detail')).includes('last.js'),'Last discussion cursor did not load')
+      ensure(!button('More discussions'),'Last page offered a nonexistent next cursor')
+      ensure(button('Previous discussions'),'Last page lost Previous discussions')
+      await click(button('Previous discussions'))
+      await until(() => text(query('.co-pr-detail')).includes('first.js') && button('More discussions'),'Previous cursor did not restore the first discussions')
+      ensure(!button('Previous discussions'),'First cursor unexpectedly offered Previous')
     })
     await check('files load on demand and individual review keeps exact one-PR scope', async () => {
       await click(detailTab('Files changed'))

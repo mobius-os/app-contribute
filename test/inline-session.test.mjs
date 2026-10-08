@@ -74,6 +74,21 @@ test('init and canonical hydration are read-only; activate and cancel are read-o
   assert.deepEqual(f.sends, [])
 })
 
+test('malformed stack intent cannot activate single or batch publication handlers', async () => {
+  const malformed = record('broken', { plan: { ...record('broken').plan, stack: { id: 'chain', total: 2 } } })
+  const good = record('good')
+  const f = fixture(['chat-send:broken', 'chat-send-batch:broken,good'], [malformed, good])
+  await f.session.hydrate()
+  assert.equal(f.action('chat-send:broken').status, 'Needs attention')
+  assert.match(f.action('chat-send:broken').note, /invalid layer metadata/i)
+  f.session.activate('chat-send:broken')
+  await f.session.confirm('chat-send:broken')
+  assert.equal(f.action('chat-send:broken').confirming, false)
+  f.session.activate('chat-send-batch:broken,good')
+  await f.session.confirm('chat-send-batch:broken,good')
+  assert.deepEqual(f.sends, ['good'])
+})
+
 test('batch confirmations start independent ready entries concurrently and freeze approved copies', async () => {
   const pending = []
   const f = fixture(['chat-send-batch:a,b'], [record('a'), record('b')], { send: rec => new Promise(resolve => pending.push({ rec, resolve })) })

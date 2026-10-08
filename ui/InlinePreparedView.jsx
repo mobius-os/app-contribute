@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { qualityReviewFor, reviewStateFor } from '../review.js'
 import { pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
 import { loadFreshContributionRecord } from '../storage.js'
-import { sortStackRecords, stackMeta, stackPublicationRecords, stackReadiness } from '../stack.js'
+import { publicationStackUnit, stackPublicationRecords, stackReadiness } from '../stack.js'
 import { ContributionCard, RepoLink } from './ContributionCard.jsx'
 import { Icon } from './Icons.jsx'
 
@@ -16,13 +16,6 @@ export function newerRecord(left, right) {
   if (!left || !right) return left || right || null
   const stamp = rec => String(rec.updated_at || rec.created_at || '')
   return stamp(right) > stamp(left) ? right : left
-}
-
-export function preparedStackUnit(record, records) {
-  const meta = stackMeta(record)
-  if (!meta) return null
-  const members = sortStackRecords((records || []).filter(item => stackMeta(item)?.id === meta.id))
-  return { type: 'stack', id: meta.id, name: meta.name, total: meta.total, records: members }
 }
 
 // The same conditions the queue's Send button checks: a reviewed, current,
@@ -122,7 +115,7 @@ export function InlinePreparedView({ target, appId, records, ledgerReady, review
   const exactRecord = exact.id === target.id ? exact.record : null
   const record = newerRecord(records.find(item => item.id === target.id), exactRecord)
   const missing = !record && ledgerReady && exact.id === target.id && exact.read
-  const unit = record ? preparedStackUnit(record, [record, ...records.filter(item => item.id !== record.id)]) : null
+  const unit = record ? publicationStackUnit(record, [record, ...records.filter(item => item.id !== record.id)]) : null
   function openFullView() {
     window.parent.postMessage({ type: 'moebius:open-app', appId, intent: `review:${target.id}` }, '*')
   }
@@ -194,7 +187,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   const items = ids.map(id => {
     const read = exact.key === key && Boolean(exact.byId[id])
     const record = newerRecord(currentRecords.find(item => item.id === id), read ? exact.byId[id].record : null)
-    const unit = record ? preparedStackUnit(record, [record, ...currentRecords.filter(item => item.id !== record.id)]) : null
+    const unit = record ? publicationStackUnit(record, [record, ...currentRecords.filter(item => item.id !== record.id)]) : null
     const item = { id, read: read && ledgerReady, record, unit }
     const phase = unit ? stackPublicationRecords(unit) : record?.status === 'prepared' ? [record] : []
     const unitKey = unit ? `stack:${unit.id}` : `record:${id}`

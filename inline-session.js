@@ -2,7 +2,7 @@
 // confirmed frozen approval reaches Contribute's existing guarded handlers.
 import { contributeBlockTarget } from './chat-blocks.js'
 import { qualityReviewFor, reviewStateFor } from './review.js'
-import { stackMeta, sortStackRecords, stackPublicationRecords, stackReadiness } from './stack.js'
+import { publicationStackUnit, stackIntent, stackPublicationRecords, stackReadiness } from './stack.js'
 
 const copy = value => JSON.parse(JSON.stringify(value))
 export const githubPull = record => {
@@ -68,21 +68,21 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     // A fresh exact read proves the record's content, not that it belongs to
     // the complete current ledger. Removed work cannot borrow its old review.
     const inLedger = member => ledger.some(current => current.id === member.id)
-    const meta = stackMeta(record)
-    if (!meta) {
+    const intent = stackIntent(record)
+    if (intent.kind === 'standalone') {
       const reason = settled(record) ? '' : ledgerReady && !inLedger(record)
         ? 'This contribution is no longer in Contribute.' : blocker(record, reviewStatus) || (ledgerReady ? currentReviewBlocker(record, reviewStatus) : '')
       return { id, key: `record:${id}`, records: [record], ready: !reason && record.status === 'prepared' ? [record] : [], reason }
     }
-    const members = sortStackRecords(records().filter(rec => stackMeta(rec)?.id === meta.id))
-    const unit = { type: 'stack', records: members, total: meta.total }
+    const unit = publicationStackUnit(record, records())
+    const members = unit.records
     const state = stackReadiness(unit)
     const loading = !ledgerReady && state.code === 'incomplete'
     const reason = ledgerReady && members.some(member => !inLedger(member))
       ? 'The linked changes are no longer in Contribute.'
       : !state.ok ? (state.code === 'settled' ? '' : loading ? 'Loading the linked changes…' : state.message)
       : stackPublicationRecords(unit).map(rec => blocker(rec, reviewStatus) || (ledgerReady ? currentReviewBlocker(rec, reviewStatus) : '')).find(Boolean) || ''
-    return { id, key: `stack:${meta.id}`, records: members, ready: reason ? [] : stackPublicationRecords(unit), stack: true, reason, loading }
+    return { id, key: `stack:${unit.id}`, records: members, ready: reason ? [] : stackPublicationRecords(unit), stack: true, reason, loading }
   }
   // A batch may name two layers of one chain. It still has one publication unit.
   const unitsFor = key => [...new Map(idsFor(key).map(id => { const unit = unitFor(id); return [unit.key, unit] })).values()]
@@ -108,7 +108,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const reviewUnavailable = reviewStatus?.state === 'unavailable'
     const isBatch = contributeBlockTarget(item.key)?.kind === 'batch'
     // This first tap starts authoritative checks; it is not Send approval.
-    const canActivate = !authoritative(item.key) && focusedResolved && focused.every(rec => rec.status === 'prepared' && !blocker(rec, reviewStatus))
+    const canActivate = !authoritative(item.key) && focusedResolved && focused.every(rec => rec.status === 'prepared' && stackIntent(rec).kind !== 'invalid' && !blocker(rec, reviewStatus))
     const publicStatus = focused.length === 1
       ? ({ draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }[focused[0].status] || 'Sent')
       : 'Sent'

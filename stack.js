@@ -28,6 +28,30 @@ export function stackMeta(rec) {
   }
 }
 
+// At a publication boundary, absent metadata is standalone; present but
+// malformed metadata is still a chain intent and must remain blocked.
+export function stackIntent(rec) {
+  if (!Object.hasOwn(rec?.plan || {}, 'stack')) return { kind: 'standalone' }
+  const meta = stackMeta(rec)
+  return meta ? { kind: 'stack', meta } : { kind: 'invalid' }
+}
+
+export function publicationStackUnit(record, records) {
+  const intent = stackIntent(record)
+  if (intent.kind === 'standalone') return null
+  if (intent.kind === 'invalid') {
+    const stack = record.plan.stack
+    return {
+      type: 'stack', id: `invalid:${record.id}`,
+      name: [stack?.name, stack?.id].find(value => typeof value === 'string' && value.trim()) || 'Invalid PR chain',
+      total: Number(stack?.total) || 2, records: [record],
+    }
+  }
+  const meta = intent.meta
+  const members = sortStackRecords((records || []).filter(item => stackMeta(item)?.id === meta.id))
+  return { type: 'stack', id: meta.id, name: meta.name, total: meta.total, records: members }
+}
+
 export function sortStackRecords(records) {
   return [...(records || [])].sort((a, b) => {
     const left = stackMeta(a)?.position || Number.MAX_SAFE_INTEGER
@@ -83,17 +107,10 @@ export function preparedContributionUnits(ready, allRecords) {
   const stackUnits = groupContributionUnits(stackRecords)
     .filter((unit) => unit.type === 'stack')
   const invalidStackUnits = (ready || [])
-    .filter((rec) => rec?.plan?.stack && !stackMeta(rec))
-    .map((rec) => ({
-      type: 'stack',
-      id: `invalid:${rec.id}`,
-      name: [rec.plan.stack.name, rec.plan.stack.id]
-        .find((value) => typeof value === 'string' && value.trim()) || 'Invalid PR chain',
-      total: Number(rec.plan.stack.total) || 2,
-      records: [rec],
-    }))
+    .filter((rec) => stackIntent(rec).kind === 'invalid')
+    .map((rec) => publicationStackUnit(rec, [rec]))
   const standalone = (ready || [])
-    .filter((rec) => !rec?.plan?.stack)
+    .filter((rec) => stackIntent(rec).kind === 'standalone')
     .map((rec) => ({ type: 'record', id: rec.id, record: rec, records: [rec] }))
   return [...stackUnits, ...invalidStackUnits, ...standalone].sort((a, b) => {
     const aRec = a.records.find((rec) => rec.status === 'prepared') || a.records[0]
@@ -146,15 +163,15 @@ export function stackReadiness(unit) {
   const total = Number(unit?.total || records.length)
   const ready = records.filter((rec) => rec.status === 'prepared')
   const fail = (code, message) => ({ ok: false, code, message, ready })
+  const metas = records.map(stackMeta)
+  if (metas.some((meta) => !meta)) {
+    return fail('invalid', 'This chain has invalid layer metadata.')
+  }
   if (!Number.isInteger(total) || total < 2 || records.length !== total) {
     return fail(
       'incomplete',
       `This chain is incomplete: ${records.length} of ${total || '?'} layers are available.`,
     )
-  }
-  const metas = records.map(stackMeta)
-  if (metas.some((meta) => !meta)) {
-    return fail('invalid', 'This chain has invalid layer metadata.')
   }
   if (metas.some((meta, index) => (
     meta.id !== metas[0].id || meta.total !== total || meta.position !== index + 1

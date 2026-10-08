@@ -5,6 +5,7 @@ import {
   preparedContributionUnits,
   publicContributionUnits,
   stackMeta,
+  stackIntent,
   stackPublicationRecords,
   stackReadiness,
 } from '../stack.js'
@@ -128,6 +129,9 @@ test('malformed stack intent never falls back to a standalone send card', () => 
   assert.equal(units.length, 1)
   assert.equal(units[0].type, 'stack')
   assert.equal(stackReadiness(units[0]).ok, false)
+  assert.equal(stackIntent({ plan: {} }).kind, 'standalone')
+  assert.equal(stackIntent({ plan: { stack: null } }).kind, 'invalid')
+  assert.equal(preparedContributionUnits([{ ...malformed, plan: { ...malformed.plan, stack: null } }], []).at(0).type, 'stack')
 })
 
 test('public stacks stay grouped while GitHub owns their acceptance', () => {

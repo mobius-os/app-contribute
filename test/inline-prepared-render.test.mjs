@@ -32,6 +32,19 @@ test('a reviewed prepared record shows its own Contribute button inside the tran
   assert.match(html, /Open in Contribute/)
 })
 
+test('malformed stack intent is visible but offers no single or batch publication action', async t => {
+  const module = await load(t)
+  if (!module) return
+  const broken = { ...reviewed, plan: { ...plan, stack: { id: 'chain', total: 2 } } }
+  const single = (await module).render({ ...base, records: [broken], target: { ...base.target, confirm: true } })
+  assert.match(single, /Fix the thing/)
+  assert.match(single, /invalid layer metadata/i)
+  assert.doesNotMatch(single, />Contribute</)
+  const batch = (await module).renderBatch({ ...base, records: [broken], target: { kind: 'batch', ids: ['rec-1'], embedded: true } })
+  assert.match(batch, /invalid layer metadata/i)
+  assert.match(batch, /disabled=""[^>]*>Contribute all 0</)
+})
+
 test('an unreviewed record offers no Send', async t => {
   const html = await render(t, { ...base, records: [{ ...reviewed, quality_review: { state: 'changes_needed' } }] })
   if (!html) return
