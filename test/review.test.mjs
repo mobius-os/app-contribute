@@ -233,11 +233,13 @@ test('a confirmed batch stays on screen with per-item results until the owner cl
   assert.doesNotMatch(feedSource, /onStartAgent/)
   assert.match(feedSource, /approval\.locked \|\| approval\.fingerprint === fingerprint/)
   assert.match(feedSource, /setBusy\(false\)[\s\S]*?setFinished\(true\)/)
-  assert.match(feedSource, /function closeResults\(\) \{\s*setApproval\(null\)/)
-  assert.match(feedSource, /\[record\.id\]: \{ error: failureText\(outcome\) \}/)
+  assert.match(feedSource, /function closeResults\(\) \{\s*if \(checking \|\| busy\) return[\s\S]*?setApproval\(null\)/)
+  assert.match(feedSource, /const value = outcomeFor\(record, outcome\)[\s\S]*?\[record\.id\]: value/)
   assert.match(feedSource, /approval\.fingerprint !== fingerprint/)
   assert.match(feedSource, /The reviewed set changed\. The current actions are listed now/)
-  assert.match(feedSource, /key=\{`send:\$\{run\?\.revision/)
+  assert.match(feedSource, /key="send"/); assert.match(feedSource, /key="ready"/)
+  assert.doesNotMatch(feedSource, /key=\{`(?:send|ready):\$\{run\?\.revision/)
+  assert.match(feedSource, /if \(admitted\.current\) return/)
 })
 
 test('paused work exposes its existing conversation without starting another', () => {
