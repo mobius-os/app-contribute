@@ -67,10 +67,12 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
       <span className={moving ? 'co-working-icon' : ''}><Icon name={waiting ? 'feedback' : 'prepare'} size={18} /></span>
       <span><strong>Full merge cycles</strong><small>{cycle.chatId ? `${cycle.title || 'Current work'} · ${statusLabel}` : 'Start or review project work'}</small></span><Icon name="right" size={16} />
     </button>
+    {cycle.phase === 'unknown' ? <button type="button" className="co-btn" onClick={workflow.recheck}><Icon name="refresh" /> Recheck saved work</button> : null}
     <TaskPane id="task:cycle" dock={false}>
       <h3>Full merge cycles</h3>
       {cycle.chatId ? <p><strong>Current:</strong> {cycle.title || 'Project work'} · {statusLabel}{cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="Started " /></> : null}</p> : <p>No current cycle.</p>}
       <div className="co-cycle-actions">
+        <button type="button" className="co-btn" disabled={cycle.phase === 'checking' || cycle.phase === 'restoring' || cycle.phase === 'starting' || cycle.phase === 'stopping'} onClick={workflow.recheck}><Icon name="refresh" /> Recheck saved work</button>
         {cycle.chatId ? <button type="button" className="co-btn" onClick={() => workflow.open()}>{waiting ? 'Answer question' : 'Open current conversation'}</button> : null}
         {['running', 'waiting', 'paused'].includes(cycle.phase) ? <button type="button" className="co-btn" onClick={workflow.stop}>{cycle.phase === 'paused' ? 'Cancel paused work' : 'Cancel active work'}</button> : null}
       </div>
