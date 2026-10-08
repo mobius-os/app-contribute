@@ -234,6 +234,7 @@ test('prepared focused activation waits for authoritative ledger and review, the
   session.updateLedger([current], false, { state: 'loading', byId: {} })
   assert.equal(states.at(-1).actions[0].confirming, false)
   session.updateLedger([current], true, readyReview([current]))
+  await new Promise(resolve => setImmediate(resolve))
   assert.equal(states.at(-1).actions[0].confirming, true)
   assert.deepEqual(sends, [])
   session.cancel('chat-send:a')
@@ -274,7 +275,7 @@ test('a partially resolved batch cannot claim the missing contribution was sent'
   assert.notEqual(states.at(-1).actions[0].status, 'Sent')
 })
 
-test('unavailable review settles checking to an actionable refusal without sending', async () => {
+test('unavailable review offers an explicit retry without sending', async () => {
   const current = record('a'), states = [], sends = []
   const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }], publish: s => states.push(s),
     loadExact: async () => current, send: async rec => { sends.push(rec.id) } })
@@ -282,9 +283,55 @@ test('unavailable review settles checking to an actionable refusal without sendi
   session.activate('chat-send:a')
   assert.equal(states.at(-1).actions[0].status, 'Checking')
   session.updateLedger([current], true, { state: 'unavailable', byId: {} })
-  assert.equal(states.at(-1).actions[0].status, 'Needs attention')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(states.at(-1).actions[0].status, 'Check unavailable')
+  assert.equal(states.at(-1).actions[0].label, 'Retry check')
   assert.match(states.at(-1).actions[0].note, /Could not verify/)
   assert.equal(states.at(-1).actions[0].confirming, false)
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
+})
+
+test('batch keeps one unavailable explanation and truthful prepared rows through retry', async () => {
+  const current = [record('a'), record('b')]
+  const states = [], sends = []
+  const session = createInlineSession({ sessionId: 's', actions: [
+    { key: 'chat-send:a', label: 'Contribute' }, { key: 'chat-send:b', label: 'Contribute' },
+    { key: 'chat-send-batch:a,b', label: 'Contribute all' },
+  ], publish: state => states.push(state), loadExact: async id => current.find(rec => rec.id === id),
+  send: async rec => { sends.push(rec.id) } })
+  await session.hydrate()
+  session.updateLedger(current, true, { state: 'unavailable', byId: {} })
+  assert.equal(states.at(-1).summary, '2 prepared · Current review unavailable')
+  assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send:a').status, 'Check unavailable')
+  assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send:a').note, '')
+  assert.match(states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').note, /Could not verify/)
+  session.activate('chat-send-batch:a,b')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').confirming, false)
+  session.updateLedger(current, true, readyReview(current))
+  assert.equal(states.at(-1).actions.find(action => action.key === 'chat-send-batch:a,b').confirming, true)
+  assert.deepEqual(sends, [])
+})
+
+test('new focused read wins over an older delayed hydration after retry', async () => {
+  const old = record('a', { revision: 1 })
+  const fresh = record('a', { revision: 2, needs_attention: true })
+  const reads = []
+  const states = [], sends = []
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }],
+    publish: state => states.push(state), loadExact: () => new Promise(resolve => reads.push(resolve)),
+    send: async rec => { sends.push(rec.id) } })
+  session.updateLedger([old], true, readyReview([old]))
+  const initial = session.hydrate()
+  session.activate('chat-send:a')
+  assert.equal(reads.length, 2)
+  reads[1](fresh)
+  await new Promise(resolve => setImmediate(resolve))
+  reads[0](old)
+  await initial
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  assert.match(states.at(-1).actions[0].note, /reviewed source changed/)
   await session.confirm('chat-send:a')
   assert.deepEqual(sends, [])
 })
@@ -296,6 +343,25 @@ test('a failed focused read is not an indefinite loading placeholder', async () 
   assert.equal(states.at(-1).actions[0].status, 'Needs attention')
   assert.match(states.at(-1).actions[0].note, /Could not read/)
   assert.equal(states.at(-1).actions[0].disabled, true)
+})
+
+test('failed exact reread cannot borrow a ready ledger record for confirmation', async () => {
+  const current = record('a'), states = [], sends = []
+  let fail = false
+  const session = createInlineSession({ sessionId: 's', actions: [{ key: 'chat-send:a' }],
+    publish: state => states.push(state), loadExact: async () => { if (fail) throw Error('offline'); return current },
+    send: async rec => { sends.push(rec.id) } })
+  session.updateLedger([current], true, readyReview([current]))
+  await session.hydrate()
+  fail = true
+  session.updateLedger([current], false, { state: 'loading', byId: {} })
+  session.activate('chat-send:a')
+  await new Promise(resolve => setImmediate(resolve))
+  session.updateLedger([current], true, readyReview([current]))
+  assert.equal(states.at(-1).actions[0].confirming, false)
+  assert.match(states.at(-1).actions[0].note, /Could not read/)
+  await session.confirm('chat-send:a')
+  assert.deepEqual(sends, [])
 })
 
 test('an all-clear local review cannot replace a missing current source verdict', async () => {
@@ -394,4 +460,12 @@ test('partial stack failure note clears only after explicit recovery settles rem
   assert.equal(f.action('chat-send:a').status, 'Open')
   assert.equal(f.action('chat-send:a').links.length, 1)
   assert.equal(f.action('chat-send:a').note, '')
+})
+test('a cold batch heading never claims its saved contributions are still ready', () => {
+  const states = []
+  const session = createInlineSession({ sessionId: 'cold', actions: [{ key: 'chat-send-batch:a,b' }],
+    publish: state => states.push(state), loadExact: async () => null })
+  session.emit()
+  assert.equal(states.at(-1).summary, '2 contributions')
+  session.dispose()
 })

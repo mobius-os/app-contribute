@@ -152,15 +152,24 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
 // where the existing guarded Send handlers remain the sole publication path.
 export default function ContributeAppEntry({ appId, token, blockSession = null }) {
   const [activatedKey, setActivatedKey] = useState('')
-  if (blockSession && !activatedKey) return <InlineBlockSession blockSession={blockSession}
-    records={[]} ledgerReady={false} reviewStatus={null}
-    onActivateRequest={setActivatedKey}
-    onSend={() => ({ error: 'This card must be activated before sending.' })}
-    onSendStack={() => ({ error: 'This card must be activated before sending.' })} />
-  return <ContributeApp appId={appId} token={token} blockSession={blockSession} autoActivateKey={activatedKey} />
+  const [inlineRuntime, setInlineRuntime] = useState(null)
+  const onActivateRequest = useCallback((key) => {
+    if (!activatedKey) setActivatedKey(key)
+    else if (inlineRuntime?.reviewStatus?.state === 'unavailable' || !inlineRuntime?.ledgerReady) void inlineRuntime?.onRefresh?.()
+  }, [activatedKey, inlineRuntime])
+  if (!blockSession) return <ContributeApp appId={appId} token={token} />
+  return <>
+    <InlineBlockSession blockSession={blockSession}
+      records={inlineRuntime?.records || []} ledgerReady={inlineRuntime?.ledgerReady || false}
+      reviewStatus={inlineRuntime?.reviewStatus || null} onActivateRequest={onActivateRequest}
+      onSend={inlineRuntime?.onSend || (() => ({ error: 'This card must be activated before sending.' }))}
+      onSendStack={inlineRuntime?.onSendStack || (() => ({ error: 'This card must be activated before sending.' }))}
+      onRefresh={inlineRuntime?.onRefresh} />
+    {activatedKey && <ContributeApp appId={appId} token={token} blockSession={blockSession} onInlineRuntime={setInlineRuntime} />}
+  </>
 }
 
-function ContributeApp({ appId, token, blockSession, autoActivateKey }) {
+function ContributeApp({ appId, token, blockSession, onInlineRuntime }) {
   const [inlineTarget, setInlineTarget] = useState(null)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
@@ -1428,13 +1437,16 @@ function ContributeApp({ appId, token, blockSession, autoActivateKey }) {
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
+  useEffect(() => {
+    if (!onInlineRuntime) return
+    onInlineRuntime({ records, ledgerReady: ledgerReady && ledgerCurrentRef.current, reviewStatus,
+      onSend, onSendStack, onRefresh: () => refreshCoordinatorRef.current() })
+  }, [onInlineRuntime, records, ledgerReady, reviewStatus, onSend, onSendStack])
+
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
-      <InlineBlockSession blockSession={blockSession} autoActivateKey={autoActivateKey}
-        records={records} ledgerReady={ledgerReady && ledgerCurrentRef.current} reviewStatus={reviewStatus}
-        onSend={onSend} onSendStack={onSendStack} onRefresh={() => refreshCoordinatorRef.current()} />
       {!inlineTarget?.embedded ? <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen || reviewFocus || selectionFocus || inlineTarget ? () => {
           setInlineTarget(null)

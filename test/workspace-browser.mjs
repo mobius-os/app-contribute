@@ -72,7 +72,10 @@ window.fetch = async (url, options = {}) => {
       if (window.deferSourceDiscovery) return new Promise(resolve => { window.releaseSourceDiscovery = value => resolve(response(value)) })
       return response({ apps: [], platform: null })
     }
-    if (call.url.endsWith('/review-status')) return response({ records: [] })
+    if (call.url.endsWith('/review-status')) {
+      if (window.fixtureReviewUnavailable) return new Response(JSON.stringify({detail:'Fixture unavailable'}), {status:503})
+      return response({ records: window.fixtureInlineReviewReady ? [{id:'focused-record',state:'ready'}] : [] })
+    }
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
       if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
@@ -656,11 +659,15 @@ window.runWorkspaceChecks = async () => {
       const originalGet = window.mobius.storage.get
       const originalList = window.mobius.storage.listWithStatus
       let focusedAction = null
+      const focusedStates = []
       // This file:// fixture has no concrete shell origin. Capture only the
       // outbound transport boundary; production attribution checks stay real.
       const originalPost = window.parent.postMessage
       window.parent.postMessage = (message, ...args) => {
-        if (message?.type === 'moebius:app-block-state' && message.sessionId === 'focused-fixture') focusedAction = message.actions[0]
+        if (message?.type === 'moebius:app-block-state' && message.sessionId === 'focused-fixture') {
+          focusedAction = message.actions[0]
+          focusedStates.push(focusedAction.status)
+        }
         else originalPost.call(window.parent, message, ...args)
       }
       window.mobius.storage.getWithVersion = async (...args) => { exactReads++; return originalVersioned(...args) }
@@ -672,15 +679,27 @@ window.runWorkspaceChecks = async () => {
       await frame(); await frame()
       await until(() => focusedAction?.status === 'Prepared', 'Focused card did not resolve its prepared status')
       ensure(!focusedAction.hidden && !focusedAction.disabled, 'Prepared card hid or disabled the activation control')
+      ensure(focusedAction.badges.some(badge => badge.label === 'All clear'), 'Fresh exact review badge was lost')
       ensure(ledgerReads === 0 && settingsReads === 0 && calls.requests.length === initialRequests, 'Focused hydration started workspace, account, or settings reads')
       ensure(!query('.co-root'), 'Focused hydration mounted the workspace')
       window.fullAppFixture = true
       window.fullAppConnected = false
+      window.fixtureReviewUnavailable = true
       const priorPublications = calls.publications.length
       window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
         data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record'}}))
       await until(() => ledgerReads > 0, 'Activation did not start the authoritative ledger')
+      await until(() => focusedAction?.label === 'Retry check', 'Unavailable review did not expose retry')
+      ensure(focusedAction.status === 'Check unavailable' && focusedAction.note.includes('Could not verify'), 'Standalone unavailable review lost its explanation')
+      ensure(!focusedStates.slice(focusedStates.indexOf('Prepared') + 1).includes('Loading'), 'Activation remounted and reset the focused session')
       ensure(calls.publications.length === priorPublications, 'Activation published without confirmation')
+      window.fixtureReviewUnavailable = false
+      window.fixtureInlineReviewReady = true
+      window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record'}}))
+      await until(() => focusedAction?.confirming, 'Retry did not recover to a fresh confirmation')
+      ensure(calls.publications.length === priorPublications, 'Retry sent without frozen confirmation')
+      window.fixtureInlineReviewReady = false
       window.mobius.storage.getWithVersion = originalVersioned
       window.mobius.storage.get = originalGet
       window.mobius.storage.listWithStatus = originalList

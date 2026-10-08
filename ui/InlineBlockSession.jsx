@@ -4,7 +4,7 @@ import { loadFreshContributionRecord } from '../storage.js'
 
 // The shell owns all visible UI. This component only exchanges bounded state
 // with the source chat block; mounting and ledger hydration never send.
-export function InlineBlockSession({ blockSession = null, autoActivateKey = '', onActivateRequest, records, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh }) {
+export function InlineBlockSession({ blockSession = null, onActivateRequest, records, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh }) {
   const session = useRef(null)
   const latest = useRef({ records, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh, onActivateRequest })
   latest.current = { records, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh, onActivateRequest }
@@ -27,7 +27,6 @@ export function InlineBlockSession({ blockSession = null, autoActivateKey = '', 
       })
       session.current = next
       next.updateLedger(latest.current.records, latest.current.ledgerReady, latest.current.reviewStatus)
-      if (autoActivateKey) next.activate(autoActivateKey)
       void next.hydrate()
     }
     const onMessage = event => {
@@ -37,8 +36,8 @@ export function InlineBlockSession({ blockSession = null, autoActivateKey = '', 
         initialize(data)
       } else if (data?.type === 'moebius:app-block-action' && data.sessionId === session.current?.sessionId) {
         if (data.event === 'activate') {
-          if (latest.current.onActivateRequest) latest.current.onActivateRequest(data.key)
-          else session.current.activate(data.key)
+          session.current.activate(data.key)
+          latest.current.onActivateRequest?.(data.key)
         }
         else if (data.event === 'cancel') session.current.cancel(data.key)
         else if (data.event === 'confirm') void session.current.confirm(data.key)

@@ -39,6 +39,10 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   const advertised = [...new Map((actions || []).filter(item => typeof item?.key === 'string').map(item => [item.key, item])).values()]
   const byId = new Map()
   const exactRead = new Set()
+  const readFinished = new Set()
+  const displayRead = new Set()
+  const pendingRead = new Set()
+  const readGeneration = new Map()
   const attempted = new Set()
   const busyUnits = new Set()
   const results = new Map()
@@ -49,11 +53,13 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   let requestedActivation = null
   let frozen = null
   let alive = true
+  let lastSummary = ''
   const idsFor = key => {
     const target = contributeBlockTarget(key)
     return target?.kind === 'prepared' ? [target.id] : target?.kind === 'batch' ? target.ids : []
   }
   const ids = [...new Set(advertised.flatMap(item => idsFor(item.key)))]
+  const hasBatch = advertised.some(item => contributeBlockTarget(item.key)?.kind === 'batch')
   const records = () => [...new Map([...ledger, ...byId.values()].filter(Boolean).map(rec => [rec.id, rec])).values()]
   const unitFor = id => {
     const record = byId.get(id) || ledger.find(rec => rec.id === id)
@@ -96,12 +102,13 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const addressed = idsFor(item.key)
     const focused = addressed.map(id => byId.get(id) || ledger.find(rec => rec.id === id)).filter(Boolean)
     const links = [...new Map(focused.map(settled).filter(Boolean).map(link => [link.url, link])).values()]
-    const readComplete = addressed.length > 0 && addressed.every(id => exactRead.has(id))
-    const focusedResolved = readComplete && focused.length === addressed.length
+    const readComplete = addressed.length > 0 && addressed.every(id => readFinished.has(id))
+    const focusedResolved = readComplete && addressed.every(id => exactRead.has(id) || pendingRead.has(id) && displayRead.has(id)) && focused.length === addressed.length
     const publicResolved = focusedResolved && focused.every(settled)
     const reviewUnavailable = reviewStatus?.state === 'unavailable'
+    const isBatch = contributeBlockTarget(item.key)?.kind === 'batch'
     // This first tap starts authoritative checks; it is not Send approval.
-    const canActivate = !authoritative(item.key) && !reviewUnavailable && focusedResolved && focused.every(rec => rec.status === 'prepared' && !blocker(rec, reviewStatus))
+    const canActivate = !authoritative(item.key) && focusedResolved && focused.every(rec => rec.status === 'prepared' && !blocker(rec, reviewStatus))
     const publicStatus = focused.length === 1
       ? ({ draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }[focused[0].status] || 'Sent')
       : 'Sent'
@@ -109,22 +116,24 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     const loading = !readComplete || checkingAuthority
     const focusedReason = readComplete && !focusedResolved ? 'Could not read this contribution. Open it in Contribute to check its current state.'
       : focused.map(rec => !settled(rec) && blocker(rec, reviewStatus)).find(Boolean)
-    const reason = reviewUnavailable && !publicResolved ? 'Could not verify the current review. Open Contribute to retry; nothing was sent.'
-      : !ledgerReady && !checkingAuthority ? focusedReason : units.map(unit => unit.reason).find(Boolean)
+    const reason = reviewUnavailable && !publicResolved
+      ? isBatch || !hasBatch ? 'Could not verify the current review. Retry check; nothing was sent.' : focusedReason || ''
+      : focusedReason || (!ledgerReady && !checkingAuthority ? '' : units.map(unit => unit.reason).find(Boolean))
     const unitBusy = units.some(unit => busyUnits.has(unit.key))
     const anyBusy = busyUnits.size > 0
     const failures = [...results.values()].filter(result => units.some(unit => unit.key === result.unitKey))
     const failure = failures.find(result => result.tone === 'danger')
     const checking = failures.some(result => result.state === 'pending') || units.some(unit => unit.records.some(rec => rec.status === 'submitting'))
     const status = unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
-      : checkingAuthority ? 'Checking' : ready.length ? 'Ready' : publicResolved ? publicStatus : canActivate ? 'Prepared' : loading ? 'Loading' : reason ? 'Needs attention' : ''
+      : checkingAuthority ? 'Checking' : ready.length ? 'Ready' : publicResolved ? publicStatus : reviewUnavailable && canActivate ? 'Check unavailable' : canActivate ? 'Prepared' : loading ? 'Loading' : reason ? 'Needs attention' : ''
     const note = failure?.note || failures.find(result => result.state === 'pending')?.note ||
-      (checkingAuthority ? 'Checking linked changes and the current review…' : '') ||
-      (!ledgerReady && (publicResolved || canActivate) ? '' : reason) ||
-      (loading && !publicResolved && !canActivate ? 'Reading this contribution…' : anyBusy || links.length || ready.length || canActivate ? '' : 'Nothing is ready to contribute.')
+      (!ledgerReady && (publicResolved || canActivate) ? '' : checkingAuthority ? '' : reviewUnavailable && hasBatch && !isBatch && canActivate ? '' : reason) ||
+      (!loading && !anyBusy && !links.length && !ready.length && !canActivate ? 'Nothing is ready to contribute.' : '')
+    const quality = focused.length === 1 && focusedResolved && focused[0].status === 'prepared'
+      ? qualityReviewFor(focused[0]) : null
     return {
       key: item.key,
-      label: item.label || 'Contribute',
+      label: checkingAuthority ? 'Checking…' : reviewUnavailable && canActivate ? 'Retry check' : unitBusy ? 'Contributing…' : item.label || 'Contribute',
       disabled: confirming === item.key ? anyBusy : !ready.length && !canActivate || anyBusy || checking || checkingAuthority || Boolean(confirming),
       busy: unitBusy,
       confirming: confirming === item.key,
@@ -134,17 +143,47 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
       status,
       statusTone: failure ? 'danger' : checking || reason && !loading ? 'attention' : status === 'Sent' ? 'success' : 'neutral',
       links,
-      badges: [],
+      badges: quality?.state === 'all_clear' ? [{ label: 'All clear', tone: 'success' }]
+        : quality?.state === 'changes_needed' ? [{ label: 'Changes needed', tone: 'attention' }] : [],
     }
   }
-  const emit = () => { if (alive) publish({ type: 'moebius:app-block-state', sessionId, actions: advertised.map(makeAction), notice: '' }) }
-  async function hydrate() {
-    await Promise.all(ids.map(async id => {
+  const summary = actions => {
+    const batch = advertised.find(item => contributeBlockTarget(item.key)?.kind === 'batch')
+    if (!batch) return ''
+    const addressed = idsFor(batch.key)
+    if (!addressed.length || !addressed.every(id => readFinished.has(id)) || addressed.some(id => pendingRead.has(id))) return lastSummary || `${addressed.length} contributions`
+    const found = addressed.map(id => exactRead.has(id) ? byId.get(id) || ledger.find(rec => rec.id === id) : null)
+    const publicCount = found.filter(settled).length
+    const preparedCount = found.filter(rec => rec?.status === 'prepared').length
+    const missingCount = addressed.length - found.filter(Boolean).length
+    lastSummary = reviewStatus?.state === 'unavailable' && preparedCount
+      ? `${preparedCount} prepared · Current review unavailable`
+      : actions.find(action => action.key === batch.key)?.busy
+        ? `${publicCount ? `${publicCount} sent · ` : ''}${preparedCount} contributing`
+        : publicCount && !preparedCount && !missingCount ? `${publicCount} sent`
+          : publicCount ? `${publicCount} sent · ${preparedCount} prepared${missingCount ? ` · ${missingCount} unavailable` : ''}`
+            : preparedCount ? `${preparedCount} prepared${missingCount ? ` · ${missingCount} unavailable` : ''}`
+              : missingCount ? `${missingCount} unavailable` : ''
+    return lastSummary
+  }
+  const emit = () => { if (alive) { const actions = advertised.map(makeAction); publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions) }) } }
+  async function hydrate(wanted = ids) {
+    await Promise.all(wanted.map(async id => {
+      const generation = (readGeneration.get(id) || 0) + 1
+      readGeneration.set(id, generation)
+      pendingRead.add(id)
       try {
         const rec = await loadExact(id)
-        if (rec?.id === id && (!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || ''))) byId.set(id, rec)
+        if (!alive || readGeneration.get(id) !== generation) return
+        if (rec?.id === id) {
+          exactRead.add(id)
+          displayRead.add(id)
+          if (!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || '')) byId.set(id, rec)
+        }
       } catch { /* keep read-only uncertainty visible */ }
-      exactRead.add(id)
+      if (!alive || readGeneration.get(id) !== generation) return
+      pendingRead.delete(id)
+      readFinished.add(id)
       reconcileResults(); fulfillRequestedActivation(); emit()
     }))
   }
@@ -152,6 +191,7 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     ledger = Array.isArray(next) ? next : []
     ledgerReady = Boolean(ready)
     reviewStatus = reviews
+    if (reviews?.state === 'unavailable') requestedActivation = null
     for (const rec of ledger) if (rec?.id && (!byId.has(rec.id) || String(rec.updated_at || '') >= String(byId.get(rec.id).updated_at || ''))) byId.set(rec.id, rec)
     reconcileResults(); fulfillRequestedActivation(); emit()
   }
@@ -164,6 +204,10 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
   }
   function fulfillRequestedActivation() {
     const key = requestedActivation
+    if (key && idsFor(key).some(id => readFinished.has(id) && !exactRead.has(id) && !pendingRead.has(id))) {
+      requestedActivation = null
+      return
+    }
     if (!key || !authoritative(key) || busyUnits.size || confirming) return
     requestedActivation = null
     freezeActivation(key)
@@ -175,6 +219,10 @@ export function createInlineSession({ sessionId, actions, publish, loadExact, se
     requestedActivation = null
     if (!authoritative(key)) requestedActivation = key
     else freezeActivation(key)
+    if (!authoritative(key) || reviewStatus?.state === 'unavailable') {
+      for (const id of idsFor(key)) exactRead.delete(id)
+      void hydrate(idsFor(key))
+    }
     emit()
   }
   function cancel(key) {
