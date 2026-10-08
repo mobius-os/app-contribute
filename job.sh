@@ -676,7 +676,7 @@ _RECORD_INTENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 def _record_target(rec):
   record_id = str(rec.get("id") or "")
-  if _RECORD_INTENT_ID.fullmatch(record_id):
+  if _RECORD_INTENT_ID.match(record_id):
     return "/shell/?app=%s&intent=review:%s" % (APP_ID, record_id)
   return "/shell/?app=%s" % APP_ID
 
