@@ -23,3 +23,16 @@ test('changed code or draft state is never silently accepted', async t => {
   await assert.rejects(liveSelection('token', [pr(7, 'head-a', 'base-old')]), error => error.code === 'changed' && /#7 changed/.test(error.message))
   await assert.rejects(liveSelection('token', [pr(8, 'head-c', 'base-old')]), error => error.code === 'changed')
 })
+
+test('retargeting an unchanged head requires new consent, unlike a same-target tip advance', async t => {
+  t.mock.method(globalThis, 'fetch', github({ 7: pr(7, 'head-a', 'base-new', { baseRefName: 'release', baseRef: { target: { oid: 'tip-new' } } }) }))
+  await assert.rejects(liveSelection('token', [pr(7, 'head-a', 'base-old')]), error => error.code === 'changed')
+})
+
+test('the same target may advance its live tip without replacing the selected code', async t => {
+  t.mock.method(globalThis, 'fetch', github({ 7: pr(7, 'head-a', 'comparison-new', { baseRef: { target: { oid: 'tip-new' } } }) }))
+  const [rebound] = await liveSelection('token', [pr(7, 'head-a', 'comparison-old', { baseRef: { target: { oid: 'tip-old' } } })])
+  assert.equal(rebound.baseRefName, 'main')
+  assert.equal(rebound.baseRef.target.oid, 'tip-new')
+  assert.equal(rebound.headRefOid, 'head-a')
+})
