@@ -39,15 +39,17 @@ export async function runUpperUiStatusChecks() {
     }
     throw Error('Forbidden upper UI fixture transport: ' + url)
   }
-  let refresh, setFocus, setProject, setTask
+  let refresh, setFocus, setProject, setTask, setConnection
   const project = { key: 'fixture', canonical_repo: 'team/repo', name: 'Fixture', kind: 'external' }
   function App() {
     const [refreshKey, changeRefresh] = useState(0), [focusPull, changeFocus] = useState({ repo: 'team/repo', number: 7, nonce: 'initial' })
     const [currentProject, changeProject] = useState(project), [activeId, changeTask] = useState('')
+    const [conn, changeConnection] = useState({ state: 'connected', login: 'fixture' })
+    setConnection = changeConnection
     refresh = () => changeRefresh(value => value + 1); setFocus = changeFocus; setProject = changeProject; setTask = changeTask
     const task = { activeId, setPublicKeys() {}, open: changeTask, close: () => changeTask('') }
     return <TaskContext.Provider value={task}><PullRequests key={currentProject.key} appId="fixture" token="mock"
-      project={currentProject} conn={{ state: 'connected', login: 'fixture' }} focusPull={focusPull} refreshKey={refreshKey} /></TaskContext.Provider>
+      project={currentProject} conn={conn} focusPull={focusPull} refreshKey={refreshKey} /></TaskContext.Provider>
   }
   const row = number => host.querySelector(`[data-pr-key="team/repo#${number}"]`)
   const title = number => row(number)?.querySelector('.co-pr-title')?.textContent
@@ -120,6 +122,103 @@ export async function runUpperUiStatusChecks() {
       search = async () => page([current]); refresh(); await until(() => title(7) === current.title)
       delayed.resolve(exact(pull())); await frame()
       ensure(title(7) === current.title, 'Late focus snapshot replaced canonical row')
+    })
+    await runCheck('closed focused identity absent from open inventory refreshes title head base and state', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([])
+      let exactPr = pull(7, { title: 'Closed initial snapshot', state: 'CLOSED' })
+      focus = async () => exact(exactPr); root.render(<App />)
+      await until(() => title(7) === exactPr.title)
+      ensure(row(7).querySelector('input').disabled, 'Closed focus became selectable')
+      exactPr = pull(7, { title: 'Merged current snapshot', state: 'MERGED', headRefOid: 'f'.repeat(40), baseRefOid: 'e'.repeat(40), baseRef: { target: { oid: 'e'.repeat(40) } } })
+      runs = [{ id: 'refreshed-closed', state: 'complete', mode: 'review', items: [{ repo: 'team/repo', number: 7, head_sha: exactPr.headRefOid, base_ref: 'main', base_sha: exactPr.baseRef.target.oid, state: 'all_clear' }] }]
+      refresh(); await until(() => title(7) === exactPr.title)
+      ensure(row(7).innerText.includes('Merged') && row(7).querySelector('input').disabled, 'Refreshed closed focus state is not current')
+      ensure(row(7).querySelector('.co-pr-agent-state')?.textContent.includes('Review clear'), 'Exact refresh did not propagate current head/base')
+      ensure(!row(7).innerText.includes('older main'), 'Exact refresh retained the prior target base')
+      row(7).querySelector('.co-pr-open').click(); await until(() => host.querySelector('.co-gh-pr-title'))
+      ensure(host.querySelector('.co-gh-pr-title').textContent.includes(exactPr.title), 'Detail retained the old focused title')
+      ensure(!host.querySelector('.co-pr-detail-actions .co-btn-primary'), 'Refreshed merged focus gained review controls')
+    })
+    await runCheck('missing-page exact refresh revalidates selection and rejects late successful and failed reads', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([])
+      let exactPr = pull(7, { title: 'Later-page initial' })
+      focus = async () => exact(exactPr); root.render(<App />); await until(() => title(7) === exactPr.title)
+      select(7); await frame(); refresh(); await frame(); await frame()
+      ensure(row(7).querySelector('input').checked, 'Unchanged exact absent-page refresh lost selected version')
+      host.querySelector('[aria-label="Take selected PRs on with agent"]').click(); await until(() => host.querySelector('.co-pr-confirm-list'))
+      exactPr = pull(7, { title: 'Later-page changed version', headRefOid: 'c'.repeat(40), baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: 'd'.repeat(40) } } })
+      refresh(); await until(() => title(7) === exactPr.title)
+      ensure(!row(7).querySelector('input').checked && host.innerText.includes('Select its current version again'), 'Changed absent-page exact identity retained selection')
+      ensure(host.querySelector('.co-pr-confirm-list').textContent.includes('Later-page initial') && !host.querySelector('.co-pr-confirm-list').textContent.includes(exactPr.title), 'Refresh silently transferred the previous frozen confirmation to a new version')
+      setTask(''); await frame()
+      const old = deferred(); let oldStarted = false; focus = () => { oldStarted = true; return old.promise }; refresh(); await until(() => oldStarted)
+      exactPr = pull(7, { title: 'Latest exact version', headRefOid: 'e'.repeat(40) })
+      focus = async () => exact(exactPr); refresh(); await until(() => title(7) === exactPr.title)
+      old.resolve(exact(pull(7, { title: 'Out-of-order exact snapshot' }))); await frame()
+      ensure(title(7) === exactPr.title, 'Old exact refresh won')
+      const oldFailure = deferred(); let failureStarted = false; focus = () => { failureStarted = true; return oldFailure.promise }; refresh(); await until(() => failureStarted)
+      exactPr = { ...exactPr, title: 'Latest after old failure' }; focus = async () => exact(exactPr)
+      refresh(); await until(() => title(7) === exactPr.title)
+      oldFailure.reject(Error('late exact failure')); await frame()
+      ensure(!host.querySelector('.co-pr-note[role=alert]'), 'Stale exact failure polluted latest focus')
+      select(7); await frame()
+      focus = async () => { throw Error('latest exact unavailable') }; refresh()
+      await until(() => host.querySelector('.co-pr-note[role=alert]'))
+      ensure(title(7) === exactPr.title, 'Failed exact refresh erased previous snapshot')
+      ensure(host.innerText.includes('previous snapshot'), 'Retained old focus was not disclosed as a previous snapshot')
+      ensure(row(7).querySelector('input').checked, 'Failed exact read lost prior selected version')
+      exactPr = { ...exactPr, title: 'Focused now closed', state: 'CLOSED' }; focus = async () => exact(exactPr)
+      refresh(); await until(() => title(7) === exactPr.title)
+      ensure(row(7).querySelector('input').disabled && !row(7).querySelector('input').checked, 'Closed exact state silently retained selection')
+      ensure(!host.querySelector('.co-pr-note[role=alert]'), 'Successful exact refresh retained stale failure')
+    })
+    await runCheck('new canonical inventory rejects an older missing-page exact response', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      const old = deferred(); let oldStarted = false; focus = () => { oldStarted = true; return old.promise }; refresh(); await until(() => oldStarted)
+      const canonical = pull(7, { title: 'Canonical after pending exact', headRefOid: 'f'.repeat(40) })
+      search = async () => page([canonical]); refresh(); await until(() => title(7) === canonical.title)
+      old.reject(Error('stale absent exact failed')); await frame()
+      ensure(title(7) === canonical.title && !host.querySelector('.co-pr-note[role=alert]'), 'Old exact response overrode newer canonical inventory')
+      search = async () => page([]); focus = async () => { throw Error('exact after canonical unavailable') }; refresh()
+      await until(() => host.querySelector('.co-pr-note[role=alert]'))
+      ensure(title(7) === canonical.title, 'Failed exact refresh resurrected an older snapshot than the last canonical row')
+      search = async () => page([canonical]); refresh(); await frame()
+      await until(() => !host.querySelector('.co-pr-note[role=alert]'))
+    })
+    await runCheck('later-page canonical discovery invalidates focus selection and remains the failed-refresh snapshot', async () => {
+      root.render(null); await frame(); runs = []; focus = async () => exact(pull())
+      const canonical = pull(7, { title: 'Later-page canonical version', headRefOid: 'e'.repeat(40) })
+      search = async query => query.includes('after:"later"') ? page([canonical])
+        : { data: { search: { nodes: [], issueCount: 1, pageInfo: { hasNextPage: true, endCursor: 'later' } } } }
+      root.render(<App />); await until(() => row(7))
+      select(7); await frame()
+      const more = [...host.querySelectorAll('button')].find(node => node.textContent === 'Load more PRs')
+      more.click()
+      await until(() => title(7) === canonical.title)
+      ensure(!row(7).querySelector('input').checked && host.innerText.includes('Select its current version again'), 'New canonical later-page head silently transferred focus selection')
+      search = async () => page([]); focus = async () => { throw Error('exact after later page unavailable') }; refresh()
+      await until(() => host.querySelector('.co-pr-note[role=alert]'))
+      ensure(title(7) === canonical.title, 'Failed exact refresh resurrected pre-pagination focus snapshot')
+    })
+    await runCheck('pending exact refresh is canceled by nonce connection and project changes', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      const oldNonce = deferred(); let nonceStarted = false; focus = () => { nonceStarted = true; return oldNonce.promise }; refresh(); await until(() => nonceStarted)
+      focus = async () => exact(pull(7, { title: 'New target nonce' }))
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'after-refresh' }); await until(() => title(7) === 'New target nonce')
+      oldNonce.resolve(exact(pull(7, { title: 'Old refresh nonce' }))); await frame()
+      ensure(title(7) === 'New target nonce', 'Old exact refresh crossed nonce')
+      const disconnected = deferred(); let connectionStarted = false; focus = () => { connectionStarted = true; return disconnected.promise }; refresh(); await until(() => connectionStarted)
+      setConnection({ state: 'disconnected' }); await frame()
+      focus = async () => exact(pull(7, { title: 'Reconnected exact' }))
+      setConnection({ state: 'connected', login: 'fixture' }); await until(() => title(7) === 'Reconnected exact')
+      disconnected.reject(Error('old connection failure')); await frame()
+      ensure(!host.querySelector('.co-pr-note[role=alert]'), 'Old exact refresh crossed connection')
+      const leaving = deferred(); let projectStarted = false; focus = () => { projectStarted = true; return leaving.promise }; refresh(); await until(() => projectStarted)
+      setProject({ ...project, key: 'other', canonical_repo: 'team/other' }); await frame()
+      leaving.resolve(exact(pull(7, { title: 'Old project refresh' }))); await frame()
+      ensure(!row(7), 'Old exact refresh crossed project')
     })
     for (const execution_state of ['stopped', 'failed', 'interrupted', 'awaiting_owner']) {
       await runCheck('inline and project preserve saved item facts with execution ' + execution_state, async () => {

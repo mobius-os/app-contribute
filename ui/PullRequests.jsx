@@ -162,6 +162,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const focusRequest = useRef(0)
   const focusDone = useRef('')
   const listRef = useRef(null)
+  const focusKey = focusPull?.repo && focusPull?.number ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
+  const focusId = `${focusKey}:${focusPull?.nonce || ''}`
+  const currentFocus = useRef(null)
+  currentFocus.current = { key: focusKey, id: focusId, repo: focusPull?.repo, number: focusPull?.number, connected: conn.state === 'connected' && !!focusKey && focusPull.repo.toLowerCase() === repo.toLowerCase() }
   // The exact deep-link read fills a missing page; current discovery owns rows.
   const allPulls = useMemo(() => focusedPr && !data.pulls.some(pr => prKey(pr) === prKey(focusedPr)) ? [...data.pulls, focusedPr] : data.pulls, [focusedPr, data.pulls])
   const currentSelection = useRef({ selected, pulls: allPulls })
@@ -183,6 +187,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current += 1 } }, [])
   const load = useCallback(async (cursor = null) => {
     const id = ++request.current
+    const focus = currentFocus.current, focusEpoch = focusRequest.current
     setData(old => ({ ...old, loading: true, error: '' }))
     try {
       let next = await discoverPulls(token, repo, cursor)
@@ -193,14 +198,35 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
         next = { ...page, pulls: mergeSelection(next.pulls, page.pulls) }
       }
       if (id !== request.current || !alive.current) return
+      // The open inventory cannot refresh a closed or missing-page destination.
+      // Re-read that exact focus, but never let an older list/nonce own its result.
+      let refreshedFocus = null, focusRead = focusEpoch
+      const canonicalFocus = focus.connected && currentFocus.current.connected && focus.id === currentFocus.current.id ? next.pulls.find(pr => prKey(pr) === focus.key) : null
+      if (canonicalFocus) {
+        focusRead = ++focusRequest.current
+        refreshedFocus = canonicalFocus; setFocusedPr(canonicalFocus); setFocusError('')
+      } else if (!cursor && focus.connected && focusEpoch === focusRequest.current && !next.pulls.some(pr => prKey(pr) === focus.key)) {
+        focusRead = ++focusRequest.current
+        try {
+          const pr = await discoverPull(token, focus.repo, focus.number)
+          if (id === request.current && focusRead === focusRequest.current && alive.current) {
+            refreshedFocus = pr; setFocusedPr(pr); setFocusError('')
+          }
+        } catch (error) {
+          if (id === request.current && focusRead === focusRequest.current && alive.current) setFocusError(error.message)
+        }
+      }
+      if (id !== request.current || !alive.current) return
       if (!cursor) { detailSnapshots.current.clear(); setDetailRevision(value => value + 1) }
       setData(old => ({ ...next, pulls: cursor ? mergeSelection(old.pulls, next.pulls) : next.pulls, loading: false, error: '' }))
-      if (!cursor) {
+      if (!cursor || canonicalFocus) {
         const previous = currentSelection.current
+        const currentPulls = cursor ? mergeSelection(previous.pulls, next.pulls) : next.pulls
+        const fallback = focus.connected && focusRead === focusRequest.current ? refreshedFocus || previous.pulls.find(pr => prKey(pr) === focus.key) : null
         const retained = new Set([...previous.selected].filter(key => {
           const before = previous.pulls.find(pr => prKey(pr) === key)
-          const after = next.pulls.find(pr => prKey(pr) === key)
-          return before && after && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
+          const after = currentPulls.find(pr => prKey(pr) === key) || (key === focus.key ? fallback : null)
+          return before && after && isOpenPull(after) && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
         }))
         const removed = [...previous.selected].filter(key => !retained.has(key))
         setSelected(retained)
@@ -225,8 +251,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     window.addEventListener('focus', refresh)
     return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [conn.state, publicRevision, refreshKey, load, loadRuns])
-  const focusKey = focusPull?.repo && focusPull?.number ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
-  const focusId = `${focusKey}:${focusPull?.nonce || ''}`
   useEffect(() => {
     const id = ++focusRequest.current
     setFocusedPr(null); setFocusError(''); focusDone.current = ''
@@ -333,7 +357,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       <div className="co-pr-filters" role="group" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>
     </div>
     {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
-    {focusError ? <p className="co-pr-note" role="alert">Could not find that pull request: {focusError}</p> : null}
+    {focusError ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusError}{focusedPr ? ' Showing the previous snapshot.' : ''}</p> : null}
     {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
     {data.error ? <div className="co-alert" role="alert"><strong>Couldn’t load pull requests</strong><p className="co-alert-text">{data.error}</p><button className="co-btn" disabled={data.loading} onClick={() => { void load(); void loadRuns() }}>Try again</button></div> : null}
     <div className="co-pr-box">
