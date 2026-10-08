@@ -178,13 +178,14 @@ test('an oversized newly frozen ownership checkpoint blocks before any public ha
 
 // Optional cross-checkout protocol contract. Run with
 // MOBIUS_APP_BLOCK_HOST_ROOT=<platform-checkout> against the exact host candidate.
-for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch']) test(`composed real app/host reload: ${phase}`, { skip: !process.env.MOBIUS_APP_BLOCK_HOST_ROOT }, async () => {
+for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch', 'canonical-failure', 'pending-to-failure']) test(`composed real app/host reload: ${phase}`, { skip: !process.env.MOBIUS_APP_BLOCK_HOST_ROOT }, async () => {
   const hostRoot = process.env.MOBIUS_APP_BLOCK_HOST_ROOT
   const host = await import(`${hostRoot}/frontend/src/components/ChatView/markdown/appBlock.js`)
   const { attributedFrameVersion } = await import(`${hostRoot}/frontend/src/components/AppCanvas/appFrameProtocol.js`)
   const canvas = readFileSync(`${hostRoot}/frontend/src/components/AppCanvas/AppCanvas.jsx`, 'utf8')
   const stack = (id, position, parent = '') => ({ ...record(id), plan: { ...record(id).plan, base_sha: 'a'.repeat(40), branch: `stack/s/${id}`, stack: { id: 's', position, total: 2, base_branch: parent ? `stack/s/${parent}` : 'main', parent_record_id: parent } } })
   const recs = phase === 'partial-stack' ? [stack('a.1', 1), stack('b.2', 2, 'a.1')] : phase === 'partial-batch' ? [record('a.1'), record('b.2')] : [record('a.1')]
+  if (['canonical-failure', 'pending-to-failure'].includes(phase)) recs[0].updated_at = '2026-10-08T22:00:00Z'
   const key = phase === 'partial-batch' ? 'chat-send-batch:a.1,b.2' : 'chat-send:a.1'
   const advertised = [{ key, label: 'Contribute' }], keys = new Set([key])
   let state = null, release, firstState, sends = 0
@@ -205,6 +206,11 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch']) tes
     publish: message => { firstState = message; receive(oldSource, message) } })
   first.updateLedger(recs, true, reviews(recs)); await first.hydrate(); first.activate(key)
   const sending = first.confirm(key); if (phase !== 'busy') await sending
+  if (phase === 'canonical-failure') {
+    recs[0] = { ...recs[0], updated_at: '2026-10-08T22:02:00Z', last_submit_error: 'Branch protection rejected this exact attempt' }
+    first.updateLedger(recs, true, reviews(recs)); await first.hydrate()
+    assert.equal(state.actions[0].status, 'Needs attention')
+  }
   assert.ok(state.checkpoint); first.dispose(); state = host.inlineBlockDocumentReset(state); scope.liveVersionRef.current = 'new'
   receive(newSource, { type: 'moebius:app-block-state', sessionId: 's', actions: [{ key, disabled: false }], retain: false })
   assert.equal(host.inlineSessionRetained(state, null), true); assert.equal(state.actions[0].disabled, true)
@@ -225,10 +231,20 @@ for (const phase of ['busy', 'uncertain', 'partial-stack', 'partial-batch']) tes
   assert.equal(state.checkpointAck, checkpoint.id); assert.equal(state.ackNonce, null); assert.equal(state.retain, true)
   mounted.message(messages[1]); await mounted.session.hydrate(); mounted.session.updateLedger(recs, true, reviews(recs))
   assert.equal(state.actions[0].disabled, true); assert.equal(state.actions[0].hidden, false)
+  if (phase === 'pending-to-failure') {
+    recs[0] = { ...recs[0], updated_at: '2026-10-08T22:02:00Z', last_submit_error: 'Branch protection rejected this exact attempt' }
+    mounted.session.updateLedger(recs, true, reviews(recs)); await mounted.session.hydrate()
+  }
+  if (['canonical-failure', 'pending-to-failure'].includes(phase)) {
+    assert.equal(state.actions[0].status, 'Needs attention')
+    assert.match(state.actions[0].note, /Branch protection rejected/)
+    assert.equal(state.retain, true)
+    assert.equal(state.ackNonce, null)
+  }
   for (const event of ['activate', 'confirm']) mounted.message({ type: 'moebius:app-block-action', sessionId: 's', key, event, nonce: event === 'confirm' ? 'old-confirm' : 'new-activate' })
   assert.equal(nextCalls, 0)
   const before = state; receive(oldSource, { type: 'moebius:app-block-state', sessionId: 's', actions: [], retain: false }); assert.equal(state, before)
-  const canonical = recs.map((rec, i) => opened(rec, i + 1)); mounted.session.updateLedger(canonical, true, reviews(canonical))
+  const canonical = recs.map((rec, i) => ({ ...opened(rec, i + 1), updated_at: '2026-10-08T22:03:00Z' })); mounted.session.updateLedger(canonical, true, reviews(canonical))
   assert.equal(host.inlineSessionRetained(state, null), false); assert.equal(state.checkpoint, null)
   assert.equal(state.actions[0].links[0].url, 'https://github.com/team/repo/pull/1')
   mounted.dispose(); if (release) { release({ uncertain: true }); await sending }
