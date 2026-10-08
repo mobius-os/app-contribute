@@ -1,3 +1,4 @@
+import datetime as dt
 import hashlib
 import subprocess
 import tempfile
@@ -15,6 +16,8 @@ from prepared_reconcile import (
     partial_identifier_presence,
     LocalMain,
     reconcile_record,
+    recheck_due,
+    run,
     Storage,
     strong_identifier_presence,
     settled_update_attention,
@@ -623,6 +626,33 @@ const distinctiveLandingEvidence = "partial"
             '"version-7"',
         ))
         self.assertEqual(storage.request[3], {"If-Match": '"version-7"'})
+        self.assertEqual(storage.written, {"record.json"})
+
+    def test_a_week_old_prepared_record_is_rechecked_at_most_daily(self):
+        now = dt.datetime(2026, 10, 7, 12, tzinfo=dt.timezone.utc)
+        fresh = {"created_at": "2026-10-05T00:00:00Z",
+                 "reconciliation_probe": {"checked_at": "2026-10-07T11:59:00Z"}}
+        self.assertTrue(recheck_due(fresh, now))
+        stale = {"created_at": "2026-09-14T21:34:35Z",
+                 "reconciliation_probe": {"checked_at": "2026-10-07T01:00:00Z"}}
+        self.assertFalse(recheck_due(stale, now))
+        stale["reconciliation_probe"]["checked_at"] = "2026-10-06T11:00:00Z"
+        self.assertTrue(recheck_due(stale, now))
+        self.assertTrue(recheck_due({"created_at": "2026-09-14T21:34:35Z"}, now))
+        self.assertTrue(recheck_due({}, now))
+
+    def test_the_scheduled_job_can_share_its_ledger_scan(self):
+        class NoScanStorage(Storage):
+            def __init__(self):
+                super().__init__("http://example.invalid", "token", "80")
+
+            def records_needing_work(self):
+                raise AssertionError("a supplied scan must not be repeated")
+
+        counts = run(NoScanStorage(), None, records=[
+            ("open.json", {"id": "open", "type": "pr", "status": "open"}, '"v1"'),
+        ])
+        self.assertEqual(counts["checked"], 0)
 
 
 if __name__ == "__main__":
