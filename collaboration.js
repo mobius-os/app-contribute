@@ -98,13 +98,13 @@ export async function discoverPull(token, repo, number) {
   return pr
 }
 
-// Owner consent covers each PR's exact code (its head). The target branch moves
-// whenever anything merges, so a launch rebinds an unchanged PR to the current
-// base instead of failing on a stale list; changed code or draft state needs
-// the owner to look again.
+// Owner consent covers each PR's exact code (its head) and destination branch.
+// The tip of that same branch moves whenever anything merges, so a launch
+// rebinds an unchanged PR to its current tip. Changed code, draft state or
+// destination needs the owner to look again.
 export async function liveSelection(token, pulls) {
   const fresh = await Promise.all(pulls.map(pr => discoverPull(token, pr.repository.nameWithOwner, pr.number)))
-  const changed = fresh.filter((pr, index) => pr.headRefOid !== pulls[index].headRefOid || pr.isDraft !== pulls[index].isDraft || (pr.state && pr.state !== 'OPEN'))
+  const changed = fresh.filter((pr, index) => pr.headRefOid !== pulls[index].headRefOid || pr.isDraft !== pulls[index].isDraft || pr.baseRefName !== pulls[index].baseRefName || (pr.state && pr.state !== 'OPEN'))
   if (changed.length) {
     throw Object.assign(new Error(`${changed.map(pr => `#${pr.number}`).join(', ')} changed since this list loaded. Review the current version, then start again.`), { code: 'changed' })
   }
