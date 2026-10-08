@@ -34,6 +34,7 @@ class ContributionPushTest(unittest.TestCase):
     target = _load_record_target()
     self.assertEqual(target({"id": "../x y"}), "/shell/?app=80")
     self.assertEqual(target({}), "/shell/?app=80")
+    self.assertEqual(target({"id": "fixture-record\n"}), "/shell/?app=80")
 
   def test_every_contribution_push_links_to_its_record(self):
     source = _job_python()
