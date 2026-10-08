@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { collaborationRequest, loadReviewRuns, REVIEW_STATE_NAMES as STATE_NAMES, reviewRunTitle, liveSelection, discoverPull, discoverPulls, matchingPulls, mayAssign, mergeSelection, prKey, reviewRunRequest, assignPulls, reviewForPull, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from '../collaboration.js'
+import { collaborationRequest, loadReviewRuns, reviewRunTitle, reviewRunStateLabel, reviewItemProgress, liveSelection, discoverPull, discoverPulls, matchingPulls, mayAssign, mergeSelection, prKey, reviewRunRequest, assignPulls, reviewForPull, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from '../collaboration.js'
 import { PullRequestDetail } from './PullRequestDetail.jsx'
 import { Avatar, ChecksBadge, GithubLabel, PullStateIcon, REVIEW_DECISION, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
@@ -162,7 +162,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const focusRequest = useRef(0)
   const focusDone = useRef('')
   const listRef = useRef(null)
-  const allPulls = useMemo(() => focusedPr ? mergeSelection(data.pulls, [focusedPr]) : data.pulls, [focusedPr, data.pulls])
+  // The exact deep-link read fills a missing page; current discovery owns rows.
+  const allPulls = useMemo(() => focusedPr && !data.pulls.some(pr => prKey(pr) === prKey(focusedPr)) ? [...data.pulls, focusedPr] : data.pulls, [focusedPr, data.pulls])
   const currentSelection = useRef({ selected, pulls: allPulls })
   currentSelection.current = { selected, pulls: allPulls }
   const [assigning, setAssigning] = useState(null)
@@ -307,8 +308,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const canRetry = run => run.state !== 'complete' && ['stopped', 'failed', 'interrupted'].includes(run.execution_state) && retryPulls(run).length > 0
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>
       <Icon name="review" size={23} /><h3>{reviewRunTitle(run)}</h3>
-      <p>{STATE_NAMES[run.execution_state] || STATE_NAMES[run.state] || run.state}</p>{run.summary ? <p>{run.summary}</p> : null}<details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>
-      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {['stopped', 'failed', 'interrupted'].includes(run.execution_state) && !['all_clear', 'merged', 'queued', 'complete'].includes(item.state) ? 'Not finished' : STATE_NAMES[item.state] || item.state}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}{item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a> : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p> : item.public_review?.summary ? <p className="co-task-footnote">{item.public_review.summary}</p> : null}</div>)}</div>
+      <p>{reviewRunStateLabel(run)}</p>{run.summary ? <p>{run.summary}</p> : null}<details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>
+      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {reviewItemProgress(run, item).label}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}{item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a> : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p> : item.public_review?.summary ? <p className="co-task-footnote">{item.public_review.summary}</p> : null}</div>)}</div>
       {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{run.execution_state === 'awaiting_owner' || run.items?.some(item => ['needs_you', 'failed'].includes(item.state)) ? 'Answer in review conversation' : 'Open review conversation'}</button> : null}
       {run.can_stop && run.state !== 'complete' && !['stopped','failed','interrupted'].includes(run.execution_state) ? <><button className="co-quiet-action" disabled={busy} onClick={()=>stopRun(run)}>Stop workflow</button><p className="co-task-footnote">Stop prevents future actions. An already-started public action may finish; its outcome stays visible.</p></> : null}
       {canRetry(run) ? <><button className="co-btn co-task-secondary" disabled={busy} onClick={() => choose(retryPulls(run), run.mode === 'review_merge' ? 'review' : run.mode, runAnchor(run))}>Start again</button><p className="co-task-footnote">Starts a new run on the current versions. You can pick another model.</p></> : null}
@@ -346,8 +347,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       const key = prKey(pr)
       const status = statusFor(pr)
       // A run whose conversation stopped or failed is not still reviewing.
-      const halted = !!status && ['stopped', 'failed', 'interrupted'].includes(status.run.execution_state) && !['all_clear', 'merged', 'queued', 'complete'].includes(status.item.state)
-      const waiting = status?.run.execution_state === 'awaiting_owner' && !['all_clear', 'merged', 'queued', 'complete'].includes(status.item.state)
+      const progress = status ? reviewItemProgress(status.run, status.item) : null
+      const halted = progress?.halted
+      const waiting = progress?.waiting
       const attention = halted || waiting || (status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown', 'ready_unknown'].includes(status.item.state))
       const assignees = pr.assignees?.nodes || []
       const comments = pr.comments?.totalCount || 0
@@ -368,7 +370,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
             {REVIEW_DECISION[pr.reviewDecision] && pr.reviewDecision !== 'REVIEW_REQUIRED' ? <span>{REVIEW_DECISION[pr.reviewDecision]}</span> : null}
             <ChecksBadge pr={pr} />
             {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
-            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{halted ? 'Run stopped' : attention ? (['merge_unknown','ready_unknown'].includes(status.item.state) ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : (STATE_NAMES[status.item.state] || status.item.state)}</button> : null}
+            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{halted ? 'Run stopped' : attention ? (['merge_unknown','ready_unknown'].includes(status.item.state) ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : progress.label}</button> : null}
           </div>
         </div>
         <div className="co-pr-aside">
