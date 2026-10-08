@@ -1,4 +1,4 @@
-// Native-browser regressions for read-only focus and execution projections.
+// Native-browser regressions for focus, execution and mocked assignment acknowledgements.
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { PullRequests } from '../ui/PullRequests.jsx'
@@ -26,10 +26,13 @@ export async function runUpperUiStatusChecks() {
   const page = pulls => ({ data: { search: { nodes: pulls, issueCount: pulls.length, pageInfo: { hasNextPage: false, endCursor: null } } } })
   const exact = pr => ({ data: { repository: { pullRequest: pr } } })
   const response = value => new Response(JSON.stringify(value))
-  let search = async () => page([pull()]), focus = async () => exact(pull()), runs = []
+  let search = async () => page([pull()]), focus = async () => exact(pull()), runs = [], assignmentResponse = async () => ({ ok: true })
   window.fetch = async (url, init = {}) => {
     const body = init.body ? JSON.parse(init.body) : null
     calls.push({ url: String(url), method: init.method || 'GET', body })
+    if (String(url).includes('/assignees?')) return response({ assignees: [{ login: 'fixture' }, { login: 'peer' }], can_assign: true })
+    // A narrow local acknowledgement mock, never a real GitHub write.
+    if (String(url).endsWith('/assign-review') && init.method === 'POST') return response(await assignmentResponse(body))
     if (String(url).endsWith('/review-runs') && !init.body) return response({ runs })
     // Observation only reconciles saved receipts; no Stop, resume or public action.
     if (String(url).endsWith('/observe')) return response({ runs })
@@ -39,7 +42,7 @@ export async function runUpperUiStatusChecks() {
     }
     throw Error('Forbidden upper UI fixture transport: ' + url)
   }
-  let refresh, setFocus, setProject, setTask, setConnection
+  let refresh, setFocus, setProject, setTask, setConnection, changeSignals = 0
   const project = { key: 'fixture', canonical_repo: 'team/repo', name: 'Fixture', kind: 'external' }
   function App() {
     const [refreshKey, changeRefresh] = useState(0), [focusPull, changeFocus] = useState({ repo: 'team/repo', number: 7, nonce: 'initial' })
@@ -49,7 +52,7 @@ export async function runUpperUiStatusChecks() {
     refresh = () => changeRefresh(value => value + 1); setFocus = changeFocus; setProject = changeProject; setTask = changeTask
     const task = { activeId, setPublicKeys() {}, open: changeTask, close: () => changeTask('') }
     return <TaskContext.Provider value={task}><PullRequests key={currentProject.key} appId="fixture" token="mock"
-      project={currentProject} conn={conn} focusPull={focusPull} refreshKey={refreshKey} /></TaskContext.Provider>
+      project={currentProject} conn={conn} focusPull={focusPull} refreshKey={refreshKey} onChanged={() => { changeSignals += 1 }} /></TaskContext.Provider>
   }
   const row = number => host.querySelector(`[data-pr-key="team/repo#${number}"]`)
   const title = number => row(number)?.querySelector('.co-pr-title')?.textContent
@@ -352,8 +355,114 @@ export async function runUpperUiStatusChecks() {
         root.render(null); await frame()
       })
     }
-    await runCheck('upper UI reads attempt no public or execution transport', async () => {
-      ensure(calls.every(call => call.method === 'GET' || call.url.endsWith('/observe') || (call.url === '/api/github/graphql' && !/mutation\b/i.test(call.body?.query || ''))), 'Mutating transport attempted')
+    const assigned = (number, login = 'fixture') => [...(row(number)?.querySelectorAll('.co-pr-aside [title]') || [])].some(node => node.title.split(', ').includes(login))
+    const beginAssignment = async (number, pending, login = 'fixture') => {
+      let started = false
+      assignmentResponse = body => { ensure(body.number === number && body.assignee === login, 'Assignment escaped its frozen scope'); started = true; return pending.promise }
+      row(number).querySelector('.co-pr-assign').click()
+      await until(() => host.querySelector('[aria-label="Assign to me"]'))
+      host.querySelector(`[aria-label="${login === 'fixture' ? 'Assign to me' : 'Assign to ' + login}"]`).click()
+      await until(() => started)
+    }
+    for (const reader of ['exact', 'inventory']) for (const readFirst of [false, true]) for (const readBeforeAssignment of [false, true]) {
+      await runCheck(`assignment metadata preserves ${reader} authority and acknowledged assignees; readFirst=${readFirst}, readIssuedFirst=${readBeforeAssignment}`, async () => {
+        root.render(null); await frame(); runs = []
+        const initial = pull(), other = pull(8, { title: 'Unchanged peer' })
+        search = async () => page([initial, other]); focus = async () => exact(initial)
+        root.render(<App />); await until(() => row(8)); select(7); select(8); await frame()
+        host.querySelector('[aria-label="Take selected PRs on with agent"]').click(); await until(() => host.querySelector('.co-pr-confirm-list'))
+        const assignment = deferred(), read = deferred()
+        let readStarted = false
+        const beginRead = async () => {
+          if (reader === 'exact') { focus = () => { readStarted = true; return read.promise }; setFocus({ repo: 'team/repo', number: 7, nonce: 'assignment-' + readFirst }) }
+          else { search = () => { readStarted = true; return read.promise }; refresh() }
+          await until(() => readStarted)
+        }
+        if (readBeforeAssignment) await beginRead()
+        await beginAssignment(7, assignment)
+        if (!readBeforeAssignment) await beginRead()
+        const current = pull(7, { title: 'Current ' + reader + ' after assignment', headRefOid: '9'.repeat(40), baseRefOid: '8'.repeat(40), baseRefName: 'release', state: 'CLOSED' })
+        if (readFirst) { read.resolve(reader === 'exact' ? exact(current) : page([current, other])); await until(() => title(7) === current.title) }
+        assignment.resolve({ ok: true }); await until(() => !host.querySelector('.co-pr-assignment'))
+        ensure(assigned(7), 'Successful assignment acknowledgement was not rendered')
+        if (!readFirst) { read.resolve(reader === 'exact' ? exact(current) : page([current, other])); await frame(); await frame() }
+        ensure(title(7) === current.title, 'Assignment vetoed fresh title/head/base/state')
+        ensure(row(7).querySelector('input').disabled && !row(7).querySelector('input').checked, 'Assignment vetoed closed/version invalidation')
+        ensure(row(8).querySelector('input').checked, 'Assignment removed unrelated selection')
+        ensure(assigned(7), 'Held read erased acknowledged assignee metadata')
+        // Choosing Assign deliberately leaves the earlier review workflow; an
+        // acknowledgement must not recreate or transfer its frozen consent.
+        setTask('task:review'); await frame()
+        ensure(!host.querySelector('.co-pr-confirm-list') && host.innerText.includes('This selection has finished'), 'Assignment/read recreated or transferred frozen confirmation')
+      })
+    }
+    await runCheck('failed exact after assignment discloses prior snapshot without losing selected metadata', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7)); select(7); await frame()
+      const assignment = deferred(), read = deferred(); await beginAssignment(7, assignment)
+      let started = false; focus = () => { started = true; return read.promise }
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'assignment-failure' }); await until(() => started)
+      assignment.resolve({ ok: true }); await until(() => !host.querySelector('.co-pr-assignment'))
+      read.reject(Error('Exact read unavailable after assignment')); await frame(); await frame()
+      ensure(host.querySelector('.co-pr-note[role=alert]')?.textContent.includes('Showing the previous snapshot'), 'Assignment suppressed failed exact disclosure')
+      ensure(title(7) === 'Initial title' && assigned(7) && row(7).querySelector('input').checked, 'Failed read erased prior selected snapshot/assignee')
+    })
+    await runCheck('metadata-only success keeps code selection and later authoritative reads reconcile assignees', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7)); select(7); await frame()
+      const assignment = deferred(); await beginAssignment(7, assignment)
+      assignment.resolve({ ok: true }); await until(() => assigned(7))
+      ensure(title(7) === 'Initial title' && row(7).querySelector('input').checked, 'Metadata-only write changed selected code')
+      const later = pull(7, { title: 'Later canonical assignees', assignees: { nodes: [{ login: 'peer' }] } })
+      focus = async () => exact(later); setFocus({ repo: 'team/repo', number: 7, nonce: 'after-assignment-read' }); await until(() => title(7) === later.title)
+      ensure(!assigned(7) && assigned(7, 'peer'), 'Old acknowledgement permanently overlaid a read issued afterwards')
+      ensure(row(7).querySelector('input').checked, 'Assignee/title-only read lost unchanged selection')
+    })
+    await runCheck('assignee receipts are reconciled individually by reads issued between acknowledgements', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(7))
+      const first = deferred(); await beginAssignment(7, first); first.resolve({ ok: true }); await until(() => assigned(7))
+      const read = deferred(); let started = false; focus = () => { started = true; return read.promise }
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'between-acknowledgements' }); await until(() => started)
+      const second = deferred(); await beginAssignment(7, second, 'peer'); second.resolve({ ok: true }); await until(() => assigned(7, 'peer'))
+      read.resolve(exact(pull(7, { title: 'Read between acknowledgements' }))); await until(() => title(7) === 'Read between acknowledgements')
+      ensure(!assigned(7) && assigned(7, 'peer'), 'Read permanently retained an earlier receipt or erased its later acknowledgement')
+    })
+    await runCheck('assignment cannot revive older nonce reads or move metadata to a different identity', async () => {
+      root.render(null); await frame(); runs = []; search = async () => page([pull(), pull(8, { title: 'Other identity' })]); focus = async () => exact(pull())
+      root.render(<App />); await until(() => row(8))
+      const assignment = deferred(), old = deferred(); await beginAssignment(7, assignment)
+      let started = false; focus = () => { started = true; return old.promise }
+      setFocus({ repo: 'team/repo', number: 7, nonce: 'old-assignment-nonce' }); await until(() => started)
+      focus = async () => exact(pull(8, { title: 'Current second identity', state: 'CLOSED' }))
+      setFocus({ repo: 'team/repo', number: 8, nonce: 'current-assignment-nonce' }); await until(() => title(8) === 'Current second identity')
+      assignment.resolve({ ok: true }); await until(() => !host.querySelector('.co-pr-assignment'))
+      old.reject(Error('Old nonce failed after assignment')); await frame(); await frame()
+      ensure(title(8) === 'Current second identity' && !assigned(8), 'Assignment metadata changed another focused PR')
+      ensure(title(7) === 'Initial title' && assigned(7), 'Assignment lost its own identity metadata')
+      ensure(!host.querySelector('.co-pr-note[role=alert]'), 'Assignment revived an obsolete nonce error')
+    })
+    for (const scope of ['connection', 'project', 'unmount']) {
+      await runCheck('late assignment acknowledgement cannot cross ' + scope, async () => {
+        root.render(null); await frame(); runs = []; search = async () => page([pull()]); focus = async () => exact(pull())
+        root.render(<App />); await until(() => row(7))
+        const assignment = deferred(); await beginAssignment(7, assignment); const before = changeSignals
+        if (scope === 'project') {
+          search = async () => page([]); setProject({ ...project, key: 'other', canonical_repo: 'team/other' }); await frame()
+        } else {
+          const next = pull(7, { title: 'Fresh after ' + scope }); search = async () => page([next]); focus = async () => exact(next)
+          if (scope === 'connection') { setConnection({ state: 'disconnected' }); await frame(); setConnection({ state: 'connected', login: 'fixture' }) }
+          else { root.render(null); await frame(); root.render(<App />) }
+          await until(() => title(7) === next.title)
+        }
+        assignment.resolve({ ok: true }); await frame(); await frame(); await frame()
+        ensure(changeSignals === before, 'Unmounted assignment callback emitted a new project change')
+        if (scope === 'project') ensure(!row(7), 'Assignment leaked into another project')
+        else ensure(!assigned(7) && title(7) === 'Fresh after ' + scope, 'Old acknowledgement changed the new connection/mount')
+      })
+    }
+    await runCheck('upper UI attempts only reads or locally mocked scoped assignment acknowledgements', async () => {
+      ensure(calls.every(call => call.method === 'GET' || call.url.endsWith('/observe') || (call.url.endsWith('/assign-review') && call.method === 'POST' && call.body?.repo === 'team/repo' && [7, 8].includes(call.body?.number) && ['fixture', 'peer'].includes(call.body?.assignee) && /^[a-f0-9]{40}$/.test(call.body?.expected_head_sha || '')) || (call.url === '/api/github/graphql' && !/mutation\b/i.test(call.body?.query || ''))), 'Mutating transport attempted')
     })
     return checks
   } finally { root.unmount(); host.remove(); window.fetch = originalFetch }

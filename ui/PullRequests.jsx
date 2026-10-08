@@ -19,6 +19,12 @@ function observedPulls(view, focusKey) {
   return keys.map(key => view.observations.get(key)?.pr).filter(Boolean)
 }
 
+function withAssignees(pr, logins) {
+  const users = new Map((pr.assignees?.nodes || []).map(user => [user.login.toLowerCase(), user]))
+  for (const login of logins) if (!users.has(login.toLowerCase())) users.set(login.toLowerCase(), { login })
+  return { ...pr, assignees: { nodes: [...users.values()] } }
+}
+
 // GitHub-style list header: the count when nothing is selected, bulk actions
 // once something is. Selection never moves focus or interrupts browsing.
 function SelectionTray({ selection, busy, onClear, onReview, onAssign, visible, shown = visible.length, loading = false, onSelectVisible }) {
@@ -38,6 +44,8 @@ function SelectionTray({ selection, busy, onClear, onReview, onAssign, visible, 
 
 function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onCancel }) {
   const picker = useRef(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     focusActionRegion(picker.current, picker.current?.querySelector('input[type=search]'))
   }, [])
@@ -61,10 +69,13 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onCancel })
     setBusy(true); setError('')
     try {
       const results = await assignPulls(token, appId, pending, login)
+      // Leaving this picker does not cancel a public action already underway,
+      // but its acknowledgement must not update a different project/connection.
+      if (!mounted.current) return
       setOutcomes(old => [...old.filter(item => !results.some(result => result.key === item.key)), ...results])
       onAssigned(login, results.filter(result => result.ok).map(result => result.key))
       if (results.every(result => result.ok)) onCancel()
-    } finally { setBusy(false) }
+    } finally { if (mounted.current) setBusy(false) }
   }
 
   const matching = people.assignees.filter(person => [person.login, person.name].some(value => value?.toLowerCase().includes(query.trim().toLowerCase())))
@@ -187,7 +198,14 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     const observations = new Map(previous.observations)
     for (const pr of pulls) {
       const key = prKey(pr)
-      if (order >= (observations.get(key)?.order || 0)) observations.set(key, { pr, order })
+      const previous = observations.get(key)
+      if (order >= (previous?.order || 0)) {
+        // A read issued before an assignment acknowledgement may carry older
+        // assignees, but still owns all freshly read code/state fields. Reads
+        // issued afterwards reconcile the receipts rather than overlay forever.
+        const assigneeReceipts = (previous?.assigneeReceipts || []).filter(receipt => receipt.order > order)
+        observations.set(key, { pr: assigneeReceipts.length ? withAssignees(pr, assigneeReceipts.map(receipt => receipt.login)) : pr, order, assigneeReceipts })
+      }
     }
     const next = { inventory: inventory || previous.inventory, observations }
     const currentPulls = observedPulls(next, focusKey)
@@ -204,6 +222,21 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     currentView.current = next
     setView(next)
   }, [])
+  function acknowledgeAssignees(login, keys) {
+    if (!keys.length) return
+    const previous = currentView.current, order = ++observationOrder.current
+    const observations = new Map(previous.observations)
+    for (const key of keys) {
+      const observed = observations.get(key)
+      if (!observed) continue
+      const assigneeReceipts = [...(observed.assigneeReceipts || []).filter(receipt => receipt.login.toLowerCase() !== login.toLowerCase()), { login, order }]
+      // Metadata receipt, not another PR observation: preserve read authority,
+      // selection and error generations while rendering the acknowledged add.
+      observations.set(key, { ...observed, pr: withAssignees(observed.pr, [login]), assigneeReceipts })
+    }
+    currentView.current = { ...previous, observations }
+    setView(currentView.current)
+  }
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
   const [resolved, setResolved] = useState(null)
@@ -361,7 +394,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     </TaskPane>
   const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation appId={appId} token={token} onResolved={setResolved} disabled={!resolved} onOptionsChange={options => { setResolved(null); setChoice(old => ({ ...old, options, request_id:crypto.randomUUID() })) }} onAgentChange={agent => { setResolved(null); setChoice(old => ({ ...old, agent, request_id:crypto.randomUUID() })) }} choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setResolved(null); setChoice(old => ({ ...old, mode, confirmation_scope:mode === 'review_fix_merge' ? (old.pulls.some(pr => pr.isDraft) ? DRAFT_TAKEOVER_SCOPE : TAKEOVER_SCOPE) : undefined, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
-      publishPulls(observedPulls(currentView.current, validFocusKey).filter(item => keys.includes(prKey(item))).map(item => ({ ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } })), ++observationOrder.current)
+      acknowledgeAssignees(login, keys)
       void onChanged?.()
     }} /> : null}</TaskPane>
   const visibleKeys = new Set(visible.map(prKey))
