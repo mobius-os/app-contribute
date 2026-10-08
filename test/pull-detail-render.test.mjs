@@ -23,6 +23,26 @@ test('detail opens on the GitHub-style Conversation tab with Files changed and C
   assert.match(html, /Loading description/)
   assert.match(html, /Take on with agent/)
 })
+for (const items of [[], [{ __typename: 'Issue', number: 2, title: 'Usable issue', url: 'https://github.com/team/repo/issues/2', repository: { nameWithOwner: 'team/repo' }, relationships: ['May close'] }]]) {
+  test(`partial related context warns and retries with ${items.length} usable items`, async t => {
+    const html = await render(t, 'PullRequestDetail', {
+      pr: { number: 7, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', url: 'https://github.com/team/repo/pull/7' },
+      cacheStore: { entries: {
+        'description:1': { data: { body: 'Description' }, loading: false },
+        'activity:1': { data: { items: [] }, loading: false },
+        'threads:': { data: { threads: [] }, loading: false },
+        related: { data: { items, errors: ['Cross-references are unavailable.'] }, loading: false },
+      } },
+    })
+    if (!html) return
+    assert.match(html, /Cross-references are unavailable\./)
+    assert.match(html, /role="alert"/)
+    assert.match(html, />Retry<\/button>/)
+    assert.match(html, /Open on GitHub/)
+    if (items.length) assert.match(html, /Issue team\/repo#2 · Usable issue/)
+    else assert.doesNotMatch(html, /Related issues &amp; PRs/)
+  })
+}
 test('check outcomes stay written and partial source absence never claims success', async t => {
   const html = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 2, groups: [{ name: 'Check runs', total: 102, hasMore: false, items: [{ id: 1, name: 'Unit tests', status: 'completed', conclusion: 'failure', details_url: 'javascript:alert(1)' }, { id: 2, name: 'Build', status: 'queued' }] }] } })
   if (!html) return

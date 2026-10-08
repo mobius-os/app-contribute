@@ -145,8 +145,12 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     setCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
     setRetry(value => value + 1)
   }
-  function readState(value, label) {
-    return <>{value.loading ? <p className="co-pr-note" role="status">Loading {label}…</p> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : tryAgain}>{value.stale ? 'Refresh PR list' : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={tryAgain} /></>
+  const retryRelated = () => {
+    setCache(old => { const next = { ...old }; delete next[keys.related]; return next })
+    setRetry(value => value + 1)
+  }
+  function readState(value, label, onRetry = tryAgain) {
+    return <>{value.loading ? <p className="co-pr-note" role="status">Loading {label}…</p> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : onRetry}>{value.stale ? 'Refresh PR list' : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={onRetry} /></>
   }
   const ready = value => !value.loading && !value.error && !stale
   const description = entry(keys.description || '')
@@ -186,7 +190,8 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       {ready(activity) ? pager(number, activity.data?.hasMore, false, value => setPage(old => ({ ...old, conversation: value }))) : null}
       {readState(threads, 'inline discussions')}
       {ready(threads) ? <><PullThreads data={threads.data} />{threadCursors.length > 1 || threads.data?.hasMore ? <div className="co-board-actions">{threadCursors.length > 1 ? <button className="co-btn" onClick={() => setThreadCursors(old => old.slice(0, -1))}>Previous discussions</button> : null}{threads.data.hasMore && threads.data.nextCursor ? <button className="co-btn" onClick={() => setThreadCursors(old => [...old, threads.data.nextCursor])}>More discussions</button> : null}</div> : null}</> : null}
-      {related.error ? readState(related, 'related issues') : ready(related) ? <PullRelated data={related.data} /> : null}
+      {readState(related, 'related issues', retryRelated)}
+      {ready(related) ? <PullRelated data={related.data} /> : null}
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
       {record && onRecord ? <button className="co-quiet-action" onClick={() => onRecord(record)}>Local preparation &amp; source conversation</button> : null}
     </> : null}
