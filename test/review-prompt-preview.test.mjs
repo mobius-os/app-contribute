@@ -58,10 +58,16 @@ for(const autopilot of [false,true]) test(`frozen takeover preview preserves sav
   assert.deepEqual(f.resolved[1].options,frozen);assert.equal(f.resolved[1].preview.preview_sha256,digest(frozen))
   assert.deepEqual(f.states.at(-1),f.resolved[1]);assert.deepEqual(frozen,{...options,autopilot})
 })
-test('new takeover still defaults to autopilot and resolves editable defaults without admission',async t=>{
-  const f=await fixture(t,{request_id:'new-fixture',mode:'review_fix_merge',options:{autopilot:false},agent})
+for(const autopilot of [false,true]) for(const post_review of [false,true]) test(`frozen takeover preserves exact autopilot ${autopilot} and post_review ${post_review} without admission`,async t=>{
+  const frozen={...options,autopilot,post_review}, f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:frozen,agent,preview_sha256:digest(frozen)})
   if(!f)return;await f.flush()
-  assert.equal(f.previews[0].options.autopilot,true);assert.equal(f.previews[0].options.review_prompt,'New default')
+  assert.deepEqual(f.previews[0].options,frozen);assert.deepEqual(f.resolved[1].options,frozen)
+  assert.equal(f.resolved[1].preview.preview_sha256,digest(frozen))
+})
+test('new takeover still defaults to autopilot and resolves editable defaults without admission',async t=>{
+  const f=await fixture(t,{request_id:'new-fixture',mode:'review_fix_merge',options:{autopilot:false,post_review:true},agent})
+  if(!f)return;await f.flush()
+  assert.equal(f.previews[0].options.autopilot,true);assert.equal(f.previews[0].options.post_review,undefined);assert.equal(f.previews[0].options.review_prompt,'New default')
   assert.equal(f.resolved[1].preview.preview_sha256,digest(f.previews[0].options))
 })
 test('frozen options never import newly added defaults into their preview identity',async t=>{
