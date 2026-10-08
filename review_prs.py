@@ -27,6 +27,14 @@ TAKEOVER_SCOPE = "named_pr_repairs_and_reviewed_successors"
 DRAFT_TAKEOVER_SCOPE = "named_pr_repairs_ready_and_reviewed_successors"
 
 
+def frozen_options(snapshot):
+  """Forward resolved consent, retaining immutable previews before post-review opt-in."""
+  options = {key: snapshot[key] for key in OPTION_FIELDS}
+  if "post_review" in snapshot:
+    options["post_review"] = snapshot["post_review"]
+  return options
+
+
 def api(path, *, method="GET", data=None, headers=None):
   base = os.environ["API_BASE_URL"].rstrip("/")
   token = os.environ["AGENT_TOKEN"]
@@ -126,7 +134,7 @@ def freeze_preview(app_id, selection, options=None, agent=None, *, allow_mark_re
   snapshot = preview["options"]
   if not re.fullmatch(r"[0-9a-f]{64}", preview["preview_sha256"]) or not snapshot.get("model"):
     raise ValueError("The platform did not return a complete frozen prompt/model preview.")
-  frozen = {**selection, "options": {key: snapshot[key] for key in OPTION_FIELDS},
+  frozen = {**selection, "options": frozen_options(snapshot),
     "agent": {"provider": snapshot["provider"], "model": snapshot["model"],
               "effort": snapshot.get("reasoning_effort")},
     "preview_sha256": preview["preview_sha256"], "resolved_snapshot": snapshot}
@@ -149,7 +157,7 @@ def verify_selection(selection):
     expected_agent = {"provider": snapshot["provider"], "model": snapshot["model"],
                       "effort": snapshot.get("reasoning_effort")}
     if (digest != selection["preview_sha256"]
-        or selection["options"] != {key: snapshot[key] for key in OPTION_FIELDS}
+        or selection["options"] != frozen_options(snapshot)
         or selection["agent"] != expected_agent):
       raise ValueError("The frozen preview changed. Prepare and present a fresh selection.")
     identity = start_body(selection)
@@ -178,7 +186,7 @@ def main(argv=None):
   parser.add_argument("prs", nargs="*", help="owner/repository#123 or full PR URL")
   parser.add_argument("--app-id", type=int)
   parser.add_argument("--mode", choices=("review", "review_merge", "review_fix_merge"), help="New selection mode; default: review")
-  parser.add_argument("--options", help="JSON file: review_prompt/fix_prompt/merge_prompt/max_rounds/autopilot")
+  parser.add_argument("--options", help="JSON file: review_prompt/fix_prompt/merge_prompt/max_rounds/autopilot/post_review")
   parser.add_argument("--agent", help="JSON file: provider/model/effort; frozen by platform preview")
   parser.add_argument("--allow-mark-ready", action="store_true", help="New takeover preview includes permission to mark drafts ready after review/checks; not consent itself")
   parser.add_argument("--selection", help="Use an already prepared exact selection; never refresh its versions")
