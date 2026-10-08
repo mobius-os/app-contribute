@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchLiveStates } from '../api.js'
-import { collaborationRequest, loadReviewRuns, PR_FIELDS, REVIEW_STATE_NAMES, reviewRunTitle } from '../collaboration.js'
+import { collaborationRequest, loadReviewRuns, PR_FIELDS, reviewRunStateLabel, reviewItemProgress, reviewRunTitle } from '../collaboration.js'
 import { pullConversations, recordsForPull } from '../chat-blocks.js'
 import { PullRequestDetail } from './PullRequestDetail.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
@@ -53,8 +53,8 @@ export function InlinePullView({ target, appId, token, records, onClose, onProje
     </> : null}
     {state.run ? <>
       <h2>{reviewRunTitle(state.run)}</h2>
-      <p>{REVIEW_STATE_NAMES[state.run.execution_state === 'awaiting_owner' ? 'awaiting_owner' : state.run.state] || state.run.state}</p>{state.run.summary ? <p>{state.run.summary}</p> : null}
-      {state.run.items?.map(item => <article key={`${item.repo}#${item.number}`}><strong>{item.repo} #{item.number} · {REVIEW_STATE_NAMES[item.state] || item.state}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>Findings will appear when the agent records them.</p>}{item.tests ? <p>{item.tests}</p> : null}</article>)}
+      <p>{reviewRunStateLabel(state.run)}</p>{state.run.summary ? <p>{state.run.summary}</p> : null}
+      {state.run.items?.map(item => <article key={`${item.repo}#${item.number}`}><strong>{item.repo} #{item.number} · {reviewItemProgress(state.run, item).label}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>Findings will appear when the agent records them.</p>}{item.tests ? <p>{item.tests}</p> : null}</article>)}
       <details className="co-task-details"><summary>Instructions used by this run</summary>{state.run.options ? <ResolvedPrompt snapshot={state.run.options} /> : <p>This older run did not retain a prompt snapshot.</p>}</details>
       <button className="co-btn" onClick={() => openAgentConversation(state.run.chat_id)}>Open owning conversation</button>
     </> : null}

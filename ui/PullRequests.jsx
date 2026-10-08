@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { collaborationRequest, loadReviewRuns, REVIEW_STATE_NAMES as STATE_NAMES, reviewRunTitle, liveSelection, discoverPull, discoverPulls, matchingPulls, mayAssign, mergeSelection, prKey, reviewRunRequest, assignPulls, reviewForPull, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from '../collaboration.js'
+import { collaborationRequest, loadReviewRuns, reviewRunTitle, reviewRunStateLabel, reviewItemProgress, liveSelection, discoverPull, discoverPulls, matchingPulls, mayAssign, mergeSelection, prKey, reviewRunRequest, assignPulls, reviewForPull, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from '../collaboration.js'
 import { PullRequestDetail } from './PullRequestDetail.jsx'
 import { Avatar, ChecksBadge, GithubLabel, PullStateIcon, REVIEW_DECISION, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
@@ -162,7 +162,12 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const focusRequest = useRef(0)
   const focusDone = useRef('')
   const listRef = useRef(null)
-  const allPulls = useMemo(() => focusedPr ? mergeSelection(data.pulls, [focusedPr]) : data.pulls, [focusedPr, data.pulls])
+  const focusKey = focusPull?.repo && focusPull?.number ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
+  const focusId = `${focusKey}:${focusPull?.nonce || ''}`
+  const currentFocus = useRef(null)
+  currentFocus.current = { key: focusKey, id: focusId, repo: focusPull?.repo, number: focusPull?.number, connected: conn.state === 'connected' && !!focusKey && focusPull.repo.toLowerCase() === repo.toLowerCase() }
+  // The exact deep-link read fills a missing page; current discovery owns rows.
+  const allPulls = useMemo(() => focusedPr && !data.pulls.some(pr => prKey(pr) === prKey(focusedPr)) ? [...data.pulls, focusedPr] : data.pulls, [focusedPr, data.pulls])
   const currentSelection = useRef({ selected, pulls: allPulls })
   currentSelection.current = { selected, pulls: allPulls }
   const [assigning, setAssigning] = useState(null)
@@ -182,6 +187,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current += 1 } }, [])
   const load = useCallback(async (cursor = null) => {
     const id = ++request.current
+    const focus = currentFocus.current, focusEpoch = focusRequest.current
     setData(old => ({ ...old, loading: true, error: '' }))
     try {
       let next = await discoverPulls(token, repo, cursor)
@@ -192,14 +198,35 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
         next = { ...page, pulls: mergeSelection(next.pulls, page.pulls) }
       }
       if (id !== request.current || !alive.current) return
+      // The open inventory cannot refresh a closed or missing-page destination.
+      // Re-read that exact focus, but never let an older list/nonce own its result.
+      let refreshedFocus = null, focusRead = focusEpoch
+      const canonicalFocus = focus.connected && currentFocus.current.connected && focus.id === currentFocus.current.id ? next.pulls.find(pr => prKey(pr) === focus.key) : null
+      if (canonicalFocus) {
+        focusRead = ++focusRequest.current
+        refreshedFocus = canonicalFocus; setFocusedPr(canonicalFocus); setFocusError('')
+      } else if (!cursor && focus.connected && focusEpoch === focusRequest.current && !next.pulls.some(pr => prKey(pr) === focus.key)) {
+        focusRead = ++focusRequest.current
+        try {
+          const pr = await discoverPull(token, focus.repo, focus.number)
+          if (id === request.current && focusRead === focusRequest.current && alive.current) {
+            refreshedFocus = pr; setFocusedPr(pr); setFocusError('')
+          }
+        } catch (error) {
+          if (id === request.current && focusRead === focusRequest.current && alive.current) setFocusError(error.message)
+        }
+      }
+      if (id !== request.current || !alive.current) return
       if (!cursor) { detailSnapshots.current.clear(); setDetailRevision(value => value + 1) }
       setData(old => ({ ...next, pulls: cursor ? mergeSelection(old.pulls, next.pulls) : next.pulls, loading: false, error: '' }))
-      if (!cursor) {
+      if (!cursor || canonicalFocus) {
         const previous = currentSelection.current
+        const currentPulls = cursor ? mergeSelection(previous.pulls, next.pulls) : next.pulls
+        const fallback = focus.connected && focusRead === focusRequest.current ? refreshedFocus || previous.pulls.find(pr => prKey(pr) === focus.key) : null
         const retained = new Set([...previous.selected].filter(key => {
           const before = previous.pulls.find(pr => prKey(pr) === key)
-          const after = next.pulls.find(pr => prKey(pr) === key)
-          return before && after && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
+          const after = currentPulls.find(pr => prKey(pr) === key) || (key === focus.key ? fallback : null)
+          return before && after && isOpenPull(after) && ['headRefOid', 'baseRefOid', 'baseRefName'].every(field => before[field] === after[field])
         }))
         const removed = [...previous.selected].filter(key => !retained.has(key))
         setSelected(retained)
@@ -224,8 +251,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     window.addEventListener('focus', refresh)
     return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [conn.state, publicRevision, refreshKey, load, loadRuns])
-  const focusKey = focusPull?.repo && focusPull?.number ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
-  const focusId = `${focusKey}:${focusPull?.nonce || ''}`
   useEffect(() => {
     const id = ++focusRequest.current
     setFocusedPr(null); setFocusError(''); focusDone.current = ''
@@ -307,8 +332,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const canRetry = run => run.state !== 'complete' && ['stopped', 'failed', 'interrupted'].includes(run.execution_state) && retryPulls(run).length > 0
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>
       <Icon name="review" size={23} /><h3>{reviewRunTitle(run)}</h3>
-      <p>{STATE_NAMES[run.execution_state] || STATE_NAMES[run.state] || run.state}</p>{run.summary ? <p>{run.summary}</p> : null}<details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>
-      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {['stopped', 'failed', 'interrupted'].includes(run.execution_state) && !['all_clear', 'merged', 'queued', 'complete'].includes(item.state) ? 'Not finished' : STATE_NAMES[item.state] || item.state}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}{item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a> : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p> : item.public_review?.summary ? <p className="co-task-footnote">{item.public_review.summary}</p> : null}</div>)}</div>
+      <p>{reviewRunStateLabel(run)}</p>{run.summary ? <p>{run.summary}</p> : null}<details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>
+      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {reviewItemProgress(run, item).label}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}{item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a> : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p> : item.public_review?.summary ? <p className="co-task-footnote">{item.public_review.summary}</p> : null}</div>)}</div>
       {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{run.execution_state === 'awaiting_owner' || run.items?.some(item => ['needs_you', 'failed'].includes(item.state)) ? 'Answer in review conversation' : 'Open review conversation'}</button> : null}
       {run.can_stop && run.state !== 'complete' && !['stopped','failed','interrupted'].includes(run.execution_state) ? <><button className="co-quiet-action" disabled={busy} onClick={()=>stopRun(run)}>Stop workflow</button><p className="co-task-footnote">Stop prevents future actions. An already-started public action may finish; its outcome stays visible.</p></> : null}
       {canRetry(run) ? <><button className="co-btn co-task-secondary" disabled={busy} onClick={() => choose(retryPulls(run), run.mode === 'review_merge' ? 'review' : run.mode, runAnchor(run))}>Start again</button><p className="co-task-footnote">Starts a new run on the current versions. You can pick another model.</p></> : null}
@@ -332,7 +357,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       <div className="co-pr-filters" role="group" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</button>)}</div>
     </div>
     {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
-    {focusError ? <p className="co-pr-note" role="alert">Could not find that pull request: {focusError}</p> : null}
+    {focusError ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusError}{focusedPr ? ' Showing the previous snapshot.' : ''}</p> : null}
     {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
     {data.error ? <div className="co-alert" role="alert"><strong>Couldn’t load pull requests</strong><p className="co-alert-text">{data.error}</p><button className="co-btn" disabled={data.loading} onClick={() => { void load(); void loadRuns() }}>Try again</button></div> : null}
     <div className="co-pr-box">
@@ -346,8 +371,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       const key = prKey(pr)
       const status = statusFor(pr)
       // A run whose conversation stopped or failed is not still reviewing.
-      const halted = !!status && ['stopped', 'failed', 'interrupted'].includes(status.run.execution_state) && !['all_clear', 'merged', 'queued', 'complete'].includes(status.item.state)
-      const waiting = status?.run.execution_state === 'awaiting_owner' && !['all_clear', 'merged', 'queued', 'complete'].includes(status.item.state)
+      const progress = status ? reviewItemProgress(status.run, status.item) : null
+      const halted = progress?.halted
+      const waiting = progress?.waiting
       const attention = halted || waiting || (status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown', 'ready_unknown'].includes(status.item.state))
       const assignees = pr.assignees?.nodes || []
       const comments = pr.comments?.totalCount || 0
@@ -368,7 +394,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
             {REVIEW_DECISION[pr.reviewDecision] && pr.reviewDecision !== 'REVIEW_REQUIRED' ? <span>{REVIEW_DECISION[pr.reviewDecision]}</span> : null}
             <ChecksBadge pr={pr} />
             {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
-            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{halted ? 'Run stopped' : attention ? (['merge_unknown','ready_unknown'].includes(status.item.state) ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : (STATE_NAMES[status.item.state] || status.item.state)}</button> : null}
+            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{halted ? 'Run stopped' : attention ? (['merge_unknown','ready_unknown'].includes(status.item.state) ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : progress.label}</button> : null}
           </div>
         </div>
         <div className="co-pr-aside">

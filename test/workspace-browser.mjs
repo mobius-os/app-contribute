@@ -17,6 +17,7 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { runUpperUiStatusChecks } from './test/upper-ui-status-fixture.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
@@ -909,6 +910,10 @@ window.runWorkspaceChecks = async () => {
     await check('reopening inline detail uses cached metadata', async () => {
       ensure(!detailReread, 'Reopen needlessly reread cached detail')
     })
+    root.unmount()
+    const upperChecks = await runUpperUiStatusChecks()
+    checks.push(...upperChecks)
+    ensure(upperChecks.every(check => check.status === 'pass'), 'Upper UI status regressions: ' + JSON.stringify(upperChecks.filter(check => check.status !== 'pass')))
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
       reviewRequests: reviewRuns.length, assignments: mutationRequests().filter(call => call.url.endsWith('/assign-review')).length,
