@@ -1,7 +1,7 @@
 // Source-attributed chat-block session. Hydration is read-only; only a
 // confirmed frozen approval reaches Contribute's existing guarded handlers.
 import { contributeBlockTarget, validContributeRecordId } from './chat-blocks.js'
-import { qualityReviewFor, reviewStateFor } from './review.js'
+import { contributionApprovalFingerprint, qualityReviewFor, reviewStateFor } from './review.js'
 import { publicationStackUnit, stackIntent, stackPublicationRecords, stackReadiness } from './stack.js'
 
 const copy = value => JSON.parse(JSON.stringify(value))
@@ -49,6 +49,29 @@ const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, re
 // This is observational ownership, not a saved approval. No record contents,
 // frozen confirmation, action nonce, or publication arguments cross reloads.
 const CHECKPOINT_BYTES = 32768
+// Reuse the approval schema's stable full-plan projection, excluding lifecycle
+// facts. New-PR receipt fields are generated outcomes, not named update targets.
+const attemptTarget = record => contributionApprovalFingerprint(record && {
+  id: record.id, type: record.type, repo: record.plan?.repo || record.repo,
+  title: record.plan?.title || record.title,
+  branch: record.plan?.branch || record.branch,
+  ...(record.plan?.action === 'pr_update' ? { number: record.number, url: record.url,
+    head_repository: record.head_repository, relay_contribution_id: record.relay_contribution_id } : {}),
+  submission_mode: record.submission_mode, plan: record.plan,
+})
+// Only the digest crosses reload. Capture identity AND baseline metadata before
+// awaiting hashing so a mutable ledger object cannot rebind the observation.
+async function attemptObservation(record) {
+  const identity = attemptTarget(record)
+  const baseline = { id: record.id,
+    at: Number.isFinite(Date.parse(record.updated_at)) ? Date.parse(record.updated_at) : null,
+    error: bounded(record.last_submit_error) }
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))
+  return { ...baseline, target: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('') }
+}
+const validObservation = value => validContributeRecordId(value?.id) && typeof value.target === 'string' && /^[a-f0-9]{64}$/.test(value.target)
+  && (value.at === null || Number.isSafeInteger(value.at) && value.at >= 0 && value.at <= 8640000000000000)
+  && typeof value.error === 'string' && value.error.length <= 500
 const checkpointId = value => typeof value === 'string' && value.length > 0 && value.length <= 128
 function checkpointPhases(checkpoint) {
   if (!checkpointId(checkpoint?.id) || typeof checkpoint.data !== 'string'
@@ -61,14 +84,21 @@ function checkpointPhases(checkpoint) {
       || seen.has(phase.unitKey) || !Array.isArray(phase.phaseIds) || !phase.phaseIds.length || phase.phaseIds.length > 256
       || phase.phaseIds.some(id => !validContributeRecordId(id)) || new Set(phase.phaseIds).size !== phase.phaseIds.length
       || !['pending', 'failed'].includes(phase.state) || typeof phase.note !== 'string' || phase.note.length > 500) throw new Error('Invalid recovery phase')
+    if (phase.observations !== undefined && (!Array.isArray(phase.observations) || !phase.observations.length || phase.observations.length > 256
+      || phase.observations.some(observation => !validObservation(observation))
+      || new Set(phase.observations.map(observation => observation.id)).size !== phase.observations.length
+      || phase.phaseIds.some(id => !phase.observations.some(observation => observation.id === id)))) throw new Error('Invalid recovery observations')
+    if (phase.canonicalFailure !== undefined && typeof phase.canonicalFailure !== 'boolean') throw new Error('Invalid recovery diagnosis')
     seen.add(phase.unitKey)
   }
-  return value.phases.map(({ unitKey, phaseIds, state, note }) => ({ unitKey, phaseIds, state, note }))
+  return value.phases.map(({ unitKey, phaseIds, state, note, observations, canonicalFailure }) => ({ unitKey, phaseIds, state, note,
+    observations: observations?.map(({ id, target, at, error }) => ({ id, target, at, error })), canonicalFailure }))
 }
 
 export function createInlineSession({ sessionId, actions, checkpoint = null, retain = false, recoveryError: incomingRecoveryError = false, publish, loadExact, send, sendStack, refresh }) {
   const advertised = [...new Map((actions || []).filter(item => typeof item?.key === 'string').map(item => [item.key, item])).values()]
   const byId = new Map()
+  const exactObservations = new Map()
   const exactRead = new Set()
   const readFinished = new Set()
   const displayRead = new Set()
@@ -94,8 +124,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (incomingRecoveryError || retain && !checkpoint) throw new Error('Recovery ownership has no checkpoint')
     if (checkpoint) {
       for (const [index, phase] of checkpointPhases(checkpoint).entries()) {
-        results.set('recovery:' + index, { ...phase, recovered: true, tone: phase.state === 'failed' ? 'danger' : 'attention' })
+        results.set('recovery:' + index, { ...phase, recovered: true, tone: phase.state === 'failed' || phase.canonicalFailure ? 'danger' : 'attention' })
         phase.phaseIds.forEach(id => recoveryIds.add(id))
+        phase.observations?.forEach(observation => recoveryIds.add(observation.id))
       }
       lastCheckpoint = { id: checkpoint.id, data: checkpoint.data }
     }
@@ -143,8 +174,34 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // restaging. Lock the owning unit AND the attempted record identities.
   const pendingUnit = unit => [...results.values()].some(result => (result.state === 'pending' || result.recovered)
     && (result.unitKey === unit.key || result.phaseIds.some(id => unit.records.some(record => record.id === id))))
+  // Only a new exact observation of an attempted target can diagnose failure;
+  // complete-ledger membership and monotonic observations exclude stale errors.
   const reconcileResults = () => {
-    for (const [key, result] of results) if (!busyUnits.has(result.unitKey) && reconciled(result.phaseIds)) results.delete(key)
+    for (const [key, result] of results) {
+      if (!busyUnits.has(result.unitKey) && reconciled(result.phaseIds)) { results.delete(key); continue }
+      // A stack failure belongs to its whole frozen parent/member context.
+      // Pending reads and newer ledger intent cannot borrow stale exact hashes.
+      const sameContext = result.observations?.every(before => {
+        const current = exactObservations.get(before.id)
+        return !pendingRead.has(before.id) && ledgerReady && ledger.some(record => record.id === before.id)
+          && current?.target === before.target && current.identity === attemptTarget(byId.get(before.id))
+          && current.at >= Date.parse(byId.get(before.id)?.updated_at)
+      })
+      const failed = sameContext && result.observations.find(before => {
+        const current = exactObservations.get(before.id)
+        return result.phaseIds.includes(before.id) && current?.status === 'prepared'
+          && before.at !== null && current.at !== null && current.at > before.at
+          && current.error && current.error !== before.error
+      })
+      if (failed) {
+        // Diagnosis never settles ownership. Even during a held response,
+        // stale handler output cannot erase the newer exact failure.
+        result.canonicalFailure = true
+        result.state = 'pending'
+        result.tone = 'danger'
+        result.note = `${exactObservations.get(failed.id).error.slice(0, 380)}. Open Contribute to check this attempt before trying again.`
+      }
+    }
   }
   const authoritative = key => ledgerReady && !['loading', 'unavailable'].includes(reviewStatus?.state) && idsFor(key).every(id => exactRead.has(id))
   const makeAction = item => {
@@ -177,7 +234,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const failures = [...results.values()].filter(result => units.some(unit => unit.key === result.unitKey || result.phaseIds.some(id => unit.records.some(rec => rec.id === id))) || result.phaseIds.some(id => addressed.includes(id)))
     const failure = failures.find(result => result.tone === 'danger')
     const checking = failures.some(result => result.state === 'pending') || units.some(unit => unit.records.some(rec => rec.status === 'submitting'))
-    const status = recoveryError ? 'Needs attention' : unitBusy ? 'Contributing' : failure ? 'Needs attention' : checking ? 'Checking result'
+    const status = recoveryError ? 'Needs attention' : failure ? 'Needs attention' : unitBusy ? 'Contributing' : checking ? 'Checking result'
       : checkingAuthority ? 'Checking' : ready.length ? 'Ready' : publicResolved ? publicStatus : reviewUnavailable && canActivate ? 'Check unavailable' : canActivate ? 'Prepared' : loading ? 'Loading' : reason ? 'Needs attention' : ''
     const note = recoveryError || failure?.note || failures.find(result => result.state === 'pending')?.note ||
       (!ledgerReady && (publicResolved || canActivate) ? '' : checkingAuthority ? '' : reviewUnavailable && hasBatch && !isBatch && canActivate ? '' : reason) ||
@@ -226,10 +283,13 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const units = new Map()
     for (const result of results.values()) {
       const previous = units.get(result.unitKey)
-      units.set(result.unitKey, { unitKey: result.unitKey,
-        phaseIds: [...new Set([...(previous?.phaseIds || []), ...result.phaseIds])],
+      const phaseIds = [...new Set([...(previous?.phaseIds || []), ...result.phaseIds])]
+      const observations = new Map([...(result.observations || []), ...(previous?.observations || [])].map(value => [value.id, value]))
+      units.set(result.unitKey, { unitKey: result.unitKey, phaseIds,
         state: previous?.state === 'pending' || result.state === 'pending' ? 'pending' : 'failed',
-        note: bounded(result.note) })
+        note: bounded(previous?.canonicalFailure ? previous.note : result.note),
+        ...(phaseIds.every(id => observations.has(id)) ? { observations: [...observations.values()] } : {}),
+        ...(previous?.canonicalFailure || result.canonicalFailure ? { canonicalFailure: true } : {}) })
     }
     const phases = [...units.values()]
     if (!phases.length) {
@@ -256,19 +316,31 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     publish({ type: 'moebius:app-block-state', sessionId, actions, notice: '', summary: summary(actions), retain, ackNonce,
       checkpoint, checkpointAck, recoveryError: Boolean(recoveryError) })
   } }
-  async function hydrate(wanted = ids) {
-    await Promise.all(wanted.map(async id => {
+  async function observeExact(id, rec, generation) {
+    if (rec?.id !== id) return
+    rec = copy(rec)
+    const identity = attemptTarget(rec)
+    const observation = Number.isFinite(Date.parse(rec.updated_at)) ? await attemptObservation(rec) : null
+    if (!alive || readGeneration.get(id) !== generation) return
+    exactRead.add(id); displayRead.add(id)
+    if (observation) {
+      exactObservations.set(id, { ...observation, status: rec.status, identity })
+    }
+    if ((!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || ''))
+      && !(settled(byId.get(id)) && !settled(rec) && String(rec.updated_at || '') <= String(byId.get(id).updated_at || ''))) byId.set(id, rec)
+  }
+  async function hydrate(wanted) {
+    const addressed = wanted || [...new Set([...ids, ...[...results.values()]
+      .flatMap(result => result.observations?.map(observation => observation.id) || [])])]
+    await Promise.all(addressed.map(async id => {
       const generation = (readGeneration.get(id) || 0) + 1
       readGeneration.set(id, generation)
       pendingRead.add(id)
+      exactObservations.delete(id) // an unavailable latest read cannot lend an older target hash
       try {
         const rec = await loadExact(id)
         if (!alive || readGeneration.get(id) !== generation) return
-        if (rec?.id === id) {
-          exactRead.add(id)
-          displayRead.add(id)
-          if (!byId.has(id) || String(rec.updated_at || '') >= String(byId.get(id).updated_at || '')) byId.set(id, rec)
-        }
+        await observeExact(id, rec, generation)
       } catch { /* keep read-only uncertainty visible */ }
       if (!alive || readGeneration.get(id) !== generation) return
       pendingRead.delete(id)
@@ -304,7 +376,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   function activate(key) {
     if (!advertised.some(item => item.key === key)) return
     if (recoveryError || unitsFor(key).some(pendingUnit)) {
-      void hydrate(ids)
+      void hydrate()
       emit()
       return
     }
@@ -335,32 +407,45 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
       unitKey: unit.key, phaseIds: unit.ready.map(rec => rec.id), state: 'pending', note: '', tone: 'attention',
     }))
     confirming = null; emit()
+    // Exact target hashes are observational only. Missing timestamps remain
+    // unknown; older checkpoints retain their no-repeat guard without a diagnosis.
+    if (approval.units.some(unit => unit.ready.some(rec => Number.isFinite(Date.parse(rec.updated_at))))) {
+      try {
+        await Promise.all(approval.units.map(async unit => {
+          const observations = await Promise.all(unit.records.map(async approved => {
+            const current = byId.get(approved.id)
+            const sameTarget = attemptTarget(current) === attemptTarget(approved)
+            return attemptObservation(copy(sameTarget ? current : approved))
+          }))
+          results.get(phaseKey(unit)).observations = observations
+        }))
+      } catch {
+        recoveryError = 'The contribution recovery observation could not be saved. Open Contribute; nothing was sent.'
+      }
+      reconcileResults(); emit()
+    }
     if (recoveryError) { busyUnits.clear(); frozen = null; emit(); return }
     await Promise.all(approval.units.map(async unit => {
       let outcome
       try { outcome = (unit.stack ? await sendStack(unit.records) : await send(unit.records[0])) || {} }
       catch { outcome = { uncertain: true } }
       for (const rec of [outcome.record, ...(outcome.records || []), ...(Array.isArray(outcome.ok) ? outcome.ok : [])]) {
-        if (rec?.id) byId.set(rec.id, rec)
+        if (unit.records.some(approved => approved.id === rec?.id)
+          && (!byId.has(rec.id) || String(rec.updated_at || '') >= String(byId.get(rec.id).updated_at || ''))
+          && !(settled(byId.get(rec.id)) && !settled(rec))) byId.set(rec.id, rec)
       }
       const resultKey = phaseKey(unit)
-      const resultBase = { unitKey: unit.key, phaseIds: unit.ready.map(rec => rec.id) }
-      if (outcome.pending) results.set(resultKey, { ...resultBase, state: 'pending', note: 'Checking the contribution result. Do not retry yet.', tone: 'attention' })
-      else if (outcome.uncertain || outcome.failure?.owner === 'automatic' && !outcome.ok) results.set(resultKey, { ...resultBase, state: 'pending', note: 'The result could not be confirmed. Check Contribute before trying again.', tone: 'attention' })
-      else if (!outcome.ok && !outcome.alreadyHandled) results.set(resultKey, { ...resultBase, state: 'failed', note: outcome.error || 'Some changes were not sent. Check Contribute for the remainder.', tone: 'danger' })
-      else results.set(resultKey, { ...resultBase, state: 'pending', note: 'Checking the saved result before marking this sent.', tone: 'attention' })
+      const resultBase = results.get(resultKey)
+      if (!resultBase.canonicalFailure) {
+        if (outcome.pending) results.set(resultKey, { ...resultBase, state: 'pending', note: 'Checking the contribution result. Do not retry yet.', tone: 'attention' })
+        else if (outcome.uncertain || outcome.failure?.owner === 'automatic' && !outcome.ok) results.set(resultKey, { ...resultBase, state: 'pending', note: 'The result could not be confirmed. Check Contribute before trying again.', tone: 'attention' })
+        else if (!outcome.ok && !outcome.alreadyHandled) results.set(resultKey, { ...resultBase, state: 'failed', note: outcome.error || 'Some changes were not sent. Check Contribute for the remainder.', tone: 'danger' })
+        else results.set(resultKey, { ...resultBase, state: 'pending', note: 'Checking the saved result before marking this sent.', tone: 'attention' })
+      }
       // Stack handlers return counts on success; canonical records provide links.
-      await Promise.all(unit.records.map(async approved => {
-        try {
-          const rec = await loadExact(approved.id)
-          if (rec?.id === approved.id) {
-            exactRead.add(rec.id)
-            if (!(settled(byId.get(rec.id)) && !settled(rec))) byId.set(rec.id, rec)
-          }
-        } catch { /* result remains uncertain */ }
-      }))
-      if (reconciled(resultBase.phaseIds)) results.delete(resultKey)
+      await hydrate(unit.records.map(approved => approved.id))
       busyUnits.delete(unit.key)
+      reconcileResults()
       emit() // each row settles before slower siblings
     }))
     try { await refresh?.() } catch { /* read-only refresh failure keeps result visible */ }

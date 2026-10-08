@@ -4,7 +4,7 @@
 // browser gets a disposable profile; all transports and host capabilities are
 // mocked before mount, with CSP and CDP network blocking as a second boundary.
 import { spawn } from 'node:child_process'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -17,6 +17,7 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { runInlineCanonicalFailureChecks } from './test/inline-canonical-failure-fixture.jsx'
 import { runUpperUiStatusChecks } from './test/upper-ui-status-fixture.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
@@ -911,6 +912,7 @@ window.runWorkspaceChecks = async () => {
       ensure(!detailReread, 'Reopen needlessly reread cached detail')
     })
     root.unmount()
+    if (window.inlineCanonicalHost) checks.push(...await runInlineCanonicalFailureChecks())
     const upperChecks = await runUpperUiStatusChecks()
     checks.push(...upperChecks)
     ensure(upperChecks.every(check => check.status === 'pass'), 'Upper UI status regressions: ' + JSON.stringify(upperChecks.filter(check => check.status !== 'pass')))
@@ -967,12 +969,21 @@ async function main() {
   if (!frontendModules) throw new Error('MOBIUS_FRONTEND_NODE_MODULES is required')
   const require = createRequire(join(frontendModules, 'package.json'))
   const { rolldown } = await import(pathToFileURL(require.resolve('rolldown')).href)
+  const hostRoot = process.env.MOBIUS_APP_BLOCK_HOST_ROOT
+  let hostLeaf = 'export const PullSnapshot = null; export const hostCSS = "";'
+  if (hostRoot) {
+    const source = await readFile(join(hostRoot, 'frontend/src/components/ChatView/markdown/AppBlock.jsx'), 'utf8')
+    const css = await readFile(join(hostRoot, 'frontend/src/components/ChatView/markdown/AppBlock.css'), 'utf8')
+    hostLeaf = "import React from 'react'; import { Branch } from '@openai/apps-sdk-ui/components/Icon';\n"
+      + source.slice(source.indexOf('const STATE_NAMES'), source.indexOf('/** Reuse the opaque app host'))
+      + '\nexport const hostCSS = ' + JSON.stringify(css) + ';'
+  }
   const build = await rolldown({ input: ENTRY, platform: 'browser', tsconfig: false,
     transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': JSON.stringify('production') } },
     resolve: { modules: [frontendModules, 'node_modules'] },
     plugins: [{ name: 'workspace-browser-fixture',
-      resolveId(id, importer) { if (id === ENTRY) return id; if (importer === ENTRY && id.startsWith('.')) return join(root, id) },
-      load(id) { if (id === ENTRY) return { code: fixture, moduleType: 'jsx' } },
+      resolveId(id, importer) { if (id === '@fixture/inline-shell') return '\0inline-shell'; if (id === ENTRY) return id; if (importer === ENTRY && id.startsWith('.')) return join(root, id) },
+      load(id) { if (id === '\0inline-shell') return { code: hostLeaf, moduleType: 'jsx' }; if (id === ENTRY) return { code: 'window.inlineCanonicalHost = ' + Boolean(hostRoot) + ';\n' + fixture, moduleType: 'jsx' } },
     }],
   })
   const { output } = await build.generate({ format: 'iife' })
