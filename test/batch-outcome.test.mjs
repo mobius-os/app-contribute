@@ -47,3 +47,48 @@ test('an existing PR link and static planned head cannot settle an unconfirmed u
  assert.equal(api.batchRecordOutcome(update,opened,{pending:true},'send'),'checking')
  assert.equal(api.batchRecordOutcome(update,{...opened,last_submit_push_sha:record.plan.head_sha},{pending:true},'send'),'done')
 })
+
+const phase={...record,updated_at:'2026-10-08T22:00:00Z',plan:{...record.plan,action:'pr',branch:'fix/a',base_branch:'main'}}
+const failed={...phase,updated_at:'2026-10-08T22:00:02Z',last_submit_error:'Branch protection rejected this exact attempt'}
+test('a newer exact terminal canonical submit failure settles pending or unknown without a public PR receipt',async t=>{
+ const api=await load(t);if(!api)return
+ for(const outcome of [{pending:true},{uncertain:true},{record:{...phase,status:'submitting'}},{error:'Old callback failure',failure:{owner:'agent'}},undefined]) {
+  assert.deepEqual(api.batchRecordOutcome(phase,failed,outcome,'send'),{error:failed.last_submit_error})
+ }
+ assert.deepEqual(api.canonicalBatchRecordOutcome({...phase,last_submit_error:'Prior failure'},failed,'send'),{error:failed.last_submit_error})
+})
+test('old errors, unavailable versions and unrelated canonical phases do not settle an uncertain action',async t=>{
+ const api=await load(t);if(!api)return
+ for(const value of [phase,{...failed,updated_at:phase.updated_at},{...failed,updated_at:undefined},{...failed,updated_at:'invalid'},{...failed,id:'other'},{...failed,plan:{...failed.plan,repo:'other/repo'}},{...failed,plan:{...failed.plan,head_sha:'b'.repeat(40)}},{...failed,plan:{...failed.plan,branch:'different'}},{...failed,plan:{...failed.plan,base_branch:'other'}},{...failed,status:'submitting'}]) {
+  assert.equal(api.canonicalBatchRecordOutcome(phase,value,'send'),null)
+ }
+ assert.equal(api.canonicalBatchRecordOutcome({...phase,last_submit_error:failed.last_submit_error},failed,'send'),null)
+ assert.equal(api.canonicalBatchRecordOutcome({...phase,updated_at:'invalid'},failed,'send'),null)
+ assert.equal(api.canonicalBatchRecordOutcome({...phase,last_submit_error:failed.last_submit_error,last_submit_error_code:'old_code'},failed,'send'),null)
+ assert.equal(api.batchRecordOutcome(phase,phase,{error:failed.last_submit_error},'send'),'checking')
+})
+test('a fresh durable submit-attempt identity can distinguish a repeated diagnostic from an old error',async t=>{
+ const api=await load(t);if(!api)return
+ const retry={...phase,last_submit_error:failed.last_submit_error,submit_started_at:'2026-10-08T21:59:00Z'}
+ assert.equal(api.canonicalBatchRecordOutcome(retry,{...failed,submit_started_at:retry.submit_started_at},'send'),null)
+ assert.deepEqual(api.canonicalBatchRecordOutcome(retry,{...failed,submit_started_at:'2026-10-08T22:00:01Z'},'send'),{error:failed.last_submit_error})
+})
+test('new exact ready failure requires cleared claim, canonical draft target and a newer diagnostic',async t=>{
+ const api=await load(t);if(!api)return
+ const draft={...opened,updated_at:phase.updated_at,status:'draft'}
+ const readyFailed={...draft,updated_at:failed.updated_at,last_ready_error:'Connected account no longer matches',last_ready_error_code:'github_not_connected'}
+ assert.deepEqual(api.batchRecordOutcome(draft,readyFailed,{pending:true,error:'Still resolving'},'ready'),{error:readyFailed.last_ready_error})
+ for(const value of [{...readyFailed,readying:true},{...readyFailed,number:2,url:'https://github.com/team/repo/pull/2'},{...readyFailed,url:'https://github.com/other/repo/pull/1'},{...readyFailed,updated_at:phase.updated_at},{...readyFailed,last_ready_error_code:'ready_unconfirmed'}]) {
+  assert.equal(api.canonicalBatchRecordOutcome(draft,value,'ready'),null)
+ }
+ assert.equal(api.canonicalBatchRecordOutcome({...draft,last_ready_error:readyFailed.last_ready_error,last_ready_error_code:readyFailed.last_ready_error_code},readyFailed,'ready'),null)
+})
+
+
+test('missing frozen versions cannot attribute a canonical diagnostic to this confirmed phase',async t=>{
+ const api=await load(t);if(!api)return
+ assert.equal(api.canonicalBatchRecordOutcome(record,failed,'send'),null)
+ assert.equal(api.canonicalBatchRecordOutcome(record,{...failed,submit_started_at:'2026-10-08T22:00:01Z'},'send'),null)
+ assert.equal(api.canonicalBatchRecordOutcome({...opened,status:'draft'},{...opened,status:'draft',updated_at:failed.updated_at,last_ready_error:'New failure',last_ready_error_code:'ready_failed'},'ready'),null)
+ assert.deepEqual(api.canonicalBatchRecordOutcome({...phase,updated_at:undefined,created_at:phase.updated_at},failed,'send'),{error:failed.last_submit_error})
+})
