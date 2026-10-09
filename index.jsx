@@ -73,7 +73,7 @@ import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { TaskPane } from './ui/TaskPane.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { discoverRepositories, mayMerge } from './collaboration.js'
+import { discoverRepositories } from './collaboration.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -206,7 +206,6 @@ export default function ContributeApp({ appId, token }) {
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const submissionMethod = 'github'
-  const [agentChoice, setAgentChoice] = useState({ provider: '', model: '', effort: '' })
   const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
   useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
@@ -220,7 +219,6 @@ export default function ContributeApp({ appId, token }) {
   const reviewStatusRequestRef = useRef(0)
   const incomingReviewsRequestRef = useRef(0)
   const agentStartRef = useRef(false)
-  const agentChoiceRef = useRef(agentChoice)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
   const ledgerReadyRef = useRef(false)
@@ -228,7 +226,6 @@ export default function ContributeApp({ appId, token }) {
   // failure from it, so a still-partial feed never reads as "updated".
   const ledgerCurrentRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
-  useEffect(() => { agentChoiceRef.current = agentChoice }, [agentChoice])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
 
   const signalReady = useCallback((details = {}) => {
@@ -253,7 +250,8 @@ export default function ContributeApp({ appId, token }) {
     }
     agentStartRef.current = true
     try {
-      const chosenAgent = agentChoiceRef.current
+      // A launch carries its own model choice; none means the chat default.
+      const chosenAgent = action.agent || {}
       const started = await window.mobius.chat.start({
         title: action.title,
         draft: action.draft,
@@ -467,11 +465,6 @@ export default function ContributeApp({ appId, token }) {
       if (typeof appSettings.autopilot_default === 'boolean') {
         setAutopilotDefault(appSettings.autopilot_default)
       }
-      setAgentChoice({
-        provider: typeof appSettings.agent_provider === 'string' ? appSettings.agent_provider : '',
-        model: typeof appSettings.agent_model === 'string' ? appSettings.agent_model : '',
-        effort: typeof appSettings.agent_effort === 'string' ? appSettings.agent_effort : '',
-      })
       connRef.current = status
       setConn(status)
 
@@ -1074,28 +1067,6 @@ export default function ContributeApp({ appId, token }) {
     saveAppSettings({ ...settings, autopilot_default: next })
   }, [])
 
-  const onChooseAgent = useCallback(async (next) => {
-    const normalized = {
-      provider: typeof next?.provider === 'string' ? next.provider : '',
-      model: typeof next?.model === 'string' ? next.model : '',
-      effort: typeof next?.effort === 'string' ? next.effort : '',
-    }
-    const previous = agentChoiceRef.current
-    agentChoiceRef.current = normalized
-    setAgentChoice(normalized)
-    const settings = await loadAppSettings()
-    const saved = await saveAppSettings({
-      ...settings,
-      agent_provider: normalized.provider,
-      agent_model: normalized.model,
-      agent_effort: normalized.effort,
-    })
-    if (!saved) {
-      agentChoiceRef.current = previous
-      setAgentChoice(previous)
-    }
-    return saved
-  }, [])
 
   const onAssignIncomingReview = useCallback(async (item) => {
     const repo = item?.repository?.nameWithOwner || ''
@@ -1394,14 +1365,6 @@ export default function ContributeApp({ appId, token }) {
       incomingReviews: [],
     }) : contributionRun
   }
-  function projectMergeRun(project) {
-    const projects = (project ? [project] : sourceProjects).filter(item => mayMerge(item.viewerPermission))
-    const repositories = new Set(projects.map(item => item.canonical_repo?.toLowerCase()))
-    return buildContributionRun({
-      records: records.filter(record => repositories.has((record.repo || record.plan?.repo || '').toLowerCase())),
-      reviewStatus, projects, incomingReviews: [],
-    })
-  }
   function renderPullRequests(project, navigation) {
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
@@ -1423,9 +1386,8 @@ export default function ContributeApp({ appId, token }) {
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <ConnectionSettings
-            conn={conn} token={token} onChanged={refreshConnection}
+            appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
-            agentChoice={agentChoice} onChooseAgent={onChooseAgent}
           />
         </Header>
       </div>
@@ -1457,7 +1419,7 @@ export default function ContributeApp({ appId, token }) {
 
 
             {project ? <GithubPullsUnavailable conn={conn} onRetry={refreshConnection} /> : null}
-            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} mergeRun={projectMergeRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
+            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? () => renderPullRequests(project, navigation) : null}
               controls={controls}

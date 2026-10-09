@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   collaborationRequest, matchingPulls, prKey, reviewForPull, reviewRunRequest,
 } from '../collaboration.js'
-import { loadCycleState, saveCycleState } from '../storage.js'
+import { claimProjectCycle, loadCycleState, saveCycleState, settleProjectCycleClaim } from '../storage.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
 // Real React SSR through the app's bundler. These tests do not claim browser
@@ -116,7 +116,7 @@ test('own and assigned PR selection constructs a review without assigning anyone
   assert.doesNotMatch(calls[0].url, /assign|merge/)
 })
 
-test('SSR review confirmation offers merging for own PRs only when the entire selection is eligible', async t => {
+test('SSR review confirmation enables takeover only when the entire selection is eligible', async t => {
   const ui = await rendered(t)
   if (!ui) return
   const renderChoice = (pulls, mode = 'review', busy = false) => ui.render('ReviewConfirmation', {
@@ -124,21 +124,22 @@ test('SSR review confirmation offers merging for own PRs only when the entire se
   })
   for (const permission of ['WRITE', 'MAINTAIN', 'ADMIN']) {
     const html = renderChoice([pull(7, { repository: { nameWithOwner: project.canonical_repo, viewerPermission: permission } })])
-    assert.match(html, /Merge when safe/, permission)
+    assert.match(html, /Review, fix &amp; merge/, permission)
+    assert.doesNotMatch(html, /class="co-pr-mode"[^>]*disabled/, permission)
     assert.match(html, /Start private review/)
     assert.doesNotMatch(html, /type="checkbox"[^>]*checked/)
   }
   for (const permission of ['READ', 'TRIAGE', null]) {
     const html = renderChoice([pull(), pull(8, { repository: { nameWithOwner: project.canonical_repo, viewerPermission: permission } })])
-    assert.doesNotMatch(html, /Merge when safe/, String(permission))
+    assert.match(html, /class="co-pr-mode"[^>]*disabled=""><strong>Review, fix &amp; merge/, String(permission))
     assert.match(html, /Start private review/)
   }
-  assert.doesNotMatch(renderChoice([pull(7, { isDraft: true })]), /Merge when safe/)
+  assert.match(renderChoice([pull(7, { isDraft: true })]), /class="co-pr-mode"[^>]*disabled=""><strong>Review, fix &amp; merge/)
   const merge = renderChoice([pull()], 'review_merge', true)
-  assert.match(merge, /type="checkbox"[^>]*checked/)
-  assert.match(merge, /version <code>aaaaaaa → main \(bbbbbbb\)/)
-  assert.match(merge, /exact versions/)
-  assert.match(merge, /No branch edits or public review comments/)
+  assert.match(renderChoice([pull()], 'review_merge'), /Allow review &amp; merge/)
+  assert.doesNotMatch(merge, /version <code>|Versions and scope covered/)
+  assert.match(merge, /these PRs may be merged or queued after review and required checks/)
+  assert.match(merge, /No branch edits or public comments/)
   assert.match(merge, /disabled=""/)
 })
 
@@ -202,6 +203,33 @@ test('durable project conversation shortcuts stay isolated across projects and t
     assert.match(key, /^project-cycles\/[a-f0-9]{64}\.json$/)
     assert.doesNotMatch(key, /%|:|\/.*\//, 'project identity must not escape into the storage filename')
   }
+})
+
+test('fresh project cycle claim keeps the previous conversation and excludes a concurrent start', async t => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  let value = { schema: 1, chat_id: 'old-chat', title: 'Old preparation', started_at: '2026-09-10T12:00:00Z' }
+  let version = 1
+  globalThis.window = { mobius: { storage: {
+    get: async () => structuredClone(value),
+    getWithVersion: async () => ({ value: structuredClone(value), version: String(version) }),
+    durableWrite: async (_key, next, options) => {
+      assert.equal(options.ifMatch, String(version))
+      value = structuredClone(next); version += 1
+      return { durability: 'synced' }
+    },
+  } } }
+  const first = await claimProjectCycle('fixture-project', 'old-chat')
+  assert.equal(first.ok, true)
+  assert.equal((await claimProjectCycle('fixture-project', 'old-chat')).ok, false)
+  assert.equal((await loadCycleState('fixture-project')).chat_id, 'old-chat')
+  assert.equal(await settleProjectCycleClaim('fixture-project', first.id, {
+    chat_id: 'new-chat', title: 'New full merge cycle', started_at: '2026-10-02T16:00:00Z',
+  }), true)
+  const saved = await loadCycleState('fixture-project')
+  assert.equal(saved.chat_id, 'new-chat')
+  assert.equal(saved.history[0].chat_id, 'old-chat')
+  assert.equal(saved.pending, undefined)
 })
 
 test('a legacy project shortcut still opens when its migration write fails', async t => {

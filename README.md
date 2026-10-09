@@ -54,8 +54,12 @@ contribution. This app is the dashboard for that loop:
   panel; settings never prepare or publish changes.
 - **PR workflows** — each project shows all open PRs, with All, Unassigned,
   Assigned to me and My PRs filters. Select individual PRs or a batch for
-  private Review or exact-version Review & merge. Independent reviews run in
-  parallel through existing agent delegation; questions stay in their review
+  private **Review**, pinned **Review & merge**, or explicitly scoped
+  **Review, fix & merge**. Takeover repairs only the named PR file scope via
+  guarded fast-forward publication and freshly independent full-diff review
+  of each successor. Public comments/reviews are not part of this grant.
+  Independent reviewers use durable programmatic children with frozen prompts
+  and model settings; questions stay in their review
   conversation. Assignment uses GitHub's shared, additive assignee list.
   Repo permissions control assignment/merge; admins manage access on GitHub.
   The companion platform review-runs backend must be activated before actions
@@ -106,13 +110,10 @@ contribution. This app is the dashboard for that loop:
     cannot be sent. A retry can keep an already-open or draft parent in view;
     if that parent has merged, Contribute asks the agent to refresh the
     remaining layers on `main` instead of silently changing the reviewed diff.
-    Once every PR is open and green, an unprotected app repository gets a
-    separate **Land** confirmation. The server rechecks every diff, commit,
-    branch, PR relationship, and CI result, then advances unchanged `main` to
-    the stack tip in one exact-base fast-forward. If `main` moved or any rule,
-    protection, failed check, or stale ref is present, nothing is changed.
-    Protected repositories—including the Möbius platform—keep GitHub's normal
-    merge or merge-queue flow.
+    Sending never grants merge. Any later acceptance uses a separate exact
+    confirmation and GitHub's normal merge or merge-queue rules. Parent-first
+    acceptance rechecks the remaining stack before progressing; it never
+    blindly advances a repository ref because checks are green.
     A durable upstream conflict remains **Needs update** until the agent
     refreshes the reviewed contribution; retryable service errors do not mask
     a later fresh local check. If the browser loses a submit response,
@@ -199,7 +200,6 @@ shape:
     "granted_at": "2026-07-06T09:05:00Z",
     "state": "idle | responding",
     "rounds_used": 1,
-    "max_rounds": 5,
     "last_round": { "outcome": "pushed | replied | stale | failed | escalated", "summary": "…" },
     "rounds": [ /* recent entries, capped */ ],
     "ignored_event_urls": [ /* exact recent replies posted by the platform */ ]
@@ -264,9 +264,41 @@ refresh, the Dismiss button — avoid silently overwriting each other. On older
 runtimes that don't return a version, Dismiss re-reads and re-checks the record
 before writing, while the cron refresh falls back to a plain best-effort write.
 
-## Autopilot: one-click ship
+## Continuous Project Desk: private PR review runs
 
-When you send a PR with **autopilot** on (the default; toggle it per app and
+The existing project workspace keeps local/upstream position, **Prepare
+changes** and **Pull updates**. PR state, private proposal, exact-head review,
+agent execution and settled history remain separate. Named paused work stays
+visible as unfinished; this iteration does not resume old cycles automatically.
+
+Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
+private review or review/fix/merge, plus model and effort. The private-review
+choice contains its autopilot checkbox; scoped takeover continues automatically.
+New takeovers have no configured repair-round limit.
+`review-preview` freezes the exact instructions and agent choice; start passes
+its `preview_sha256` and rejects drift. Mandatory safety instructions are
+platform-owned. New UI autopilot can explicitly be on, but missing/older grants
+remain off and never acquire repair authority.
+
+A run publishes necessary takeover repairs only through a dedicated
+server-owned checkout and guarded receipts, then requires new independent
+full-diff review and passing evidence before merging a successor. It does not
+post comments or GitHub reviews. Unclear public outcomes reconcile read-only;
+queued is not merged. Stop prevents new execution and does not prevent observing
+an existing receipt, but observation never restarts the cycle.
+
+GitHub is a core Settings capability even without Contribute. The platform
+`github-workflows` skill and `python3 "$SCRIPTS_DIR/github_review.py"` provide
+app-independent private previews and scoped chat runs through the same owner
+and receipt mechanisms. Contribute adds the project desk and app-backed detail;
+installing it is not a prerequisite for GitHub work. Both require the companion
+backend activation; local source edits alone do not activate routes or skills.
+
+## Publication follow-up autopilot
+
+This existing outgoing-contribution follow-up is distinct from the private
+selected-PR review/takeover run above; its separate publication grant governs
+any reviewer replies. When you send a PR with **autopilot** on (the default; toggle it per app and
 pause/resume per PR), you're the last click. The platform then handles the whole
 review loop in the background: the scheduled job detects each new review, failing
 check or comment and asks the platform to respond; merge conflicts stay a
@@ -281,7 +313,8 @@ merging**, or
 If the platform cannot honor the Autopilot grant, Contribute falls back to the
 ordinary review notification rather than hiding the review.
 
-The consent, claim, and five-round limit live in a platform database row — never
+The consent and claim live in a platform database row (follow-up has no round
+budget; two consecutive failed rounds still hand back to the owner) — never
 in the agent-writable ledger — so a tampered ledger can't authorize or forge an
 action. The background agent follows the `review-followup.md` skill, which keeps
 every public action server-mediated and source-only, treats reviewer text as
@@ -326,4 +359,4 @@ Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
 
-Project Refresh renews source, contribution, PR and run status without pulling code.
+Project Refresh renews source, contribution, PR and run status without pulling code. Prepare and Pull open launch panels independently of old dormant work. Full merge cycles provides an explicit fresh start, current conversation, cancellation and retained cycle history; fresh starts have distinct scoped identities and online CAS admission.

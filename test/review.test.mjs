@@ -14,7 +14,6 @@ import {
   contributionReviewScope,
   focusedContributionNavigationReady,
   focusedContributionReady,
-  contributionCyclePhase,
   contributionCycleProgress,
   isAllClear,
   locateContributionReview,
@@ -245,9 +244,9 @@ test('a confirmed batch stays on screen with per-item results until the owner cl
 
 test('paused work exposes its existing conversation without starting another', () => {
   const controls = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
-  assert.match(controls, /\['paused', 'failed'\].includes\(cycle\?\.phase\)/)
-  assert.match(controls, /onClick=\{workflow.open\}/)
-  assert.match(controls, /Open conversation/)
+  assert.match(controls, /paused: 'Work paused', failed: 'Work failed'/)
+  assert.match(controls, /onClick=\{\(\) => workflow.open\(\)\}/)
+  assert.match(controls, /Open current conversation/)
 })
 
 test('projects contain their contribution flow without a separate Reviews destination', () => {
@@ -594,13 +593,6 @@ test('public action failures have one truthful owner', () => {
   assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.doesNotMatch(feedSource, /await onStartAgent/)
   assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts to send this related group as your account\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
-})
-
-test('cycle lifecycle distinguishes running, waiting, paused, and settled work', () => {
-  assert.equal(contributionCyclePhase({ running: true }), 'running')
-  assert.equal(contributionCyclePhase({ running: false, pending_question_id: 'q1' }), 'waiting')
-  assert.equal(contributionCyclePhase({ running: false, goal: { status: 'paused' } }), 'paused')
-  assert.equal(contributionCyclePhase({ running: false, goal: { status: 'completed' } }), 'complete')
 })
 
 test('cycle progress uses the durable plan and current task', () => {

@@ -581,8 +581,8 @@ export async function markContributionReady({ appId, token, rec }) {
 // Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
 // a ledger write — the grant lives in a platform DB row the app can't edit, so
 // flipping the (display-only) ledger `autopilot` block could never actually stop
-// the loop. Resume also clears any human_required flag and resets the five-round
-// count. Returns { ok } or { error }.
+// the loop. Resume also clears any human_required flag and resets the round and
+// failure counters. Returns { ok } or { error }.
 export async function setAutopilot({ appId, token, recordId, enabled }) {
   try {
     const r = await fetch(

@@ -102,6 +102,8 @@
     "review_prs.py",
     "pull-details.js",
     "service.py",
-    "ui/PullRequestDetail.jsx"
+    "ui/PullRequestDetail.jsx",
+    "review-prompts.js",
+    "ui/ReviewPromptSettings.jsx"
   ]
 }

@@ -16,7 +16,7 @@ Move changes from local work into private review, public collaboration, and safe
 
 ## Positioning
 
-A project control board, not a Git client. See what remains local, what is
+A Continuous Project Desk, not a Git client. See what remains local, what is
 shared for review, and whether shared updates have been checked. Choose one project, then prepare or review its work; approve exact public actions when ready.
 
 ## Operating Context
@@ -56,6 +56,32 @@ position. Agent work progresses in place; only actual questions need the owner.
 - Source chats remain the durable home of their work. Background workers may
   contribute evidence or independent edits, but they never become the owner-facing source.
 
+### Selected-PR run contract
+
+Keep the local/upstream overview and prepare/pull loop; extend their project
+workspace rather than introducing a replacement Reviews room. PR body, checks,
+labels, reviewers/comments and source conversation are deliberate detail.
+
+Review-only, legacy pinned conditional merge and explicit named-PR
+review/fix/merge are distinct scopes. Takeover is bounded to server-frozen PR
+files and independently reviewed successor heads, never arbitrary changed
+versions, comments or force-push. Editable prompts, private
+autopilot and model/effort resolve into a frozen pre-consent snapshot; execution
+rejects drift and cannot rewrite mandatory safety instructions. Old grants do
+not inherit autopilot or broader scope.
+
+New review/fix/merge runs have no repair-round budget. Previously frozen finite
+selections retain their limit rather than silently expanding an accepted run.
+Stop, clarification, exact scope, independent review and required checks still
+control continuation.
+
+One owning chat, durable programmatic independent reviewers, dedicated repair
+checkout and public receipts carry the actual review—not a preview proposal or
+an all-clear inferred from green checks. Paused work has a name and remaining
+steps; queued is not merged. Read-only receipt observation never revives Stop.
+Core Settings GitHub workflows work without this optional app, through the same
+platform owner and grant mechanisms, not a second queue.
+
 ## Brand Commitments
 
 Quiet, inviting, high-level, concise, and icon-led. Show the next meaningful action before technical detail.
@@ -81,3 +107,20 @@ Live local project status, private contribution records and stored diffs, and co
 ## Accessibility & Inclusion
 
 Keyboard-accessible controls, state labels that do not depend on color, readable contrast, practical touch targets, and an adaptive list-to-detail flow on small screens.
+
+## Minimal daily workflow (owner direction, 2026-10-02)
+
+Use a linked project repository, real status refresh, prepare/pull launch panels, actionable prepared work above PRs, compact PR authors/labels/check counts and person assignment. Agent launch offers private review with optional review-only autopilot, or scoped review/fix/merge with automatic continuation; model and effort belong to that launch. Settings contains one grouped prompt editor, not a second automation or model console. Full merge cycles and History retain meaningful current/past work; hiding archived proposals never deletes their records. Version/scope/prompt freezing stays mandatory underneath but does not require routine disclosures or duplicate decisions. Read-only guards remain intentional. New explicitly approved draft takeover reviews and fixes while draft, then marks ready only after fresh independent review and checks. Old grants retain their draft boundary.
+
+## GitHub alignment and live versions (2026-10-03)
+
+The PR list and detail follow GitHub's own presentation
+(state icons, colored labels, "#123 · author opened …", ✓ n/m checks). A run is
+bound to each PR's exact head and to the target branch's live tip at the moment
+of consent; GitHub's PR comparison base is not used for that binding. At Start
+the selected PRs are re-read: unchanged code follows a moved target branch,
+while changed code or draft state requires the owner to look again. The
+upstream position states incoming files (or commits behind), the same units as
+local work. Default review, fix and merge prompts are short, readable guidance
+that widens review scope and fixes causes; mechanics and authority stay in the
+fixed run brief and mandatory instructions.
