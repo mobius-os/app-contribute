@@ -17,7 +17,7 @@ export function SourceConversations({ project, token, appId }) {
       .catch(error => { if (current) setState({ phase: 'error', chats: [], error: error.message }) })
     return () => { current = false }
   }, [task?.activeId, project.key, appId, token, attempt])
-  return <TaskPane id="task:scope">
+  return <TaskPane id="task:scope" dock={false}>
     <h3>Choose what to prepare</h3>
     <button className="co-scope-row" onClick={() => task.open('task:prepare')}><strong>All local work in {project.name}</strong><span>Group related work across conversations.</span><Icon name="right" size={16} /></button>
     <h4>One conversation</h4>

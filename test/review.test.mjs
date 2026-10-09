@@ -229,13 +229,18 @@ test('Merge is an end-state intent without widening the public grant', () => {
   assert.notEqual(contributionActionScope(merge), contributionActionScope(prepare))
 })
 
-test('batch recovery releases confirmation and returns durable failures to projection', () => {
+test('a confirmed batch stays on screen with per-item results until the owner closes it', () => {
   assert.doesNotMatch(feedSource, /fixAndReviewAction\(agentRecords\)/)
   assert.doesNotMatch(feedSource, /onStartAgent/)
-  assert.match(feedSource, /setBusy\(false\)[\s\S]*?setApproval\(null\)[\s\S]*?setNote\(failures\[0\]/)
+  assert.match(feedSource, /approval\.locked \|\| approval\.fingerprint === fingerprint/)
+  assert.match(feedSource, /setBusy\(false\)[\s\S]*?setFinished\(true\)/)
+  assert.match(feedSource, /function closeResults\(\) \{\s*if \(checking \|\| busy\) return[\s\S]*?setApproval\(null\)/)
+  assert.match(feedSource, /const value = outcomeFor\(record, outcome\)[\s\S]*?\[record\.id\]: value/)
   assert.match(feedSource, /approval\.fingerprint !== fingerprint/)
   assert.match(feedSource, /The reviewed set changed\. The current actions are listed now/)
-  assert.match(feedSource, /key=\{`send:\$\{run\?\.revision/)
+  assert.match(feedSource, /key="send"/); assert.match(feedSource, /key="ready"/)
+  assert.doesNotMatch(feedSource, /key=\{`(?:send|ready):\$\{run\?\.revision/)
+  assert.match(feedSource, /if \(admitted\.current\) return/)
 })
 
 test('paused work exposes its existing conversation without starting another', () => {
@@ -251,9 +256,9 @@ test('projects contain their contribution flow without a separate Reviews destin
   assert.doesNotMatch(appSource, /showProjects|<ProjectControl[ >]|contribute-reviews/)
   assert.doesNotMatch(appSource, /co-tab-prs|co-tab-issues/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
-  assert.match(feedSource, /<h3>Needs you /)
-  assert.match(feedSource, /<h3>In progress<\/h3>/)
-  assert.match(feedSource, />Done recently</)
+  assert.match(feedSource, /<span>Needs you<\/span>/)
+  assert.match(feedSource, /agentActivity, 'Agent activity'/)
+  assert.match(feedSource, />History</)
   assert.match(feedSource, /DECISION_ACTION_LABELS/)
   assert.match(sourceMapSource, /placeholder="Find a project"/)
   assert.match(sourceMapSource, /\['local', 'Changes'\]/)

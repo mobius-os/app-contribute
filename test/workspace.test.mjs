@@ -18,7 +18,7 @@ const project = {
 }
 const pull = (number = 7, extra = {}) => ({
   number, title: `Contribution ${number}`, headRefOid: HEAD,
-  baseRefName: 'main', baseRefOid: BASE, isDraft: false,
+  baseRefName: 'main', baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: BASE } }, isDraft: false,
   url: `https://github.com/owner/project/pull/${number}`,
   repository: { nameWithOwner: 'owner/project', viewerPermission: 'WRITE' },
   author: { login: 'owner' }, assignees: { nodes: [] }, ...extra,
@@ -63,32 +63,32 @@ async function rendered(t) {
   return renderer
 }
 
-test('review verdict belongs to the exact repository, PR, head, base commit and base branch', () => {
+test('a run belongs to the exact repository, PR, code and target branch, bound to the live branch tip', () => {
   const item = reviewItem({ repo: 'OWNER/PROJECT' })
   const reviewed = { id: 'exact-run', items: [item] }
-  assert.deepEqual(reviewForPull([reviewed], pull()), { run: reviewed, item })
+  assert.deepEqual(reviewForPull([reviewed], pull()), { run: reviewed, item, exactBase: true })
   for (const [field, value] of [
-    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)],
-    ['base_sha', 'c'.repeat(40)], ['base_ref', 'release'],
+    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)], ['base_ref', 'release'],
   ]) {
     assert.equal(reviewForPull([{ items: [reviewItem({ [field]: value })] }], pull()), null, field)
   }
   assert.equal(reviewForPull([], pull()), null)
 })
 
-test('a newer run for a changed target cannot replace the exact saved verdict', () => {
+test('a review on an older branch tip stays visible but is never presented as current', () => {
   const exact = { id: 'exact', items: [reviewItem()] }
-  const changed = { id: 'changed-target', items: [reviewItem({ base_sha: 'c'.repeat(40), state: 'merged' })] }
-  assert.equal(reviewForPull([changed, exact], pull()).run, exact)
-  assert.equal(reviewForPull([exact], pull(7, { baseRefOid: 'c'.repeat(40) })), null)
+  const older = { id: 'older-tip', items: [reviewItem({ base_sha: 'c'.repeat(40), state: 'merged' })] }
+  assert.equal(reviewForPull([older, exact], pull()).run, exact, 'the run on the current tip wins')
+  const moved = reviewForPull([exact], pull(7, { baseRef: { target: { oid: 'c'.repeat(40) } } }))
+  assert.equal(moved.run, exact)
+  assert.equal(moved.exactBase, false)
 })
 
 test('missing target identity never counts as an exact reviewed base', () => {
-  for (const [reviewField, pullField] of [['base_sha', 'baseRefOid'], ['base_ref', 'baseRefName']]) {
-    for (const missing of [undefined, null, '']) {
-      assert.equal(reviewForPull([{ items: [reviewItem({ [reviewField]: missing })] }],
-        pull(7, { [pullField]: missing })), null, `${reviewField}: ${String(missing)}`)
-    }
+  for (const missing of [undefined, null, '']) {
+    assert.equal(reviewForPull([{ items: [reviewItem({ base_ref: missing })] }], pull(7, { baseRefName: missing })), null)
+    assert.equal(reviewForPull([{ items: [reviewItem({ base_sha: missing })] }], pull()).exactBase, false)
+    assert.equal(reviewForPull([{ items: [reviewItem()] }], pull(7, { baseRef: missing })).exactBase, false)
   }
 })
 
@@ -147,9 +147,9 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 local file/)
-  assert.match(html, /Private until you prepare and approve sharing/)
-  assert.match(html, /Review changed files/)
+  assert.match(html, /1 changed file/)
+  assert.match(html, /Local and upstream changes/)
+  assert.match(html, /co-position-inspect/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
@@ -305,10 +305,10 @@ test('SSR selecting a focused contribution retains the project inventory and his
   })
   for (const selectedId of ['', privateWork.id, 'task:pulls', 'task:review']) {
     const html = ui.render('ContributionRun', { run: current, selectedId }, { activeId: selectedId, host: null })
-    for (const label of ['Private work', 'Published work', 'Accepted work', 'Historical work']) {
+    for (const label of ['Private work', 'Published work', 'Accepted work']) {
       assert.match(html, new RegExp(label), `${label} remains listed for ${selectedId}`)
     }
-    assert.doesNotMatch(html, /This contribution moved/)
+    assert.doesNotMatch(html, /This contribution moved|Archived proposals|Historical work/)
   }
 })
 

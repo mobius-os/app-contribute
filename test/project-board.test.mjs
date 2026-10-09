@@ -22,7 +22,7 @@ test('project facts never equate published review work with accepted or only-loc
   const facts = projectBoardFacts({ ...project, contributions: [
     { status: 'prepared' }, { status: 'open' }, { status: 'draft' }, { status: 'merged' },
   ] })
-  assert.equal(facts.work, '2 files with local changes · 1 prepared · not shared · 2 in review')
+  assert.equal(facts.work, '2 files with local changes · 1 private proposal · 2 shared contributions')
   assert.equal(facts.shared, 'Last check found no shared updates')
   assert.doesNotMatch(facts.shared, /Up to date|latest|linear/)
 })
@@ -33,6 +33,12 @@ test('unknown comparison and installed baseline are not an online all-clear', ()
   assert.equal(projectBoardFacts({ ...project, sourceComparisonRequired: true }).shared, 'Check for shared updates')
   assert.equal(projectBoardFacts({ ...project, incomingFiles: 2 }).shared, 'Shared updates are available')
   assert.equal(projectBoardFacts({ ...project, conflictFiles: 1 }).shared, 'Shared update needs attention')
+})
+
+test('prepared PR revisions are not counted as unpublished new proposals',()=>{
+  const facts=projectBoardFacts({...project,contributions:[{status:'prepared',plan:{action:'pr_update'}},{status:'prepared',plan:{action:'pr'}},{status:'prepared',number:7,url:'https://github.com/owner/repo/pull/7'}]})
+  assert.match(facts.work,/1 private proposal · 2 prepared updates/)
+  assert.doesNotMatch(facts.work,/not shared|in review/)
 })
 
 test('semantic comparison outranks a behind commit count when reporting shared updates', () => {
@@ -102,7 +108,8 @@ test('project controls keep preparation and updating direct without a competing 
   const html = render(props)
   assert.match(html, /Actions for Contribute/)
   assert.match(html, /Prepare changes/)
-  assert.match(html, /Check for shared updates/)
+  assert.match(html, /Pull updates/)
+  assert.doesNotMatch(html, /Bring accepted changes here/)
   assert.doesNotMatch(html, /Prepare &amp; merge|Prepare all|Update all/)
   assert.doesNotMatch(html, /More actions|View reviews/)
   assert.match(html, /Follow through to merge/)
