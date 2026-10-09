@@ -96,3 +96,18 @@ test('PR files use canonical rendered diff, preserve LOC totals and missing patc
   assert.match(html, /binary or too large/)
   assert.match(html, /may omit or shorten large patches/)
 })
+
+for (const [additions, deletions, expected] of [
+  [2, null, 'Showing 1 changed file with 2 additions.'],
+  [null, 3, 'Showing 1 changed file with 3 deletions.'],
+  [null, null, 'Showing 1 changed file.'],
+  [0, 0, 'Showing 1 changed file with 0 additions and 0 deletions.'],
+]) {
+  test(`file summary preserves unknown counts (${additions}, ${deletions})`, async t => {
+    const html = await render(t, 'PullFiles', { data: { totals: { files: 1, additions, deletions }, files: [] } })
+    if (!html) return
+    assert.ok(html.includes(expected), html)
+    if (additions === null) assert.doesNotMatch(html, /[0-9]+ additions/)
+    if (deletions === null) assert.doesNotMatch(html, /[0-9]+ deletions/)
+  })
+}

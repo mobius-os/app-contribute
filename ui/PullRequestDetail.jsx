@@ -33,8 +33,12 @@ export function PullFileTotals({ totals, label = 'Total change' }) {
 }
 export function PullFiles({ data }) {
   const totals = data?.totals
+  const counts = [
+    Number.isInteger(totals?.additions) ? `${totals.additions} additions` : null,
+    Number.isInteger(totals?.deletions) ? `${totals.deletions} deletions` : null,
+  ].filter(Boolean).join(' and ')
   return <>
-    {Number.isInteger(totals?.files) ? <p className="co-pr-note">Showing {totals.files} changed {totals.files === 1 ? 'file' : 'files'}{Number.isInteger(totals.additions) ? ` with ${totals.additions} additions and ${totals.deletions ?? 0} deletions` : ''}{data?.page > 1 ? ` · page ${data.page}` : ''}. GitHub may omit or shorten large patches.</p> : null}
+    {Number.isInteger(totals?.files) ? <p className="co-pr-note">Showing {totals.files} changed {totals.files === 1 ? 'file' : 'files'}{counts ? ` with ${counts}` : ''}{data?.page > 1 ? ` · page ${data.page}` : ''}. GitHub may omit or shorten large patches.</p> : null}
     {(data?.files || []).map(file => <details key={file.filename} className="co-file-disclosure"><summary>{file.filename} <span className="co-detail-stats">{file.status} · +{file.additions} −{file.deletions}</span></summary>{file.previous_filename ? <p>Previously {file.previous_filename}</p> : null}{file.patch ? <DiffView file={pullFileDiff(file)} /> : <p>No text patch is available for this file; it may be binary or too large.</p>}</details>)}
     {!data?.files?.length ? <p>No changed files returned on this page.</p> : null}
     {data?.capped ? <p>GitHub’s 3,000-file limit has been reached. More files may be omitted; use the review conversation for the full source.</p> : null}
