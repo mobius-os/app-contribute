@@ -5,9 +5,9 @@ description: "Contribute app's project-collaboration skill. Read before ANY publ
 # Contributing upstream
 
 It moves local project changes into private review, public collaboration, and
-safe local reconciliation. The constitution's end-of-task checklist routes you
-here when a change would help other users; "share this" or "report that bug
-upstream" lands here too. The cycle is project-shaped: a project adapter
+safe local reconciliation. Read it when the partner asks to prepare, publish,
+or work on a contribution, not merely because a local change could be shared.
+The cycle is project-shaped: a project adapter
 supplies the facts that differ between targets (where source lives, what is
 shared, how publication and local updates work), and this core applies to every
 target.
@@ -24,23 +24,35 @@ every file.
 
 Three rules never bend. Every mode file assumes them and points back here.
 
-1. **No public action without a per-action yes.** Fork, push, PR, issue,
-   comment — each needs the partner's explicit yes for THAT action. Not a
-   standing preference, not "they approved one last week", not an inferred
-   "they'd want this". An explicit, unambiguous instruction in chat is a valid
-   yes when it names the exact current action, or clearly accepts a
-   just-enumerated immutable set of actions. The partner does not need to repeat
-   that same approval in Contribute. A Contribute control is a convenient
-   durable approval surface, not the only valid one. If the target, diff, head,
-   or proposed public text changes, the old yes no longer applies: show the new
-   exact action and ask again.
+1. **No public action without explicit scoped approval.** An explicit,
+   unambiguous instruction in chat is a valid yes for the named work. For
+   example, "create a PR for this fix" authorizes its private preparation,
+   necessary fork and push, and PR creation with a truthful source-only title
+   and description. "Update this PR" authorizes the reviewed in-scope update.
+   The partner does not need to repeat that same approval in Contribute or
+   approve each mechanical step. Neither instruction authorizes merging;
+   merging needs its own explicit instruction or approval. A changed commit
+   requires fresh review, not automatically a new owner decision. Ask again
+   for a different target, materially changed scope, risk, or public message,
+   or when the owner limited approval to a pinned version. Never infer
+   approval from silence, standing preferences, or another agent's request.
 2. **Only source code leaves the instance, and only after you re-read the FULL
    diff.** The allowlist below is exhaustive — never memory, storage, db, logs,
    creds, chat, or personal data. Re-read every changed line before proposing;
    the `body_draft` and the `.diff` are exactly what goes public.
 3. **Never submit stale work.** If the staged plan's `base_sha`/`head_sha` or
-   canonical branch diff has drifted since the partner reviewed it, do NOT
-   submit — re-stage and tell them what changed.
+   canonical branch diff has drifted, do NOT submit — re-stage and re-review
+   the current version. Use the same guarded publication path; review and
+   freshness checks remain mandatory regardless of the approval surface.
+
+## The common path
+
+Most requests are one PR, new or an update to an open one. After the adapter:
+check related work ([prepare.md](prepare.md); prefer updating the owner's own
+open PR over a duplicate), build the locked review worktree on the fresh base
+or the PR head ([branch.md](branch.md)), run the focused tests, review and
+stage with one verdict ([ledger.md](ledger.md)), then publish once approved:
+**Send PR** or `update-existing` ([publish.md](publish.md)).
 
 ## Which file to read
 
@@ -83,7 +95,7 @@ legacy `submission_mode: "mobius-bot"` marker to a record.
   github remote outside the guarded Send path.
 - `connected: false` — contributions can still be prepared and reviewed
   privately, but sending requires a connected GitHub account. Nothing goes
-  public until the partner approves the exact record.
+  public without the partner's scoped approval (Hard stop #1).
 - `gh_version: null` — `gh` is unavailable. Tell the partner a platform update
   is needed; don't improvise around it.
 
@@ -120,24 +132,15 @@ Pressing **Prepare to submit** on the card or in Changes is an explicit
 private-preparation request; dismissing it only hides that revision of the
 suggestion and keeps the work in Changes and Contribute.
 
-**One decision, no duplicate approval.** A live Contribute/prepare block is one
-owner decision surface for the exact action it represents. Apart from the Goal
-handoff below, never also call `request_user_input` / `AskUserQuestion` for
-**Prepare**, **Review / Fix and review**, **Send / Update PR**, or another
-action already shown by that block, and do not paraphrase the same choice into
-chat merely to solicit a second answer. But if the partner voluntarily gives an
-explicit, unambiguous chat instruction for that exact current action—or replies
-"send all of those" to a just-enumerated immutable set—that is the owner
-decision. Proceed without requiring the matching Contribute press. Run the same
-exact-head, full-diff, identity, and freshness checks and use the documented
-guarded submission path; chat approval changes the approval surface, not the
-safety preflight.
-
-**A Goal waiting on that decision** still needs a handoff; the block neither
-owns the Goal nor resumes the chat. Claim the action's canonical work key (for
-example `github:<owner/repo>:pr:<number>:<head_sha>:update`), then end with
-exactly one `request_approval` card for that record and head under the same
-key. Approving it is a valid yes. Never re-ask for the same head.
+**One decision, no duplicate approval.** Proceed without requiring the matching
+Contribute press when the owner's instruction already covers the action. Run
+the same exact-head, full-diff, identity, and freshness checks; chat approval
+changes the approval surface, not the safety preflight. An open Goal does not
+create a new permission requirement. If permission is genuinely missing, use
+one decision surface: a saved approval card when this chat needs to resume, or
+the existing Contribute control when its workflow owns the continuation. Do not
+ask for the same decision on both surfaces. A saved approval card claims its
+work key itself; do not claim it separately first.
 
 If the owner presses the block, let that action own its complete batch until
 every item settles; in-flight siblings stay visibly in flight. A chat-scoped
@@ -146,43 +149,26 @@ source chat. Contribute may start an app-owned scoped conversation only for
 genuinely global work that has no source chat. Background Delegation children return evidence or independent edits to
 their parent; they do not become owner-facing contribution homes.
 
-Hard stop #1 is still the gate. In practice:
+Interpret the request in context, using Hard stop #1:
 
-1. If the partner explicitly asks to prepare a contribution, prepare it
-   privately and stop at the Contribute review record. If they ask whether a
-   change *should* be contributed, answer the investigative question first and
-   do not prepare anything until they explicitly ask. If they ask to
-   "contribute" or "share" without distinguishing preparation from publication,
-   treat that as approval for routine private preparation only; the resulting
-   exact record still needs later explicit public approval, either in chat or
-   through its Contribute control.
-2. Wait and classify the response:
-   - **Prepare privately** is approval for preparation only. Prepare everything
-     needed for review and direct submission, then stop.
-   - **Refine first**, or actionable free-text feedback about the candidate,
-     defers the contribution decision; it does not decline it. Do not prepare
-     yet. Apply the feedback within the approved scope, verify the revised
-     change, then wait for a fresh explicit preparation request. If the
-     partner selected **Refine first** without saying what to change, ask for
-     that open-ended feedback in plain chat.
-   - **Not now** declines preparation. Leave the change local and do not
-     re-offer the same version.
-3. An unanswered, timed-out, disabled, or empty-response card stops the flow
-   without preparing. Silence is neither approval nor refinement, so do not
-   immediately re-ask or treat `{}` / no selection as a yes.
-
-Anything except an explicit private-preparation request or **Prepare privately**
-choice remains non-approval. Refinement feedback changes when the question is
-asked again, never what the agent may publish. Preparing is still private: a
-local branch/commit and a Contribute record, not a fork, push, PR, issue, or
-comment. The next public step happens only after the partner explicitly
-approves the exact current action in chat or uses the matching Contribute
-control. Chat approval does not waive the record's guarded freshness and
-exact-diff checks, and it never requires the partner to visit Contribute just to
-say yes again.
+- **Prepare privately** means prepare and review, then stop before publication.
+  Preparing is still private: a local branch/commit and Contribute record, not
+  a fork, push, PR, issue, or comment.
+- **Create/send a PR for this work** means prepare, review, publish, and verify
+  that PR, not just prepare it for another approval. Ordinary read-only checks
+  and bounded CI monitoring are verification, not another permission request;
+  use a durable Wait if this chat owes a result after the turn. Do not invent
+  indefinite monitoring after the requested outcome is complete.
+- **Should this be contributed?** is a question, not publication authority.
+  If "share" or another request leaves the target or public scope genuinely
+  ambiguous, finish safe private preparation and ask only for that decision.
+- **Refine first** authorizes the requested private refinement, not publication.
+  Ask for missing feedback through a saved question only if it is needed.
+- **Not now** declines the proposed action. Do not re-offer the same version.
+  An unanswered, preselected, or empty card is not approval.
 
 ## Contribute not installed
 
-No staging, no review card, no tracking — but Hard stop #1 still holds (a plain
-yes in chat gates each action). Recommend installing it from the App Store
-before contributing; go app-less only if the partner insists.
+No staging, no review card, no tracking — but Hard stop #1 still holds.
+Recommend installing it from the App Store before contributing; go app-less
+only if the partner insists.

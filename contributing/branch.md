@@ -7,7 +7,7 @@ contract live in [prepare.md](prepare.md); ledger writes
 in [ledger.md](ledger.md). The target's adapter names
 the working source, accepted base, and any target-specific recipe.
 
-Run these during preparation, after the partner agrees to stage a PR for review.
+Run these during preparation authorized by a prepare, publish, or update request.
 Do not fork, push, or create a PR here.
 
 ## Cleanup ownership
@@ -57,7 +57,7 @@ files remain an owner decision—do not grow a hidden ignore mechanism.
 ## Keep exploration out of durable staging
 
 `/data/contrib` is the final review boundary, not a general Git workspace. Until
-the partner has approved **Prepare privately** and one exact review + record id
+preparation is authorized and one exact review + record id
 have been chosen, keep review clones, rebase trials, integration carriers,
 builds, and candidate fixes under the current turn's `$TMPDIR`. That scratch is
 owned by the chat run and swept after it becomes idle.
@@ -117,8 +117,9 @@ cleanup verifies the reciprocal Git pointer and releases that exact lock.
 
 When a new owner-authored change belongs on a PR that is already open, update
 that contribution's existing record instead of opening a duplicate or pushing
-around Contribute. This is still a private preparation until the owner
-explicitly approves the exact update in chat or presses **Update PR**.
+around Contribute. Preparation stays private; publish only when Hard stop #1
+covers the update. A clear request to update this PR already supplies that
+authority within its scope.
 
 1. Build on the public pushed head: the review checkout's branch must contain
    the PR's current head. Never rebase a published branch. To clear a merge
@@ -141,9 +142,9 @@ explicitly approves the exact update in chat or presses **Update PR**.
    action regardless of where the owner approved it. An ordinary PR does not
    require its changes to be installed locally. A reviewed app-connection
    promise still requires its installed-source proof.
-4. Stop for explicit public approval. **Update PR** in Contribute is one
-   approval surface; an explicit, unambiguous chat instruction approving this
-   same record and exact new head is equally valid. Do not require both. The
+4. Apply Hard stop #1 to the freshly reviewed update; proceed if it is already
+   authorized, otherwise ask once. **Update PR** is a version-pinned approval
+   surface, not an extra step after an explicit in-scope update instruction. The
    guarded update route rechecks the live PR identity and requires the public
    title and body to exactly match `plan.title` and `plan.body_draft` before any
    branch mutation. It does not PATCH the pull request's title or body: GitHub
