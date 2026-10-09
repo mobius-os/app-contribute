@@ -9,7 +9,8 @@ async function render(t, conn) {
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { GithubPullsUnavailable } from './index.jsx'
-    export const render = conn => renderToStaticMarkup(React.createElement(GithubPullsUnavailable, { conn, onRetry: () => {} }))
+    import { TaskContext } from './ui/TaskPane.jsx'
+    export const render = conn => renderToStaticMarkup(React.createElement(TaskContext.Provider, { value: { activeId: '' } }, React.createElement(GithubPullsUnavailable, { conn, onRetry: () => {} })))
   `)
   return (await renderer).render(conn)
 }

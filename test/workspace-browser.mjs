@@ -31,7 +31,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
-import ContributeApp from './index.jsx'
+import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
 
 const HEAD = 'a'.repeat(40), SECOND_HEAD = 'c'.repeat(40), BASE = 'b'.repeat(40)
 const projects = [
@@ -56,7 +56,7 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [] }
+const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], githubRetries: 0 }
 const values = new Map(), navigation = [], reviewRuns = []
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
@@ -196,6 +196,13 @@ async function loadProjectDiff(project) {
 }
 function Fixture() {
   const [refreshKey, setRefreshKey] = useState(0)
+  const [conn, setConn] = useState({state:'connected',login:'owner'})
+  window.setConnectionFixture = setConn
+  async function retryGithub() {
+    calls.githubRetries++
+    await new Promise(resolve => { window.finishGithubRetry = resolve })
+    setConn({state:'connected',login:'owner'})
+  }
   const [records, setRecords] = useState([prepared, {...prepared,id:'fixture-dismissed',title:'Dismissed local proposal',summary:'Dismissed local proposal',status:'abandoned',plan:{...prepared.plan,title:'Dismissed local proposal'}}])
   const [selectionId, setSelectionId] = useState(null)
   const [allProjects, setAllProjects] = useState(projects)
@@ -227,17 +234,17 @@ function Fixture() {
   }
   async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
-    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={{ state: 'connected', login: 'owner' }}
+    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
       repositoryPicker={<RepositoryPicker token="fixture-only" connected onAdded={repositoryAdded} />}
-      renderActivity={(project, navigation) => project ? <ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
+      renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
-          conn={{ state: 'connected', login: 'owner' }} records={records.filter(record => record.repo === project.canonical_repo)} />}
-      />}</ProjectControls> : null} />}
+          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} />}
+      />}</ProjectControls></> : null} />}
   </main></div>
 }
 const root = createRoot(document.getElementById('root'))
@@ -679,6 +686,109 @@ window.runWorkspaceChecks = async () => {
       ensure(action.draft.includes('update/apply approval') && action.draft.includes('uncommitted edits') && action.draft.includes('does not authorize preparing or publishing'),'Safe apply/overlay/publication boundaries missing')
       ensure(mutationRequests().length===before,'Update handoff mutated GitHub')
       await chooseProject('Fixture project')
+    })
+    const savedRun = (id, number, head, state) => ({id,mode:'review',state:'complete',chat_id:id+'-chat',
+      items:[{repo:'owner/project',number,head_sha:head,base_ref:'main',base_sha:BASE,state,summary:'Saved findings for '+id}]})
+    const historyEntry = id => query('[data-review-run="'+id+'"]')
+    const historyFold = () => query('.co-review-history')
+    async function openHistory() {
+      await until(()=>historyFold(),'Project review conversations are undiscoverable')
+      if(!historyFold().open) await click(historyFold().querySelector('summary'))
+    }
+    async function openSavedRun(id, expected) {
+      await openHistory()
+      const opener=historyEntry(id)
+      ensure(opener && opener.getClientRects().length,'Saved run has no visible opener: '+id)
+      opener.focus(); await nativeSpace()
+      const pane=()=>query('[data-task="task:run:'+id+'"]')
+      await until(()=>pane(),'Saved run did not open: '+id)
+      ensure(text(pane()).includes(expected),'Saved run lost its version context: '+text(pane()))
+      const conversation=button('Answer in review conversation',pane()) || button('Open review conversation',pane())
+      // This hermetic page is top-level. Mock only the direct shell boundary,
+      // retaining the component's actual opaque-frame postMessage path.
+      const parentDescriptor=Object.getOwnPropertyDescriptor(window,'parent')
+      Object.defineProperty(window,'parent',{configurable:true,value:{postMessage(message,target){
+        ensure(message.type==='moebius:open-chat' && target==='*','Wrong shell conversation command')
+        calls.opened.push(message.chatId)
+      }}})
+      try { await click(conversation) } finally { Object.defineProperty(window,'parent',parentDescriptor) }
+      ensure(calls.opened.at(-1)===id+'-chat','Opened another review conversation')
+      pane().focus(); await nativeEscape()
+      await until(()=>!pane(),'Saved run did not close with Escape')
+      ensure(document.activeElement===opener,'Saved run did not restore focus to its history entry')
+    }
+    await check('project review conversations retain older, needs-you and unknown outcomes without treating them as current verdicts', async () => {
+      await inventory()
+      const before=mutationRequests().length, starts=calls.starts.length
+      reviewRuns.unshift(savedRun('saved-current',7,HEAD,'all_clear'),savedRun('saved-needs',8,SECOND_HEAD,'needs_you'),
+        savedRun('saved-unknown',7,'d'.repeat(40),'merge_unknown'),savedRun('saved-older',7,'d'.repeat(40),'all_clear'),
+        savedRun('saved-shadowed',7,HEAD,'needs_you'),
+        {...savedRun('saved-base',7,HEAD,'all_clear'),items:[{...savedRun('saved-base',7,HEAD,'all_clear').items[0],base_sha:'f'.repeat(40)}]},
+        {...savedRun('another-project',7,HEAD,'needs_you'),items:[{repo:'owner/other',number:7,state:'needs_you'}]})
+      await click(query('[aria-label="Refresh project status"]'))
+      await openHistory()
+      ensure(!historyEntry('another-project'),'Another project leaked into review history')
+      ensure(text(historyEntry('saved-needs')).includes('Needs you'),'Saved question is not discoverable')
+      ensure(text(historyEntry('saved-unknown')).includes('Outcome needs checking'),'Unknown merge outcome is not discoverable')
+      ensure(text(historyEntry('saved-older')).includes('Older PR version'),'Older clear verdict lacks stale context')
+      await openSavedRun('saved-needs','Matches loaded PR version')
+      await openSavedRun('saved-unknown','Older PR version')
+      await openSavedRun('saved-older','Older PR version')
+      await openSavedRun('saved-shadowed','Matches loaded PR version')
+      await openSavedRun('saved-base','Older base version')
+      ensure(mutationRequests().length===before && calls.starts.length===starts,'Inspecting saved reviews started or mutated work')
+    })
+    await check('saved reviews stay reachable during loading and failure without claiming a fresh version check', async () => {
+      const before=mutationRequests().length
+      window.holdPulls=true; window.failPulls=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>window.releasePulls && text(historyEntry('saved-current')).includes('Current version not checked'),'Loading inventory reused a fresh verdict')
+      await openSavedRun('saved-current','Current version not checked')
+      window.holdPulls=false; window.releasePulls(); window.releasePulls=null
+      await until(()=>text(historyEntry('saved-current')).includes('Matches loaded PR version'),'Refresh did not finish')
+      window.failPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(query('.co-public-work')).includes('Couldn’t load pull requests'),'Inventory failure missing')
+      await openSavedRun('saved-needs','Current version not checked')
+      window.failPulls=false
+      await click(button('Try again',query('.co-public-work')))
+      await until(()=>text(historyEntry('saved-needs')).includes('Matches loaded PR version'),'Inventory retry did not recover')
+      ensure(mutationRequests().length===before,'Inspecting review recovery mutated work')
+    })
+    await check('saved review conversations survive head changes, search filtering, closed PRs and project reopen', async () => {
+      const before=mutationRequests().length, starts=calls.starts.length
+      window.fixtureChangedHead=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(historyEntry('saved-needs')).includes('Older PR version'),'Changed-head review was hidden or shown as current')
+      await fill(query('[aria-label="Find a pull request"]'),'no matching pull')
+      await openSavedRun('saved-needs','Older PR version')
+      await fill(query('[aria-label="Find a pull request"]'),'')
+      window.emptyPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>!query('.co-pr-row'),'Closed PR fixture still appears open')
+      await chooseProject('Other project'); await chooseProject('Fixture project')
+      await openSavedRun('saved-needs','Not in the loaded open PRs')
+      await openSavedRun('saved-unknown','Not in the loaded open PRs')
+      await openSavedRun('saved-older','Not in the loaded open PRs')
+      ensure(mutationRequests().length===before && calls.starts.length===starts,'Reopening review history restarted work')
+      window.emptyPulls=false; window.fixtureChangedHead=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>query('.co-pr-row'),'PR inventory did not recover')
+    })
+    await check('unknown GitHub status exposes inline retry without opening a task and prevents duplicate checks', async () => {
+      await inventory()
+      const before=mutationRequests().length
+      window.setConnectionFixture({state:'unknown',message:'Fixture GitHub check timed out.'})
+      await until(()=>button('Check GitHub again'),'Unknown GitHub retry is hidden behind an unopened task')
+      ensure(button('Check GitHub again').getClientRects().length,'GitHub retry is not visible')
+      ensure(text(query('.co-workspace')).includes('Your connection is unchanged'),'Unknown status implies disconnected account')
+      await click(button('Check GitHub again'))
+      await until(()=>button('Checking…')?.disabled && window.finishGithubRetry,'Retry did not expose checking state')
+      button('Checking…').click()
+      ensure(calls.githubRetries===1,'Disabled retry repeated the check')
+      window.finishGithubRetry()
+      await until(()=>!button('Checking…') && query('.co-pr-row'),'Retry did not recover the PR list')
+      ensure(mutationRequests().length===before,'Connection retry mutated public work')
     })
     await check('host Back leaves the project once; inline details add no hidden back steps', async () => {
       await inventory(); await click(query('.co-pr-open'))

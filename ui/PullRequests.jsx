@@ -233,11 +233,21 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   // A run opens beside its PR when it covers one; batches open under the header.
   const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerCase()}#${run.items[0].number}` : ''
   const runTitle = run => run.mode === 'review_merge' ? 'Review & merge' : 'Private review'
+  // Saved conversations outlive the open-PR inventory. Its current snapshot
+  // provides context, never new approval or a fresh verdict for old findings.
+  function savedVersion(item) {
+    if (data.loading || data.error) return 'Current version not checked'
+    const pr = data.pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)
+    if (!pr) return 'Not in the loaded open PRs'
+    if (item.head_sha !== pr.headRefOid || item.base_ref !== pr.baseRefName) return 'Older PR version'
+    if (!item.base_sha || !baseTip(pr)) return 'Current base not checked'
+    return item.base_sha === baseTip(pr) ? 'Matches loaded PR version' : 'Older base version'
+  }
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>
       <Icon name="review" size={23} /><h3>{runTitle(run)}</h3>
-      <p>{STATE_NAMES[run.state] || run.state}</p>{run.summary ? <p>{run.summary}</p> : null}
-      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {STATE_NAMES[item.state] || item.state}</strong>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}</div>)}</div>
-      {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{run.items?.some(item => ['needs_you', 'failed'].includes(item.state)) ? 'Answer in review conversation' : 'Open review conversation'}</button> : null}
+      <p>Recorded status: {STATE_NAMES[run.state] || run.state}</p>{run.summary ? <p>{run.summary}</p> : null}
+      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {STATE_NAMES[item.state] || item.state}</strong><p className="co-pr-note">{savedVersion(item)} · Recorded version <code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code>. Saved findings are not a new approval.</p>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}</div>)}</div>
+      {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{run.items?.some(item => ['needs_you', 'failed', 'merge_unknown'].includes(item.state)) ? 'Answer in review conversation' : 'Open review conversation'}</button> : null}
       {run.items?.some(item => item.state === 'merged') && project.available && project.kind !== 'external' ? <button className="co-btn co-task-secondary" onClick={() => task?.open('task:update')}>Pull updates</button> : null}
       {run.items?.some(item => item.state === 'queued') ? <p>In the merge queue, not merged yet. The review conversation follows its outcome.</p> : null}
     </TaskPane>
@@ -306,6 +316,14 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     })}</div>
     </div>
     {data.hasNextPage ? <button className="co-btn" disabled={data.loading} onClick={() => load(data.endCursor)}>Load more PRs</button> : null}
+    {relevantRuns.length ? <details className="co-run-fold co-review-history">
+      <summary><span>Review conversations</span><b>{relevantRuns.length}</b><Icon name="chevron" size={14} /></summary>
+      <p className="co-pr-note">Saved findings apply only to their recorded versions. Open a conversation to answer questions or check an unresolved outcome.</p>
+      <div>{relevantRuns.map(run => <button key={run.id} type="button" className="co-review-history-entry" data-review-run={run.id} onClick={() => task?.open(`task:run:${run.id}`)}>
+        <strong>{runTitle(run)}</strong>
+        {run.items?.map(item => <span key={`${item.repo}:${item.number}`}>{item.repo} #{item.number} · Recorded: {STATE_NAMES[item.state] || item.state}<small>{savedVersion(item)}</small></span>)}
+      </button>)}</div>
+    </details> : null}
 
 
   </section>

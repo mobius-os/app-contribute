@@ -71,7 +71,6 @@ import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
-import { TaskPane } from './ui/TaskPane.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { discoverRepositories, mayMerge } from './collaboration.js'
 
@@ -130,14 +129,14 @@ function Header({ appId, fromCache, checking, onBack, children }) {
 export function GithubPullsUnavailable({ conn, onRetry }) {
   const [retrying, setRetrying] = useState(false)
   if (conn?.state === 'disconnected') {
-    return <TaskPane id="task:pulls"><h3>Pull requests</h3><p>Go to Möbius Settings → Accounts and connect GitHub to see this project’s pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane>
+    return <section className="co-alert" aria-label="GitHub connection"><h3>Pull requests</h3><p>Go to Möbius Settings → Accounts and connect GitHub to see this project’s pull requests, assign work, and run reviews. Your saved contributions remain here.</p></section>
   }
   if (conn?.state !== 'unknown') return null
-  return <TaskPane id="task:pulls"><h3>Pull requests</h3><p>{conn.message || 'Could not reach GitHub.'} Your connection is unchanged.</p>
+  return <section className="co-alert" aria-label="GitHub connection"><h3>Pull requests</h3><p>{conn.message || 'Could not reach GitHub.'} Your connection is unchanged.</p>
     <button type="button" className="co-btn" disabled={retrying} onClick={async () => {
       setRetrying(true)
       try { await onRetry?.() } finally { setRetrying(false) }
-    }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></TaskPane>
+    }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></section>
 }
 
 export default function ContributeApp({ appId, token }) {

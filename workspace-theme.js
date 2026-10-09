@@ -129,6 +129,10 @@ export const WORKSPACE_CSS = `
 .co-workspace ::selection { color:var(--text); background:var(--accent-dim); }
 .co-workspace :is(input,textarea) { caret-color:var(--accent); }
 .co-page,.co-person-list { scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.co-review-history > p { padding:0 12px; }
+.co-review-history-entry { display:block; box-sizing:border-box; width:100%; min-height:44px; padding:12px; border:0; border-bottom:1px solid var(--border); background:none; color:inherit; font:inherit; text-align:left; overflow-wrap:anywhere; cursor:pointer; }
+.co-review-history-entry > span,.co-review-history-entry small { display:block; margin-top:4px; }
+.co-review-history-entry small { color:var(--muted); }
 .co-task-pulls > div { padding:14px 0; border-bottom:1px solid var(--border); }
 .co-task-pulls strong { font-size:16px; display:block; }
 .co-task-pulls .co-markdown { margin-top:8px; font-size:15px; }
