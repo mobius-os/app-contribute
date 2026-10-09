@@ -66,6 +66,23 @@ const pause=()=>new Promise(r=>setTimeout(r,80));
 const approval=()=>!!document.querySelector('.co-run-approval');
 async function begin(mode){root.render(<App key={mode} mode={mode}/>);await pause();await wait(()=>!!sendOffer(),mode+' offer');sendOffer().click();await wait(approval,mode+' approval');}
 window.runWorkspaceChecks=async()=>{const reports=[];try{
+
+ for(const action of ['pr','pr_update']) {
+  root.render(<App key={'normalization-'+action} mode='pending'/>);await pause();await wait(()=>!!sendOffer(),'normalization offer');
+  controls.update('a',{...(action==='pr_update'?{number:7,url:'https://github.com/team/repo/pull/7'}:{}),plan:{...controls.records[0].plan,action,base_branch:'main',base_sha:'b'.repeat(40)}});await pause();
+  const frozen=controls.records[0];sendOffer().click();await wait(approval,'normalization approval');sendConfirmation().click();
+  await wait(()=>document.body.innerText.includes('Checking result'),'normalization pending');
+  const normalized='d'.repeat(40);
+  const published={...canonical(frozen),number:7,url:'https://github.com/team/repo/pull/7',head_sha:normalized,last_submit_push_sha:normalized,
+   plan:{...frozen.plan,head_sha:normalized,attribution_normalized_from:sha}};
+  for(const patch of [{plan:{...published.plan,attribution_normalized_from:undefined}},{plan:{...published.plan,attribution_normalized_from:'e'.repeat(40)}},{last_submit_push_sha:sha},{head_sha:undefined},{plan:{...published.plan,base_branch:'release'}}]) {
+   controls.update('a',{...published,...patch});await pause();
+   check(!button('Done')&&document.body.innerText.includes('Checking result'),'incomplete or unrelated normalization settled '+action);
+  }
+  controls.update('a',published);await wait(()=>!!button('Done'),'valid normalization settlement');
+  check(document.body.innerText.includes('Sent to GitHub')&&controls.calls.join(',')==='a','normalization did not settle exactly once');
+  reports.push({case:'normalized-'+action,calls:[...controls.calls]});root.render(null);await pause();
+ }
  for(const mode of ['pending','unknown','success-drift-preflight']) {
   root.render(<App key={'success-drift-'+mode} mode={mode}/>);await pause();await wait(()=>!!sendOffer(),'drift offer');
   controls.update('a',{plan:{...controls.records[0].plan,base_branch:'release',base_sha:'b'.repeat(40)}});await pause();
@@ -95,7 +112,7 @@ window.runWorkspaceChecks=async()=>{const reports=[];try{
   controls.update('b',{...canonical(member),number:2,url:'https://github.com/team/repo/pull/2',plan:{...member.plan,stack:{...member.plan.stack,[key]:value}}});await pause();
   check(!button('Done')&&document.querySelectorAll('.co-run-approval-list li')[1]?.innerText.includes('Checking result'),'other stack publication settled member '+key);
  }
- controls.update('b',{...canonical(member),number:2,url:'https://github.com/team/repo/pull/2',last_submit_base_branch:'stack/chain/1'});
+ controls.update('b',{...canonical(member),number:2,url:'https://github.com/team/repo/pull/2',last_submit_base_branch:'stack/chain/1',head_sha:'d'.repeat(40),last_submit_push_sha:'d'.repeat(40),plan:{...member.plan,head_sha:'d'.repeat(40),attribution_normalized_from:sha}});
  await wait(()=>!!button('Done'),'exact stack identity settlement');check(controls.calls.join(',')==='stack:a,b','stack drift replayed publication');
  reports.push({case:'success-stack-drift',calls:[...controls.calls]});root.render(null);await pause();
  for(const mode of ['preflight-send','preflight-ready','preflight-stack']) {

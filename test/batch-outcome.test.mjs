@@ -219,3 +219,34 @@ test('canonical public outcomes require the same frozen publication intent in ev
   assert.equal(api.canonicalBatchRecordOutcome(fallback,{...published,plan:fallback.plan,branch:'fix/a'},mode),'done')
  }
 })
+
+
+test('backend attribution normalization settles only its exact published head and unchanged intent',async t=>{
+ const api=await load(t);if(!api)return
+ const normalized='d'.repeat(40)
+ for(const source of [phase,stacked]) for(const action of ['pr','pr_update']) {
+  const frozen={...source,plan:{...source.plan,action},...(action==='pr_update'?{number:1,url:opened.url}:{})}
+  const published={...frozen,status:'open',number:1,url:opened.url,head_sha:normalized,
+   plan:{...frozen.plan,head_sha:normalized,attribution_normalized_from:frozen.plan.head_sha},last_submit_push_sha:normalized}
+  for(const outcome of [{pending:true},{uncertain:true},{ok:true},{}])
+   assert.equal(api.batchRecordOutcome(frozen,published,outcome,'send'),'done')
+  const invalid=[
+   {...published,plan:{...published.plan,attribution_normalized_from:undefined}},
+   {...published,plan:{...published.plan,attribution_normalized_from:'e'.repeat(40)}},
+   {...published,head_sha:undefined}, {...published,head_sha:'e'.repeat(40)},
+   {...published,last_submit_push_sha:undefined}, {...published,last_submit_push_sha:frozen.plan.head_sha},
+   {...published,head_sha:'bad',last_submit_push_sha:'bad',plan:{...published.plan,head_sha:'bad'}},
+   {...published,status:'submitting'}, {...published,status:'prepared'},
+  ]
+  for(const key of ['action','branch','base_branch','base_sha'])invalid.push({...published,plan:{...published.plan,[key]:'other'}})
+  if(source===stacked)for(const key of ['id','position','total','base_branch','parent_record_id'])
+   invalid.push({...published,plan:{...published.plan,stack:{...published.plan.stack,[key]:'other'}}})
+  for(const current of invalid) {
+   assert.equal(api.canonicalBatchRecordOutcome(frozen,current,'send'),null,JSON.stringify(current))
+   for(const outcome of [{ok:true},{pending:true},{uncertain:true},{}])
+    assert.equal(api.batchRecordOutcome(frozen,current,outcome,'send'),'checking')
+  }
+  assert.equal(api.batchRecordOutcome(frozen,frozen,{ok:true},'send'),'checking','acknowledgement alone is not publication')
+  assert.equal(api.canonicalBatchRecordOutcome({...frozen,status:'draft',number:1,url:opened.url},published,'ready'),null,'requesting review cannot normalize a head')
+ }
+})

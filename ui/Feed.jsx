@@ -142,7 +142,20 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
   if (!current || current.id !== record.id) return null
   const repo = record.plan?.repo || record.repo
   if ((current.plan?.repo || current.repo) !== repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo || '')) return null
-  if (record.plan?.head_sha && current.plan?.head_sha !== record.plan.head_sha) return null
+  const frozenHead = record.plan?.head_sha
+  const publishedHead = current.plan?.head_sha
+  const exactHead = !frozenHead || publishedHead === frozenHead
+  // Fork publication may normalize author metadata after validating the same
+  // tree and reviewed diff. Its canonical patch names the original head; only
+  // a matching published receipt can settle that transition, not the marker
+  // or a handler acknowledgement alone. Review requests never rewrite heads.
+  const normalizedPublication = mode === 'send'
+    && /^[a-f0-9]{40}$/i.test(frozenHead || '')
+    && /^[a-f0-9]{40}$/i.test(publishedHead || '')
+    && current.plan?.attribution_normalized_from === frozenHead
+    && current.head_sha === publishedHead
+    && current.last_submit_push_sha === publishedHead
+  if (!exactHead && !normalizedPublication) return null
   const number = Number(current.number)
   const publicIdentity = Number.isSafeInteger(number) && number > 0
     && current.url === `https://github.com/${repo}/pull/${number}`
@@ -185,14 +198,14 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
     && ['action', 'branch', 'base_branch', 'base_sha'].every(
       key => current.plan?.[key] === record.plan?.[key],
     )
-  if (failedStatus && exactPublicationIntent && typeof error === 'string' && error.trim()
+  if (failedStatus && exactHead && exactPublicationIntent && typeof error === 'string' && error.trim()
     && /^[a-f0-9]{40}$/i.test(record.plan?.head_sha || '')
     && after > before && (newDiagnostic || newSubmitAttempt)
     && !String(code || '').endsWith('unconfirmed')) {
     return { error }
   }
   // Publication may add a PR number, head repository and operational receipts,
-  // but it does not change the approved plan. A same-head result for another
+  // but it does not change the approved destination. A result for another
   // branch, target or stack cannot settle this frozen action (even as closed).
   const targetBranch = frozenStack?.baseBranch || record.plan?.base_branch
   if (!publicIdentity || !exactPublicationIntent
@@ -202,7 +215,7 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
   if (['closed', 'merged'].includes(current.status)) return current.status
   if (mode === 'ready') return current.status === 'open' && !current.readying ? 'done' : null
   if (!['draft', 'open', 'landing'].includes(current.status)) return null
-  if (record.plan?.action === 'pr_update' && current.last_submit_push_sha !== record.plan?.head_sha) return null
+  if (record.plan?.action === 'pr_update' && current.last_submit_push_sha !== publishedHead) return null
   return 'done'
 }
 
