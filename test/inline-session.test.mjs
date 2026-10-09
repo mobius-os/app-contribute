@@ -350,13 +350,60 @@ test('new focused read wins over an older delayed hydration after retry', async 
   session.activate('chat-send:a')
   assert.equal(reads.length, 2)
   reads[1](fresh)
-  await new Promise(resolve => setImmediate(resolve))
+  await until(() => /reviewed source changed/.test(states.at(-1).actions[0].note))
   reads[0](old)
   await initial
   assert.equal(states.at(-1).actions[0].confirming, false)
   assert.match(states.at(-1).actions[0].note, /reviewed source changed/)
   await session.confirm('chat-send:a')
   assert.deepEqual(sends, [])
+})
+
+test('a held fresh exact digest outlives a tick and old hydration without lending stale authority', async () => {
+  const old = record('a', { revision: 1 })
+  const fresh = record('a', { revision: 2, needs_attention: true })
+  const reads = [], states = [], sends = []
+  const session = createInlineSession({ sessionId: 'held-exact', actions: [{ key: 'chat-send:a' }],
+    publish: state => states.push(state), loadExact: () => new Promise(resolve => reads.push(resolve)),
+    send: async rec => { sends.push(rec.id) } })
+  const digest = crypto.subtle.digest.bind(crypto.subtle)
+  let releaseFresh, held = false
+  try {
+    // Only the first (newer read's) hash is held. The older read completes its
+    // real hash, so awaiting that hydration cannot imply the fresh read is done.
+    crypto.subtle.digest = (algorithm, bytes) => {
+      if (held) return digest(algorithm, bytes)
+      held = true
+      return new Promise(resolve => { releaseFresh = () => digest(algorithm, bytes).then(resolve) })
+    }
+    session.updateLedger([old], true, readyReview([old]))
+    const initial = session.hydrate()
+    session.activate('chat-send:a')
+    assert.equal(reads.length, 2)
+    reads[1](fresh)
+    await until(() => Boolean(releaseFresh))
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(states.at(-1).actions[0].note, '', 'a scheduler tick is not the exact-read hash boundary')
+    reads[0](old)
+    await initial
+    assert.equal(states.at(-1).actions[0].status, 'Checking', 'completed older generation cannot activate old source')
+    assert.equal(states.at(-1).actions[0].confirming, false)
+    assert.equal(states.at(-1).actions[0].note, '', 'awaiting old hydration is not completion of the held fresh digest')
+    await session.confirm('chat-send:a')
+    assert.deepEqual(sends, [])
+    await releaseFresh()
+    releaseFresh = null
+    await until(() => /reviewed source changed/.test(states.at(-1).actions[0].note))
+    assert.equal(states.at(-1).actions[0].confirming, false)
+    assert.match(states.at(-1).actions[0].note, /reviewed source changed/)
+    assert.equal(states.at(-1).actions[0].disabled, true)
+    await session.confirm('chat-send:a')
+    assert.deepEqual(sends, [])
+  } finally {
+    session.dispose()
+    crypto.subtle.digest = digest
+    await releaseFresh?.()
+  }
 })
 
 test('a failed focused read is not an indefinite loading placeholder', async () => {
