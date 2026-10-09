@@ -508,6 +508,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     return true
   }
   return { sessionId, hydrate, updateLedger, activate, cancel, confirm, handleEvent, emit,
+    // Local presentation can copy only the owning frozen publication units,
+    // including public parents. This never becomes host/checkpoint authority.
+    readFrozenRecords: key => alive && confirming === key && frozen?.key === key
+      ? copy(frozen.units.flatMap(unit => unit.records)) : [],
     canFreeze, readUnit: id => copy(unitFor(id)),
     readAction: id => makeAction({ key: `chat-send:${id}`, label: 'Contribute' }), dispose: () => { alive = false } }
 }

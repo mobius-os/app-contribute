@@ -62,21 +62,22 @@ function useFallbackPublication(ids, records, ledgerReady, reviewStatus, onSend,
   async function contribute(actionKey) {
     const current = published.current?.actions.find(item => item.key === actionKey)
     if (!session.current || !current || current.disabled || !session.current.canFreeze(actionKey)) return { pending: true }
-    // Copy the visible target before activation/hash awaits. It is only local
-    // presentation history; the session separately owns frozen approval/proof.
-    const addressed = actionKey.startsWith('chat-send-batch:') ? ids : [actionKey.slice('chat-send:'.length)]
-    const copied = [...new Map(addressed.flatMap(id => {
-      const record = displayRecords.find(rec => rec.id === id)
-      return record ? publicationStackUnit(record, displayRecords)?.records || [record] : []
-    }).map(record => [record.id, record])).values()]
-    const context = [...new Map(addressed.flatMap(id => session.current.readUnit(id).records).map(record => [record.id, record])).values()]
-    if (!publicationContextMatches(copied, context)) return { pending: true }
+    // Capture what is visible before activation or any observation/hash await.
+    // Eligibility and complete parent/member context belong to the frozen owner.
+    const visible = displayRecords
     session.current.activate(actionKey)
     if (!published.current?.actions.find(item => item.key === actionKey)?.confirming) {
       session.current.cancel(actionKey) // no latent consent after a read-only activation
       return { pending: true }
     }
-    remember(copied)
+    const context = session.current.readFrozenRecords(actionKey)
+    const copied = structuredClone(context.map(record => visible.find(before => before.id === record.id)).filter(Boolean))
+    if (copied.length !== context.length || !publicationContextMatches(copied, context)) {
+      session.current.cancel(actionKey) // selected work must match its visible target
+      return { pending: true }
+    }
+    // Skipped rows are observations, not historical publication owners.
+    remember(context)
     await session.current.confirm(actionKey)
     return { pending: true }
   }
