@@ -48,7 +48,10 @@ function useFallbackPublication(ids, records, ledgerReady, reviewStatus, onSend,
   }, [key])
   useEffect(() => {
     session.current?.updateLedger(ledger, ledgerReady, reviewStatus)
-    void session.current?.hydrate()
+    // A cold exact-only view may discover its linked parent only when the
+    // full ledger arrives. Read that owning unit, not only initial action IDs.
+    const members = [...new Set([...ids, ...ids.flatMap(id => session.current?.readUnit(id).records.map(record => record.id) || [])])]
+    void session.current?.hydrate(members)
   }, [ledger, ledgerReady, reviewStatus])
   function remember(copied) {
     setSnapshots(previous => ({ ...previous, ...Object.fromEntries(copied.map(record => [record.id, structuredClone(record)])) }))

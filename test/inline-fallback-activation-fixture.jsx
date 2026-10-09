@@ -11,7 +11,7 @@ const reviews = records => ({state:'ready',byId:Object.fromEntries(records.map(r
 export async function runFallbackActivationChecks() {
   const checks=[],originalRead=window.mobius.storage.getWithVersion,originalDigest=crypto.subtle.digest.bind(crypto.subtle)
   const container=document.createElement('div');document.body.append(container);const root=createRoot(container)
-  let records,change,ledgerReady,reviewState,calls=[],responses=[],holdRead=false,holdHash=false,readFailure=false,reads=[],digests=[],readCount=0
+  let records,change,ledgerReady,reviewState,calls=[],responses=[],holdRead=false,holdHash=false,readFailure=false,reads=[],digests=[],readCount=0,exactOnly=false
   window.mobius.storage.getWithVersion=async path=>{
     readCount++;if(readFailure)throw Error('Exact read temporarily unavailable');const value=structuredClone(records.find(rec=>path===`contributions/${rec.id}.json`)||null)
     if(holdRead)return new Promise(resolve=>reads.push(()=>resolve({value,version:'fixture'})))
@@ -19,7 +19,7 @@ export async function runFallbackActivationChecks() {
   }
   crypto.subtle.digest=(algorithm,bytes)=>holdHash ? new Promise(resolve=>digests.push(async()=>resolve(await originalDigest(algorithm,bytes)))) : originalDigest(algorithm,bytes)
   function Mount({kind,ids}) {
-    const [data,setData]=useState({ledger:records,ready:ledgerReady,review:reviewState});change=setData
+    const [data,setData]=useState({ledger:exactOnly?[]:records,ready:ledgerReady,review:reviewState});change=setData
     const props={records:data.ledger,ledgerReady:data.ready,reviewStatus:data.review==='ready'?reviews(data.ledger):{state:data.review,byId:{}},appId:'fixture-app',loadDiff:async()=>'',onDismiss:async()=>{},
       onRefresh:async()=>{change(previous=>({...previous,review:'ready'}))},
       onSend:rec=>{calls.push(structuredClone(rec));return new Promise(resolve=>responses.push(resolve))},
@@ -30,16 +30,16 @@ export async function runFallbackActivationChecks() {
   const enabled=()=>sends().find(node=>!node.disabled)
   const settle=async()=>{for(const resolve of responses.splice(0))resolve({pending:true});await frame()}
   try {
-    for(const kind of ['batch','confirm','card','stack']) for(const delay of ['none','read','hash','unavailable','readfail']) {
+    for(const kind of ['batch','confirm','card','stack']) for(const delay of ['none','read','hash','unavailable','readfail','exact-only']) {
       records=kind==='stack'?targetCaseRecords({stack:true}):kind==='batch'?[targetRecord(),targetRecord('other.2')]:[targetRecord()]
-      const ids=records.map(rec=>rec.id);ledgerReady=false;reviewState=delay==='unavailable'?'unavailable':'ready';calls=[];responses=[];reads=[];digests=[];readCount=0;holdRead=delay==='read';holdHash=delay==='hash';readFailure=delay==='readfail'
+      const ids=records.map(rec=>rec.id);ledgerReady=false;reviewState=delay==='unavailable'?'unavailable':'ready';calls=[];responses=[];reads=[];digests=[];readCount=0;holdRead=delay==='read';holdHash=delay==='hash';readFailure=delay==='readfail';exactOnly=delay==='exact-only'
       root.render(<Mount key={`${kind}:${delay}`} kind={kind} ids={ids}/> )
       await until(()=>readCount>0 && container.querySelector('.co-inline-view'),'Cold fallback did not read/mount')
       await frame();await frame()
       ensure(!enabled(),`${kind}/${delay}: cold authority exposed enabled publication`)
       for(const button of sends())button.click()
       ensure(calls.length===0&&!container.textContent.includes('Contribution results'),`${kind}/${delay}: read became consent/results`)
-      ensure(/Checking|current source check|verify the current review|Loading/.test(container.textContent),`${kind}/${delay}: no honest authority explanation`)
+      ensure(/Checking|Could not read|current source check|verify the current review|Loading/.test(container.textContent),`${kind}/${delay}: no honest authority explanation`)
       // Review may finish while the paged ledger is still missing. Neither is
       // consent. Change every visible target in this gap, including chain bases.
       records=records.map((rec,index)=>({...rec,repo:'visible/repo',updated_at:'2026-10-08T22:06:00Z',plan:{...rec.plan,repo:'visible/repo',head_sha:(index?'f':'e').repeat(40),branch:kind==='stack'?`stack/current/${rec.id}`:'fix/current',base_branch:'release',base_sha:kind==='stack'&&index?'e'.repeat(40):'c'.repeat(40),...(rec.plan.stack?{stack:{...rec.plan.stack,id:'current',base_branch:index?`stack/current/${records[0].id}`:'release'}}:{})},quality_review:{state:'all_clear',reviewed_head_sha:(index?'f':'e').repeat(40)}}))
@@ -64,7 +64,7 @@ export async function runFallbackActivationChecks() {
     // Dispose a cold source view before delayed reads arrive. A replacement
     // target cannot inherit requested activation, snapshots, or late consent.
     for(const kind of ['batch','confirm','card','stack']) {
-      records=kind==='stack'?targetCaseRecords({stack:true}):[targetRecord()];calls=[];responses=[];reads=[];digests=[];ledgerReady=false;reviewState='ready';holdRead=true
+      records=kind==='stack'?targetCaseRecords({stack:true}):[targetRecord()];calls=[];responses=[];reads=[];digests=[];ledgerReady=false;reviewState='ready';holdRead=true;exactOnly=false
       root.render(<Mount key={`leave:${kind}`} kind={kind} ids={records.map(rec=>rec.id)}/> )
       await until(()=>reads.length>0,'Navigation control did not hold source read')
       for(const button of sends())button.click()
