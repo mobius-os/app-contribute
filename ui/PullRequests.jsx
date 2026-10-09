@@ -183,9 +183,19 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     task?.setPublicKeys(new Set(data.pulls.map(prKey)))
     return () => task?.setPublicKeys(new Set())
   }, [data.pulls, task?.setPublicKeys])
-  if (conn.state !== 'connected' || !project || !repo) return null
   const visible = matchingPulls(data.pulls, filter, conn.login).filter(pr => !query.trim() || `${pr.number} ${pr.title} ${pr.author?.login || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   const selection = data.pulls.filter(pr => selected.has(prKey(pr)))
+  const detailVisible = visible.some(pr => prKey(pr) === opened)
+  useEffect(() => {
+    // Inline detail belongs to its visible row. When filtering or a successful
+    // refresh removes that row, retire the task as well as its local identity;
+    // clearing the filter must not silently reopen an orphaned action.
+    if (task?.activeId === 'task:detail' && opened && !detailVisible) {
+      setOpened('')
+      task.close()
+    }
+  }, [opened, detailVisible, task?.activeId, task?.close])
+  if (conn.state !== 'connected' || !project || !repo) return null
   const relevantRuns = runs.filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
   const statusFor = pr => reviewForPull(relevantRuns, pr)
   const detailPr = data.pulls.find(pr => prKey(pr) === opened)

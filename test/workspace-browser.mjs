@@ -56,7 +56,7 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [] }
+const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [] }
 const values = new Map(), navigation = [], reviewRuns = []
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
@@ -196,7 +196,7 @@ async function loadProjectDiff(project) {
 }
 function Fixture() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [records, setRecords] = useState([prepared])
+  const [records, setRecords] = useState([prepared, {...prepared,id:'fixture-dismissed',title:'Dismissed local proposal',summary:'Dismissed local proposal',status:'abandoned',plan:{...prepared.plan,title:'Dismissed local proposal'}}])
   const [selectionId, setSelectionId] = useState(null)
   const [allProjects, setAllProjects] = useState(projects)
   window.openSelectionFixture = setSelectionId
@@ -204,14 +204,19 @@ function Fixture() {
 
   function runFor(project) {
     const items = records.filter(record => record.repo === project.canonical_repo).map(record => ({
-      id: (record.status === 'prepared' ? 'publish:' : 'public:') + record.id,
-      kind: record.status === 'prepared' ? 'publish' : 'public', record,
+      id: (record.status === 'abandoned' ? 'archived:' : record.status === 'prepared' ? 'publish:' : 'public:') + record.id,
+      kind: record.status === 'abandoned' ? 'archived' : record.status === 'prepared' ? 'publish' : 'public', record,
       label: record.summary, detail: record.repo,
     }))
     return { revision: records.map(record => record.status).join('|'),
       decisions: items.filter(item => item.kind === 'publish'),
-      working: items.filter(item => item.kind === 'public'), recent: [], archive: [],
+      working: items.filter(item => item.kind === 'public'), recent: [], archive: items.filter(item => item.kind === 'archived'),
       privateAction: organizePrivateWorkAction([], { byId: {} }, [project]) }
+  }
+  async function restore(record) {
+    calls.restores.push(record.id)
+    setRecords(old=>old.map(item=>item.id===record.id?{...item,status:'prepared'}:item))
+    return {ok:true}
   }
   async function send(record) {
     calls.publications.push(structuredClone(record))
@@ -229,7 +234,7 @@ function Fixture() {
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
-        selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send}
+        selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
           conn={{ state: 'connected', login: 'owner' }} records={records.filter(record => record.repo === project.canonical_repo)} />}
       />}</ProjectControls> : null} />}
@@ -326,7 +331,7 @@ window.runWorkspaceChecks = async () => {
       await click(button('All',filters))
       ensure(query('.co-workspace-inventory')===originalInventory && mutationRequests().length===0,'Display-only controls replaced inventory or mutated GitHub')
     })
-    const firstCheckbox = query('input[aria-label="Select owner/project #7"]')
+    let firstCheckbox = query('input[aria-label="Select owner/project #7"]')
     let secondCheckbox = query('input[aria-label="Select owner/project #8"]')
     function selectionStaysInInventory(focused) {
       ensure(navigation.length === inventoryNavigationDepth, 'Checkbox selection changed navigation')
@@ -400,6 +405,45 @@ window.runWorkspaceChecks = async () => {
       await until(() => document.querySelectorAll('.co-pr-row').length===2,'PR list did not restore')
       secondCheckbox=query('input[aria-label="Select owner/project #8"]')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Closing detail changed selected versions')
+    })
+    await check('hiding an opened PR deliberately closes detail without losing filters or resurrecting it', async () => {
+      const before=mutationRequests().length
+      const search=query('[aria-label="Find a pull request"]'), filters=query('.co-pr-filters')
+      const openSecond=async()=>{
+        const trigger=[...document.querySelectorAll('.co-pr-open')].find(node=>text(node).includes('Contribution 8'))
+        trigger.focus(); await click(trigger)
+        await until(()=>query('.co-pr-detail'),'Detail did not open')
+      }
+      await openSecond()
+      const unassigned=button('Unassigned',filters); unassigned.focus(); await click(unassigned)
+      await until(()=>!query('.co-pr-detail'),'Filter did not hide target detail')
+      ensure(document.activeElement===unassigned,'Closing filtered detail stole focus from its filter')
+      await click(button('All',filters))
+      ensure(!query('.co-pr-detail') && !query('[data-task="task:detail"]'),'Clearing filter resurrected a hidden detail task')
+      await openSecond(); search.focus(); await fill(search,'Contribution')
+      ensure(query('.co-pr-detail'),'A still-visible PR lost its detail')
+      await fill(search,'Contribution 7')
+      ensure(!query('.co-pr-detail') && document.activeElement===search,'Search did not close detail while retaining typing focus')
+      await fill(search,'')
+      ensure(!query('[data-task="task:detail"]'),'Clearing search resurrected a hidden detail task')
+      await openSecond(); window.emptyPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>!query('.co-pr-row'),'Refresh did not remove fixture PRs')
+      window.emptyPulls=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>document.querySelectorAll('.co-pr-row').length===2,'PRs did not reload')
+      ensure(!query('[data-task="task:detail"]'),'Refreshing a removed PR resurrected its hidden task')
+      ensure(navigation.length===inventoryNavigationDepth && mutationRequests().length===before,'Detail disappearance navigated or mutated work')
+      // An empty successful refresh correctly clears the selected identities.
+      await click(query('[aria-label="Select all visible pull requests"]'))
+      await openSecond(); await click(button('Take on with agent',query('.co-pr-detail')))
+      await until(()=>query('.co-pr-confirm'),'Individual confirmation did not open')
+      await click(button('Unassigned',filters))
+      ensure(query('.co-pr-confirm') && text(query('.co-pr-confirm')).includes('Contribution 8') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Detail cleanup closed or changed another active workflow')
+      await click(button('Cancel',query('.co-pr-confirm'))); await click(button('All',filters))
+      ensure(mutationRequests().length===before,'Filtering an existing confirmation approved work')
+      firstCheckbox=query('input[aria-label="Select owner/project #7"]')
+      secondCheckbox=query('input[aria-label="Select owner/project #8"]')
     })
     await check('cancelling batch actions restores their original keyboard trigger', async () => {
       for (const label of ['Take on with agent','Assign']) {
@@ -525,6 +569,24 @@ window.runWorkspaceChecks = async () => {
       ensure(!button('Send to GitHub'),'Settled publication remained actionable')
       await click(button('Done'))
       ensure(query('input[aria-label="Select owner/project #9"]').getClientRects().length,'Published PR not selectable')
+    })
+    await check('dismissed work is discoverable without a link and only explicit Restore changes its local state', async () => {
+      const before=mutationRequests().length, publications=calls.publications.length
+      const archive=query('.co-run-fold.is-recent')
+      ensure(archive && !archive.open,'Dismissed contributions have no collapsed discovery route')
+      await click(archive.querySelector('summary'))
+      const row=[...archive.querySelectorAll('button')].find(node=>text(node).includes('Dismissed local proposal'))
+      ensure(row && row.getClientRects().length,'Dismissed proposal is not discoverable')
+      row.focus(); await click(row)
+      await until(()=>button('Restore'),'Dismissed contribution cannot be restored from its discovered detail')
+      ensure(calls.restores.length===0 && mutationRequests().length===before,'Inspecting dismissed work changed it')
+      await nativeEscape(); await until(()=>!query('.co-task-content'),'Escape did not close dismissed detail')
+      ensure(document.activeElement===row,'Dismissed detail did not return focus to its row')
+      await click(row); await click(button('Restore'))
+      await until(()=>calls.restores.length===1 && !query('.co-run-fold.is-recent'),'Restore did not move exact record out of history')
+      ensure(calls.restores[0]==='fixture-dismissed' && calls.publications.length===publications && mutationRequests().length===before,'Restore published work or restored another record')
+      await inventory()
+      ensure(button('Review and send'),'Restored record did not return to private preparation')
     })
     await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
       const before=mutationRequests().length

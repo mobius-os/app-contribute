@@ -887,7 +887,7 @@ export function ContributionRun({
   const sharedItems = visibleWorking.filter(item => !['review_in_progress', 'autopilot', 'publishing', 'connecting'].includes(item.kind))
   const issues = sharedItems.filter(item => runUnitRecords(item).some(record => record?.type === 'issue'))
   const otherShared = sharedItems.filter(item => !issues.includes(item))
-  const recent = run?.recent || []
+  const history = [...(run?.recent || []), ...(run?.archive || [])]
   const publishItems = decisions.filter(item => item.kind === 'publish')
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
   const ownerDecisions = decisions.filter(item => ![
@@ -995,11 +995,11 @@ export function ContributionRun({
         </details>
       ) : null)}
 
-      {recent.length > 0 ? (
+      {history.length > 0 ? (
         <details className="co-run-fold is-recent">
-          <summary><span>History</span><b>{recent.length}</b><Icon name="chevron" size={14} /></summary>
-          <p className="co-inventory-note">Latest recorded outcomes, including closed, local-only, and superseded work. Not all were merged.</p>
-          <div>{recent.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+          <summary><span>History</span><b>{history.length}</b><Icon name="chevron" size={14} /></summary>
+          <p className="co-inventory-note">Recorded outcomes and dismissed proposals, including closed, local-only, and superseded work. Not all were merged.</p>
+          <div>{history.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
         </details>
       ) : null}
 

@@ -355,7 +355,7 @@ test('durable Ready errors stay visible with only deliberate safe recovery', asy
   assert.match(html, /Open pull request/)
 })
 
-test('dismissed work retains exact restore links without a separate archive surface', async (t) => {
+test('dismissed work is discoverable in History and retains exact restore links', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun, renderFocus } = await runRenderer()
   const archived = { ...record('Restore me'), status: 'abandoned' }
@@ -371,6 +371,8 @@ test('dismissed work retains exact restore links without a separate archive surf
   const focusHtml = renderFocus(item)
 
   assert.doesNotMatch(runHtml, /Archived proposals/)
+  assert.match(runHtml, /History<\/span><b>1<\/b>/)
+  assert.match(runHtml, /Restore me/)
   assert.match(focusHtml, />Restore</)
 })
 
@@ -432,8 +434,9 @@ test('history names outcomes honestly without an archive or success-only implica
   const { renderRun } = await runRenderer()
   const outcome = status => ({ id: status, kind: 'recent', record: record(status, { status }), label: status, detail: status })
   const html = renderRun({ recent: ['merged', 'closed', 'local', 'superseded'].map(outcome), archive: [outcome('abandoned')] })
-  assert.match(html, /History<\/span><b>4<\/b>/)
+  assert.match(html, /History<\/span><b>5<\/b>/)
   assert.doesNotMatch(html, /Archived proposals/)
+  assert.match(html, /abandoned/)
   assert.match(html, /Not all were merged/)
   assert.doesNotMatch(html, /Done recently|Recent outcomes/)
 })

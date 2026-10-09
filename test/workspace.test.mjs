@@ -305,10 +305,10 @@ test('SSR selecting a focused contribution retains the project inventory and his
   })
   for (const selectedId of ['', privateWork.id, 'task:pulls', 'task:review']) {
     const html = ui.render('ContributionRun', { run: current, selectedId }, { activeId: selectedId, host: null })
-    for (const label of ['Private work', 'Published work', 'Accepted work']) {
+    for (const label of ['Private work', 'Published work', 'Accepted work', 'Historical work']) {
       assert.match(html, new RegExp(label), `${label} remains listed for ${selectedId}`)
     }
-    assert.doesNotMatch(html, /This contribution moved|Archived proposals|Historical work/)
+    assert.doesNotMatch(html, /This contribution moved|Archived proposals/)
   }
 })
 
