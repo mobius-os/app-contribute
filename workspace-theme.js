@@ -211,7 +211,8 @@ export const WORKSPACE_CSS = `
 .co-change-total em { color:var(--danger); font-style:normal; font-weight:650; }
 .co-root { user-select:text; -webkit-user-select:text; }
 .co-source-row,.co-card-title,.co-run-row-main,.co-run-quiet-row { user-select:text; -webkit-user-select:text; }
-.co-source-row { min-height:88px; padding:13px 12px; border-radius:12px; }
+/* Disclosure content can inherit content-box through the browser’s details pseudo-element. */
+.co-source-row { box-sizing:border-box; min-height:88px; padding:13px 12px; border-radius:12px; }
 .co-source-row .co-source-glyph { grid-row:1; align-self:center; }
 .co-btn > .co-icon,.co-quiet-action > .co-icon,.co-icon-btn > .co-icon,.co-source-row-cue > .co-icon { flex:0 0 auto; align-self:center; margin:0; }
 .co-icon-btn { line-height:0; }
