@@ -7,6 +7,7 @@ import { openAgentConversation } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 import { ResolvedPrompt } from './ReviewPromptSettings.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
+import { RepoLink } from './ContributionCard.jsx'
 
 export function InlinePullView({ target, appId, token, records, onClose, onProject }) {
   const [state, setState] = useState({ loading: true })
@@ -43,7 +44,7 @@ export function InlinePullView({ target, appId, token, records, onClose, onProje
     {state.error ? <p role="alert">{state.error}</p> : null}
     {state.pr ? <>
       <h2>#{state.pr.number} {state.pr.title}</h2>
-      <p className="co-detail-stats"><span>{state.pr.repository.nameWithOwner}</span><span>{state.pr.state === 'MERGED' ? 'Merged' : state.pr.state === 'CLOSED' ? 'Closed, not merged' : state.pr.isDraft ? 'Draft PR' : 'Open PR'}</span><span>{state.pr.author?.login}</span><span className="co-change-total">{state.pr.changedFiles} {state.pr.changedFiles===1 ? 'file' : 'files'} <b>+{state.pr.additions}</b><em>−{state.pr.deletions}</em></span></p>
+      <p className="co-detail-stats"><RepoLink repo={state.pr.repository.nameWithOwner} /><span>{state.pr.state === 'MERGED' ? 'Merged' : state.pr.state === 'CLOSED' ? 'Closed, not merged' : state.pr.isDraft ? 'Draft PR' : 'Open PR'}</span><span>{state.pr.author?.login}</span><span className="co-change-total">{state.pr.changedFiles} {state.pr.changedFiles===1 ? 'file' : 'files'} <b>+{state.pr.additions}</b><em>−{state.pr.deletions}</em></span></p>
       <PullRequestDetail key={`${state.pr.headRefOid}:${state.pr.baseRefOid}`} pr={state.pr} token={token} readOnly
         onRefresh={() => setRevision(value => value + 1)} record={recordsForPull(records, state.pr)[0]}
         provenance={pullConversations(records, state.runs, state.pr)} />

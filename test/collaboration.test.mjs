@@ -1,3 +1,4 @@
+import { PR_FIELDS } from '../collaboration.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle } from '../collaboration.js'
@@ -173,4 +174,11 @@ test('a review run is named by what it does in public', () => {
   assert.equal(reviewRunTitle({ mode: 'review', options: { post_review: true } }), 'GitHub review')
   assert.equal(reviewRunTitle({ mode: 'review_merge' }), 'Review & merge')
   assert.equal(reviewRunTitle({ mode: 'review_fix_merge', options: { post_review: true } }), 'Review, fix & merge')
+})
+
+
+test('PR metadata includes real discussion and commit totals without extra detail reads', () => {
+  assert.match(PR_FIELDS, /comments \{ totalCount \}/)
+  assert.match(PR_FIELDS, /reviews \{ totalCount \}/)
+  assert.match(PR_FIELDS, /commits\(last:1\) \{ totalCount nodes/)
 })

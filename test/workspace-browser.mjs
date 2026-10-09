@@ -4,7 +4,7 @@
 // browser gets a disposable profile; all transports and host capabilities are
 // mocked before mount, with CSP and CDP network blocking as a second boundary.
 import { spawn } from 'node:child_process'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -17,6 +17,11 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { runUnattemptedHistoryChecks } from './test/inline-unattempted-history-fixture.jsx'
+import { runFallbackMixedChecks } from './test/inline-fallback-mixed-fixture.jsx'
+import { runFallbackActivationChecks } from './test/inline-fallback-activation-fixture.jsx'
+import { runFallbackAttributionChecks } from './test/inline-fallback-attribution-fixture.jsx'
+import { runInlineCanonicalFailureChecks } from './test/inline-canonical-failure-fixture.jsx'
 import { runUpperUiStatusChecks } from './test/upper-ui-status-fixture.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
@@ -26,6 +31,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
+import { InlinePreparedView, InlineBatchView } from './ui/InlinePreparedView.jsx'
 import ContributeApp from './index.jsx'
 
 const HEAD = 'a'.repeat(40), SECOND_HEAD = 'c'.repeat(40), BASE = 'b'.repeat(40)
@@ -69,8 +75,14 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64)})
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
-    if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
-    if (call.url.endsWith('/review-status')) return response({ records: [] })
+    if (call.url.startsWith('/api/github/source-status')) {
+      if (window.deferSourceDiscovery) return new Promise(resolve => { window.releaseSourceDiscovery = value => resolve(response(value)) })
+      return response({ apps: [], platform: null })
+    }
+    if (call.url.endsWith('/review-status')) {
+      if (window.fixtureReviewUnavailable) return new Response(JSON.stringify({detail:'Fixture unavailable'}), {status:503})
+      return response({ records: window.fixtureInlineReviewReady ? [{id:'focused-record',state:'ready'}] : [] })
+    }
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
       if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
@@ -85,10 +97,15 @@ window.fetch = async (url, options = {}) => {
     if (call.body.query.includes('ContributeExactPull')) {
       const number=Number(call.body.query.match(/pullRequest\(number:(\d+)\)/)?.[1])
       const found=number===11 ? pull(11,{state:'CLOSED',title:'Closed contribution'}) : pulls.find(pr=>pr.number===number)
-      return response({data:{repository:{pullRequest:found || null}}})
+      return response({data:{repository:{pullRequest:found && window.fixtureRetarget ? {...found, baseRefName:'release', baseRef:{target:{oid:'d'.repeat(40)}}} : found || null}}})
     }
     if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
-    if (call.body.query.includes('ContributePullContext')) return response({data:{repository:{pullRequest:{headRefOid:pulls.find(pr=>pr.number===call.body.variables.number)?.headRefOid,baseRefOid:BASE,baseRefName:'main',closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},timelineItems:{nodes:[],pageInfo:{hasNextPage:false}}}}}})
+    if (call.body.query.includes('ContributePullContext')) {
+      const last = call.body.variables.after === 'thread-page-2'
+      return response({data:{repository:{pullRequest:{headRefOid:pulls.find(pr=>pr.number===call.body.variables.number)?.headRefOid,baseRefOid:BASE,baseRefName:'main',closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},
+        reviewThreads:{nodes:[{id:last?'thread-last':'thread-first',path:last?'last.js':'first.js',line:1,diffSide:'RIGHT',isResolved:false,comments:{nodes:[],pageInfo:{hasNextPage:false}}}],pageInfo:{hasNextPage:!last,endCursor:last?null:'thread-page-2'}},
+        timelineItems:{nodes:[],pageInfo:{hasNextPage:false}}}}}})
+    }
     let found = call.body.query.includes('repo:owner/other') ? [] : pulls
     const laterPage = call.body.query.includes('after:"fixture-page-2"')
     if (window.fixturePaging) found = laterPage ? found.slice(1) : found.slice(0,1)
@@ -284,6 +301,72 @@ window.runWorkspaceChecks = async () => {
   const checks = []
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
+    checks.push(...await runUnattemptedHistoryChecks())
+    checks.push(...await runFallbackMixedChecks())
+    checks.push(...await runFallbackActivationChecks())
+    checks.push(...await runFallbackAttributionChecks())
+    await check('mounted cycle Refresh recovers a lost start and ambiguous Stop without duplicate admission', async () => {
+      const originalChat={...window.mobius.chat}
+      let visible=false, offline=false, stopped=false, startCount=0, stopCount=0, recoveredScope=''
+      window.mobius.chat.start=async action=>{startCount++;recoveredScope=action.scope;throw Error('Lost fixture start response')}
+      window.mobius.chat.list=async({scope})=>{
+        ensure(scope===recoveredScope,'Recovery changed the exact saved reservation scope')
+        if(offline) throw Error('Fixture offline')
+        return visible?[{id:'recovered-cycle-chat',title:'Same admitted work',created_at:'2026-09-10T12:00:00Z'}]:[]
+      }
+      window.mobius.chat.status=async id=>{
+        ensure(id==='recovered-cycle-chat','Recovery observed another chat')
+        if(offline)throw Error('Fixture offline')
+        return stopped?{running:false,goal:{status:'stopped'}}:{running:true}
+      }
+      window.mobius.chat.stop=async id=>{stopCount++;ensure(id==='recovered-cycle-chat','Stop targeted another chat');stopped=true;return {stopped:false}}
+      root.render(<div className="co-root"><style>{CSS}</style><main className="co-page"><ProjectControls appId="fixture-app" token="fixture-only" project={projects[0]}
+        run={{privateAction:{title:'Prepare fixture',event:'private',count:1,draft:'Only app:fixture'}}} onStart={async action=>({ok:true,...await window.mobius.chat.start(action)})} /></main></div>)
+      await until(()=>button('Start fresh full merge cycle') && !button('Start fresh full merge cycle').disabled,'Recovery fixture did not restore idle')
+      await click(button('Start fresh full merge cycle'))
+      await until(()=>[...values.values()].some(value=>value?.pending?.id) && button('Start fresh full merge cycle').disabled,'Lost start was not kept uncertain')
+      const cycleKey=[...values.keys()].find(key=>key.startsWith('project-cycles/'))
+      ensure(values.get(cycleKey)?.pending?.id && startCount===1,'Lost start reservation was not saved exactly once')
+      ensure(button('Recheck saved work'),'Mounted unknown cycle offered no explicit read-only recovery')
+      await click(button('Recheck saved work'))
+      ensure(values.get(cycleKey)?.pending?.id && button('Start fresh full merge cycle').disabled,'Empty lookup released the reservation')
+      offline=true;await click(button('Recheck saved work'))
+      ensure(values.get(cycleKey)?.pending?.id && startCount===1,'Offline lookup released or readmitted work')
+      offline=false;visible=true
+      await click(button('Recheck saved work'))
+      await until(()=>values.get(cycleKey)?.chat_id==='recovered-cycle-chat' && button('Cancel active work'),'Explicit recheck did not recover the existing chat')
+      ensure(!values.get(cycleKey).pending && startCount===1,'Recheck started another cycle')
+      ensure(button('Open current conversation') && values.get(cycleKey).chat_id==='recovered-cycle-chat','Recovery lost its owning conversation link')
+      await click(button('Cancel active work'))
+      await until(()=>text(query('.co-cycle-outlet')).includes('Status unknown') && button('Start fresh full merge cycle').disabled,'Ambiguous Stop did not remain uncertain')
+      offline=true;await click(button('Recheck saved work'))
+      ensure(button('Start fresh full merge cycle').disabled,'Offline Stop recheck allowed duplicate admission')
+      offline=false;await click(button('Recheck saved work'))
+      await until(()=>text(query('main')).includes('Work stopped') && !button('Start fresh full merge cycle').disabled,'Stop status did not reconcile in the same mounted view')
+      ensure(startCount===1 && stopCount===1,'Read-only recovery started or stopped work again')
+      window.mobius.chat=originalChat
+      root.render(null);await frame();await frame()
+      values.clear();versions.clear()
+      for(const list of Object.values(calls))list.splice(0)
+      root.render(<Fixture />)
+    })
+    await check('legacy single and batch malformed stacks cannot call either publication handler', async () => {
+      const broken={...prepared,id:'broken-inline',plan:{...prepared.plan,stack:{id:'chain',total:2}}}
+      let singleCalls=0,stackCalls=0
+      const props={appId:'fixture-app',records:[broken],ledgerReady:true,reviewStatus:{state:'ready',byId:{[broken.id]:{state:'ready'}}},
+        onSend:async()=>{singleCalls++;return {ok:true}},onSendStack:async()=>{stackCalls++;return {ok:true}},loadDiff:async()=>''}
+      for (const confirm of [true,false]) {
+        root.render(<div className="co-root"><style>{CSS}</style><InlinePreparedView {...props} target={{kind:'prepared',id:broken.id,confirm}} /></div>)
+        await until(()=>text(query('.co-inline-view')).includes('invalid layer metadata'),'Malformed legacy single fell back to standalone')
+        ensure(![...document.querySelectorAll('button')].some(node=>!node.disabled && /^Contribute(?: |$)/.test(text(node))),'Malformed legacy single offered publication')
+      }
+      root.render(<div className="co-root"><style>{CSS}</style><InlineBatchView {...props} target={{kind:'batch',ids:[broken.id]}} /></div>)
+      await until(()=>button('Contribute all 0')?.disabled && text(query('.co-inline-view')).includes('invalid layer metadata'),'Malformed legacy batch became eligible')
+      button('Contribute all 0').click();await frame();await frame()
+      ensure(singleCalls===0 && stackCalls===0,'Malformed legacy metadata called a publication handler')
+      root.render(null);await frame();await frame()
+      root.render(<Fixture />)
+    })
     await until(() => query('.co-source-row'), 'Project list did not render')
     await check('project directory uses wrapped filter buttons instead of a dropdown or scroller', async () => {
       const filters=query('.co-directory-filters'), filterButtons=[...filters.querySelectorAll('button')]
@@ -399,6 +482,23 @@ window.runWorkspaceChecks = async () => {
       ensure([...query('.co-pr-list').querySelectorAll('input[type=checkbox]')].map(node=>node.checked).join(',')===before, 'Individual launch altered batch selection')
       ensure(mutationRequests().length===mutations, 'Opening or cancelling individual launch started public work')
     })
+    await check('retargeting the unchanged PR never posts a launch in either review mode', async () => {
+      for (const mode of ['Review only', 'Review, fix & merge']) {
+        await click(query('[aria-label="Take PR 7 on with an agent"]'))
+        await until(() => modeButton(mode,query('.co-pr-confirm')),'Retarget mode did not load')
+        if (mode !== 'Review only') await click(modeButton(mode,query('.co-pr-confirm')))
+        const launchName=mode==='Review only'?'Start private review':'Allow scoped takeover'
+        await until(() => button(launchName) && !button(launchName).disabled,'Retarget preflight did not settle')
+        const before=mutationRequests().filter(call=>call.url.endsWith('/review-runs')).length
+        window.fixtureRetarget=true
+        await click(button(launchName))
+        await until(() => text(query('.co-pr-confirm')).includes('changed since this list loaded') || !query('.co-pr-confirm'),'Retarget admission did not settle')
+        ensure(mutationRequests().filter(call=>call.url.endsWith('/review-runs')).length===before,'Retargeted '+mode+' posted a launch')
+        ensure(text(query('.co-pr-confirm')).includes('changed since this list loaded'),'Retarget did not ask for fresh consent')
+        window.fixtureRetarget=false
+        await click(button('Cancel',query('.co-pr-confirm')))
+      }
+    })
     await check('individual PR detail leads with its Conversation description without reading diff', async () => {
       const title=document.querySelectorAll('.co-pr-open')[1]; title.focus(); await click(title)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
@@ -407,6 +507,16 @@ window.runWorkspaceChecks = async () => {
       ensure(detailTab('Conversation')?.getAttribute('aria-pressed')==='true' && text(detailTab('Files changed'))==='Files changed1+1−0' && detailTab('Checks'),'Detail tabs absent')
       ensure(query('.co-pr-detail').closest('.co-pr-row') && !query('.co-task-dock'),'Detail escaped its row')
       ensure(mutationRequests().length===0 && navigation.length===inventoryNavigationDepth,'Opening detail changed work or screens')
+    })
+    await check('last discussion page keeps Previous and restores the prior cursor', async () => {
+      await until(() => button('More discussions'),'First discussion page did not load')
+      await click(button('More discussions'))
+      await until(() => text(query('.co-pr-detail')).includes('last.js'),'Last discussion cursor did not load')
+      ensure(!button('More discussions'),'Last page offered a nonexistent next cursor')
+      ensure(button('Previous discussions'),'Last page lost Previous discussions')
+      await click(button('Previous discussions'))
+      await until(() => text(query('.co-pr-detail')).includes('first.js') && button('More discussions'),'Previous cursor did not restore the first discussions')
+      ensure(!button('Previous discussions'),'First cursor unexpectedly offered Previous')
     })
     await check('files load on demand and individual review keeps exact one-PR scope', async () => {
       await click(detailTab('Files changed'))
@@ -511,10 +621,10 @@ window.runWorkspaceChecks = async () => {
       window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
-      await inventory(); await click(button('Review and send'))
-      await until(() => button('Send to GitHub'),'Publication confirmation missing')
+      await inventory(); await click(button('Contribute'))
+      await until(() => button('Contribute'),'Publication confirmation missing')
       ensure(calls.publications.length===0,'Opening publication sent work')
-      await click(button('Send to GitHub'))
+      await click(button('Contribute'))
       await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
       ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
@@ -644,6 +754,66 @@ window.runWorkspaceChecks = async () => {
       await until(() => query('[data-pr-key="owner/project#7"]'), 'Cold destination did not show its PR inventory')
       ensure(calls.starts.length === beforeColdStarts, 'Opening a cold destination started agent work')
     })
+    await check('focused block hydration reads only its own record before activation', async () => {
+      root.render(null); await frame(); await frame()
+      values.clear()
+      const exact = {...prepared, id:'focused-record'}
+      values.set('contributions/focused-record.json', exact)
+      let exactReads = 0, ledgerReads = 0, settingsReads = 0
+      const originalVersioned = window.mobius.storage.getWithVersion
+      const originalGet = window.mobius.storage.get
+      const originalList = window.mobius.storage.listWithStatus
+      let focusedAction = null
+      let focusedMessage = null
+      const focusedStates = []
+      // This file:// fixture has no concrete shell origin. Capture only the
+      // outbound transport boundary; production attribution checks stay real.
+      const originalPost = window.parent.postMessage
+      window.parent.postMessage = (message, ...args) => {
+        if (message?.type === 'moebius:app-block-state' && message.sessionId === 'focused-fixture') {
+          focusedAction = message.actions[0]
+          focusedMessage = message
+          focusedStates.push(focusedAction.status)
+        }
+        else originalPost.call(window.parent, message, ...args)
+      }
+      window.mobius.storage.getWithVersion = async (...args) => { exactReads++; return originalVersioned(...args) }
+      window.mobius.storage.get = async (...args) => { settingsReads++; return originalGet(...args) }
+      window.mobius.storage.listWithStatus = async () => { ledgerReads++; return {complete:true,entries:[{type:'file',name:exact.id+'.json',content:exact}]} }
+      const initialRequests = calls.requests.length
+      root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{sessionId:'focused-fixture',actions:[{key:'chat-send:focused-record',intent:'chat-send:focused-record',label:'Contribute'}]}} />)
+      await until(() => exactReads > 0, 'Focused exact read did not resolve')
+      await frame(); await frame()
+      await until(() => focusedAction?.status === 'Prepared', 'Focused card did not resolve its prepared status')
+      ensure(!focusedAction.hidden && !focusedAction.disabled, 'Prepared card hid or disabled the activation control')
+      ensure(focusedAction.badges.some(badge => badge.label === 'All clear'), 'Fresh exact review badge was lost')
+      ensure(ledgerReads === 0 && settingsReads === 0 && calls.requests.length === initialRequests, 'Focused hydration started workspace, account, or settings reads')
+      ensure(!query('.co-root'), 'Focused hydration mounted the workspace')
+      window.fullAppFixture = true
+      window.fullAppConnected = false
+      window.fixtureReviewUnavailable = true
+      const priorPublications = calls.publications.length
+      window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record',nonce:'focused-first'}}))
+      await until(() => ledgerReads > 0, 'Activation did not start the authoritative ledger')
+      await until(() => focusedAction?.label === 'Retry check', 'Unavailable review did not expose retry')
+      ensure(focusedAction.status === 'Check unavailable' && focusedAction.note.includes('Could not verify'), 'Standalone unavailable review lost its explanation')
+      ensure(!focusedStates.slice(focusedStates.indexOf('Prepared') + 1).includes('Loading'), 'Activation remounted and reset the focused session')
+      ensure(calls.publications.length === priorPublications, 'Activation published without confirmation')
+      window.fixtureReviewUnavailable = false
+      window.fixtureInlineReviewReady = true
+      window.dispatchEvent(new MessageEvent('message', {source:window.parent,origin:window.location.origin,
+        data:{type:'moebius:app-block-action',sessionId:'focused-fixture',event:'activate',key:'chat-send:focused-record',nonce:'focused-retry'}}))
+      await until(() => focusedAction?.confirming, 'Retry did not recover to a fresh confirmation')
+      ensure(calls.publications.length === priorPublications, 'Retry sent without frozen confirmation')
+      ensure(focusedMessage.ackNonce === 'focused-retry' && focusedMessage.retain === true, 'Confirmation lost its event acknowledgement or retained owner')
+      ensure(focusedAction.confirmation[0].facts.some(fact => fact.label === 'Repository' && fact.value === exact.plan.repo), 'Confirmation omitted its current repository')
+      window.fixtureInlineReviewReady = false
+      window.mobius.storage.getWithVersion = originalVersioned
+      window.mobius.storage.get = originalGet
+      window.mobius.storage.listWithStatus = originalList
+      window.parent.postMessage = originalPost
+    })
     await check('returning from Settings refreshes the full app account and live feed exactly once', async () => {
       // Mount the actual app, not a refresh helper. Only external storage and
       // fetch boundaries are faked; hooks, coordinator and reconciliation run.
@@ -685,10 +855,72 @@ window.runWorkspaceChecks = async () => {
       ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
       await click(button('Done',panel))
     })
+    await check('cold record links open before a slow ledger and source discovery, with projects navigation intact', async () => {
+      root.render(null); await frame(); await frame()
+      values.clear()
+      window.fullAppConnected = false
+      window.deferSourceDiscovery = true
+      const exact = {...prepared, id:'cold-record', title:'Cold reviewed proposal',
+        plan:{...prepared.plan,title:'Cold reviewed proposal',base_branch:'main'}, updated_at:'2026-10-06T12:00:00Z'}
+      values.set('contributions/cold-record.json', exact)
+      const originalGet = window.mobius.storage.get
+      window.mobius.storage.get = async key => key === 'feed-cache.json'
+        ? new Promise(resolve => { window.releaseColdCache = () => resolve({records:[{...exact,title:'Old cached title',plan:{...exact.plan,title:'Old cached title'}}]}) })
+        : originalGet(key)
+      let ledgerSettled = false
+      window.mobius.storage.listWithStatus = async () => new Promise(resolve => {
+        window.releaseColdLedger = () => { ledgerSettled = true; resolve({complete:true,entries:[
+          {type:'file',name:exact.id+'.json',content:{...exact,title:'Stale scan title',plan:{...exact.plan,title:'Stale scan title'}}},
+          ...Array.from({length:1900},(_,i)=>({type:'file',name:'history-'+i+'.json',content:{id:'history-'+i,type:'pr',status:'closed',repo:'owner/project',title:'History '+i}})),
+        ]}) }
+      })
+      root.render(<ContributeApp appId="fixture-app" token="fixture-only" />)
+      await until(() => window.releaseColdCache && window.releaseSourceDiscovery && window.releaseColdLedger, 'Cold reads did not start')
+      const hostIntent = (intent, nonce, source = window.parent) => window.dispatchEvent(new MessageEvent('message', {
+        source, origin:window.location.origin, data:{type:'moebius:app-intent',intent,nonce},
+      }))
+      hostIntent('review:cold-record','untrusted',null)
+      await frame(); await frame()
+      ensure(!query('.co-run-focus-detail'), 'A non-parent sender opened a record')
+      hostIntent('review:cold-record','cold-review')
+      await until(() => text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Exact record stayed behind slow startup reads')
+      ensure(!ledgerSettled, 'Cold focus waited for the history scan')
+      ensure(query('.co-header-shell') && query('[aria-label="Back to projects"]'), 'Cold detail lost its full-app header or projects action')
+      window.releaseColdCache()
+      await frame(); await frame()
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Late cache erased the exact record')
+      window.deferSourceDiscovery = false
+      window.releaseSourceDiscovery({apps:[{...projects[0],key:'app:cold',name:'Cold installed project',state:'aligned'}],platform:null})
+      await until(() => text(query('.co-workspace-head h2')) === 'Cold installed project', 'Provisional repository did not resolve into the installed project')
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Project reconciliation closed record detail')
+      window.releaseColdLedger()
+      await until(() => values.get('feed-cache.json')?.records?.some(record=>record.id==='cold-record'), 'Cold ledger did not settle')
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Slow scan overwrote the exact read')
+      const changedPhase = {...exact, updated_at:'2026-10-06T12:01:00Z', quality_review:{state:'needed'}}
+      values.set('contributions/cold-record.json',changedPhase)
+      window.mobius.storage.listWithStatus = async () => ({complete:true,entries:[{type:'file',name:'cold-record.json',content:changedPhase}]})
+      window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
+      await until(() => values.get('feed-cache.json')?.records?.[0]?.quality_review?.state === 'needed', 'Changed phase did not refresh')
+      await frame(); await frame()
+      ensure(text(query('.co-run-focus-detail')).includes('Cold reviewed proposal') && !text(query('.co-run-focus-detail')).includes('This contribution moved'), 'A review phase change lost the exact selected record')
+      await click(query('[aria-label="Back to projects"]'))
+      await until(() => text(query('.co-view-heading')).includes('Your projects'), 'Full detail could not return to all projects')
+      await click([...document.querySelectorAll('.co-source-row')].find(node=>text(node.querySelector('strong'))==='Cold installed project'))
+      await until(() => query('.co-workspace-head') && query('[aria-label="Back to projects"]'), 'Entering a project hid the toolbar')
+      hostIntent('chat-prepared:cold-record','legacy-review')
+      await until(() => text(query('.co-run-focus-detail')).includes('Cold reviewed proposal'), 'Legacy title did not open the normal record workspace')
+      ensure(query('.co-header-shell') && !query('.co-inline-view'), 'Legacy title entered a headerless embedded view')
+      values.set('contributions/cold-record.json',exact)
+      hostIntent('chat-send:cold-record','inline-confirm')
+      await until(() => query('.co-inline-confirm'), 'chat-send no longer opens its confirmation')
+      ensure(!query('.co-header-shell'), 'chat-send must retain its embedded headerless layout')
+      window.mobius.storage.get = originalGet
+    })
     await check('reopening inline detail uses cached metadata', async () => {
       ensure(!detailReread, 'Reopen needlessly reread cached detail')
     })
     root.unmount()
+    if (window.inlineCanonicalHost) checks.push(...await runInlineCanonicalFailureChecks())
     const upperChecks = await runUpperUiStatusChecks()
     checks.push(...upperChecks)
     ensure(upperChecks.every(check => check.status === 'pass'), 'Upper UI status regressions: ' + JSON.stringify(upperChecks.filter(check => check.status !== 'pass')))
@@ -734,7 +966,7 @@ function cdp(browser) {
   return { events, onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) }, send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = ++serial
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 45000)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, method === 'Runtime.evaluate' ? 180000 : 45000)
       pending.set(id, { resolve, reject, timer })
       browser.stdio[3].write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
     })
@@ -745,12 +977,21 @@ async function main() {
   if (!frontendModules) throw new Error('MOBIUS_FRONTEND_NODE_MODULES is required')
   const require = createRequire(join(frontendModules, 'package.json'))
   const { rolldown } = await import(pathToFileURL(require.resolve('rolldown')).href)
+  const hostRoot = process.env.MOBIUS_APP_BLOCK_HOST_ROOT
+  let hostLeaf = 'export const PullSnapshot = null; export const hostCSS = "";'
+  if (hostRoot) {
+    const source = await readFile(join(hostRoot, 'frontend/src/components/ChatView/markdown/AppBlock.jsx'), 'utf8')
+    const css = await readFile(join(hostRoot, 'frontend/src/components/ChatView/markdown/AppBlock.css'), 'utf8')
+    hostLeaf = "import React from 'react'; import { Branch } from '@openai/apps-sdk-ui/components/Icon';\n"
+      + source.slice(source.indexOf('const STATE_NAMES'), source.indexOf('/** Reuse the opaque app host'))
+      + '\nexport const hostCSS = ' + JSON.stringify(css) + ';'
+  }
   const build = await rolldown({ input: ENTRY, platform: 'browser', tsconfig: false,
     transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': JSON.stringify('production') } },
     resolve: { modules: [frontendModules, 'node_modules'] },
     plugins: [{ name: 'workspace-browser-fixture',
-      resolveId(id, importer) { if (id === ENTRY) return id; if (importer === ENTRY && id.startsWith('.')) return join(root, id) },
-      load(id) { if (id === ENTRY) return { code: fixture, moduleType: 'jsx' } },
+      resolveId(id, importer) { if (id === '@fixture/inline-shell') return '\0inline-shell'; if (id === ENTRY) return id; if (importer === ENTRY && id.startsWith('.')) return join(root, id) },
+      load(id) { if (id === '\0inline-shell') return { code: hostLeaf, moduleType: 'jsx' }; if (id === ENTRY) return { code: 'window.inlineCanonicalHost = ' + Boolean(hostRoot) + ';\n' + fixture, moduleType: 'jsx' } },
     }],
   })
   const { output } = await build.generate({ format: 'iife' })

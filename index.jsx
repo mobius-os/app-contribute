@@ -17,6 +17,9 @@
 // submit endpoint; Feedback returns to the source chat; Dismiss CAS-abandons),
 // and composes header, tiles, connection card, feed.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+// Allows generic hosts to negotiate an in-place session for legacy blocks.
+export const appBlockSessions = true
 import { CSS } from './theme.js'
 import {
   attachSourceProjects,
@@ -64,6 +67,8 @@ import {
 import { ConnectionSettings } from './ui/ConnectionCard.jsx'
 import { contributeBlockTarget } from './chat-blocks.js'
 import { InlinePullView } from './ui/InlinePullView.jsx'
+import { InlineBatchView, InlinePreparedView } from './ui/InlinePreparedView.jsx'
+import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { Icon } from './ui/Icons.jsx'
@@ -85,7 +90,7 @@ function Header({ appId, fromCache, checking, onBack, children }) {
     <header className="co-header">
       <div className="co-header-main">
         {onBack ? (
-          <button type="button" className="co-header-back" onClick={onBack} aria-label="Back to projects"><Icon name="left" size={18} /><span>Projects</span></button>
+          <button type="button" className="co-header-back" onClick={onBack} aria-label="Back to projects"><Icon name="left" size={18} /><span>Your projects</span></button>
         ) : (
           <>
             {iconFailed ? (
@@ -142,7 +147,29 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
     }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></TaskPane>
 }
 
-export default function ContributeApp({ appId, token }) {
+// Inline cards start with exact record reads only. The ordinary workspace and
+// its account, preferences, source and ledger reads are mounted on activation,
+// where the existing guarded Send handlers remain the sole publication path.
+export default function ContributeAppEntry({ appId, token, blockSession = null }) {
+  const [activatedKey, setActivatedKey] = useState('')
+  const [inlineRuntime, setInlineRuntime] = useState(null)
+  const onActivateRequest = useCallback((key) => {
+    if (!activatedKey) setActivatedKey(key)
+    else if (inlineRuntime?.reviewStatus?.state === 'unavailable' || !inlineRuntime?.ledgerReady) void inlineRuntime?.onRefresh?.()
+  }, [activatedKey, inlineRuntime])
+  if (!blockSession) return <ContributeApp appId={appId} token={token} />
+  return <>
+    <InlineBlockSession blockSession={blockSession}
+      records={inlineRuntime?.records || []} ledgerReady={inlineRuntime?.ledgerReady || false}
+      reviewStatus={inlineRuntime?.reviewStatus || null} onActivateRequest={onActivateRequest}
+      onSend={inlineRuntime?.onSend || (() => ({ error: 'This card must be activated before sending.' }))}
+      onSendStack={inlineRuntime?.onSendStack || (() => ({ error: 'This card must be activated before sending.' }))}
+      onRefresh={inlineRuntime?.onRefresh} />
+    {activatedKey && <ContributeApp appId={appId} token={token} blockSession={blockSession} onInlineRuntime={setInlineRuntime} />}
+  </>
+}
+
+function ContributeApp({ appId, token, blockSession, onInlineRuntime }) {
   const [inlineTarget, setInlineTarget] = useState(null)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
@@ -455,8 +482,9 @@ export default function ContributeApp({ appId, token }) {
       const settingsPromise = loadAppSettings()
       const cached = await cachedPromise
       if (!cancelled && cached.length > 0) {
-        recordsRef.current = cached
-        setRecords(cached)
+        const next = reconcileLedgerSnapshot(recordsRef.current, mergeRecordUpdates(cached, recordsRef.current))
+        recordsRef.current = next
+        setRecords(next)
         setLoading(false)
         signalReady({
           item_count: cached.length,
@@ -476,7 +504,12 @@ export default function ContributeApp({ appId, token }) {
 
       const ledger = await ledgerPromise
       if (cancelled) return
-      const recs = ledger.records
+      // A bounded listing may omit a large body that the focused path already
+      // read. Preserve only those explicitly-present omitted members, never a
+      // record removed from an authoritative directory snapshot.
+      const omittedPaths = new Set(ledger.omitted)
+      const available = mergeRecordUpdates(ledger.records, recordsRef.current.filter(record => omittedPaths.has(record.path)))
+      const recs = reconcileLedgerSnapshot(recordsRef.current, available)
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
       setRecords(recs)
@@ -1379,10 +1412,10 @@ export default function ContributeApp({ appId, token }) {
     recordsForProject(focusedRecord ? [focusedRecord] : [], project).length > 0)?.key || ''
   const routedFocusRef = useRef('')
   useEffect(() => {
-    if (!reviewFocus?.recordId || !focusedReviewReady || sourceLoading || routedFocusRef.current === reviewFocus.nonce) return
+    if (!reviewFocus?.recordId || !focusedReviewReady || !focusedProjectKey || routedFocusRef.current === reviewFocus.nonce) return
     routedFocusRef.current = reviewFocus.nonce
     setProjectFocus({ key: focusedProjectKey, nonce: reviewFocus.nonce })
-  }, [reviewFocus, focusedReviewReady, sourceLoading, focusedProjectKey])
+  }, [reviewFocus, focusedReviewReady, focusedProjectKey])
 
   function projectRun(project) {
     return project ? buildContributionRun({
@@ -1404,12 +1437,24 @@ export default function ContributeApp({ appId, token }) {
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
+  useEffect(() => {
+    if (!onInlineRuntime) return
+    onInlineRuntime({ records, ledgerReady: ledgerReady && ledgerCurrentRef.current, reviewStatus,
+      onSend, onSendStack, onRefresh: () => refreshCoordinatorRef.current() })
+  }, [onInlineRuntime, records, ledgerReady, reviewStatus, onSend, onSendStack])
+
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       {!inlineTarget?.embedded ? <div className="co-header-shell">
-        <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
+        <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen || reviewFocus || selectionFocus || inlineTarget ? () => {
+          setInlineTarget(null)
+          setReviewFocus(null)
+          setPullFocus(null)
+          closeSelection()
+          setProjectFocus({ key: '', nonce: crypto.randomUUID() })
+        } : null}>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
@@ -1418,7 +1463,12 @@ export default function ContributeApp({ appId, token }) {
       </div> : null}
       <main ref={pageRef} className="co-page is-sources">
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
-        {inlineTarget ? <InlinePullView target={inlineTarget} appId={appId} token={token} records={records} onClose={() => setInlineTarget(null)} onProject={repository => {
+        {reviewFocus?.recordId && focusedReviewReady && !focusedRecord ? <p className="co-run-error" role="alert">This contribution is no longer available. Use Your projects to see your current work.</p> : null}
+        {inlineTarget?.kind === 'batch' ? <InlineBatchView target={inlineTarget} records={records} ledgerReady={ledgerReady}
+          reviewStatus={reviewStatus} onSend={onSend} onSendStack={onSendStack} onRefresh={() => refreshCoordinatorRef.current()} />
+          : inlineTarget?.kind === 'prepared' ? <InlinePreparedView target={inlineTarget} appId={appId} records={records} ledgerReady={ledgerReady}
+          reviewStatus={reviewStatus} onSend={onSend} onSendStack={onSendStack} onDismiss={onDismiss}
+          loadDiff={loadFullDiff} onRefresh={() => refreshCoordinatorRef.current()} /> : inlineTarget ? <InlinePullView target={inlineTarget} appId={appId} token={token} records={records} onClose={() => setInlineTarget(null)} onProject={repository => {
           const repo=repository.nameWithOwner
           setInlineTarget(null)
           setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.toLowerCase())?.key || `external:${repo.toLowerCase()}`, repository, nonce: crypto.randomUUID() })
@@ -1464,7 +1514,7 @@ export default function ContributeApp({ appId, token }) {
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
               onAssignIncomingReview={onAssignIncomingReview} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
-              focusReady={focusedReviewReady && !sourceLoading}
+              focusReady={focusedReviewReady}
               onFocusConsumed={consumeReviewFocus}
             />}
             </ProjectControls> : null}

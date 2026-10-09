@@ -229,8 +229,22 @@ honestly be recorded, leave the record visibly at **Review needed** or
 **Changes needed**—never tell the partner it is sendable.
 
 Status stays `prepared` until publication. After a prepare-only request, give
-one short, text-only handoff summarizing the staged work. If publication is
-already authorized, continue through [publish.md](publish.md) instead of asking
-again. A prepared review is not an app build completion. Do not navigate the
+one short handoff summarizing the staged work and end it with each `all_clear`
+record's Send block:
+
+```bash
+python3 /data/apps/contribute/prepared_block.py '<record-id>'
+```
+
+Paste the printed `mobius-app` fence unchanged, once per record (one per
+linked stack). For several records, pass every id to the same helper to print
+one batch block: each row has its own **Contribute**, and **Contribute all**
+confirms once and sends every ready item. It shows the proposed PR in the chat; its **Contribute** button
+opens Contribute's live view of that exact record with one send confirmation
+above the diff, using the same freshness checks as Contribute itself. That
+button is the approval surface: do not also tell the owner to open Contribute, ask for the same send
+on a card, or offer the block for a record that is not `all_clear`. If
+publication is already authorized, continue through [publish.md](publish.md)
+instead of asking again. A prepared review is not an app build completion. Do not navigate the
 workspace, place an app, or link a completion notification to an app as part of
 this handoff.

@@ -4,6 +4,7 @@ import { MarkdownView } from './MarkdownView.jsx'
 import DiffView from './diff/DiffView.jsx'
 import { Icon } from './Icons.jsx'
 import { ChecksBadge, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
+import { checkSummary } from '../collaboration.js'
 
 export function DateLabel({ value, prefix = '' }) {
   if (!value || !Number.isFinite(Date.parse(value))) return null
@@ -102,7 +103,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
   // failure never blanks the others.
   const keys = tab === 'conversation'
     ? { description: 'description:1', activity: `activity:${number}`, threads: `threads:${threadCursor || ''}`, related: 'related' }
-    : { view: `${tab}:${number}` }
+    : tab === 'commits' ? {} : { view: `${tab}:${number}` }
   const keySignature = Object.values(keys).join('|')
   useEffect(() => {
     const controller = new AbortController()
@@ -126,7 +127,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       read(keys.activity, () => loadPullActivity(token, pr, number, controller.signal))
       read(keys.threads, () => loadPullThreads(token, pr, threadCursor, controller.signal))
       read(keys.related, () => loadPullRelated(token, pr, controller.signal))
-    } else {
+    } else if (tab !== 'commits') {
       read(keys.view, () => tab === 'files' ? loadPullFiles(token, pr, number, controller.signal) : loadPullChecks(token, pr, number, controller.signal))
     }
     return () => {
@@ -163,11 +164,18 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     {hasMore ? <button className="co-btn" onClick={() => set(current + 1)}>{unknown ? 'Check next page' : 'Next page'}</button> : null}
   </div> : null
   const labels = pr.labels?.nodes || []
-  const tabs = [['conversation', 'Conversation'], ['files', 'Files changed'], ['checks', 'Checks']]
+  const tabs = [['conversation', 'Conversation'], ['commits', 'Commits'], ['files', 'Files changed'], ['checks', 'Checks']]
+  const repoName = pr.repository?.nameWithOwner
+  const repoUrl = /^[\w.-]+\/[\w.-]+$/.test(repoName || '') ? `https://github.com/${repoName}` : null
+  const comments = pr.comments?.totalCount
+  const reviews = pr.reviews?.totalCount
+  const conversationCount = Number.isInteger(comments) && comments >= 0 && Number.isInteger(reviews) && reviews >= 0 ? comments + reviews : null
+  const commitCount = pr.commits?.totalCount
   return <div className="co-pr-detail" aria-label={`Details for PR ${pr.number}`}>
     <header className="co-gh-pr-head">
       <h3 className="co-gh-pr-title">{pr.title} <span>#{pr.number}</span></h3>
-      <div className="co-gh-pr-sub"><PullStateBadge pr={pr} /><span><b>{pr.author?.login || 'Someone'}</b> wants to merge into <code>{pr.baseRefName}</code>{pr.headRefName ? <> from <code>{pr.headRefName}</code></> : null}</span></div>
+      <div className="co-gh-pr-sub"><PullStateBadge pr={pr} /><span><b>{pr.author?.login || 'Someone'}</b> wants to merge {pr.headRefName ? <code>{pr.headRefName}</code> : 'a branch'} into <code>{pr.baseRefName || 'unknown base'}</code></span></div>
+      {repoName ? <p className="co-gh-pr-repo">Repository: {repoUrl ? <a className="co-repo-link" href={repoUrl} target="_blank" rel="noopener noreferrer">{repoName}</a> : repoName}</p> : null}
       {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
     </header>
     <div className="co-pr-detail-actions">
@@ -177,7 +185,10 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       <DetailLink href={pr.url}>Open on GitHub</DetailLink>
     </div>
     {provenance.length ? <p className="co-gh-provenance"><Icon name="feedback" size={16} /><span>From</span>{provenance.map(link => <button className="co-gh-chat-link" key={`${link.chat_id}:${link.role}`} onClick={() => window.parent.postMessage({type:'moebius:open-chat',chatId:link.chat_id},'*')} title={link.role === 'source' ? 'Created or modified this PR' : link.role === 'fix' ? 'Fixed this PR' : 'Reviewed this PR'}>{link.title}</button>)}</p> : null}
+    <div className="co-gh-review-status" aria-label="GitHub checks and review status"><div><strong>Checks</strong>{checkSummary(pr)?.total ? <ChecksBadge pr={pr} /> : <span>Not available</span>}</div><div><strong>Review</strong><span>{REVIEW_DECISION[pr.reviewDecision] || 'Status unavailable'}</span></div><p>GitHub checks are not an all-clear private review.</p></div>
     <nav className="co-detail-tabs" aria-label="Pull request details">{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}
+      {key === 'conversation' && conversationCount !== null ? <span className="co-tab-count" title={`${comments} comments and ${reviews} reviews`}>{conversationCount}</span> : null}
+      {key === 'commits' && Number.isInteger(commitCount) && commitCount >= 0 ? <span className="co-tab-count">{commitCount}</span> : null}
       {key === 'files' && Number.isInteger(pr.changedFiles) ? <><span className="co-tab-count">{pr.changedFiles}</span><span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span></> : null}
       {key === 'checks' ? <ChecksBadge pr={pr} /> : null}</button>)}</nav>
     <div className="co-pr-detail-body" role="region" aria-label="Pull request context">
@@ -195,10 +206,11 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
       {record && onRecord ? <button className="co-quiet-action" onClick={() => onRecord(record)}>Local preparation &amp; source conversation</button> : null}
     </> : null}
-    {tab !== 'conversation' ? readState(view, tab === 'files' ? 'files' : 'checks') : null}
+    {tab === 'commits' ? <p className="co-pr-note">Commit history is unavailable here. {safeDetailLink(pr.url) ? <DetailLink href={pr.url}>View PR on GitHub</DetailLink> : null}</p> : null}
+    {tab === 'files' || tab === 'checks' ? readState(view, tab === 'files' ? 'files' : 'checks') : null}
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
     {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
-    {tab !== 'conversation' && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
+    {(tab === 'files' || tab === 'checks') && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
     {tab === 'checks' && !view.loading ? <button className="co-quiet-action" onClick={() => { setCache(old => { const next = { ...old }; delete next[keys.view]; return next }); setRetry(value => value + 1) }}>Refresh checks</button> : null}
     </div>
   </div>

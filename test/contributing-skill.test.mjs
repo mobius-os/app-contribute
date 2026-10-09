@@ -13,7 +13,6 @@ const modeFiles = readdirSync(new URL('../contributing', import.meta.url))
 const mode = (name) => read(`contributing/${name}`)
 const skill = [core, ...modeFiles.map(mode)].join('\n')
 const prose = skill.replace(/\s+/g, ' ')
-const attached = read('attached-work.md').replace(/\s+/g, ' ')
 const manifest = JSON.parse(read('mobius.json'))
 
 test('folder skill core stays small and links every mode file relatively', () => {
@@ -98,11 +97,14 @@ test('existing PR updates require exact public metadata without mutating it', ()
   assert.doesNotMatch(prose, /applies `plan\.title`\/`plan\.body_draft` once after the branch update/)
 })
 
-test('chat classifications are durable outcomes rather than prose-only exclusions', () => {
-  assert.match(prose, /settle_chat_changes\.py/)
-  assert.match(prose, /newest `ts` actually reviewed/)
-  assert.match(prose, /A later edit to the same path becomes Unsorted again/)
-  assert.match(prose, /do not substitute a prose summary for this write/)
+test('prepared work is handed off with its Send block, not a trip to Contribute', () => {
+  assert.match(prose, /prepared_block\.py '<record-id>'/)
+  assert.match(prose, /Paste the printed `mobius-app` fence unchanged/)
+  assert.match(prose, /do not also tell the owner to open Contribute/)
+  assert.match(core, /Send block/)
+  assert.match(prose, /not `all_clear`/)
+  assert.doesNotMatch(prose, /press \*\*Send PR\*\* in Contribute|Changes ready to organize|settle_chat_changes/)
+  assert.doesNotMatch(prose, /text-only handoff/)
 })
 
 test('linked private reviews are locked until verified terminal cleanup', () => {
@@ -114,14 +116,11 @@ test('linked private reviews are locked until verified terminal cleanup', () => 
 })
 
 test('verification reuses exact environments and owns exceptional installs', () => {
-  for (const text of [prose, attached]) {
-    assert.match(text, /scripts\.wt-pytest\.sh|scripts\/wt-pytest\.sh/)
-    assert.match(text, /scripts\.wt-npm\.sh|scripts\/wt-npm\.sh/)
-    assert.match(text, /exact `package-lock\.json` match|`package-lock\.json` matches exactly/)
-    assert.match(text, /Do not run a direct `npm ci`/)
-    assert.match(text, /checkout-local `\.venv`/)
-  }
-  assert.match(attached, /test machinery is not/)
+  assert.match(prose, /scripts\.wt-pytest\.sh|scripts\/wt-pytest\.sh/)
+  assert.match(prose, /scripts\.wt-npm\.sh|scripts\/wt-npm\.sh/)
+  assert.match(prose, /exact `package-lock\.json` match|`package-lock\.json` matches exactly/)
+  assert.match(prose, /Do not run a direct `npm ci`/)
+  assert.match(prose, /checkout-local `\.venv`/)
 })
 
 test('mixed-action stacks advance through separately approved public phases', () => {
@@ -131,17 +130,6 @@ test('mixed-action stacks advance through separately approved public phases', ()
   assert.match(prose, /full chain remains visible and is revalidated on both calls/)
   assert.match(prose, /never let one phase claim, hide, or inherit approval for the deferred phase/i)
 })
-
-test('attached helpers use one private bounded playbook', () => {
-  assert.match(attached, /Nothing public/)
-  assert.match(attached, /agent_snapshot\.py/)
-  assert.match(attached, /--work-json/)
-  assert.match(attached, /do not enumerate/)
-  assert.match(attached, /manifest's `source_chat_id` owns provenance/)
-  assert.match(attached, /Public actions: none/)
-  assert.doesNotMatch(attached, /Read and follow .*contributing/)
-})
-
 
 test('private publication and local installation have separate ownership', () => {
   assert.match(prose, /An ordinary PR may remain uninstalled/)
@@ -197,12 +185,10 @@ test('the co-author trailer is the default and an opt-out is explicit and disclo
   assert.match(prose, /`coauthor_trailer: false` is the only way to omit that trailer/)
   assert.match(prose, /Contribute's review shows the omission; give the reason/)
   assert.match(prose, /unless the reviewed plan set `coauthor_trailer: false`/)
-  assert.match(attached, /set `plan\.coauthor_trailer: false` and name the policy/)
-  assert.match(attached, /owner's request to omit it reaches the source chat, not this helper/)
 })
 
 test('skill text states rules rather than incident history', () => {
-  for (const text of [prose, attached]) {
+  for (const text of [prose]) {
     assert.doesNotMatch(text, /second doorway|Older platforms may still require|parallel Möbius-maintainer roster|chat-settlement|older boot cleaners|baked boot cleaner|ecosystem is young/)
   }
 })
@@ -211,7 +197,5 @@ test('pull-request records are staged and reviewed through Contribute, never han
   assert.match(prose, /contributions\/<id>\/<record-id>\/stage/)
   assert.match(prose, /contributions\/<id>\/<record-id>\/review/)
   assert.match(prose, /never recompute or hand-write those fields/)
-  assert.match(attached, /never write the record or diff through the storage API/)
   assert.doesNotMatch(prose, /CAS-(store|mark|update) `?quality_review/)
-  assert.doesNotMatch(attached, /"quality_review": \{/)
 })

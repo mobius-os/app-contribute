@@ -9,7 +9,8 @@ export const PR_FIELDS = `id number title url headRefOid headRefName baseRefName
   headRepository { nameWithOwner viewerPermission isArchived }
   labels(first:20) { nodes { name color } totalCount }
   comments { totalCount }
-  commits(last:1) { nodes { commit { statusCheckRollup { state contexts {
+  reviews { totalCount }
+  commits(last:1) { totalCount nodes { commit { statusCheckRollup { state contexts {
     totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
   } } } } }
   reviewDecision mergeable`

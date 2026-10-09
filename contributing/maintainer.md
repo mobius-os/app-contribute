@@ -274,7 +274,9 @@ read-only PR snapshot. It prints a `mobius-app` fence with `app: "contribute"`,
 a GitHub PR row, and fallback `facts` for older chat views. Paste the helper's
 output unchanged; do not invent live checks or imply it reviewed the diff.
 Opening the block focuses that PR in Contribute for current detail.
-A generic app fence is not a button granting hidden action authority.
+A generic app fence is not a button granting hidden action authority; only a
+prepared record's Send block ([SKILL.md](SKILL.md)) carries Contribute's own
+send control.
 
 A review-run block uses `intent: "chat-review-run:<run.id>"` for the exact saved
 run, showing its steps, frozen prompt/model, results and owning chat. Use a

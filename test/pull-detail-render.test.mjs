@@ -13,15 +13,27 @@ async function render(t, name, props) {
   `)
   return (await renderer).render(name, props)
 }
-test('detail opens on the GitHub-style Conversation tab with Files changed and Checks beside it', async t => {
-  const html = await render(t, 'PullRequestDetail', { pr: { number: 7, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', url: 'https://github.com/team/repo/pull/7' } })
+test('detail opens with truthful GitHub-style tabs, repository and branch context', async t => {
+  const html = await render(t, 'PullRequestDetail', { pr: { number: 7, title: 'Improve review flow', author: { login: 'octocat' }, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), headRefName: 'fix/review', baseRefOid: 'b'.repeat(40), baseRefName: 'main', url: 'https://github.com/team/repo/pull/7', comments: { totalCount: 3 }, reviews: { totalCount: 2 }, commits: { totalCount: 4 }, changedFiles: 6, reviewDecision: 'REVIEW_REQUIRED' } })
   if (!html) return
-  assert.match(html, /aria-pressed="true">Conversation/)
-  assert.match(html, />Files changed</)
+  assert.match(html, /aria-pressed="true">Conversation<span class="co-tab-count"[^>]*>5</)
+  assert.match(html, />Commits<span class="co-tab-count">4</)
+  assert.match(html, />Files changed<span class="co-tab-count">6</)
   assert.match(html, />Checks<\/button>/)
-  assert.match(html, /wants to merge into <code>main<\/code>/)
+  assert.match(html, /octocat<\/b> wants to merge <code>fix\/review<\/code> into <code>main<\/code>/)
+  assert.match(html, /href="https:\/\/github.com\/team\/repo"/)
+  assert.match(html, /Review required/)
+  assert.match(html, /not an all-clear private review/)
   assert.match(html, /Loading description/)
   assert.match(html, /Take on with agent/)
+})
+test('missing public counts are not fabricated', async t => {
+  const html = await render(t, 'PullRequestDetail', { pr: { number: 8, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main' } })
+  if (!html) return
+  assert.match(html, />Commits<\/button>/)
+  assert.match(html, /Status unavailable/)
+  assert.match(html, /Not available/)
+  assert.doesNotMatch(html, />Commits<span class="co-tab-count">0</)
 })
 for (const items of [[], [{ __typename: 'Issue', number: 2, title: 'Usable issue', url: 'https://github.com/team/repo/issues/2', repository: { nameWithOwner: 'team/repo' }, relationships: ['May close'] }]]) {
   test(`partial related context warns and retries with ${items.length} usable items`, async t => {

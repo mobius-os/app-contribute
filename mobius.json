@@ -14,6 +14,12 @@
     "writes": "none",
     "execution": "none"
   },
+  "capabilities": {
+    "chat.blocks.passive": {
+      "version": 1,
+      "reason": "Read current contribution receipts in chat without sending changes."
+    }
+  },
   "permissions": {
     "cross_app_access": "none",
     "share_with_apps": "none",
@@ -107,6 +113,10 @@
     "review-prompts.js",
     "ui/ReviewPromptSettings.jsx",
     "pr_block.py",
-    "ui/InlinePullView.jsx"
+    "prepared_block.py",
+    "ui/InlinePullView.jsx",
+    "ui/InlinePreparedView.jsx",
+    "inline-session.js",
+    "ui/InlineBlockSession.jsx"
   ]
 }

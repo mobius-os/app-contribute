@@ -684,6 +684,10 @@ export const CSS = `
 }
 .co-plan-meta-repo,
 .co-plan-meta-time { flex: 0 0 auto; white-space: nowrap; }
+.co-repo-link { color: #4493f8; text-decoration: none; }
+[data-theme="light"] .co-repo-link { color: #0969da; }
+.co-repo-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.co-repo-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 3px; }
 .co-plan-meta-branch {
   flex: 0 1 auto; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
@@ -1031,7 +1035,7 @@ export const CSS = `
   font-size: 14px; font-weight: 700;
 }
 .co-secondary-action {
-  width: auto; padding: 0 11px; gap: 7px;
+  width: auto; flex: 0 0 auto; padding: 0 11px; gap: 7px;
   font-size: 14px; font-weight: 700;
 }
 .co-icon-btn.co-review-btn.is-primary {
@@ -1716,4 +1720,50 @@ export const CSS = `
 }
 
 ${WORKSPACE_CSS}
+
+/* Focused contribution detail: keep the GitHub PR reading rhythm without
+   changing compact cards in the chat transcript. */
+.co-card-full-detail { min-width: 0; padding: 20px 22px; box-shadow: none; }
+.co-prepared-pr-head { min-width: 0; }
+.co-card-full-detail h3.co-prepared-pr-title { margin: 0; color: var(--text); font-size: 22px; font-weight: 600; line-height: 1.32; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.co-prepared-pr-title > span { color: var(--muted); font-weight: 400; white-space: nowrap; }
+.co-prepared-pr-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 13px; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.co-prepared-pr-sub > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.co-prepared-pr-sub b { color: var(--text); font-weight: 650; }
+.co-prepared-pr-sub code { padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2, var(--surface)); color: var(--text); font: 14px var(--mono, var(--font)); overflow-wrap: anywhere; }
+.co-gh-badge.is-private { background: var(--surface-2, var(--surface)); color: var(--text); border: 1px solid var(--border); }
+.co-prepared-pr-repo { margin: 10px 0 0; font-size: 14px; }
+.co-card-full-detail .co-gh-labels { margin-top: 12px; }
+.co-card-full-detail .co-gh-label.is-plain { border-color: var(--border); background: var(--surface-2, var(--surface)); color: var(--text); }
+.co-private-review { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 20px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--green) 35%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--green) 6%, var(--surface)); font-size: 14px; }
+.co-private-review > strong { display: inline-flex; align-items: center; gap: 5px; color: var(--green); font-weight: 700; }
+.co-private-review > span { color: var(--text); }
+.co-private-review > details { flex-basis: 100%; }
+.co-private-review summary { min-height: 44px; display: inline-flex; align-items: center; color: var(--text); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.co-private-review p { max-width: 72ch; margin: 0 0 10px; color: var(--text); line-height: 1.5; }
+.co-card-full-detail .co-review { display: block; width: 100%; margin-top: 22px; padding-top: 0; border-top: 0; }
+.co-card-full-detail .co-detail-tabs { display: flex; width: 100%; max-width: 100%; gap: 20px; margin: 0; overflow-x: auto; scrollbar-width: thin; }
+.co-card-full-detail .co-detail-tabs button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 48px; white-space: nowrap; }
+.co-prepared-detail-body { min-height: 280px; height: clamp(280px, 46dvh, 520px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 18px 2px 8px; }
+.co-prepared-description { max-width: 75ch; }
+.co-prepared-description > .co-markdown { font-size: 16px; line-height: 1.6; }
+.co-prepared-detail-body .co-pr-note { margin: 0; line-height: 1.5; }
+.co-workspace .co-decisions .co-run-primary.is-send .co-btn.co-btn-primary { border-color: transparent; background: var(--accent-hover, var(--accent)); color: var(--accent-fg); font-weight: 650; }
+.co-workspace .co-decisions .co-run-primary.is-send .co-btn.co-btn-primary:hover { filter: brightness(1.06); }
+.co-root .co-header-back { min-height: 44px; padding: 8px 10px; border-radius: 8px; color: var(--text); font-weight: 650; }
+.co-root .co-header-back:hover { background: var(--surface-2, var(--surface)); color: var(--text); }
+.co-root .co-header-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.co-gh-pr-repo { margin: 9px 0 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.co-gh-review-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; margin: 14px 0 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 14px; }
+.co-gh-review-status > div { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.co-gh-review-status strong { font-weight: 650; }
+.co-gh-review-status p { flex-basis: 100%; margin: 0; color: var(--muted); line-height: 1.4; }
+.co-pr-detail .co-detail-tabs { gap: 16px; }
+@media (max-width: 640px) {
+  .co-card-full-detail { padding: 16px; }
+  .co-card-full-detail h3.co-prepared-pr-title { font-size: 22px; }
+  .co-prepared-pr-sub { align-items: flex-start; }
+  .co-prepared-detail-body { height: clamp(280px, 46dvh, 460px); }
+  .co-card-full-detail .co-detail-tabs { gap: 16px; }
+}
 `
