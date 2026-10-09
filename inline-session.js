@@ -240,9 +240,15 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     }
   }
   const authoritative = key => ledgerReady && !['loading', 'unavailable'].includes(reviewStatus?.state) && idsFor(key).every(id => exactRead.has(id))
+  const readyUnitsFor = key => authoritative(key) ? unitsFor(key).filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit)) : []
+  // A fallback publication click is not the passive protocol's read activation.
+  // Expose that distinction without changing the host action/checkpoint schema.
+  const canFreeze = key => alive && !recoveryError && !busyUnits.size && !confirming && !requestedActivation
+    && readyUnitsFor(key).length > 0 && readyUnitsFor(key).every(unit => unit.records.every(record =>
+      !pendingRead.has(record.id) && exactObservations.get(record.id)?.identity === attemptTarget(record)))
   const makeAction = item => {
     const units = unitsFor(item.key)
-    const ready = authoritative(item.key) ? units.filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit)) : []
+    const ready = readyUnitsFor(item.key)
     // Display identities are not publication units. A row links its own PR;
     // confirmation still freezes the complete parent-first stack below.
     const addressed = idsFor(item.key)
@@ -394,7 +400,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     reconcileResults(); fulfillRequestedActivation(); emit()
   }
   function freezeActivation(key) {
-    const ready = unitsFor(key).filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit))
+    const ready = readyUnitsFor(key)
     if (!ready.length) return false
     frozen = { key, units: copy(ready) }
     confirming = key
@@ -501,6 +507,6 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     return true
   }
   return { sessionId, hydrate, updateLedger, activate, cancel, confirm, handleEvent, emit,
-    readUnit: id => copy(unitFor(id)),
+    canFreeze, readUnit: id => copy(unitFor(id)),
     readAction: id => makeAction({ key: `chat-send:${id}`, label: 'Contribute' }), dispose: () => { alive = false } }
 }

@@ -24,11 +24,12 @@ const reviewed = { id: 'rec-1', type: 'pr', status: 'prepared', repo: 'team/repo
 const base = { target: { kind: 'prepared', id: 'rec-1', embedded: true }, appId: 1, ledgerReady: true,
   reviewStatus: { state: 'ready', byId: { 'rec-1': { state: 'ready' } } }, onSend() {}, onSendStack() {}, onDismiss() {}, onFeedback() {}, loadDiff: async () => '' }
 
-test('a reviewed prepared record shows its own Contribute button inside the transcript view', async t => {
+test('a cached reviewed card waits for mounted exact authority before offering publication', async t => {
   const html = await render(t, { ...base, records: [reviewed] })
   if (!html) return
   assert.match(html, /Fix the thing/)
-  assert.match(html, />Contribute</)
+  assert.match(html, /Checking this contribution/)
+  assert.doesNotMatch(html, />Contribute</)
   assert.match(html, /Open in Contribute/)
 })
 
@@ -112,14 +113,14 @@ test('the confirmation explains that All clear is a private review, not CI, with
   assert.match(html, /Ran the focused tests\./)
 })
 
-test('a batch lists every named record, counts only the ready ones, and says why others are skipped', async t => {
+test('an unhydrated batch lists every named record and waits truthfully while preserving skip reasons', async t => {
   const module = await load(t)
   if (!module) return
   const unreviewed = { ...reviewed, id: 'rec-2', title: 'Not reviewed yet', plan: { ...plan, title: 'Not reviewed yet' }, quality_review: { state: 'changes_needed' } }
   const sent = { ...reviewed, id: 'rec-3', status: 'open', number: 3, url: 'https://github.com/team/repo/pull/3', plan: { ...plan, title: 'Already out' } }
   const html = (await module).renderBatch({ ...base, target: { kind: 'batch', ids: ['rec-1', 'rec-2', 'rec-3'], embedded: true }, records: [reviewed, unreviewed, sent] })
-  assert.match(html, /Contribute 1 of 3\?/)
-  assert.match(html, />Contribute all 1</)
+  assert.match(html, /Checking contributions/)
+  assert.match(html, /disabled=""[^>]*>Checking…</)
   assert.match(html, /Fix the thing/)
   assert.match(html, /still needs a review before it can be sent/)
   assert.match(html, /Already sent/)

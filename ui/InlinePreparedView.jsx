@@ -53,11 +53,12 @@ function useFallbackPublication(ids, records, ledgerReady, reviewStatus, onSend,
   function remember(copied) {
     setSnapshots(previous => ({ ...previous, ...Object.fromEntries(copied.map(record => [record.id, structuredClone(record)])) }))
   }
-  const action = id => state && (state.actions.find(item => item.key === `chat-send:${id}`) || session.current?.readAction(id))
-  const batch = state?.actions.find(item => item.key === `chat-send-batch:${key}`)
+  const action = id => state && { ...session.current?.readAction(id), readyToFreeze: session.current?.canFreeze(`chat-send:${id}`) }
+  const batchAction = state?.actions.find(item => item.key === `chat-send-batch:${key}`)
+  const batch = batchAction && { ...batchAction, readyToFreeze: session.current?.canFreeze(batchAction.key) }
   async function contribute(actionKey) {
     const current = published.current?.actions.find(item => item.key === actionKey)
-    if (!session.current || !current || current.disabled) return { pending: true }
+    if (!session.current || !current || current.disabled || !session.current.canFreeze(actionKey)) return { pending: true }
     // Copy the visible target before activation/hash awaits. It is only local
     // presentation history; the session separately owns frozen approval/proof.
     const addressed = actionKey.startsWith('chat-send-batch:') ? ids : [actionKey.slice('chat-send:'.length)]
@@ -67,9 +68,13 @@ function useFallbackPublication(ids, records, ledgerReady, reviewStatus, onSend,
     }).map(record => [record.id, record])).values()]
     const context = [...new Map(addressed.flatMap(id => session.current.readUnit(id).records).map(record => [record.id, record])).values()]
     if (!publicationContextMatches(copied, context)) return { pending: true }
-    remember(copied)
     session.current.activate(actionKey)
-    if (published.current?.actions.find(item => item.key === actionKey)?.confirming) await session.current.confirm(actionKey)
+    if (!published.current?.actions.find(item => item.key === actionKey)?.confirming) {
+      session.current.cancel(actionKey) // no latent consent after a read-only activation
+      return { pending: true }
+    }
+    remember(copied)
+    await session.current.confirm(actionKey)
     return { pending: true }
   }
   const projected = new Map(records.map(record => [record.id, record]))
@@ -195,19 +200,19 @@ export function InlinePreparedView({ target, appId, records, ledgerReady, review
         <div><strong>Contribute this linked chain to <RepoLink repo={unit.records[0]?.plan?.repo || unit.records[0]?.repo} />?</strong>
           <span>Opens each layer publicly from your GitHub account, parent first. Nothing merges. Every reviewed change is below.</span></div>
         <div className="co-inline-confirm-actions"><button type="button" className="co-btn" onClick={() => setConfirming(false)}>Not now</button>
-          <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} /></div>
+          <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action?.readyToFreeze} /></div>
         <ReviewNote records={unit.records.filter(member => member.status === 'prepared')} />
       </div> : null}
       {unit.records.map(member => <ContributionCard key={member.id} rec={member} reviewState={reviewStateFor(member, reviewStatus)}
         loadDiff={loadDiff} initialExpanded={member.id === record.id} showDecision={false} />)}
-      {confirming || locked ? null : <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} />}
+      {confirming || locked ? null : <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action?.readyToFreeze} />}
     </div> : null}
-    {attempted ? <FallbackResult action={action} /> : null}
-    {record && !unit && confirming && !locked ? <SendConfirm record={record} reviewState={reviewStateFor(record, reviewStatus)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} onSend={() => publication.send(target.id)} onClose={() => setConfirming(false)} /> : null}
+    {attempted ? <FallbackResult action={action} /> : record && !action?.readyToFreeze && !settled(record) ? <p role="status" className="co-review-note">{action?.note || 'Checking this contribution before you can contribute.'}</p> : null}
+    {record && !unit && confirming && !locked ? <SendConfirm record={record} reviewState={reviewStateFor(record, reviewStatus)} busy={Boolean(action?.busy)} disabled={!action?.readyToFreeze} onSend={() => publication.send(target.id)} onClose={() => setConfirming(false)} /> : null}
     {/* No source-chat button here: the reader is already in a chat. While the
         confirmation is open it is the only Send, so the card shows none. */}
     {record && !unit ? <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)}
-      onSend={confirming || locked || action?.disabled || reviewStateFor(record, reviewStatus)?.state !== 'ready' ? undefined : () => publication.send(target.id)} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
+      onSend={confirming || locked || !action?.readyToFreeze || reviewStateFor(record, reviewStatus)?.state !== 'ready' ? undefined : () => publication.send(target.id)} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
   </section>
 }
 
@@ -256,10 +261,11 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   })
   // One stack is one publication unit, even if the block names two layers.
   // A later phase gets a fresh key and therefore needs a fresh confirmation.
-  const ready = [...new Map(items.filter(item => !item.blocker && item.phase.length && (!publication.action(item.id) || !publication.action(item.id).disabled))
+  const ready = [...new Map(items.filter(item => !item.blocker && item.phase.length && (publication.action(item.id)?.readyToFreeze))
     .map(item => [item.unitKey, item])).values()]
   const loading = items.some(item => (!item.record && !item.read)
     || (item.unit && !ledgerReady && stackReadiness(item.unit).code === 'incomplete'))
+  const checking = !Object.keys(publication.attempted).length && items.some(item => !item.blocker && item.phase.length && !publication.action(item.id)?.readyToFreeze)
   async function sendAll() { await publication.sendAll() }
   async function refresh() {
     setRefreshing(true)
@@ -274,6 +280,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     if (action && attempted) return <span className={`co-batch-status ${action.busy ? 'is-busy' : action.status === 'Needs attention' ? 'is-failed' : ''}`}>
       {action.busy ? 'Sending…' : action.status === 'Checking result' ? 'Checking result…' : ['Open','Draft','Closed','Merged','Sent'].includes(action.status) ? 'Sent' : action.note || action.status} {linkView}</span>
     if (item.record && item.record.status !== 'prepared') return <span className="co-batch-status">{links.length ? <>Already sent {linkView}</> : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
+    if (!action?.readyToFreeze && !item.blocker) return <span className="co-batch-status">{action?.note || 'Checking contribution…'}</span>
     return item.blocker ? <span className="co-batch-status">{item.blocker} {linkView}</span> : <span className="co-batch-status is-ready">Ready {linkView}</span>
   }
   const finished = Object.keys(publication.attempted).length > 0 && !busy
@@ -282,7 +289,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     <div className="co-board-actions"><button className="co-quiet-action" disabled={refreshing || busy} onClick={refresh}><Icon name="refresh" /> {refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
     <div className="co-inline-confirm" role="group" aria-label="Confirm contributing several">
       <div>
-        <strong>{finished ? 'Contribution results' : `Contribute ${ready.length} of ${items.length}?`}</strong>
+        <strong>{finished ? 'Contribution results' : checking ? 'Checking contributions…' : `Contribute ${ready.length} of ${items.length}?`}</strong>
         <span>Each one opens publicly from your GitHub account, all at once; a linked chain opens parent first. Nothing merges. Anything not ready is skipped and says why.</span>
       </div>
       <ul className="co-batch-list">
@@ -299,8 +306,8 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
         })}
       </ul>
       <div className="co-inline-confirm-actions">
-        <button type="button" className="co-btn co-btn-primary" disabled={busy || loading || ready.length === 0 || !publication.batch || publication.batch.disabled} aria-busy={busy} onClick={sendAll}>
-          {busy ? 'Contributing…' : loading ? 'Checking…' : `Contribute all ${ready.length}`}
+        <button type="button" className="co-btn co-btn-primary" disabled={busy || loading || ready.length === 0 || !publication.batch?.readyToFreeze} aria-busy={busy} onClick={sendAll}>
+          {busy ? 'Contributing…' : loading || checking ? 'Checking…' : `Contribute all ${ready.length}`}
         </button>
       </div>
       <ReviewNote records={items.flatMap(item => item.unit ? stackPublicationRecords(item.unit) : item.record ? [item.record] : [])} />
