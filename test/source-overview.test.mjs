@@ -43,10 +43,11 @@ const runRenderer = () => renderModule(`
       loadDiff: noop,
     })))
   }
-  export function renderFocus(item) {
+  export function renderFocus(item, options = {}) {
     return renderToStaticMarkup(React.createElement(FocusedItem, {
       item,
-      reviewStatus: { byId: {} },
+      reviewStatus: options.reviewStatus || { byId: {} },
+      onReview: options.onReview,
       onFeedback: noop,
       onDismiss: noop,
       onRestore: noop,
@@ -109,8 +110,8 @@ test('a mixed-route publication batch stays behind one exact preflight', async (
     privateAction: null,
   }, { publicationPreference: 'mobius', githubState: 'connected' })
 
-  assert.match(html, /3 reviewed and ready to send/)
-  assert.match(html, /Choose the exact changes before anything is sent/)
+  assert.match(html, /3 prepared PRs/)
+  assert.match(html, /Privately reviewed. Nothing shared yet/)
   assert.match(html, /Review and send 3/)
 })
 
@@ -205,19 +206,19 @@ test('the Run keeps project identity without duplicating Projects navigation', a
   }
   const html = renderRun(run)
 
-  assert.match(html, /Prepared proposals · not shared/)
+  assert.match(html, /Prepared work/)
   assert.doesNotMatch(html, /Prepare &amp; review|Run full cycle|Inspect changes/)
   assert.match(html, /owner\/one/)
   assert.match(html, /owner\/two/)
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
-  assert.doesNotMatch(html, /co-run-row is-private_review/)
+  assert.match(html, /co-run-row is-private_review/)
   assert.doesNotMatch(html, /projects represented in this snapshot/)
   assert.doesNotMatch(html, /Browse projects/)
   assert.doesNotMatch(html, /<select|Filter by project|All projects/)
   assert.doesNotMatch(html, /You’re caught up/)
 })
 
-test('private review groups move from the one Private Run into Working while it runs', async (t) => {
+test('pending private review proposals do not become agent tasks merely because a project cycle runs', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun } = await runRenderer()
   const rec = record('Private fix')
@@ -231,12 +232,11 @@ test('private review groups move from the one Private Run into Working while it 
     privateAction: { label: 'Fix', count: 1, draft: 'Fix private work' },
   }, { cycle: { phase: 'running', runtime: { running: true } } })
 
-  assert.match(html, /<h3>In progress<\/h3>/)
-  assert.match(html, /is-review_in_progress/)
-  assert.match(html, /Private run in progress/)
+  assert.match(html, /Prepared work/)
+  assert.doesNotMatch(html, /Agent activity|is-review_in_progress|Private run in progress/)
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
   assert.doesNotMatch(html, /co-run-private-items/)
-  assert.doesNotMatch(html, /co-run-row is-private_review/)
+  assert.match(html, /co-run-row is-private_review/)
 })
 
 test('focused batch and private items are inspectable but cannot bypass their one owner', async (t) => {
@@ -269,6 +269,20 @@ test('focused stacks preserve every source chat and never expose an unreviewed s
   assert.equal((html.match(/class="co-group-member"/g) || []).length, 2)
   assert.match(html, /Address group in conversation/)
   assert.doesNotMatch(html, />Send PRs?</)
+})
+
+test('a focused stack offers its group review only while a member still needs one', async (t) => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderFocus } = await runRenderer()
+  const stack = records => ({
+    id: 'private_review:stack', kind: 'private_review',
+    unit: { type: 'stack', id: 'stack', records }, record: records[0],
+    label: 'Related changes', detail: 'Private review needed',
+  })
+  const unreviewed = record('Unreviewed', { quality_review: null })
+  assert.match(renderFocus(stack([record('Reviewed'), unreviewed]), { onReview: () => ({ ok: true }) }), />Review group</)
+  const ready = { byId: { Reviewed: { state: 'ready' }, 'Also reviewed': { state: 'ready' } } }
+  assert.doesNotMatch(renderFocus(stack([record('Reviewed'), record('Also reviewed')]), { onReview: () => ({ ok: true }), reviewStatus: ready }), />Review group</)
 })
 
 test('focused public-attention stacks expose every affected record and its next action', async (t) => {
@@ -341,7 +355,7 @@ test('durable Ready errors stay visible with only deliberate safe recovery', asy
   assert.match(html, /Open pull request/)
 })
 
-test('dismissed work remains discoverable and focused history can restore it', async (t) => {
+test('dismissed work is discoverable in History and retains exact restore links', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun, renderFocus } = await runRenderer()
   const archived = { ...record('Restore me'), status: 'abandoned' }
@@ -356,7 +370,9 @@ test('dismissed work remains discoverable and focused history can restore it', a
   })
   const focusHtml = renderFocus(item)
 
+  assert.doesNotMatch(runHtml, /Archived proposals/)
   assert.match(runHtml, /History<\/span><b>1<\/b>/)
+  assert.match(runHtml, /Restore me/)
   assert.match(focusHtml, />Restore</)
 })
 
@@ -367,7 +383,7 @@ test('the global workspace keeps exact ready batches without duplicating project
   const publish = { id: 'publish:ready', kind: 'publish', record: rec, unit: { type: 'record', record: rec, records: [rec] }, label: rec.title, detail: rec.repo }
   const run = { decisions: [publish], working: [], recent: [], archive: [] }
   assert.match(renderRun(run, { presentation: 'overview' }), /Review and send/)
-  assert.doesNotMatch(renderRun(run, { presentation: 'overview' }), /Needs you|Prepared proposals · not shared|In progress/)
+  assert.doesNotMatch(renderRun(run, { presentation: 'overview' }), /Needs you|Private proposals · not shared|In progress/)
   assert.equal(renderRun({ decisions: [], working: [], recent: [], archive: [] }, { presentation: 'overview' }), '')
   const focused = renderRun(run, { selectedId: publish.id, projectName: 'Example' })
   assert.match(focused, /co-run-focus-detail/)
@@ -386,4 +402,53 @@ test('non-actionable batch records leave no empty overview spacing', async t => 
   const html = renderRun({ decisions: [item('publish', sent), item('mark_ready', managedDraft)],
     working: [], recent: [], archive: [] }, { presentation: 'overview' })
   assert.equal(html, '')
+})
+
+test('seven open issues are shared inventory, never seven agent tasks', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const issues = Array.from({ length: 7 }, (_, index) => {
+    const rec = record(`Open issue ${index + 1}`, { type: 'issue', status: 'open', number: index + 1 })
+    return { id: rec.id, kind: 'public', record: rec, label: rec.title, detail: `Public · ${rec.repo}` }
+  })
+  const html = renderRun({ working: issues }, { cycle: { phase: 'paused' } })
+  assert.match(html, /aria-label="Issues"/)
+  assert.doesNotMatch(html, /Agent activity|In progress|co-working-icon/)
+  for (let index = 1; index <= 7; index++) assert.match(html, new RegExp(`Open issue ${index}`))
+})
+
+test('private proposals and PR revisions share an actionable prepared-work home', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const records = [record('New private proposal'), record('Private revision', { plan: { action: 'pr_update' } }),
+    record('Public PR follow-up', { status: 'open' })]
+  const html = renderRun({ decisions: records.map(rec => ({ id: rec.id, kind: 'private_review', record: rec, label: rec.title, detail: rec.repo })) })
+  assert.match(html, /Prepared work/)
+  assert.equal((html.match(/co-run-row-action/g) || []).length, 3)
+  assert.equal((html.match(/<strong>Private revision<\/strong>/g) || []).length, 1)
+  assert.equal((html.match(/<strong>Public PR follow-up<\/strong>/g) || []).length, 1)
+})
+
+test('history names outcomes honestly without an archive or success-only implication', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const outcome = status => ({ id: status, kind: 'recent', record: record(status, { status }), label: status, detail: status })
+  const html = renderRun({ recent: ['merged', 'closed', 'local', 'superseded'].map(outcome), archive: [outcome('abandoned')] })
+  assert.match(html, /History<\/span><b>5<\/b>/)
+  assert.doesNotMatch(html, /Archived proposals/)
+  assert.match(html, /abandoned/)
+  assert.match(html, /Not all were merged/)
+  assert.doesNotMatch(html, /Done recently|Recent outcomes/)
+})
+
+test('only recorded work activity moves; queued agent follow-up stays still', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const rec = record('Queued public repair', { status: 'open', autopilot: { enabled: true, state: 'idle' } })
+  const item = { id: rec.id, kind: 'autopilot', record: rec, label: rec.title, detail: 'Agent handling public follow-up' }
+  const queued = renderRun({ working: [item] })
+  assert.match(queued, /Agent follow-up queued/)
+  assert.doesNotMatch(queued, /co-working-icon|Agent handling public follow-up/)
+  const responding = renderRun({ working: [{ ...item, record: { ...rec, autopilot: { enabled: true, state: 'responding' } } }] })
+  assert.match(responding, /co-working-icon/)
 })

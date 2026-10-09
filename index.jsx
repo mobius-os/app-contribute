@@ -71,7 +71,6 @@ import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
-import { TaskPane } from './ui/TaskPane.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { discoverRepositories, mayMerge } from './collaboration.js'
 
@@ -122,6 +121,32 @@ function Header({ appId, fromCache, checking, onBack, children }) {
       )}
     </header>
   )
+}
+
+// The PR list needs a confirmed connection. Only a confirmed disconnect asks
+// the owner to connect; a failed or timed-out status read is retryable and
+// says so, and the initial check renders nothing rather than a false prompt.
+export function GithubPullsUnavailable({ conn, onRetry }) {
+  const [retrying, setRetrying] = useState(false)
+  if (conn?.state === 'disconnected') {
+    return <section className="co-alert" aria-label="GitHub connection"><h3>Pull requests</h3><p>Go to Möbius Settings → Accounts and connect GitHub to see this project’s pull requests, assign work, and run reviews. Your saved contributions remain here.</p></section>
+  }
+  if (conn?.state !== 'unknown') return null
+  return <section className="co-alert" aria-label="GitHub connection"><h3>Pull requests</h3><p>{conn.message || 'Could not reach GitHub.'} Your connection is unchanged.</p>
+    <button type="button" className="co-btn" disabled={retrying} onClick={async () => {
+      setRetrying(true)
+      try { await onRetry?.() } finally { setRetrying(false) }
+    }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></section>
+}
+
+// Preflight rejection did not enter a public write. Keep it distinct from a
+// lost response after dispatch, which must retain reconciliation ownership.
+function stalePublicApproval() {
+  return {
+    notAttempted: true,
+    error: 'The saved proposal changed. Review its current version and confirm again; this action made no public request.',
+    failure: { owner: 'agent', code: 'approval_changed' },
+  }
 }
 
 export default function ContributeApp({ appId, token }) {
@@ -191,6 +216,7 @@ export default function ContributeApp({ appId, token }) {
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const submissionMethod = 'github'
   const [agentChoice, setAgentChoice] = useState({ provider: '', model: '', effort: '' })
+  const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
   useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
   const pageRef = useRef(null)
@@ -730,6 +756,7 @@ export default function ContributeApp({ appId, token }) {
     } catch { /* handled by the safe refresh error below */ }
     if (!canonical) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh the saved review. Nothing was sent; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -744,6 +771,7 @@ export default function ContributeApp({ appId, token }) {
       qualityReviewFor(refreshed).state !== 'all_clear'
     ) {
       return {
+        notAttempted: true,
         reviewNeeded: true,
         record: refreshed,
         error: 'Review this exact version first. The Review action is ready on this card.',
@@ -756,6 +784,7 @@ export default function ContributeApp({ appId, token }) {
     if (updating) {
       if (connRef.current.state !== 'connected') {
         return {
+          notAttempted: true,
           error: 'Connect GitHub in Möbius Settings → Accounts before updating this pull request.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
@@ -768,6 +797,7 @@ export default function ContributeApp({ appId, token }) {
         connRef.current.state,
       )
       if (decision.error) return {
+        notAttempted: true,
         error: decision.error,
         failure: { owner: 'owner' },
       }
@@ -894,6 +924,7 @@ export default function ContributeApp({ appId, token }) {
     } catch { /* handled by the safe error below */ }
     if (!canonical) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh this draft. Nothing changed; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -906,6 +937,7 @@ export default function ContributeApp({ appId, token }) {
     if (current.status === 'open') return { alreadyHandled: true, record: current }
     if (current.status !== 'draft' || current.submission_mode === 'mobius-bot') {
       return {
+        notAttempted: true,
         error: current.submission_mode === 'mobius-bot'
           ? 'Möbius relay drafts cannot request review from this connection yet.'
           : 'This pull request is no longer a personal draft.',
@@ -1131,6 +1163,7 @@ export default function ContributeApp({ appId, token }) {
     })
     if (currentRecords.length !== stackRecords.length) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh the complete reviewed chain. Nothing was sent; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -1150,6 +1183,7 @@ export default function ContributeApp({ appId, token }) {
     )
     if (updating && connRef.current.state !== 'connected') {
       return {
+        notAttempted: true,
         error: 'Connect GitHub in Möbius Settings → Accounts before updating these pull requests.',
         failure: { owner: 'owner', code: 'github_not_connected' },
       }
@@ -1161,11 +1195,13 @@ export default function ContributeApp({ appId, token }) {
         connRef.current.state,
       )
       if (decision.error) return {
+        notAttempted: true,
         error: decision.error,
         failure: { owner: 'owner' },
       }
       if (decision.method === 'mobius') {
         return {
+          notAttempted: true,
           error: 'Connect GitHub in Möbius Settings → Accounts to send this related group as your account.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
@@ -1386,8 +1422,8 @@ export default function ContributeApp({ appId, token }) {
     })
   }
   function renderPullRequests(project, navigation) {
-    return <PullRequests key={project?.key || 'all'} appId={appId} token={token}
-      project={project} conn={conn} onChanged={refreshIncomingReviews}
+    return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
+      project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
       records={recordsForProject(records, project)} onRecord={record => {
         const found = findRunItemByRecord(projectRun(project), record.id)
         if (found) navigation.onSelect(found.item.id)
@@ -1427,6 +1463,7 @@ export default function ContributeApp({ appId, token }) {
               refreshCoordinatorRef.current(),
             ])
             if (conn.state === 'connected') await Promise.all([loadRepositories(), refreshIncomingReviews()])
+            setRefreshKey(value => value + 1)
             return sourceOk && ledgerCurrentRef.current
           }} loadProjectDiff={loadProjectDiff}
           repositoryPicker={<RepositoryPicker token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
@@ -1434,18 +1471,16 @@ export default function ContributeApp({ appId, token }) {
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
             setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.nameWithOwner.toLowerCase())?.key || 'external:' + repo.nameWithOwner.toLowerCase(), nonce: crypto.randomUUID() })
           }} />}
-          renderControls={(project) => project ? <ProjectControls
-            key={project.key} appId={appId} token={token} project={project} run={projectRun(project)} mergeRun={projectMergeRun(project)}
-            loading={loading || !ledgerReady || sourceLoading || !!sourceError}
-            onStart={startAgentTask}
-          /> : null}
           renderActivity={(project, navigation) => (
             <>
 
 
-            {project && conn.state !== 'connected' ? <TaskPane id="task:pulls"><h3>Review contributions</h3><p>Go to Möbius Settings → Accounts and connect GitHub to see this project’s public pull requests, assign work, and run reviews. Your saved contributions remain here.</p></TaskPane> : null}
-            {project ? <ContributionRun
+            {project ? <GithubPullsUnavailable conn={conn} onRetry={refreshConnection} /> : null}
+            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} mergeRun={projectMergeRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
+            {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? () => renderPullRequests(project, navigation) : null}
+              controls={controls}
+              projectProgress={progress}
               run={projectRun(project)} presentation={project ? 'project' : 'overview'}
               projectName={project?.name || 'all projects'}
               selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack}
@@ -1453,13 +1488,14 @@ export default function ContributeApp({ appId, token }) {
               publicationPreference="github" githubState={conn.state}
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
-              onFeedback={onFeedback} onDismiss={onDismiss} onRestore={onRestore}
+              onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
               onAssignIncomingReview={onAssignIncomingReview} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
               focusReady={focusedReviewReady && !sourceLoading}
               onFocusConsumed={consumeReviewFocus}
-            /> : null}
+            />}
+            </ProjectControls> : null}
             </>
           )}
         />}

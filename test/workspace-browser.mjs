@@ -3,6 +3,12 @@
 // Actual app components, native Chromium DOM, and no live app/backend. The
 // browser gets a disposable profile; all transports and host capabilities are
 // mocked before mount, with CSP and CDP network blocking as a second boundary.
+// PR98 deliberately moved the fixed selection tray into the list header,
+// anchored detail/agent actions inline, and combined Description + Activity
+// into Conversation. Test those placements without weakening the retained
+// selection, focus-return, exact-consent, navigation or retry contracts.
+// Local source comparison stays read-only; preparation/editing and applying
+// accepted updates are explicit agent handoffs, not direct editor/apply buttons.
 import { spawn } from 'node:child_process'
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -25,7 +31,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
-import ContributeApp from './index.jsx'
+import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
 
 const HEAD = 'a'.repeat(40), SECOND_HEAD = 'c'.repeat(40), BASE = 'b'.repeat(40)
 const projects = [
@@ -38,7 +44,7 @@ const projects = [
 ]
 const pull = (number, extra = {}) => ({
   number, title: 'Contribution ' + number, headRefOid: HEAD, baseRefOid: BASE,
-  baseRefName: 'main', isDraft: false, url: 'https://github.com/owner/project/pull/' + number,
+  baseRefName: 'main', baseRef: { target: { oid: BASE } }, state: 'OPEN', isDraft: false, url: 'https://github.com/owner/project/pull/' + number,
   repository: { nameWithOwner: 'owner/project', viewerPermission: 'WRITE' },
   changedFiles: 1, additions: 1, deletions: 0, createdAt: '2026-09-07T12:00:00Z', updatedAt: '2026-09-07T13:00:00Z',
   author: { login: 'owner' }, assignees: { nodes: [] }, ...extra,
@@ -50,7 +56,7 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [] }
+const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], githubRetries: 0 }
 const values = new Map(), navigation = [], reviewRuns = []
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
@@ -77,7 +83,28 @@ window.fetch = async (url, options = {}) => {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
     if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
     if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
-    let found = call.body.query.includes('repo:owner/other') ? [] : pulls
+    if (call.body.query.includes('ContributeExactPull')) {
+      const number=Number(call.body.query.match(/pullRequest\(number:(\d+)/)?.[1])
+      const pr=pulls.find(pr=>pr.number===number)
+      ensure(call.body.query.includes('owner:"owner"') && call.body.query.includes('name:"project"'),'Exact read used another repository')
+      return response({data:{repository:{pullRequest:{...pr,
+        headRefOid:window.exactHeadChanged?'e'.repeat(40):pr.headRefOid,
+        baseRef:{target:{oid:window.liveBase || BASE}},
+      }}}})
+    }
+    if (call.body.query.includes('ContributePullContext')) {
+      const pr=pulls.find(pr=>pr.number===call.body.variables.number)
+      ensure(call.body.variables.owner==='owner' && call.body.variables.name==='project','Wrong context repository')
+      return response({data:{repository:{pullRequest:{...pr,
+        reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},
+        closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},
+        timelineItems:{nodes:[],pageInfo:{hasNextPage:false}},
+      }}}})
+    }
+    if (!call.body.query.includes('ContributePullRequests')) return forbidden('unknown GraphQL query')(call.body.query)
+    if(window.failPulls) return new Response(JSON.stringify({detail:'Fixture pull read error'}),{status:503})
+    if(window.holdPulls) await new Promise(resolve=>{window.releasePulls=resolve})
+    let found = call.body.query.includes('repo:owner/other') || window.emptyPulls ? [] : pulls
     const laterPage = call.body.query.includes('after:"fixture-page-2"')
     if (window.fixturePaging) found = laterPage ? found.slice(1) : found.slice(0,1)
     if (window.fixtureChangedHead) found = found.map(pr => pr.number===8 ? {...pr,headRefOid:'e'.repeat(40)} : pr)
@@ -102,13 +129,27 @@ window.fetch = async (url, options = {}) => {
     selected.assignees.nodes.push({ login: call.body.assignee })
     return response({ ok: true })
   }
-  if (call.url.startsWith('/api/github/contributions/fixture-app/source-chats?') && call.method === 'GET') return response({ chats: [] })
+  if (call.url.startsWith('/api/github/contributions/fixture-app/source-chats?') && call.method === 'GET') {
+    if(window.holdScope) await new Promise(resolve=>{window.releaseScope=resolve})
+    if(window.failScope) return new Response(JSON.stringify({detail:'Fixture scope unavailable'}),{status:503})
+    return response({ chats: [] })
+  }
   if (call.url.startsWith('/api/github/api/repos/owner/project/') && call.method === 'GET') {
+    if(call.url.includes('/commits/')) {
+      const head=call.url.match(/commits\/([a-f0-9]+)\//)?.[1]
+      ensure([HEAD,SECOND_HEAD].includes(head),'Checks lost their exact head')
+      if(call.url.includes('/check-runs?')) return window.failChecks
+        ? new Response(JSON.stringify({detail:'Fixture check runs unavailable'}),{status:503})
+        : response({total_count:1,check_runs:[{id:1,name:'Unit tests',head_sha:head,status:'completed',conclusion:'success'}]})
+      if(call.url.includes('/status?')) return response({sha:head,total_count:1,statuses:[{id:2,context:'Build',state:'success'}]})
+      return forbidden('unknown commit read')(call.url)
+    }
     const number = Number(call.url.match(/(?:pulls|issues)\/(\d+)/)?.[1]); const pr=pulls.find(item=>item.number===number)
     if (call.url.includes('/files?')) return response([{filename:'change.js',additions:1,deletions:0,status:'modified',patch:'@@ -1 +1 @@\n-old\n+safe change'}])
     if (call.url.includes('/comments?')) return response([{id:1,body:'Please check this edge case',user:{login:'reviewer'},created_at:'2026-09-07T14:00:00Z'}])
     if (call.url.includes('/reviews?')) return response([])
-    return response({body:'Fixture PR description '+number,head:{sha:pr.headRefOid},base:{sha:pr.baseRefOid,ref:pr.baseRefName}})
+    if(!/\/pulls\/\d+$/.test(call.url)) return forbidden('unknown pull read')(call.url)
+    return response({changed_files:pr.changedFiles,additions:pr.additions,deletions:pr.deletions,body:'Fixture PR description '+number,head:{sha:pr.headRefOid},base:{sha:pr.baseRefOid,ref:pr.baseRefName}})
   }
   return forbidden('fetch')(call.url)
 }
@@ -146,8 +187,23 @@ window.mobius = {
   },
 }
 
+async function loadProjectDiff(project) {
+  calls.diffs.push({key:project.key,head:project.head_sha,base:project.base_sha})
+  if(window.holdDiff) await new Promise(resolve=>{window.releaseDiff=resolve})
+  if(window.diffMode==='error') return {ok:false}
+  if(window.diffMode==='stale') return {ok:false,stale:true}
+  return {ok:true,data:{diff:window.diffMode==='empty'?'':'diff --git a/local.js b/local.js\n--- a/local.js\n+++ b/local.js\n@@ -1 +1 @@\n-old\n+local improvement\n'}}
+}
 function Fixture() {
-  const [records, setRecords] = useState([prepared])
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [conn, setConn] = useState({state:'connected',login:'owner'})
+  window.setConnectionFixture = setConn
+  async function retryGithub() {
+    calls.githubRetries++
+    await new Promise(resolve => { window.finishGithubRetry = resolve })
+    setConn({state:'connected',login:'owner'})
+  }
+  const [records, setRecords] = useState([prepared, {...prepared,id:'fixture-dismissed',title:'Dismissed local proposal',summary:'Dismissed local proposal',status:'abandoned',plan:{...prepared.plan,title:'Dismissed local proposal'}}])
   const [selectionId, setSelectionId] = useState(null)
   const [allProjects, setAllProjects] = useState(projects)
   window.openSelectionFixture = setSelectionId
@@ -155,14 +211,19 @@ function Fixture() {
 
   function runFor(project) {
     const items = records.filter(record => record.repo === project.canonical_repo).map(record => ({
-      id: (record.status === 'prepared' ? 'publish:' : 'public:') + record.id,
-      kind: record.status === 'prepared' ? 'publish' : 'public', record,
+      id: (record.status === 'abandoned' ? 'archived:' : record.status === 'prepared' ? 'publish:' : 'public:') + record.id,
+      kind: record.status === 'abandoned' ? 'archived' : record.status === 'prepared' ? 'publish' : 'public', record,
       label: record.summary, detail: record.repo,
     }))
     return { revision: records.map(record => record.status).join('|'),
       decisions: items.filter(item => item.kind === 'publish'),
-      working: items.filter(item => item.kind === 'public'), recent: [], archive: [],
+      working: items.filter(item => item.kind === 'public'), recent: [], archive: items.filter(item => item.kind === 'archived'),
       privateAction: organizePrivateWorkAction([], { byId: {} }, [project]) }
+  }
+  async function restore(record) {
+    calls.restores.push(record.id)
+    setRecords(old=>old.map(item=>item.id===record.id?{...item,status:'prepared'}:item))
+    return {ok:true}
   }
   async function send(record) {
     calls.publications.push(structuredClone(record))
@@ -171,19 +232,19 @@ function Fixture() {
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
     return { ok: true, record: shared }
   }
-  async function start(action) { return { ok: true, ...await window.mobius.chat.start(action) } }
+  async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
-    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture' }} conn={{ state: 'connected', login: 'owner' }}
-      onRetry={forbidden('unexpected source refresh')}
+    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
+      loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
       repositoryPicker={<RepositoryPicker token="fixture-only" connected onAdded={repositoryAdded} />}
-      renderControls={project => project ? <ProjectControls appId="fixture-app" token="fixture-only" project={project}
-        run={runFor(project)} mergeRun={runFor(project)} onStart={start} /> : null}
-      renderActivity={(project, navigation) => project ? <ContributionRun run={runFor(project)}
+      renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
+        run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
+        {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
-        selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send}
-        renderPublicWork={() => <PullRequests appId="fixture-app" token="fixture-only" project={project}
-          conn={{ state: 'connected', login: 'owner' }} records={records.filter(record => record.repo === project.canonical_repo)} />}
-      /> : null} />}
+        selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
+        renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
+          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} />}
+      />}</ProjectControls></> : null} />}
   </main></div>
 }
 const root = createRoot(document.getElementById('root'))
@@ -244,7 +305,12 @@ async function chooseProject(name) {
 }
 window.runWorkspaceChecks = async () => {
   const checks = []
-  async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
+  async function check(name, run) {
+    await run()
+    const page=query('.co-page')
+    ensure(!page || page.scrollWidth<=page.clientWidth+1,'Workspace overflows horizontally at '+name+': '+page.scrollWidth+' > '+page.clientWidth)
+    checks.push({ name, status: 'pass' })
+  }
   try {
     await until(() => query('.co-source-row'), 'Project list did not render')
     await check('project directory uses wrapped filter buttons instead of a dropdown or scroller', async () => {
@@ -253,8 +319,8 @@ window.runWorkspaceChecks = async () => {
       ensure(filterButtons.map(node => text(node)).join('|')==='All|Changes2|Updates0', 'Project filter choices or counts drifted')
       ensure(button('All',filters).getAttribute('aria-pressed')==='true', 'The active project filter is not exposed')
       await click(query('.co-source-row'))
-      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && !button('Prepare changes')?.disabled, 'Project did not settle')
-      ensure(query('.co-workspace-inventory') && !query('.co-task-dock'), 'Opening a project displayed task work')
+      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && button('Prepare changes') && !button('Prepare changes').disabled, 'Project did not settle')
+      ensure(query('.co-workspace-inventory') && !query('.co-task-content'), 'Opening a project displayed task work')
       ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
     })
     const originalInventory = query('.co-workspace-inventory'), originalList = query('.co-pr-list'), originalRow = query('.co-pr-row')
@@ -264,7 +330,7 @@ window.runWorkspaceChecks = async () => {
       ensure(!query('.co-public-work select[aria-label="Filter pull requests"]'),'PR filters regressed to a native select')
       ensure(filterButtons.map(node => text(node)).join('|')==='All|Unassigned|Assigned|Mine','PR filter choices drifted')
       ensure(button('All',filters).getAttribute('aria-pressed')==='true' && filterButtons.filter(node => node.getAttribute('aria-pressed')==='true').length===1,'Default filter is not exposed as one pressed button')
-      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => text(node).includes('1 file+1−0')),'Change totals were not visible by default')
+      ensure([...document.querySelectorAll('.co-pr-row .co-pr-meta')].every(node => text(node).includes('+1−0')),'Change totals were not visible by default')
       ensure(!query('.co-display'), 'The retired display menu returned')
       await click(button('Mine',filters))
       ensure(button('Mine',filters).getAttribute('aria-pressed')==='true' && button('All',filters).getAttribute('aria-pressed')==='false','Pressed filter state did not follow the choice')
@@ -272,7 +338,7 @@ window.runWorkspaceChecks = async () => {
       await click(button('All',filters))
       ensure(query('.co-workspace-inventory')===originalInventory && mutationRequests().length===0,'Display-only controls replaced inventory or mutated GitHub')
     })
-    const firstCheckbox = query('input[aria-label="Select owner/project #7"]')
+    let firstCheckbox = query('input[aria-label="Select owner/project #7"]')
     let secondCheckbox = query('input[aria-label="Select owner/project #8"]')
     function selectionStaysInInventory(focused) {
       ensure(navigation.length === inventoryNavigationDepth, 'Checkbox selection changed navigation')
@@ -283,9 +349,10 @@ window.runWorkspaceChecks = async () => {
     }
     await check('multiple checkbox changes keep selection, focus and inventory stable', async () => {
       for (const [checkbox, one, two] of [[firstCheckbox,true,false],[secondCheckbox,true,true],[firstCheckbox,false,true],[firstCheckbox,true,true]]) {
-        checkbox.focus(); await click(checkbox)
+        checkbox.focus(); const scroll=query('.co-page').scrollTop; await click(checkbox)
+        ensure(Math.abs(query('.co-page').scrollTop-scroll)<2,'Checkbox selection scrolled the inventory')
         ensure(firstCheckbox.checked === one && secondCheckbox.checked === two, 'Unrelated selection changed')
-        ensure(text(query('.co-pr-selection')).includes((Number(one)+Number(two))+' selected'), 'Selection count drifted')
+        ensure(text(query('.co-pr-box-head')).includes((Number(one)+Number(two))+' selected'), 'Selection count drifted')
         selectionStaysInInventory(checkbox)
       }
     })
@@ -296,97 +363,135 @@ window.runWorkspaceChecks = async () => {
       secondCheckbox.removeEventListener('keydown',capture)
       ensure(events.length === 2 && events.every(event => event.trusted && event.code === 'Space'),'Keyboard test was not native')
     })
-    await check('compact selection tray keeps count and only the approved batch actions in one fixed header', async () => {
-      const tray=query('.co-pr-selection'), scroller=query('.co-page')
-      const heading=query('.co-selection-heading')
-      ensure(heading && button('Assign',heading) && button('Review 2',heading) && text(heading).includes('2 selected'),'Count and batch actions are not together in the tray header')
-      ensure(!button('Review & merge',tray),'Tray exposed a redundant merge action')
-      ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='false','Selection tray did not start compact')
-      const before=tray.getBoundingClientRect()
-      scroller.scrollTop=Math.min(160,Math.max(0,scroller.scrollHeight-scroller.clientHeight)); await new Promise(requestAnimationFrame)
-      const after=tray.getBoundingClientRect()
-      ensure(getComputedStyle(tray).position==='fixed' && Math.abs(before.bottom-after.bottom)<2 && after.bottom<=innerHeight && after.top>=0,'Selection tray left the viewport while browsing')
-      ensure(after.height < innerHeight * 0.5,'Compact selection tray stretched into an empty full-height panel')
-      ensure(query('.co-selected-cards').children.length===2,'Selected titles missing')
-      await click(query('.co-selection-toggle'))
-      ensure(query('.co-selection-toggle').getAttribute('aria-expanded')==='true','Selection list did not expand')
-      await click(query('[aria-label="Remove PR 8 from selection"]'))
-      ensure(firstCheckbox.checked && !secondCheckbox.checked,'Card removal changed the wrong PR')
-      await click(secondCheckbox)
-      await click(query('.co-selection-toggle'))
-      ensure(mutationRequests().length===0,'Selection tray mutated remote work')
+    await check('inline list header keeps count, bulk actions and visible selection without changing scope', async () => {
+      const header=query('.co-pr-box-head')
+      ensure(button('Assign',header) && button('Take on with agent',header) && text(header).includes('2 selected'),'Inline bulk actions missing')
+      ensure(!button('Review & merge',header) && !query('.co-pr-selection'),'Obsolete tray or redundant merge action returned')
+      ensure(getComputedStyle(header).position!=='fixed','Bulk header still floats outside inventory')
+      await click(query('[aria-label="Select all visible pull requests"]'))
+      ensure(!firstCheckbox.checked && !secondCheckbox.checked,'Deselect-visible changed the wrong scope')
+      await click(query('[aria-label="Select all visible pull requests"]'))
+      ensure(firstCheckbox.checked && secondCheckbox.checked,'Select-visible failed')
+      ensure(mutationRequests().length===0,'Bulk selection mutated remote work')
     })
     await check('refresh preserves selection across pages and announces changed versions', async () => {
       window.fixturePaging=true
-      await click(query('[aria-label="Refresh pull requests"]'))
-      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Refresh did not finish')
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => !query('[aria-label="Refresh project status"]').disabled,'Refresh did not finish')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Refresh discarded unchanged selection or skipped selected later page')
       window.fixtureChangedHead=true
-      await click(query('[aria-label="Refresh pull requests"]'))
-      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Changed refresh did not finish')
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => !query('[aria-label="Refresh project status"]').disabled,'Changed refresh did not finish')
       ensure(firstCheckbox.checked && !secondCheckbox.checked,'Changed head remained selected or unchanged head was lost')
       ensure(text(query('.co-public-work')).includes('Selection updated: owner/project#8'),'Selection change was not announced')
       window.fixturePaging=false; window.fixtureChangedHead=false
-      await click(query('[aria-label="Refresh pull requests"]'))
-      await until(() => !query('[aria-label="Refresh pull requests"]').disabled,'Restored refresh did not finish')
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => !query('[aria-label="Refresh project status"]').disabled,'Restored refresh did not finish')
       await click(secondCheckbox)
     })
-    await check('PR detail opens in a nonmodal dock without clearing list state or selected versions', async () => {
+    await check('inline PR detail retains filters, hidden selection, list identity and keyboard return', async () => {
       const filters=query('.co-pr-filters'), search=query('input[aria-label="Find a pull request"]')
       await click(button('Unassigned',filters)); await fill(search,'Contribution')
       ensure(!query('input[aria-label="Select owner/project #8"]'),'Fixture filter did not hide selected PR')
-      const card=[...document.querySelectorAll('.co-selected-open')].find(node => text(node).startsWith('#8'))
-      const scroller=query('.co-page'), scrollBefore=scroller.scrollTop, listBefore=query('.co-pr-list')
-      card.focus()
-      await click(card)
-      await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Filtered selected detail did not load')
-      const dock=query('.co-task-dock'), dockRect=dock.getBoundingClientRect()
-      ensure(dock.getAttribute('role')==='dialog' && dock.getAttribute('aria-modal')==='false','Dock is not exposed as a nonmodal dialog')
-      ensure(getComputedStyle(dock).position==='fixed' && dockRect.bottom<=innerHeight && dockRect.right<=innerWidth,'PR detail is not docked to the viewport edge')
-      ensure(query('.co-pr-detail').closest('.co-task-dock')===dock && !query('.co-pr-detail').closest('.co-pr-row'),'PR detail expanded a list row instead of using the dock')
+      ensure(text(query('.co-pr-box-head')).includes('2 selected'),'Filtering discarded hidden selection')
+      await click(button('Take on with agent',query('.co-pr-box-head')))
+      await until(()=>query('.co-pr-confirm'),'Filtered batch preview missing')
+      ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Hidden selected identity omitted from confirmation')
+      await click(button('Cancel',query('.co-pr-confirm')))
+      const trigger=query('.co-pr-open'), listBefore=query('.co-pr-list')
+      trigger.focus(); await click(trigger)
+      await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 7'),'Inline detail did not load')
+      const region=query('[data-task="task:detail"]')
+      ensure(region.getAttribute('role')==='region' && !query('.co-task-dock'),'Detail is not an inline nonmodal region')
+      ensure(query('.co-pr-detail').closest('.co-pr-row')?.dataset.pr==='owner/project#7','Detail is not anchored to its PR')
       ensure(button('Unassigned',filters).getAttribute('aria-pressed')==='true' && search.value==='Contribution','Opening detail cleared filter or search')
-      ensure(!query('input[aria-label="Select owner/project #8"]') && query('.co-pr-list')===listBefore && Math.abs(scroller.scrollTop-scrollBefore)<2,'Opening detail changed filtered list identity or scroll ('+scrollBefore+' -> '+scroller.scrollTop+')')
-      ensure([...document.querySelectorAll('.co-selected-open')].map(node => text(node).slice(0,2)).join(',')==='#7,#8','Opening detail changed the exact selection')
-      await nativeEscape()
-      await until(() => !query('.co-task-dock'),'Escape did not close the dock')
-      ensure(document.activeElement===card,'Escape did not return focus to the detail trigger')
+      ensure(query('.co-pr-list')===listBefore && text(query('.co-pr-box-head')).includes('2 selected'),'Opening detail remounted list or changed selection')
+      await nativeEscape(); await until(() => !query('.co-task-content'),'Escape did not close inline detail')
+      ensure(document.activeElement===trigger,'Escape did not return focus to the detail trigger')
       await fill(search,''); await click(button('All',filters))
-      await until(() => document.querySelectorAll('.co-pr-row').length===2,'PR list did not restore after resetting filters')
+      await until(() => document.querySelectorAll('.co-pr-row').length===2,'PR list did not restore')
       secondCheckbox=query('input[aria-label="Select owner/project #8"]')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Closing detail changed selected versions')
     })
+    await check('hiding an opened PR deliberately closes detail without losing filters or resurrecting it', async () => {
+      const before=mutationRequests().length
+      const search=query('[aria-label="Find a pull request"]'), filters=query('.co-pr-filters')
+      const openSecond=async()=>{
+        const trigger=[...document.querySelectorAll('.co-pr-open')].find(node=>text(node).includes('Contribution 8'))
+        trigger.focus(); await click(trigger)
+        await until(()=>query('.co-pr-detail'),'Detail did not open')
+      }
+      await openSecond()
+      const unassigned=button('Unassigned',filters); unassigned.focus(); await click(unassigned)
+      await until(()=>!query('.co-pr-detail'),'Filter did not hide target detail')
+      ensure(document.activeElement===unassigned,'Closing filtered detail stole focus from its filter')
+      await click(button('All',filters))
+      ensure(!query('.co-pr-detail') && !query('[data-task="task:detail"]'),'Clearing filter resurrected a hidden detail task')
+      await openSecond(); search.focus(); await fill(search,'Contribution')
+      ensure(query('.co-pr-detail'),'A still-visible PR lost its detail')
+      await fill(search,'Contribution 7')
+      ensure(!query('.co-pr-detail') && document.activeElement===search,'Search did not close detail while retaining typing focus')
+      await fill(search,'')
+      ensure(!query('[data-task="task:detail"]'),'Clearing search resurrected a hidden detail task')
+      await openSecond(); window.emptyPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>!query('.co-pr-row'),'Refresh did not remove fixture PRs')
+      window.emptyPulls=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>document.querySelectorAll('.co-pr-row').length===2,'PRs did not reload')
+      ensure(!query('[data-task="task:detail"]'),'Refreshing a removed PR resurrected its hidden task')
+      ensure(navigation.length===inventoryNavigationDepth && mutationRequests().length===before,'Detail disappearance navigated or mutated work')
+      // An empty successful refresh correctly clears the selected identities.
+      await click(query('[aria-label="Select all visible pull requests"]'))
+      await openSecond(); await click(button('Take on with agent',query('.co-pr-detail')))
+      await until(()=>query('.co-pr-confirm'),'Individual confirmation did not open')
+      await click(button('Unassigned',filters))
+      ensure(query('.co-pr-confirm') && text(query('.co-pr-confirm')).includes('Contribution 8') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Detail cleanup closed or changed another active workflow')
+      await click(button('Cancel',query('.co-pr-confirm'))); await click(button('All',filters))
+      ensure(mutationRequests().length===before,'Filtering an existing confirmation approved work')
+      firstCheckbox=query('input[aria-label="Select owner/project #7"]')
+      secondCheckbox=query('input[aria-label="Select owner/project #8"]')
+    })
     await check('cancelling batch actions restores their original keyboard trigger', async () => {
-      for (const label of ['Review 2','Assign']) {
-        const trigger=button(label,query('.co-pr-selection')); trigger.focus(); await click(trigger)
-        await until(() => query('.co-task-dock'),'Dock did not open')
-        await click(button('Cancel',query('.co-task-dock')))
-        await until(() => !query('.co-task-dock'),'Dock did not close')
+      for (const label of ['Take on with agent','Assign']) {
+        const trigger=button(label,query('.co-pr-box-head')); trigger.focus(); await click(trigger)
+        await until(() => query('.co-task-content'),'Inline action did not open')
+        await click(button('Cancel',query('.co-task-content')))
+        await until(() => !query('.co-task-content'),'Inline action did not close')
         ensure(trigger.isConnected && document.activeElement===trigger,'Cancel lost keyboard focus instead of returning to the batch action')
       }
       ensure(mutationRequests().length===0,'Cancel submitted a workflow')
     })
-    await check('individual PR detail leads with Description and retains review and merge choices', async () => {
+    await check('individual PR detail leads with Conversation and retains guarded review and merge choices', async () => {
       const title=document.querySelectorAll('.co-pr-open')[1]
       title.focus(); await click(title)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 8'),'Description did not load')
       ensure(firstCheckbox.checked && secondCheckbox.checked,'Opening detail replaced batch selection')
       ensure(!query('.co-file-disclosure') && !calls.requests.some(call => call.url.includes('/files?')),'Diff loaded by default')
       const tabs=query('.co-detail-tabs')
-      ensure(button('Description',tabs).getAttribute('aria-pressed')==='true' && button('Files 1',tabs) && button('Activity',tabs),'Description, Files, and Activity tabs were not maintained')
-      ensure(button('Review this PR',query('.co-task-dock')) && button('Review & merge',query('.co-task-dock')),'Individual review choices were lost')
+      ensure(button('Conversation',tabs).getAttribute('aria-pressed')==='true' && [...tabs.querySelectorAll('button')].some(node=>text(node).startsWith('Files changed1')) && button('Checks',tabs),'Conversation, Files changed, and Checks tabs were not maintained')
+      ensure(button('Take on with agent',query('.co-task-content')),'Individual review choices were lost')
       ensure(mutationRequests().length === 0 && navigation.length === inventoryNavigationDepth,'Opening PR changed work or screens')
     })
-    await check('files load only on demand, remain collapsed, and activity is separate', async () => {
-      await click(button('Files 1',query('.co-pr-detail')))
+    await check('files load only on demand and remain collapsed while discussion stays in Conversation', async () => {
+      await click([...query('.co-detail-tabs').querySelectorAll('button')].find(node=>text(node).startsWith('Files changed')))
       await until(() => query('.co-file-disclosure'),'Files did not load')
       ensure(!query('.co-file-disclosure').open,'Patch opened by default')
       await click(query('.co-file-disclosure summary'))
-      ensure(query('.co-file-disclosure').open && text(query('.co-file-disclosure pre')).includes('+safe change'),'Patch disclosure failed')
-      await click(button('Activity',query('.co-pr-detail')))
+      ensure(query('.co-file-disclosure').open && text(query('.co-file-disclosure .diff-view')).includes('safe change'),'Patch disclosure failed')
+      window.failChecks=true
+      await click(button('Checks',query('.co-pr-detail')))
+      await until(()=>text(query('.co-pr-detail')).includes('Check runs: Could not load this information'),'Partial check failure missing')
+      ensure(text(query('.co-pr-detail')).includes('Build') && text(query('.co-pr-detail')).includes('not an all-clear review'),'Successful sibling or check limitation disappeared')
+      window.failChecks=false
+      await click(button('Retry',query('.co-pr-detail')))
+      await until(()=>text(query('.co-pr-detail')).includes('Unit tests') && !text(query('.co-pr-detail')).includes('Check runs: Could not load this information'),'Check retry did not settle')
+      ensure(calls.requests.filter(call=>call.url.includes('/commits/')).every(call=>call.url.includes(SECOND_HEAD)),'Checks used another PR head')
+      await click(button('Conversation',query('.co-pr-detail')))
       await until(() => text(query('.co-pr-detail')).includes('Please check this edge case'),'Activity did not load')
       ensure(!query('.co-file-disclosure'),'Files leaked into activity')
       const title=document.querySelectorAll('.co-pr-open')[1]
-      await click(button('Review this PR',query('.co-task-dock')))
+      await click(button('Take on with agent',query('.co-task-content')))
       await until(() => query('.co-pr-confirm'),'Individual review confirmation did not open')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 8') && text(query('.co-pr-confirm')).includes('ccccccc') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Individual review changed PR scope or version')
       const mergeOption=query('.co-pr-confirm input[type="checkbox"]')
@@ -394,17 +499,19 @@ window.runWorkspaceChecks = async () => {
       await click(mergeOption)
       ensure(button('Allow review & merge'),'Individual merge choice did not require guarded approval')
       ensure(mutationRequests().length===0,'Changing individual review mode mutated GitHub')
-      await click(button('Cancel',query('.co-task-dock')))
-      await until(() => !query('.co-task-dock'),'Individual review did not close')
+      await click(button('Cancel',query('.co-task-content')))
+      await until(() => !query('.co-task-content'),'Individual review did not close')
       ensure(document.activeElement===title,'Closing individual review did not return focus to its row trigger (focused '+(document.activeElement?.className || document.activeElement?.tagName)+': '+text(document.activeElement)+')')
     })
     await check('batch assignment uses one explicit person action and preserves selected PRs', async () => {
-      const scrollBefore=query('.co-page').scrollTop
-      await click(button('Assign',query('.co-pr-selection')))
+      await click(button('Assign',query('.co-pr-box-head')))
       await until(() => query('[aria-label="Assign to me"]'),'People did not load')
       ensure(mutationRequests().length === 0,'Opening picker assigned prematurely')
       ensure(document.activeElement === query('.co-person-search'),'People search did not receive focus')
-      ensure(Math.abs(query('.co-page').scrollTop-scrollBefore)<2,'Assignment jumped the project scroll position')
+      // #98 intentionally replaces the fixed dock with an inline region.
+      // Opening it may scroll it into view; selection itself must not scroll.
+      const assignmentRect=query('.co-person-search').getBoundingClientRect()
+      ensure(assignmentRect.top>=0 && assignmentRect.bottom<=innerHeight && query('.co-pr-list')===originalList,'Inline assignment is not reachable or replaced the list')
       window.failAssignment = 8
       await click(query('[aria-label="Assign to me"]'))
       await until(() => mutationRequests().length === 2 && text(query('.co-pr-assignment')).includes('Only remaining'),'Partial result missing')
@@ -416,10 +523,10 @@ window.runWorkspaceChecks = async () => {
       ensure(assigned.map(call => call.body.number).join(',') === '7,8,8','Successful assignment was repeated')
       ensure(firstCheckbox.checked && secondCheckbox.checked && reviewRuns.length === 0,'Assignment started review or lost selection')
     })
-    await check('batch review stays in a nonmodal dock, enumerates exact versions, and starts only after approval', async () => {
-      await click(button('Review 2'))
+    await check('inline batch review enumerates exact versions and starts only after approval', async () => {
+      await click(button('Take on with agent'))
       await until(() => query('.co-pr-confirm'),'No confirmation')
-      ensure(query('.co-pr-confirm').closest('.co-task-dock')?.getAttribute('aria-modal')==='false','Batch review did not use the nonmodal dock')
+      ensure(query('.co-pr-confirm').closest('.co-task-content')?.getAttribute('role')==='region','Batch review did not use an inline nonmodal region')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(query('.co-pr-confirm')).includes('aaaaaaa') && text(query('.co-pr-confirm')).includes('ccccccc'),'Exact heads absent')
       ensure(!query('.co-pr-confirm input').checked && reviewRuns.length === 0,'Private review granted merge')
@@ -428,20 +535,36 @@ window.runWorkspaceChecks = async () => {
       ensure(rect.top >= 0 && rect.top < innerHeight && document.activeElement === region,'Review not visible/focused')
       await click(query('.co-pr-confirm input'))
       ensure(reviewRuns.length === 0,'Mode toggle counted as approval')
+      ensure(text(query('.co-pr-confirm')).includes('current tip of the same target branch'),'Approval falsely pins the displayed base')
+      ensure(text(query('.co-pr-confirm')).includes('fresh review of the combined code'),'Combined-code review missing from approval')
+      window.liveBase='d'.repeat(40)
       await click(button('Allow review & merge'))
       await until(() => reviewRuns.length === 1 && button('Open review conversation'),'Review did not start')
       const write=mutationRequests().at(-1)
       ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
       ensure(write.body.items[0].head_sha===HEAD && write.body.items[1].head_sha===SECOND_HEAD,'Approval lost selected heads')
+      ensure(write.body.items.every(item=>item.base_ref==='main' && item.base_sha===window.liveBase),'Exact launch did not re-read the current same-target tip')
+      ensure(calls.requests.filter(call=>call.body?.query?.includes('ContributeExactPull')).length===2,'Launch did not read exactly its selected PRs')
+      window.liveBase=null
       ensure(query('.co-pr-list')===originalList,'Review replaced inventory')
     })
     await check('review errors preserve exact selection for an explicit retry', async () => {
-      await inventory(); await click(firstCheckbox); await click(button('Review 1'))
+      await inventory(); await click(firstCheckbox); await click(button('Take on with agent'))
       window.failReview = true
       await click(button('Start private review'))
       await until(() => text(query('.co-pr-confirm')).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
       window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
+    })
+    await check('changed exact code blocks an inline review instead of approving a refreshed head', async () => {
+      const before=mutationRequests().length
+      await click(firstCheckbox); await click(button('Take on with agent',query('.co-pr-box-head')))
+      window.exactHeadChanged=true
+      await click(button('Start private review'))
+      await until(()=>text(query('.co-pr-confirm')).includes('changed since this list loaded'),'Changed code did not stop exact launch')
+      ensure(mutationRequests().length===before && reviewRuns.length===1,'Changed code was approved')
+      window.exactHeadChanged=false
+      await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
       await inventory(); await click(button('Review and send'))
@@ -451,22 +574,93 @@ window.runWorkspaceChecks = async () => {
       await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
       ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
-      await until(() => button('Review public contributions'),'Publication outcome missing')
-      await click(button('Review public contributions'))
+      await until(() => button('Done') && text(query('.co-task-content')).includes('Sent to GitHub'),'Publication outcome missing')
+      ensure(!button('Send to GitHub'),'Settled publication remained actionable')
+      await click(button('Done'))
       ensure(query('input[aria-label="Select owner/project #9"]').getClientRects().length,'Published PR not selectable')
+    })
+    await check('dismissed work is discoverable without a link and only explicit Restore changes its local state', async () => {
+      const before=mutationRequests().length, publications=calls.publications.length
+      const archive=query('.co-run-fold.is-recent')
+      ensure(archive && !archive.open,'Dismissed contributions have no collapsed discovery route')
+      await click(archive.querySelector('summary'))
+      const row=[...archive.querySelectorAll('button')].find(node=>text(node).includes('Dismissed local proposal'))
+      ensure(row && row.getClientRects().length,'Dismissed proposal is not discoverable')
+      row.focus(); await click(row)
+      await until(()=>button('Restore'),'Dismissed contribution cannot be restored from its discovered detail')
+      ensure(calls.restores.length===0 && mutationRequests().length===before,'Inspecting dismissed work changed it')
+      await nativeEscape(); await until(()=>!query('.co-task-content'),'Escape did not close dismissed detail')
+      ensure(document.activeElement===row,'Dismissed detail did not return focus to its row')
+      await click(row); await click(button('Restore'))
+      await until(()=>calls.restores.length===1 && !query('.co-run-fold.is-recent'),'Restore did not move exact record out of history')
+      ensure(calls.restores[0]==='fixture-dismissed' && calls.publications.length===publications && mutationRequests().length===before,'Restore published work or restored another record')
+      await inventory()
+      ensure(button('Review and send'),'Restored record did not return to private preparation')
+    })
+    await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
+      const before=mutationRequests().length
+      window.failPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(query('.co-public-work')).includes('Couldn’t load pull requests'),'Read failure missing')
+      ensure(document.querySelectorAll('.co-pr-row').length===3,'Failed refresh erased saved inventory')
+      window.failPulls=false
+      await click(button('Try again',query('.co-public-work')))
+      await until(()=>!query('.co-public-work [role="alert"]'),'Read retry did not clear error')
+      window.emptyPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(query('.co-pr-empty')).includes('No pull requests'),'Empty inventory missing')
+      ensure(!query('.co-pr-row'),'Empty result kept stale rows')
+      window.emptyPulls=false; window.holdPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>window.releasePulls && text(query('.co-pr-empty')).includes('Loading pull requests'),'Loading confused with empty')
+      ensure(!text(query('.co-pr-empty')).includes('No pull requests'),'Loading claimed an empty result')
+      window.holdPulls=false; window.releasePulls(); window.releasePulls=null
+      await until(()=>document.querySelectorAll('.co-pr-row').length===3,'Released inventory did not load')
+      const search=query('[aria-label="Find a pull request"]')
+      await fill(search,'no-such-contribution')
+      ensure(text(query('.co-pr-empty')).includes('No pull requests match'),'Search empty result missing')
+      await fill(search,'')
+      ensure(mutationRequests().length===before && query('.co-pr-list')===originalList,'Read states mutated work or remounted inventory')
+    })
+    await check('local comparison is lazy, versioned, read-only and distinguishes loading, failure, empty and stale', async () => {
+      const before=mutationRequests().length
+      ensure(calls.diffs.length===0,'Local source diff loaded before inspection')
+      window.holdDiff=true; window.diffMode='error'
+      const local=()=>[...document.querySelectorAll('.co-position-inspect')].find(node=>text(node).startsWith('Local'))
+      await click(local())
+      await until(()=>window.releaseDiff && query('.co-project-diff-loading'),'Comparison loader missing')
+      window.holdDiff=false; window.releaseDiff(); window.releaseDiff=null
+      await until(()=>button('Could not load diffs · try again'),'Comparison error missing')
+      window.diffMode='empty'; await click(button('Could not load diffs · try again'))
+      await until(()=>text(query('.co-project-diff-empty')).includes('No changed files'),'Empty comparison missing')
+      await inventory(); window.diffMode='stale'; await click(local())
+      await until(()=>button('Project changed · check again'),'Stale comparison not distinguished')
+      window.diffMode='ready'; await click(button('Project changed · check again'))
+      await until(()=>text(query('.diff-view')).includes('local improvement'),'Fresh comparison did not recover')
+      await click(query('.co-position-details summary'))
+      ensure(text(query('.co-position-details')).includes('aaaaaaa') && text(query('.co-position-details')).includes('bbbbbbb'),'Compared versions missing')
+      ensure(calls.diffs.every(call=>call.key==='app:fixture' && call.head===HEAD && call.base===BASE),'Comparison drifted to another source')
+      ensure(mutationRequests().length===before && calls.starts.length===0,'Read-only comparison started work')
+      await inventory()
     })
     await check('source conversation scope loads lazily and remains separate from project preparation', async () => {
       await click(button('Prepare changes'))
       await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
       const scope = query('.co-prepare-scope')
       ensure(text(scope).includes('1 local file'),'Preparation did not show the collocated file scope')
+      window.holdScope=true; window.failScope=true
       await click(scope)
+      await until(()=>window.releaseScope && text(query('[data-task="task:scope"]')).includes('Finding source conversations'),'Scope loader missing')
+      window.holdScope=false; window.releaseScope(); window.releaseScope=null
+      await until(()=>text(query('[data-task="task:scope"]')).includes('Fixture scope unavailable'),'Scope failure missing')
+      ensure(text(query('[data-task="task:scope"]')).includes('All local work'),'Scope failure hid project preparation')
+      window.failScope=false; await click(button('Try again',query('[data-task="task:scope"]')))
       await until(() => text(query('[data-task="task:scope"]')).includes('No source conversations'),'Scope did not load')
       ensure(calls.starts.length===0,'Choosing scope started work')
       await click([...document.querySelectorAll('.co-scope-row')][0])
     })
     await check('preparation starts once and project switching restores its durable owner', async () => {
-      const prepareButton=button('Prepare changes',query('[data-task="task:prepare"]'))
+      const prepareButton=button('Start preparation',query('[data-task="task:prepare"]'))
       prepareButton.click(); prepareButton.click()
       await until(() => button('Open conversation'),'Preparation did not start')
       ensure(calls.starts.length===1 && calls.starts[0].draft.includes('app:fixture') && !calls.starts[0].draft.includes('app:other'),'Duplicate or wrong scope')
@@ -477,7 +671,128 @@ window.runWorkspaceChecks = async () => {
       await until(() => button('Open conversation'),'Saved conversation unavailable')
       ensure(calls.status.includes('prepare-1') && calls.starts.length===1,'Restore restarted work')
     })
-    await check('host Back leaves the project once; docked details add no hidden back steps', async () => {
+    await check('pulling accepted changes requires one explicit scoped agent handoff and preserves failures', async () => {
+      await chooseProject('Other project')
+      const before=mutationRequests().length, starts=calls.starts.length
+      await click(button('Pull updates'))
+      await until(()=>button('Start pull') && !button('Start pull').disabled,'Pull action did not settle')
+      ensure(calls.starts.length===starts && mutationRequests().length===before,'Opening update applied or published work')
+      window.failStart=true; await click(button('Start pull'))
+      await until(()=>text(query('[data-task="task:update"]')).includes('Fixture agent unavailable'),'Agent-start failure missing')
+      ensure(calls.starts.length===starts,'Failed handoff counted as started')
+      window.failStart=false
+      const start=button('Start pull'); start.click(); start.click()
+      await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
+      const action=calls.starts.at(-1)
+      ensure(action.event==='update_source_projects' && action.draft.includes('app:other') && !action.draft.includes('app:fixture'),'Update scope drifted')
+      ensure(action.draft.includes('update/apply approval') && action.draft.includes('uncommitted edits') && action.draft.includes('does not authorize preparing or publishing'),'Safe apply/overlay/publication boundaries missing')
+      ensure(mutationRequests().length===before,'Update handoff mutated GitHub')
+      await chooseProject('Fixture project')
+    })
+    const savedRun = (id, number, head, state) => ({id,mode:'review',state:'complete',chat_id:id+'-chat',
+      items:[{repo:'owner/project',number,head_sha:head,base_ref:'main',base_sha:BASE,state,summary:'Saved findings for '+id}]})
+    const historyEntry = id => query('[data-review-run="'+id+'"]')
+    const historyFold = () => query('.co-review-history')
+    async function openHistory() {
+      await until(()=>historyFold(),'Project review conversations are undiscoverable')
+      if(!historyFold().open) await click(historyFold().querySelector('summary'))
+    }
+    async function openSavedRun(id, expected) {
+      await openHistory()
+      const opener=historyEntry(id)
+      ensure(opener && opener.getClientRects().length,'Saved run has no visible opener: '+id)
+      opener.focus(); await nativeSpace()
+      const pane=()=>query('[data-task="task:run:'+id+'"]')
+      await until(()=>pane(),'Saved run did not open: '+id)
+      ensure(text(pane()).includes(expected),'Saved run lost its version context: '+text(pane()))
+      const conversation=button('Answer in review conversation',pane()) || button('Open review conversation',pane())
+      // This hermetic page is top-level. Mock only the direct shell boundary,
+      // retaining the component's actual opaque-frame postMessage path.
+      const parentDescriptor=Object.getOwnPropertyDescriptor(window,'parent')
+      Object.defineProperty(window,'parent',{configurable:true,value:{postMessage(message,target){
+        ensure(message.type==='moebius:open-chat' && target==='*','Wrong shell conversation command')
+        calls.opened.push(message.chatId)
+      }}})
+      try { await click(conversation) } finally { Object.defineProperty(window,'parent',parentDescriptor) }
+      ensure(calls.opened.at(-1)===id+'-chat','Opened another review conversation')
+      pane().focus(); await nativeEscape()
+      await until(()=>!pane(),'Saved run did not close with Escape')
+      ensure(document.activeElement===opener,'Saved run did not restore focus to its history entry')
+    }
+    await check('project review conversations retain older, needs-you and unknown outcomes without treating them as current verdicts', async () => {
+      await inventory()
+      const before=mutationRequests().length, starts=calls.starts.length
+      reviewRuns.unshift(savedRun('saved-current',7,HEAD,'all_clear'),savedRun('saved-needs',8,SECOND_HEAD,'needs_you'),
+        savedRun('saved-unknown',7,'d'.repeat(40),'merge_unknown'),savedRun('saved-older',7,'d'.repeat(40),'all_clear'),
+        savedRun('saved-shadowed',7,HEAD,'needs_you'),
+        {...savedRun('saved-base',7,HEAD,'all_clear'),items:[{...savedRun('saved-base',7,HEAD,'all_clear').items[0],base_sha:'f'.repeat(40)}]},
+        {...savedRun('another-project',7,HEAD,'needs_you'),items:[{repo:'owner/other',number:7,state:'needs_you'}]})
+      await click(query('[aria-label="Refresh project status"]'))
+      await openHistory()
+      ensure(!historyEntry('another-project'),'Another project leaked into review history')
+      ensure(text(historyEntry('saved-needs')).includes('Needs you'),'Saved question is not discoverable')
+      ensure(text(historyEntry('saved-unknown')).includes('Outcome needs checking'),'Unknown merge outcome is not discoverable')
+      ensure(text(historyEntry('saved-older')).includes('Older PR version'),'Older clear verdict lacks stale context')
+      await openSavedRun('saved-needs','Matches loaded PR version')
+      await openSavedRun('saved-unknown','Older PR version')
+      await openSavedRun('saved-older','Older PR version')
+      await openSavedRun('saved-shadowed','Matches loaded PR version')
+      await openSavedRun('saved-base','Older base version')
+      ensure(mutationRequests().length===before && calls.starts.length===starts,'Inspecting saved reviews started or mutated work')
+    })
+    await check('saved reviews stay reachable during loading and failure without claiming a fresh version check', async () => {
+      const before=mutationRequests().length
+      window.holdPulls=true; window.failPulls=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>window.releasePulls && text(historyEntry('saved-current')).includes('Current version not checked'),'Loading inventory reused a fresh verdict')
+      await openSavedRun('saved-current','Current version not checked')
+      window.holdPulls=false; window.releasePulls(); window.releasePulls=null
+      await until(()=>text(historyEntry('saved-current')).includes('Matches loaded PR version'),'Refresh did not finish')
+      window.failPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(query('.co-public-work')).includes('Couldn’t load pull requests'),'Inventory failure missing')
+      await openSavedRun('saved-needs','Current version not checked')
+      window.failPulls=false
+      await click(button('Try again',query('.co-public-work')))
+      await until(()=>text(historyEntry('saved-needs')).includes('Matches loaded PR version'),'Inventory retry did not recover')
+      ensure(mutationRequests().length===before,'Inspecting review recovery mutated work')
+    })
+    await check('saved review conversations survive head changes, search filtering, closed PRs and project reopen', async () => {
+      const before=mutationRequests().length, starts=calls.starts.length
+      window.fixtureChangedHead=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>text(historyEntry('saved-needs')).includes('Older PR version'),'Changed-head review was hidden or shown as current')
+      await fill(query('[aria-label="Find a pull request"]'),'no matching pull')
+      await openSavedRun('saved-needs','Older PR version')
+      await fill(query('[aria-label="Find a pull request"]'),'')
+      window.emptyPulls=true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>!query('.co-pr-row'),'Closed PR fixture still appears open')
+      await chooseProject('Other project'); await chooseProject('Fixture project')
+      await openSavedRun('saved-needs','Not in the loaded open PRs')
+      await openSavedRun('saved-unknown','Not in the loaded open PRs')
+      await openSavedRun('saved-older','Not in the loaded open PRs')
+      ensure(mutationRequests().length===before && calls.starts.length===starts,'Reopening review history restarted work')
+      window.emptyPulls=false; window.fixtureChangedHead=false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(()=>query('.co-pr-row'),'PR inventory did not recover')
+    })
+    await check('unknown GitHub status exposes inline retry without opening a task and prevents duplicate checks', async () => {
+      await inventory()
+      const before=mutationRequests().length
+      window.setConnectionFixture({state:'unknown',message:'Fixture GitHub check timed out.'})
+      await until(()=>button('Check GitHub again'),'Unknown GitHub retry is hidden behind an unopened task')
+      ensure(button('Check GitHub again').getClientRects().length,'GitHub retry is not visible')
+      ensure(text(query('.co-workspace')).includes('Your connection is unchanged'),'Unknown status implies disconnected account')
+      await click(button('Check GitHub again'))
+      await until(()=>button('Checking…')?.disabled && window.finishGithubRetry,'Retry did not expose checking state')
+      button('Checking…').click()
+      ensure(calls.githubRetries===1,'Disabled retry repeated the check')
+      window.finishGithubRetry()
+      await until(()=>!button('Checking…') && query('.co-pr-row'),'Retry did not recover the PR list')
+      ensure(mutationRequests().length===before,'Connection retry mutated public work')
+    })
+    await check('host Back leaves the project once; inline details add no hidden back steps', async () => {
       await inventory(); await click(query('.co-pr-open'))
       const before = navigation.length
       window.mobius.nav.back()
@@ -495,6 +810,7 @@ window.runWorkspaceChecks = async () => {
       await showSelection('selection-link-one')
       await until(() => button('Allow review & merge'), 'Review link did not reach exact approval')
       ensure(text(query('.co-selection-page')).includes('aaaaaaa → main (bbbbbbb)'), 'Link omitted selected version')
+      ensure(!text(query('.co-selection-page')).includes('current tip of the same target branch'),'Pinned link incorrectly allows base rebinding')
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {

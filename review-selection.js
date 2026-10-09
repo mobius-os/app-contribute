@@ -30,7 +30,7 @@ export async function loadReviewSelection(id) {
 export async function inspectReviewSelection(token, request) {
   const fields = request.items.map((item, index) => {
     const [owner, name] = item.repo.split('/')
-    return `p${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}) { nameWithOwner viewerPermission isArchived pullRequest(number:${item.number}) { number title url state isDraft headRefOid baseRefName baseRefOid } }`
+    return `p${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}) { nameWithOwner viewerPermission isArchived pullRequest(number:${item.number}) { number title url state isDraft headRefOid baseRefName baseRefOid baseRef { target { oid } } } }`
   }).join('\n')
   const data = await fetchLiveStates(token, `query ContributeReviewSelection { ${fields} }`)
   if (!data) throw new Error('Could not check these contributions. Retry when GitHub is available.')
@@ -38,7 +38,7 @@ export async function inspectReviewSelection(token, request) {
     const repository = data[`p${index}`]
     const pr = repository?.pullRequest
     if (!pr || repository.nameWithOwner?.toLowerCase() !== item.repo || pr.number !== item.number
-        || pr.state !== 'OPEN' || pr.headRefOid !== item.head_sha || pr.baseRefOid !== item.base_sha || pr.baseRefName !== item.base_ref) throw new Error('A selected contribution changed or closed. Ask the agent for a fresh review link; nothing was approved.')
+        || pr.state !== 'OPEN' || pr.headRefOid !== item.head_sha || pr.baseRef?.target?.oid !== item.base_sha || pr.baseRefName !== item.base_ref) throw new Error('A selected contribution changed or closed. Ask the agent for a fresh review link; nothing was approved.')
     return { ...pr, repository: { nameWithOwner: repository.nameWithOwner, viewerPermission: repository.isArchived ? null : repository.viewerPermission } }
   })
   return { ...request, pulls, canMerge: pulls.every(pr => !pr.isDraft && mayMerge(pr.repository.viewerPermission)) }

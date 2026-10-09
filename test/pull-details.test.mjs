@@ -35,3 +35,12 @@ test('activity retains successful comments when reviews fail and reports the fai
   const result=await loadPullActivity('fixture',pr)
   assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'comment');assert.equal(result.errors.length,1)
 })
+
+test('file boundaries and LOC come from full PR totals, not current-page sums', async t => {
+  const files = Array.from({ length: 100 }, (_, i) => ({ filename: `file${i}`, additions: 1, deletions: 0 }))
+  t.mock.method(globalThis, 'fetch', async url => response(url.includes('/files?') ? files : { ...detail(), changed_files: 100, additions: 400, deletions: 220 }))
+  const result = await loadPullFiles('fixture', pr)
+  assert.deepEqual(result.totals, { files: 100, additions: 400, deletions: 220 })
+  assert.equal(result.hasMore, false)
+  assert.equal(result.paginationUnknown, false)
+})

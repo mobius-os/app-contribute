@@ -26,6 +26,8 @@ import {
   reviewAllAction,
 } from '../review.js'
 import { upsertRecord } from '../domain.js'
+import { stackPublicationRecords } from '../stack.js'
+import { contributionPathDecision, contributionStackDecision } from '../contribution-policy.js'
 import { contributionRecordPaths } from '../storage.js'
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
@@ -229,13 +231,18 @@ test('Merge is an end-state intent without widening the public grant', () => {
   assert.notEqual(contributionActionScope(merge), contributionActionScope(prepare))
 })
 
-test('batch recovery releases confirmation and returns durable failures to projection', () => {
+test('a confirmed batch stays on screen with per-item results until the owner closes it', () => {
   assert.doesNotMatch(feedSource, /fixAndReviewAction\(agentRecords\)/)
   assert.doesNotMatch(feedSource, /onStartAgent/)
-  assert.match(feedSource, /setBusy\(false\)[\s\S]*?setApproval\(null\)[\s\S]*?setNote\(failures\[0\]/)
+  assert.match(feedSource, /approval\.locked \|\| approval\.fingerprint === fingerprint/)
+  assert.match(feedSource, /setBusy\(false\)[\s\S]*?setFinished\(true\)/)
+  assert.match(feedSource, /function closeResults\(\) \{\s*if \(checking \|\| busy\) return[\s\S]*?setApproval\(null\)/)
+  assert.match(feedSource, /const value = outcomeFor\(record, outcome\)[\s\S]*?\[record\.id\]: value/)
   assert.match(feedSource, /approval\.fingerprint !== fingerprint/)
   assert.match(feedSource, /The reviewed set changed\. The current actions are listed now/)
-  assert.match(feedSource, /key=\{`send:\$\{run\?\.revision/)
+  assert.match(feedSource, /key="send"/); assert.match(feedSource, /key="ready"/)
+  assert.doesNotMatch(feedSource, /key=\{`(?:send|ready):\$\{run\?\.revision/)
+  assert.match(feedSource, /if \(admitted\.current\) return/)
 })
 
 test('paused work exposes its existing conversation without starting another', () => {
@@ -251,9 +258,9 @@ test('projects contain their contribution flow without a separate Reviews destin
   assert.doesNotMatch(appSource, /showProjects|<ProjectControl[ >]|contribute-reviews/)
   assert.doesNotMatch(appSource, /co-tab-prs|co-tab-issues/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
-  assert.match(feedSource, /<h3>Needs you /)
-  assert.match(feedSource, /<h3>In progress<\/h3>/)
-  assert.match(feedSource, />Done recently</)
+  assert.match(feedSource, /<span>Needs you<\/span>/)
+  assert.match(feedSource, /agentActivity, 'Agent activity'/)
+  assert.match(feedSource, />History</)
   assert.match(feedSource, /DECISION_ACTION_LABELS/)
   assert.match(sourceMapSource, /placeholder="Find a project"/)
   assert.match(sourceMapSource, /\['local', 'Changes'\]/)
@@ -614,4 +621,57 @@ test('cycle progress uses the durable plan and current task', () => {
     percent: 50,
     label: 'Review prepared changes',
   })
+})
+
+
+// Execute the app-owned callback bodies with only their I/O boundary replaced.
+// This catches early-return classifications without copying their preflight logic.
+function publicCallback(name, dependencies) {
+  const marker=`const ${name} = useCallback(`
+  const start=appSource.indexOf(marker)+marker.length
+  const end=appSource.indexOf('\n  }, [',start)
+  assert.ok(start>=marker.length && end>start,'Owning callback must be present')
+  const helper=appSource.match(/^function stalePublicApproval\(\) \{[\s\S]*?^\}/m)?.[0] || ''
+  return new Function(...Object.keys(dependencies),`${helper}; return (${appSource.slice(start,end)}\n  })`)(...Object.values(dependencies))
+}
+function preflightFixture(name, read) {
+  const head='a'.repeat(40)
+  const approved={id:'preflight',type:'pr',status:name==='onMarkReady'?'draft':'prepared',repo:'team/repo',
+    ...(name==='onMarkReady'?{number:1,url:'https://github.com/team/repo/pull/1'}:{}),
+    plan:{action:'pr',repo:'team/repo',branch:'fix/preflight',head_sha:head},quality_review:{state:'all_clear',reviewed_head_sha:head}}
+  const writes=[]
+  const write=async()=>{writes.push(name);return {error:'Unconfirmed server response',failure:{owner:'automatic'}}}
+  const dependencies={appId:'fixture',token:'fixture',autopilotDefault:false,submissionMethod:'github',connRef:{current:{state:'connected'}},
+    applyRecordUpdates:()=>{},refreshReviewStatus:()=>{},contributionApprovalIsCurrent,contributionPhaseApprovalIsCurrent,qualityReviewFor,stackPublicationRecords,
+    contributionPathDecision,contributionStackDecision,
+    loadFreshContributionRecord:async()=>read(approved),loadFreshContributionRecords:async()=>{const value=await read(approved);return value?[value]:[]},
+    updateContribution:write,submitContribution:write,submitContributionViaMobius:write,markContributionReady:write,updateContributionStack:write,submitContributionStack:write}
+  return {writes,run:()=>publicCallback(name,dependencies)(name==='onSendStack'?[approved]:approved)}
+}
+test('app publication callbacks report failed fresh-ledger preflight as not attempted without invoking a write',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) for(const read of [()=>null,()=>{throw Error('offline')}]) {
+    const fixture=preflightFixture(name,read)
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,true,name)
+    assert.match(outcome.error,/could not refresh/)
+    assert.equal(outcome.failure.owner,'automatic')
+    assert.deepEqual(fixture.writes,[])
+  }
+})
+test('a changed saved approval fails explicitly before a write instead of throwing into uncertain settlement',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) {
+    const fixture=preflightFixture(name,record=>({...record,plan:{...record.plan,head_sha:'b'.repeat(40)}}))
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,true,name)
+    assert.match(outcome.error,/changed/)
+    assert.deepEqual(fixture.writes,[])
+  }
+})
+test('automatic errors after entering the publication transport are never labeled not attempted',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) {
+    const fixture=preflightFixture(name,record=>record)
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,undefined,name)
+    assert.deepEqual(fixture.writes,[name])
+  }
 })
