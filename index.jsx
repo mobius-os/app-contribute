@@ -139,6 +139,16 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
     }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></section>
 }
 
+// Preflight rejection did not enter a public write. Keep it distinct from a
+// lost response after dispatch, which must retain reconciliation ownership.
+function stalePublicApproval() {
+  return {
+    notAttempted: true,
+    error: 'The saved proposal changed. Review its current version and confirm again; this action made no public request.',
+    failure: { owner: 'agent', code: 'approval_changed' },
+  }
+}
+
 export default function ContributeApp({ appId, token }) {
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
@@ -746,6 +756,7 @@ export default function ContributeApp({ appId, token }) {
     } catch { /* handled by the safe refresh error below */ }
     if (!canonical) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh the saved review. Nothing was sent; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -760,6 +771,7 @@ export default function ContributeApp({ appId, token }) {
       qualityReviewFor(refreshed).state !== 'all_clear'
     ) {
       return {
+        notAttempted: true,
         reviewNeeded: true,
         record: refreshed,
         error: 'Review this exact version first. The Review action is ready on this card.',
@@ -772,6 +784,7 @@ export default function ContributeApp({ appId, token }) {
     if (updating) {
       if (connRef.current.state !== 'connected') {
         return {
+          notAttempted: true,
           error: 'Connect GitHub in Möbius Settings → Accounts before updating this pull request.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
@@ -784,6 +797,7 @@ export default function ContributeApp({ appId, token }) {
         connRef.current.state,
       )
       if (decision.error) return {
+        notAttempted: true,
         error: decision.error,
         failure: { owner: 'owner' },
       }
@@ -910,6 +924,7 @@ export default function ContributeApp({ appId, token }) {
     } catch { /* handled by the safe error below */ }
     if (!canonical) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh this draft. Nothing changed; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -922,6 +937,7 @@ export default function ContributeApp({ appId, token }) {
     if (current.status === 'open') return { alreadyHandled: true, record: current }
     if (current.status !== 'draft' || current.submission_mode === 'mobius-bot') {
       return {
+        notAttempted: true,
         error: current.submission_mode === 'mobius-bot'
           ? 'Möbius relay drafts cannot request review from this connection yet.'
           : 'This pull request is no longer a personal draft.',
@@ -1147,6 +1163,7 @@ export default function ContributeApp({ appId, token }) {
     })
     if (currentRecords.length !== stackRecords.length) {
       return {
+        notAttempted: true,
         error: 'Contribute could not refresh the complete reviewed chain. Nothing was sent; try again once it reconnects.',
         failure: { owner: 'automatic' },
       }
@@ -1166,6 +1183,7 @@ export default function ContributeApp({ appId, token }) {
     )
     if (updating && connRef.current.state !== 'connected') {
       return {
+        notAttempted: true,
         error: 'Connect GitHub in Möbius Settings → Accounts before updating these pull requests.',
         failure: { owner: 'owner', code: 'github_not_connected' },
       }
@@ -1177,11 +1195,13 @@ export default function ContributeApp({ appId, token }) {
         connRef.current.state,
       )
       if (decision.error) return {
+        notAttempted: true,
         error: decision.error,
         failure: { owner: 'owner' },
       }
       if (decision.method === 'mobius') {
         return {
+          notAttempted: true,
           error: 'Connect GitHub in Möbius Settings → Accounts to send this related group as your account.',
           failure: { owner: 'owner', code: 'github_not_connected' },
         }

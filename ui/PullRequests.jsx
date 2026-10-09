@@ -79,7 +79,7 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onCancel })
   </div>
 }
 
-export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange }) {
+export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange, bindCurrentTarget = false }) {
   const confirmation = useRef(null)
   useEffect(() => {
     if (choice) {
@@ -92,10 +92,13 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
 
     <h3>{merge ? 'Review & merge if safe' : 'Review privately'}</h3>
     <p>{merge
-      ? 'Allow the agent to merge or queue these exact versions after a thorough review and required checks. Changed versions and questions come back to you. No branch edits or public review comments.'
+      ? bindCurrentTarget
+        ? 'Allow the agent to merge or queue these PR heads into their named target branches after a fresh review of the combined code and required checks. Questions come back to you. No branch edits or public review comments.'
+        : 'Allow the agent to merge or queue these exact versions after a thorough review and required checks. Changed versions and questions come back to you. No branch edits or public review comments.'
       : 'Review privately, in parallel where independent. Nothing is posted or merged.'}</p>
     <ul>{choice.pulls.map(pr => <li key={prKey(pr)}><strong>#{pr.number} {pr.title}</strong><span>{pr.repository.nameWithOwner}</span></li>)}</ul>
-    <details className="co-task-details"><summary>Exact versions covered by this approval</summary>{choice.pulls.map(pr => <p key={prKey(pr)}>#{pr.number}: version <code>{pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({baseTip(pr)?.slice(0, 7)})</code></p>)}<p>Changed code requires a fresh approval.</p></details>
+    {bindCurrentTarget ? <p>On confirmation, unchanged PR heads are bound to the current tip of the same target branch, which may be newer than the snapshot below. Changed heads, target branches or draft status require a fresh confirmation.</p> : null}
+    <details className="co-task-details"><summary>{bindCurrentTarget ? 'PR heads and target branches' : 'Exact versions covered by this approval'}</summary>{choice.pulls.map(pr => <p key={prKey(pr)}>#{pr.number}: version <code>{pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({bindCurrentTarget ? 'last seen ' : ''}{baseTip(pr)?.slice(0, 7)})</code></p>)}{!bindCurrentTarget ? <p>Changed code requires a fresh approval.</p> : null}</details>
     {onModeChange && choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft) ? <label className="co-workflow-option"><input type="checkbox" checked={merge} disabled={busy} onChange={event => onModeChange(event.target.checked ? 'review_merge' : 'review')} /> Merge when safe</label> : null}
     <div className="co-board-actions">
       <button className="co-btn co-btn-primary" disabled={busy || disabled} onClick={onConfirm}>{busy ? 'Starting…' : merge ? 'Allow review & merge' : 'Start private review'}</button>
@@ -251,7 +254,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       {run.items?.some(item => item.state === 'merged') && project.available && project.kind !== 'external' ? <button className="co-btn co-task-secondary" onClick={() => task?.open('task:update')}>Pull updates</button> : null}
       {run.items?.some(item => item.state === 'queued') ? <p>In the merge queue, not merged yet. The review conversation follows its outcome.</p> : null}
     </TaskPane>
-  const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
+  const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation choice={choice} bindCurrentTarget busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       setData(old => ({ ...old, pulls: old.pulls.map(item => keys.includes(prKey(item)) ? { ...item, assignees: { nodes: [...new Map([...(item.assignees?.nodes || []), { login }].map(user => [user.login.toLowerCase(), user])).values()] } } : item) }))
       void onChanged?.()

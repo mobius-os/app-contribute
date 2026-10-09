@@ -26,6 +26,8 @@ import {
   reviewAllAction,
 } from '../review.js'
 import { upsertRecord } from '../domain.js'
+import { stackPublicationRecords } from '../stack.js'
+import { contributionPathDecision, contributionStackDecision } from '../contribution-policy.js'
 import { contributionRecordPaths } from '../storage.js'
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
@@ -619,4 +621,57 @@ test('cycle progress uses the durable plan and current task', () => {
     percent: 50,
     label: 'Review prepared changes',
   })
+})
+
+
+// Execute the app-owned callback bodies with only their I/O boundary replaced.
+// This catches early-return classifications without copying their preflight logic.
+function publicCallback(name, dependencies) {
+  const marker=`const ${name} = useCallback(`
+  const start=appSource.indexOf(marker)+marker.length
+  const end=appSource.indexOf('\n  }, [',start)
+  assert.ok(start>=marker.length && end>start,'Owning callback must be present')
+  const helper=appSource.match(/^function stalePublicApproval\(\) \{[\s\S]*?^\}/m)?.[0] || ''
+  return new Function(...Object.keys(dependencies),`${helper}; return (${appSource.slice(start,end)}\n  })`)(...Object.values(dependencies))
+}
+function preflightFixture(name, read) {
+  const head='a'.repeat(40)
+  const approved={id:'preflight',type:'pr',status:name==='onMarkReady'?'draft':'prepared',repo:'team/repo',
+    ...(name==='onMarkReady'?{number:1,url:'https://github.com/team/repo/pull/1'}:{}),
+    plan:{action:'pr',repo:'team/repo',branch:'fix/preflight',head_sha:head},quality_review:{state:'all_clear',reviewed_head_sha:head}}
+  const writes=[]
+  const write=async()=>{writes.push(name);return {error:'Unconfirmed server response',failure:{owner:'automatic'}}}
+  const dependencies={appId:'fixture',token:'fixture',autopilotDefault:false,submissionMethod:'github',connRef:{current:{state:'connected'}},
+    applyRecordUpdates:()=>{},refreshReviewStatus:()=>{},contributionApprovalIsCurrent,contributionPhaseApprovalIsCurrent,qualityReviewFor,stackPublicationRecords,
+    contributionPathDecision,contributionStackDecision,
+    loadFreshContributionRecord:async()=>read(approved),loadFreshContributionRecords:async()=>{const value=await read(approved);return value?[value]:[]},
+    updateContribution:write,submitContribution:write,submitContributionViaMobius:write,markContributionReady:write,updateContributionStack:write,submitContributionStack:write}
+  return {writes,run:()=>publicCallback(name,dependencies)(name==='onSendStack'?[approved]:approved)}
+}
+test('app publication callbacks report failed fresh-ledger preflight as not attempted without invoking a write',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) for(const read of [()=>null,()=>{throw Error('offline')}]) {
+    const fixture=preflightFixture(name,read)
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,true,name)
+    assert.match(outcome.error,/could not refresh/)
+    assert.equal(outcome.failure.owner,'automatic')
+    assert.deepEqual(fixture.writes,[])
+  }
+})
+test('a changed saved approval fails explicitly before a write instead of throwing into uncertain settlement',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) {
+    const fixture=preflightFixture(name,record=>({...record,plan:{...record.plan,head_sha:'b'.repeat(40)}}))
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,true,name)
+    assert.match(outcome.error,/changed/)
+    assert.deepEqual(fixture.writes,[])
+  }
+})
+test('automatic errors after entering the publication transport are never labeled not attempted',async()=>{
+  for(const name of ['onSend','onMarkReady','onSendStack']) {
+    const fixture=preflightFixture(name,record=>record)
+    const outcome=await fixture.run()
+    assert.equal(outcome.notAttempted,undefined,name)
+    assert.deepEqual(fixture.writes,[name])
+  }
 })

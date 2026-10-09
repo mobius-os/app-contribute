@@ -535,6 +535,8 @@ window.runWorkspaceChecks = async () => {
       ensure(rect.top >= 0 && rect.top < innerHeight && document.activeElement === region,'Review not visible/focused')
       await click(query('.co-pr-confirm input'))
       ensure(reviewRuns.length === 0,'Mode toggle counted as approval')
+      ensure(text(query('.co-pr-confirm')).includes('current tip of the same target branch'),'Approval falsely pins the displayed base')
+      ensure(text(query('.co-pr-confirm')).includes('fresh review of the combined code'),'Combined-code review missing from approval')
       window.liveBase='d'.repeat(40)
       await click(button('Allow review & merge'))
       await until(() => reviewRuns.length === 1 && button('Open review conversation'),'Review did not start')
@@ -808,6 +810,7 @@ window.runWorkspaceChecks = async () => {
       await showSelection('selection-link-one')
       await until(() => button('Allow review & merge'), 'Review link did not reach exact approval')
       ensure(text(query('.co-selection-page')).includes('aaaaaaa → main (bbbbbbb)'), 'Link omitted selected version')
+      ensure(!text(query('.co-selection-page')).includes('current tip of the same target branch'),'Pinned link incorrectly allows base rebinding')
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {

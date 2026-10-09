@@ -158,3 +158,20 @@ test('first-layer parent absence and invalid values cannot impersonate its froze
   assert.equal(api.canonicalBatchRecordOutcome(invalid,{...current,plan:invalid.plan},mode),null)
  }
 })
+
+
+test('explicit preflight rejection is not an uncertain public attempt, but cannot release an existing claim',async t=>{
+ const api=await load(t);if(!api)return
+ const error='Fresh ledger unavailable. Nothing was sent.'
+ const stopped={notAttempted:true,error,failure:{owner:'automatic'}}
+ for(const mode of ['send','ready']) {
+  const frozen=mode==='ready'?{...opened,status:'draft'}:record
+  assert.deepEqual(api.batchRecordOutcome(frozen,frozen,stopped,mode),{notAttempted:true,error})
+  for(const flag of ['pending','uncertain','ok','alreadyHandled']) {
+   assert.equal(api.batchRecordOutcome(frozen,frozen,{...stopped,[flag]:true},mode),'checking')
+  }
+  assert.equal(api.batchRecordOutcome(frozen,{...frozen,status:'submitting'},stopped,mode),'checking')
+  assert.equal(api.batchRecordOutcome(frozen,{...frozen,readying:true},stopped,mode),'checking')
+  assert.equal(api.batchRecordOutcome(frozen,opened,stopped,mode),'done','canonical settlement still wins')
+ }
+})

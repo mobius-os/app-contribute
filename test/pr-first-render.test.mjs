@@ -37,3 +37,18 @@ test('detail keeps actions and tabs outside reserved independently loaded contex
   assert.match(html, /Loading description/)
   assert.doesNotMatch(html, /Take over review &amp; merge/)
 })
+
+
+test('live-list approval discloses current same-target binding while saved selections stay base-pinned', async t => {
+  const choice={mode:'review_merge',pulls:[{...pr,baseRef:{target:{oid:pr.baseRefOid}}}]}
+  const live=await render(t,'ReviewConfirmation',{choice,bindCurrentTarget:true})
+  if(live===null)return
+  assert.match(live,/current tip of the same target branch/)
+  assert.match(live,/fresh review of the combined code/)
+  assert.match(live,/last seen bbbbbbb/)
+  assert.doesNotMatch(live,/Exact versions covered by this approval/)
+  const pinned=await render(t,'ReviewConfirmation',{choice})
+  assert.match(pinned,/Exact versions covered by this approval/)
+  assert.match(pinned,/aaaaaaa → main \(bbbbbbb\)/)
+  assert.doesNotMatch(pinned,/current tip of the same target branch|last seen/)
+})

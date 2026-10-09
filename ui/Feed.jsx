@@ -205,14 +205,21 @@ export function batchRecordOutcome(record, current, outcome, mode) {
   const canonical = canonicalBatchRecordOutcome(record, current, mode)
   if (canonical) return canonical
   if (outcome?.pending || outcome?.uncertain || outcome?.ok || outcome?.alreadyHandled
-    || !outcome?.failure || outcome.failure.owner === 'automatic') return 'checking'
+    || current?.status === 'submitting' || current?.readying) return 'checking'
+  // Only the callback that owns preflight can certify no public dispatch.
+  // A generic automatic failure or missing response remains uncertain.
+  if (outcome?.notAttempted === true) return {
+    notAttempted: true,
+    error: outcome.error || 'Preflight could not complete. Review and confirm again when it recovers.',
+  }
+  if (!outcome?.failure || outcome.failure.owner === 'automatic') return 'checking'
   return { error: outcome.error || (contributionFailureOwner(outcome) === 'agent'
     ? 'Moved back to private preparation.' : 'Needs attention.') }
 }
 
 const PROGRESS_TEXT = {
   ready: { working: 'Requesting review…', checking: 'Checking result…', 'not-attempted': 'Not requested', closed: 'Pull request closed', merged: 'Merged', done: 'Review requested' },
-  send: { working: 'Sending…', checking: 'Checking result…', closed: 'Pull request closed', merged: 'Merged', done: 'Sent to GitHub' },
+  send: { working: 'Sending…', checking: 'Checking result…', 'not-attempted': 'Not sent', closed: 'Pull request closed', merged: 'Merged', done: 'Sent to GitHub' },
 }
 
 function ExactActionList({
@@ -246,7 +253,7 @@ function ExactActionList({
                   <strong>{contributionTitle(record)}</strong>
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
                 </span>
-                <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.error
+                <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
                   || PROGRESS_TEXT[mode]?.[progress[record.id]]
                   || (mode === 'ready' ? 'Request review' : publicationLine(record, publicationPreference, githubState))}</em>
                 {meta ? <code>{meta.baseBranch} → {record?.plan?.branch || record?.branch}</code> : null}
