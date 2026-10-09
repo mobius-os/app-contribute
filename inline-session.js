@@ -241,11 +241,6 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   }
   const authoritative = key => ledgerReady && !['loading', 'unavailable'].includes(reviewStatus?.state) && idsFor(key).every(id => exactRead.has(id))
   const readyUnitsFor = key => authoritative(key) ? unitsFor(key).filter(unit => unit.ready.length && !attempted.has(phaseKey(unit)) && !pendingUnit(unit)) : []
-  // A fallback publication click is not the passive protocol's read activation.
-  // Expose that distinction without changing the host action/checkpoint schema.
-  const canFreeze = key => alive && !recoveryError && !busyUnits.size && !confirming && !requestedActivation
-    && readyUnitsFor(key).length > 0 && readyUnitsFor(key).every(unit => unit.records.every(record =>
-      !pendingRead.has(record.id) && exactObservations.get(record.id)?.identity === attemptTarget(record)))
   const makeAction = item => {
     const units = unitsFor(item.key)
     const ready = readyUnitsFor(item.key)
@@ -301,6 +296,12 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
         : quality?.state === 'changes_needed' ? [{ label: 'Changes needed', tone: 'attention' }] : [],
     }
   }
+  // Publication is stricter than passive read activation, but never overrides
+  // the owning action's unresolved-result lock to advertise a usable subset.
+  const canFreeze = key => alive && !recoveryError && !busyUnits.size && !confirming && !requestedActivation
+    && !makeAction({ key }).disabled
+    && readyUnitsFor(key).length > 0 && readyUnitsFor(key).every(unit => unit.records.every(record =>
+      !pendingRead.has(record.id) && exactObservations.get(record.id)?.identity === attemptTarget(record)))
   const summary = actions => {
     const batch = advertised.find(item => contributeBlockTarget(item.key)?.kind === 'batch')
     if (!batch) return ''

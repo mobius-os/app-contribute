@@ -17,6 +17,7 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { runFallbackMixedChecks } from './test/inline-fallback-mixed-fixture.jsx'
 import { runFallbackActivationChecks } from './test/inline-fallback-activation-fixture.jsx'
 import { runFallbackAttributionChecks } from './test/inline-fallback-attribution-fixture.jsx'
 import { runInlineCanonicalFailureChecks } from './test/inline-canonical-failure-fixture.jsx'
@@ -299,6 +300,7 @@ window.runWorkspaceChecks = async () => {
   const checks = []
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
+    checks.push(...await runFallbackMixedChecks())
     checks.push(...await runFallbackActivationChecks())
     checks.push(...await runFallbackAttributionChecks())
     await check('mounted cycle Refresh recovers a lost start and ambiguous Stop without duplicate admission', async () => {

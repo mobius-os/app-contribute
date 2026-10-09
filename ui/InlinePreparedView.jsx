@@ -268,7 +268,8 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     .map(item => [item.unitKey, item])).values()]
   const loading = items.some(item => (!item.record && !item.read)
     || (item.unit && !ledgerReady && stackReadiness(item.unit).code === 'incomplete'))
-  const checking = !Object.keys(publication.attempted).length && items.some(item => !item.blocker && item.phase.length && !publication.action(item.id)?.readyToFreeze)
+  const checking = !Object.keys(publication.attempted).length && (publication.batch?.status === 'Checking result'
+    || items.some(item => !item.blocker && item.phase.length && !publication.action(item.id)?.readyToFreeze))
   async function sendAll() { await publication.sendAll() }
   async function refresh() {
     setRefreshing(true)
@@ -280,7 +281,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     const links = [...new Map(members.flatMap(member => publication.action(member.id)?.links || (!action ? [settled(member)].filter(Boolean) : [])).map(link => [link.url, link])).values()]
     const linkView = links.map(link => <a key={link.url} className="co-repo-link" href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>)
     const attempted = Boolean(publication.attempted[item.id])
-    if (action && attempted) return <span className={`co-batch-status ${action.busy ? 'is-busy' : action.status === 'Needs attention' ? 'is-failed' : ''}`}>
+    if (action && (attempted || action.status === 'Checking result')) return <span className={`co-batch-status ${action.busy ? 'is-busy' : action.status === 'Needs attention' ? 'is-failed' : ''}`}>
       {action.busy ? 'Sending…' : action.status === 'Checking result' ? 'Checking result…' : ['Open','Draft','Closed','Merged','Sent'].includes(action.status) ? 'Sent' : action.note || action.status} {linkView}</span>
     if (item.record && item.record.status !== 'prepared') return <span className="co-batch-status">{links.length ? <>Already sent {linkView}</> : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
     if (!action?.readyToFreeze && !item.blocker) return <span className="co-batch-status">{action?.note || 'Checking contribution…'}</span>
