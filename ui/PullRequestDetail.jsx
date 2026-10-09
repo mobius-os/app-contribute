@@ -81,7 +81,7 @@ export function PullRequestDetail(props) {
   const identity = `${pr.repository?.nameWithOwner}#${pr.number}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
   return <PullRequestDetailView key={identity} {...props} />
 }
-function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record }) {
+function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, readOnly = false, provenance = [] }) {
   const [tab, setTab] = useState('conversation')
   const [cache, setCache] = useState(() => cacheStore?.entries || {})
   const [page, setPage] = useState({ files: 1, checks: 1, conversation: 1 })
@@ -171,11 +171,12 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
     </header>
     <div className="co-pr-detail-actions">
-      <button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview?.('review')}><Icon name="prepare" /> Take on with agent</button>
-      {canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}><Icon name="person" /> Assign</button> : null}
-      {status ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
+      {!readOnly ? <button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview?.('review')}><Icon name="prepare" /> Take on with agent</button> : null}
+      {!readOnly && canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}><Icon name="person" /> Assign</button> : null}
+      {!readOnly && status ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
       <DetailLink href={pr.url}>Open on GitHub</DetailLink>
     </div>
+    {provenance.length ? <p className="co-gh-provenance"><Icon name="feedback" size={16} /><span>From</span>{provenance.map(link => <button className="co-gh-chat-link" key={`${link.chat_id}:${link.role}`} onClick={() => window.parent.postMessage({type:'moebius:open-chat',chatId:link.chat_id},'*')} title={link.role === 'source' ? 'Created or modified this PR' : link.role === 'fix' ? 'Fixed this PR' : 'Reviewed this PR'}>{link.title}</button>)}</p> : null}
     <nav className="co-detail-tabs" aria-label="Pull request details">{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}
       {key === 'files' && Number.isInteger(pr.changedFiles) ? <><span className="co-tab-count">{pr.changedFiles}</span><span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span></> : null}
       {key === 'checks' ? <ChecksBadge pr={pr} /> : null}</button>)}</nav>

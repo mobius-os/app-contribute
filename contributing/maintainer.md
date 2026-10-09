@@ -265,6 +265,25 @@ polling process or second queue. Stop prevents new execution; observation can
 settle an existing receipt but never resumes the stopped cycle. Complete the
 existing merge work claim only after confirmed merge, as the brief directs.
 
+### Rich PR and run blocks in chat
+
+Use `python3 /data/apps/contribute/pr_block.py 'owner/repository#123'` for a
+read-only PR snapshot. It prints a `mobius-app` fence with `app: "contribute"`,
+`intent: "pull-request:owner/repository#123"`, the PR `title`, a `pull` object
+(repository, number, state, author, size, colored labels) that chat renders like
+a GitHub PR row, and fallback `facts` for older chat views. Paste the helper's
+output unchanged; do not invent live checks or imply it reviewed the diff.
+Opening the block focuses that PR in Contribute for current detail.
+A generic app fence is not a button granting hidden action authority.
+
+A review-run block uses `intent: "chat-review-run:<run.id>"` for the exact saved
+run, showing its steps, frozen prompt/model, results and owning chat. Use a
+source-chat/review-chat link for continuation, not a new chat assembled from a
+snapshot. PR state (open/merged/closed), private proposal, review verdict, agent
+execution and run/history are separate facts; paused is named unfinished work,
+not an all-clear verdict or consent to resume. Do not render stale snapshots as
+current permission or restart old paused cycles while explaining them.
+
 ## Prepare & merge
 
 **Prepare & merge** for local work remains a continuous workflow toward merge,

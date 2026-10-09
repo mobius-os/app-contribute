@@ -98,7 +98,8 @@ export async function discoverPulls(token, repo = '', cursor = null) {
   return { pulls: data.search.nodes.filter(pr => pr?.repository?.nameWithOwner && pr.headRefOid),
     total: data.search.issueCount, ...data.search.pageInfo }
 }
-// Re-read one exact PR identity without scanning all open PR pages.
+// An explicit transcript link may name a closed PR or a later search page.
+// Resolve that exact identity without scanning all open PR pages.
 export async function discoverPull(token, repo, number) {
   const name = repositoryName(repo)
   if (!name || !Number.isSafeInteger(number) || number < 1) throw new Error('Choose a valid pull request.')
@@ -139,6 +140,16 @@ export async function collaborationRequest(token, appId, path, body) {
 export const reviewRunTitle = run => run.mode === 'review_fix_merge' ? 'Review, fix & merge' : run.mode === 'review_merge' ? 'Review & merge' : run.options?.post_review === true ? 'GitHub review' : 'Private review'
 
 export const REVIEW_STATE_NAMES = { reviewing: 'Reviewing', repairing:'Fixing review findings', pushing:'Sending scoped fix', marking_ready:'Marking ready for review', ready_unknown:'Readiness outcome needs checking', push_unknown:'Fix outcome needs checking', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Failed', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', complete: 'Complete', stopped: 'Stopped', interrupted:'Interrupted', paused: 'Paused', awaiting_owner: 'Waiting for your answer' }
+
+// Execution belongs to the conversation; item state preserves its saved facts.
+// Stopping never erases a review verdict or a public queue/merge receipt.
+export const reviewRunStateLabel = run => REVIEW_STATE_NAMES[run.execution_state] || REVIEW_STATE_NAMES[run.state] || run.state
+export function reviewItemProgress(run, item) {
+  const settled = ['all_clear', 'merged', 'queued', 'complete'].includes(item.state)
+  const halted = !settled && ['stopped', 'failed', 'interrupted'].includes(run.execution_state)
+  const waiting = !settled && run.execution_state === 'awaiting_owner'
+  return { label: halted ? 'Not finished' : REVIEW_STATE_NAMES[item.state] || item.state, halted, waiting }
+}
 
 // Public outcomes a run saved before GitHub settled them. The server's observe
 // step is read-only reconciliation, so the view settles them itself: a queued

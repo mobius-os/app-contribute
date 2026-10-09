@@ -22,6 +22,13 @@ test('a frozen selection cannot change its scope through the unavailable merge f
   assert.match(selection, /setResolved\(null\); setMode\('review'\)/)
 })
 
+test('embedded details omit the full app header without changing the main project workspace', () => {
+  assert.match(appSource, /!inlineTarget\?\.embedded \? <div className="co-header-shell"/)
+  const inline = readFileSync(new URL('../ui/InlinePullView.jsx', import.meta.url), 'utf8')
+  assert.match(inline, /target\.embedded \? ' is-embedded' : ''/)
+  assert.match(inline, /\.co-inline-view\.is-embedded > h2 \{ font-size:20px/)
+})
+
 test('new contributions use GitHub automatically without a route picker', () => {
   assert.doesNotMatch(appSource, /onChooseSubmissionMethod|submissionError|setSubmissionError/)
   assert.doesNotMatch(connectionSource, /co-method-setting|Send Möbius contributions as|onChooseSubmissionMethod/)
@@ -280,7 +287,7 @@ test('wide collection and review views share centered guides on one continuous c
   assert.doesNotMatch(themeSource, /\.co-root::before/)
   assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 1040px\); margin-inline: auto/)
   assert.match(themeSource, /\.co-header-shell \{\s*flex: 0 0 auto; width: 100%; background: var\(--bg\);\s*\}/)
-  assert.match(appSource, /<div className="co-header-shell">[\s\S]*?<\/div>\s*<main/)
+  assert.ok(/<div className="co-header-shell">[\s\S]*?<\/div>(?: : null})?\s*<main/.test(appSource), "the header stays outside the scrolling main, including embedded views")
   assert.doesNotMatch(themeSource, /\.co-page\.is-sources \{\s*width:/)
 })
 

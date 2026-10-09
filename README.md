@@ -280,6 +280,13 @@ its `preview_sha256` and rejects drift. Mandatory safety instructions are
 platform-owned. New UI autopilot can explicitly be on, but missing/older grants
 remain off and never acquire repair authority.
 
+A read-only chat PR block includes observed summary facts and deliberately
+opened rich detail, including body, checks, labels and reviewer/comment context
+when available. `pr_block.py` prints the PR fence; `chat-review-run:<id>` shows
+run steps, evidence, frozen prompts and owning conversation. Snapshots and
+opening blocks are never consent. Continue in that owning source/review chat,
+not a second workflow assembled from the block.
+
 A run publishes necessary takeover repairs only through a dedicated
 server-owned checkout and guarded receipts, then requires new independent
 full-diff review and passing evidence before merging a successor. It does not
@@ -359,4 +366,4 @@ Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
 
-Project Refresh renews source, contribution, PR and run status without pulling code. Prepare and Pull open launch panels independently of old dormant work. Full merge cycles provides an explicit fresh start, current conversation, cancellation and retained cycle history; fresh starts have distinct scoped identities and online CAS admission.
+Project Refresh renews source, contribution, PR and run status without pulling code. Prepare and Pull open launch panels independently of old dormant work. Full merge cycles provides an explicit fresh start, current conversation, cancellation and retained cycle history; fresh starts have distinct scoped identities and online CAS admission. New PR transcript snapshots link the repository and open/highlight the exact PR in Contribute, without inline detail or version clutter.

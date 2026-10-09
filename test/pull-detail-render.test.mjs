@@ -54,6 +54,12 @@ test('check outcomes stay written and partial source absence never claims succes
   assert.doesNotMatch(html, /href="javascript:/)
 })
 
+test('chat PR details show provenance but expose no review, assignment or merge controls',async t=>{
+  const html=await render(t,'PullRequestDetail',{readOnly:true,pr:{number:7,repository:{nameWithOwner:'team/repo'},headRefOid:'a'.repeat(40),baseRefOid:'b'.repeat(40),baseRefName:'main'},provenance:[{chat_id:'source-chat',role:'source',title:'Source conversation'}],canMerge:true,canAssign:true})
+  if(!html)return
+  assert.match(html,/Source conversation/)
+  assert.doesNotMatch(html,/Take on with agent|Take over review|Assign person/)
+})
 test('inline review UI distinguishes resolution, old lines, outdated location and truncated replies', async t => {
   const html = await render(t, 'PullThreads', { data: { threads: [
     { id: 't1', path: 'src/file.js', line: 17, startLine: 15, diffSide: 'LEFT', isResolved: true, isOutdated: true, comments: { nodes: [{ id: 'c1', body: 'Please test this', author: { login: 'reviewer' }, url: 'https://github.com/team/repo/pull/7#discussion_r1' }], totalCount: 60, pageInfo: { hasNextPage: true } } },
