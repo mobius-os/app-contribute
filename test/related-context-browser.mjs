@@ -2,7 +2,7 @@
 //      CHROMIUM_PATH=/opt/agent-browser/browsers/chrome-154.0.8037.92/chrome \
 //      node test/related-context-browser.mjs
 // Actual detail component, seeded cache, native Chromium DOM, and a mocked
-// related read only. CSP/CDP block external network; the profile is disposable.
+// context transport only. CSP/CDP block external network; the profile is disposable.
 import { spawn } from 'node:child_process'
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -28,6 +28,41 @@ const root=createRoot(document.getElementById('root'));
 const pause=()=>new Promise(r=>setTimeout(r,50));
 const wait=async(p,label)=>{let end=Date.now()+3000;while(!p()){if(Date.now()>end)throw Error('timeout '+label+' '+document.body.innerText);await new Promise(r=>setTimeout(r,10))}};
 const check=(condition,message)=>{if(!condition)throw Error(message+'; DOM='+document.body.innerText)};
+const button=label=>[...document.querySelectorAll('button')].find(node=>node.textContent.trim()===label);
+const response=(data,ok=true)=>({ok,json:async()=>data});
+const description=(body,head=pr.headRefOid)=>({body,head:{sha:head},base:{sha:pr.baseRefOid,ref:pr.baseRefName}});
+const relatedResponse=partial=>({data:{repository:{pullRequest:{headRefOid:pr.headRefOid,baseRefOid:pr.baseRefOid,baseRefName:pr.baseRefName,
+  closingIssuesReferences:{nodes:[item],pageInfo:{hasNextPage:false}},...(partial?{}:{timelineItems:{nodes:[],pageInfo:{hasNextPage:false}}})}}}});
+const unexpectedReads=[];
+function delayedContext({failure='error',ignoreAbort=false}={}) {
+  const store=cache([]);delete store.entries['description:1'];delete store.entries.related;
+  store.entries['files:1']={data:{files:[],totals:{files:101,additions:0,deletions:0},page:1,hasMore:true},loading:false};
+  const descriptions=[],files=[],related=[],activity=[];
+  let relatedCalls=0;
+  const hold=(requests,signal)=>new Promise((resolve,reject)=>{
+    const request={aborted:false,resolve:data=>resolve(response(data))};requests.push(request);
+    signal.addEventListener('abort',()=>{request.aborted=true;if(!ignoreAbort)reject(new DOMException('Aborted','AbortError'))},{once:true});
+  });
+  window.fetch=(url,options)=>{
+    if(options.signal.aborted)return Promise.reject(new DOMException('Aborted','AbortError'));
+    if(/\/(comments|reviews)\?/.test(url))return hold(activity,options.signal);
+    if(url==='/api/github/api/repos/team/repo/pulls/7') {
+      if(failure==='description'&&!descriptions.length) {descriptions.push({failed:true});return Promise.resolve(response({},false))}
+      return hold(descriptions,options.signal);
+    }
+    if(url.includes('/files?'))return hold(files,options.signal);
+    if(url==='/api/github/graphql'&&options.body.includes('closingIssuesReferences')) {
+      relatedCalls++;
+      if(failure==='description')return hold(related,options.signal);
+      if(relatedCalls===1&&failure==='error')return Promise.resolve(response({},false));
+      return Promise.resolve(response(relatedResponse(relatedCalls===1&&failure==='partial')));
+    }
+    unexpectedReads.push(url);
+    throw Error('Successful sibling was refetched or unexpected transport: '+url);
+  };
+  const mount=key=>root.render(<div className='co-root'><style>{CSS+WORKSPACE_CSS}</style><PullRequestDetail key={key} pr={pr} token='mock-token' cacheStore={store} /></div>);
+  return {store,descriptions,files,related,activity,get relatedCalls(){return relatedCalls},mount};
+}
 window.runWorkspaceChecks=async()=>{const reports=[];try{for(const count of [0,1]){
   calls.length=0;
   root.render(<div className='co-root'><style>{CSS+WORKSPACE_CSS}</style><PullRequestDetail key={count} pr={pr} token='mock-token' cacheStore={cache(count?[item]:[])} /></div>);
@@ -42,7 +77,93 @@ window.runWorkspaceChecks=async()=>{const reports=[];try{for(const count of [0,1
   check(calls.length===1 && calls[0].url==='/api/github/graphql' && calls[0].query.includes('closingIssuesReferences'),'retry not isolated to related read');
   check(!![...document.querySelectorAll('a')].find(a=>a.textContent.includes('Usable issue')),'link absent after retry');
   reports.push({case:count?'partial-items':'zero-items',relatedCalls:calls.length});
-}return{status:'pass',reports};}catch(e){return{status:'fail',error:e.stack,reports,dom:document.body.innerText}}};`;
+}
+for(const failure of ['error','partial']) {
+  root.render(null);await pause();
+  const scenario=delayedContext({failure});scenario.mount('sibling-'+failure);
+  await wait(()=>scenario.descriptions.length===1&&document.querySelector('[role="alert"] button'),'delayed description and related failure');
+  document.querySelector('[role="alert"] button').click();
+  await wait(()=>scenario.relatedCalls===2&&document.body.innerText.includes('Usable issue'),'related retry completed');
+  check(!scenario.descriptions[0].aborted,'Related retry aborted its pending description sibling');
+  check(scenario.descriptions.length===1,'Related retry duplicated description');
+  scenario.descriptions[0].resolve(description('Delayed description survives '+failure));
+  await wait(()=>document.body.innerText.includes('Delayed description survives '+failure),'description settled after sibling retry');
+  check(!document.body.innerText.includes('Loading description'),'description stranded in loading');
+  check(scenario.store.entries['activity:1']&&scenario.store.entries['threads:'],'successful sibling cache lost');
+  reports.push({case:'pending-description-related-'+failure,descriptionCalls:scenario.descriptions.length,relatedCalls:scenario.relatedCalls});
+}
+root.render(null);await pause();
+{
+ const scenario=delayedContext({failure:'description'});scenario.mount('general-retry');
+ await wait(()=>scenario.related.length===1&&button('Try again'),'description error and pending related');
+ button('Try again').click();await wait(()=>scenario.descriptions.length===2,'description retry');
+ check(!scenario.related[0].aborted&&scenario.relatedCalls===1,'General retry aborted or duplicated a healthy pending sibling');
+ scenario.descriptions[1].resolve(description('Recovered description'));scenario.related[0].resolve(relatedResponse(false));
+ await wait(()=>document.body.innerText.includes('Recovered description')&&document.body.innerText.includes('Usable issue'),'independent retries settled');
+ reports.push({case:'pending-related-description-retry',descriptionCalls:scenario.descriptions.length,relatedCalls:scenario.relatedCalls});
+}
+root.render(null);await pause();
+{
+ const scenario=delayedContext({failure:'none'});scenario.store.entries['activity:1'].data.hasMore=true;scenario.mount('conversation-pages');
+ await wait(()=>scenario.descriptions.length===1&&button('Next page'),'conversation page offer');
+ button('Next page').click();await wait(()=>scenario.activity.length===2,'second activity page');
+ check(!scenario.descriptions[0].aborted&&scenario.descriptions.length===1,'Conversation paging aborted its pending description');
+ scenario.activity[0].resolve([{id:1,body:'Second page comment',created_at:'2026-10-09T00:00:00Z'}]);scenario.activity[1].resolve([]);
+ await wait(()=>document.body.innerText.includes('Second page comment')&&button('Previous page'),'second activity page settled');
+ button('Previous page').click();await wait(()=>!!button('Next page'),'first activity page restored');
+ scenario.descriptions[0].resolve(description('Paged conversation description'));await wait(()=>document.body.innerText.includes('Paged conversation description'),'description after paging');
+ button('Next page').click();await wait(()=>document.body.innerText.includes('Second page comment'),'cached second activity page');
+ check(scenario.activity.length===2&&scenario.descriptions.length===1,'Paging refetched successful sibling context');
+ reports.push({case:'conversation-paging-preserves-pending-sibling',activityCalls:scenario.activity.length,descriptionCalls:scenario.descriptions.length});
+}
+root.render(null);await pause();
+{
+ // Deliberately deliver responses after abort to prove request ownership, not
+ // transport cooperation, keeps stale completions out of a replacement read.
+ const scenario=delayedContext({failure:'none',ignoreAbort:true});scenario.mount('navigation');
+ await wait(()=>scenario.descriptions.length===1&&document.body.innerText.includes('Usable issue'),'navigation initial reads');
+ button('Files changed').click();await wait(()=>scenario.descriptions[0].aborted,'leaving conversation cancels description');
+ button('Next page').click();await wait(()=>scenario.files.length===1,'second file page read');
+ button('Conversation').click();await wait(()=>scenario.files[0].aborted&&scenario.descriptions.length===2,'tab change cancels file page and resumes description');
+ scenario.descriptions[1].resolve(description('Replacement description'));
+ await wait(()=>document.body.innerText.includes('Replacement description'),'replacement description');
+ scenario.descriptions[0].resolve(description('Late obsolete description','c'.repeat(40)));scenario.files[0].resolve([]);await pause();
+ check(document.body.innerText.includes('Replacement description')&&!document.body.innerText.includes('This PR changed'),'aborted stale completion overwrote current read');
+ button('Files changed').click();await wait(()=>button('Previous page')===undefined&&scenario.files.length===2,'cancelled page restarts instead of caching loader');
+ scenario.files[1].resolve([]);await wait(()=>scenario.descriptions.length===3,'file page version read');
+ scenario.descriptions[2].resolve(description('File version'));await wait(()=>!!button('Previous page'),'file page completion');
+ button('Previous page').click();await wait(()=>!!button('Next page'),'cached first file page restored');
+ check(scenario.files.length===2,'successful first page refetched');
+ button('Conversation').click();await wait(()=>document.body.innerText.includes('Replacement description'),'cached conversation restored');
+ check(scenario.descriptions.length===3&&scenario.relatedCalls===1,'successful context refetched during navigation');
+ reports.push({case:'tab-page-cancellation-and-late-completion',descriptionCalls:scenario.descriptions.length,filesCalls:scenario.files.length});
+}
+root.render(null);await pause();
+{
+ const scenario=delayedContext({failure:'none',ignoreAbort:true});scenario.mount('close');
+ await wait(()=>scenario.descriptions.length===1&&document.body.innerText.includes('Usable issue'),'close initial reads');
+ root.render(null);await wait(()=>scenario.descriptions[0].aborted,'close cancels in-flight read');
+ check(!scenario.store.entries['description:1'],'close persisted an incomplete loader');
+ scenario.mount('reopen');await wait(()=>scenario.descriptions.length===2,'reopen resumes incomplete description');
+ scenario.descriptions[1].resolve(description('Reopened description'));await wait(()=>document.body.innerText.includes('Reopened description'),'reopen settles');
+ scenario.descriptions[0].resolve(description('Closed obsolete description'));await pause();
+ check(document.body.innerText.includes('Reopened description')&&!document.body.innerText.includes('Closed obsolete description'),'closed request contaminated reopened cache');
+ check(scenario.relatedCalls===1,'reopen refetched successful related context');
+ root.render(null);await pause();scenario.mount('cached-reopen');await wait(()=>document.body.innerText.includes('Reopened description'),'settled description cache reused');
+ check(scenario.descriptions.length===2,'successful description refetched on reopen');
+ reports.push({case:'close-reopen-request-ownership',descriptionCalls:scenario.descriptions.length,relatedCalls:scenario.relatedCalls});
+}
+root.render(null);await pause();
+{
+ const scenario=delayedContext({failure:'none'});scenario.mount('stale');
+ await wait(()=>scenario.descriptions.length===1,'stale version read');
+ scenario.descriptions[0].resolve(description('Wrong version','c'.repeat(40)));
+ await wait(()=>!!button('Refresh PR list'),'stale version guard');
+ check(button('Take on with agent').disabled&&!document.body.innerText.includes('Wrong version'),'stale context enabled review or rendered mismatched body');
+ reports.push({case:'active-version-mismatch-blocks-review'});
+}
+check(unexpectedReads.length===0,'Successful cached siblings were refetched: '+unexpectedReads.join(', '));
+return{status:'pass',reports};}catch(e){return{status:'fail',error:e.stack,reports,dom:document.body.innerText}}};`;
 
 async function chromiumPath() {
   if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH

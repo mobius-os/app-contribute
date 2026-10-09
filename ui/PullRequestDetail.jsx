@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadPullActivity, loadPullChecks, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, pullFileDiff, safeDetailLink } from '../pull-details.js'
 import { MarkdownView } from './MarkdownView.jsx'
 import DiffView from './diff/DiffView.jsx'
@@ -88,9 +88,23 @@ export function PullRequestDetail(props) {
 function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record }) {
   const [tab, setTab] = useState('conversation')
   const [cache, setCache] = useState(() => cacheStore?.entries || {})
+  const cacheRef = useRef(cache)
+  const requests = useRef(new Map())
+  // Request admission and cache publication share a synchronous owner. React
+  // snapshots alone can still contain a loader whose request was just aborted.
+  const writeCache = useCallback(update => {
+    const next = update(cacheRef.current)
+    if (next === cacheRef.current) return
+    cacheRef.current = next
+    setCache(next)
+  }, [])
+  useEffect(() => () => {
+    const abandoned = [...requests.current.values()]
+    requests.current.clear()
+    for (const request of abandoned) request.controller.abort()
+  }, [token])
   const [page, setPage] = useState({ files: 1, checks: 1, conversation: 1 })
   const [threadCursors, setThreadCursors] = useState([null])
-  const [retry, setRetry] = useState(0)
   const [versionStale, setVersionStale] = useState(cacheStore?.stale === true)
   useEffect(() => {
     if (!cacheStore) return
@@ -109,49 +123,50 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     : { view: `${tab}:${number}` }
   const keySignature = Object.values(keys).join('|')
   useEffect(() => {
-    const controller = new AbortController()
-    let current = true
-    const started = []
+    const active = new Set(Object.values(keys))
+    // A retry invalidates only its failed cache entries. Navigation cancels
+    // reads that leave the visible page, not pending siblings that still belong.
+    for (const [key, request] of requests.current) if (!active.has(key)) {
+      requests.current.delete(key)
+      request.controller.abort()
+      writeCache(old => {
+        if (old[key] !== request.entry) return old
+        const next = { ...old }; delete next[key]; return next
+      })
+    }
     function read(key, loader) {
-      if (cache[key]) return
-      started.push(key)
-      setCache(old => ({ ...old, [key]: { loading: true } }))
-      loader().then(data => {
-        if (current) setCache(old => ({ ...old, [key]: { data, loading: false } }))
+      if (requests.current.has(key) || (cacheRef.current[key] && !cacheRef.current[key].loading)) return
+      const request = { controller: new AbortController(), entry: { loading: true } }
+      requests.current.set(key, request)
+      writeCache(old => ({ ...old, [key]: request.entry }))
+      loader(request.controller.signal).then(data => {
+        if (requests.current.get(key) !== request) return
+        requests.current.delete(key)
+        writeCache(old => ({ ...old, [key]: { data, loading: false } }))
       }).catch(error => {
-        if (current) {
-          if (error.code === 'stale') setVersionStale(true)
-          setCache(old => ({ ...old, [key]: { loading: false, error: error.message, stale: error.code === 'stale' } }))
-        }
+        if (requests.current.get(key) !== request) return
+        requests.current.delete(key)
+        if (error.code === 'stale') setVersionStale(true)
+        writeCache(old => ({ ...old, [key]: { loading: false, error: error.message, stale: error.code === 'stale' } }))
       })
     }
     if (tab === 'conversation') {
-      read(keys.description, () => loadPullDescription(token, pr, controller.signal))
-      read(keys.activity, () => loadPullActivity(token, pr, number, controller.signal))
-      read(keys.threads, () => loadPullThreads(token, pr, threadCursor, controller.signal))
-      read(keys.related, () => loadPullRelated(token, pr, controller.signal))
+      read(keys.description, signal => loadPullDescription(token, pr, signal))
+      read(keys.activity, signal => loadPullActivity(token, pr, number, signal))
+      read(keys.threads, signal => loadPullThreads(token, pr, threadCursor, signal))
+      read(keys.related, signal => loadPullRelated(token, pr, signal))
     } else {
-      read(keys.view, () => tab === 'files' ? loadPullFiles(token, pr, number, controller.signal) : loadPullChecks(token, pr, number, controller.signal))
+      read(keys.view, signal => tab === 'files' ? loadPullFiles(token, pr, number, signal) : loadPullChecks(token, pr, number, signal))
     }
-    return () => {
-      current = false; controller.abort()
-      setCache(old => {
-        const next = { ...old }
-        for (const key of started) if (next[key]?.loading) delete next[key]
-        return next
-      })
-    }
-  }, [keySignature, retry, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
+  }, [keySignature, cache, writeCache, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
   const entry = key => cache[key] || { loading: true }
   const stale = versionStale || Object.values(cache).some(value => value.stale)
   const tryAgain = () => {
     const mine = new Set(Object.values(keys))
-    setCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
-    setRetry(value => value + 1)
+    writeCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
   }
   const retryRelated = () => {
-    setCache(old => { const next = { ...old }; delete next[keys.related]; return next })
-    setRetry(value => value + 1)
+    writeCache(old => { const next = { ...old }; delete next[keys.related]; return next })
   }
   function readState(value, label, onRetry = tryAgain) {
     return <>{value.loading ? <p className="co-pr-note" role="status">Loading {label}…</p> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : onRetry}>{value.stale ? 'Refresh PR list' : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={onRetry} /></>
@@ -202,7 +217,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
     {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
     {tab !== 'conversation' && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
-    {tab === 'checks' && !view.loading ? <button className="co-quiet-action" onClick={() => { setCache(old => { const next = { ...old }; delete next[keys.view]; return next }); setRetry(value => value + 1) }}>Refresh checks</button> : null}
+    {tab === 'checks' && !view.loading ? <button className="co-quiet-action" onClick={() => { writeCache(old => { const next = { ...old }; delete next[keys.view]; return next }) }}>Refresh checks</button> : null}
     </div>
   </div>
 }
