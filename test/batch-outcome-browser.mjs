@@ -34,6 +34,11 @@ function App({mode}){
  const calls=useRef([]);const run=buildContributionRun({records,reviewStatus:status});
  controls={calls:calls.current,records,revision:run.revision,update:(id,patch)=>setRecords(old=>old.map(r=>r.id===id?{...r,...patch}:r)),activate:()=>setActivation(x=>x+1)};
  async function send(record){calls.current.push(record.id);
+  if(mode==='success-drift-preflight'){
+   const drift={...canonical(record),plan:{...record.plan,base_branch:'main',base_sha:'c'.repeat(40)}};
+   setRecords(old=>old.map(r=>r.id===record.id?drift:r));
+   return {notAttempted:true,error:'Approval changed. Nothing was sent.',failure:{owner:'agent',code:'approval_changed'},record:drift};
+  }
   if(mode==='preflight-mixed'&&record.id==='b')return {pending:true,record:{...record,status:'submitting'}};
   if(mode==='preflight-send'||mode==='preflight-mixed')return {notAttempted:true,error:'Fresh ledger unavailable. Nothing was sent.',failure:{owner:'automatic'}};
   if((mode==='batch'||mode==='batch-late') && record.id==='a'){setRecords(old=>old.map(r=>r.id==='a'?canonical(r):r));return {ok:true,record:canonical(record)}}
@@ -61,6 +66,38 @@ const pause=()=>new Promise(r=>setTimeout(r,80));
 const approval=()=>!!document.querySelector('.co-run-approval');
 async function begin(mode){root.render(<App key={mode} mode={mode}/>);await pause();await wait(()=>!!sendOffer(),mode+' offer');sendOffer().click();await wait(approval,mode+' approval');}
 window.runWorkspaceChecks=async()=>{const reports=[];try{
+ for(const mode of ['pending','unknown','success-drift-preflight']) {
+  root.render(<App key={'success-drift-'+mode} mode={mode}/>);await pause();await wait(()=>!!sendOffer(),'drift offer');
+  controls.update('a',{plan:{...controls.records[0].plan,base_branch:'release',base_sha:'b'.repeat(40)}});await pause();
+  const frozen=controls.records[0];sendOffer().click();await wait(approval,'drift approval');sendConfirmation().click();
+  await wait(()=>controls.calls.length===1,'drift callback');await pause();
+  if(mode==='success-drift-preflight') {
+   check(!!button('Done')&&document.body.innerText.includes('Not sent')&&document.body.innerText.includes('Approval changed'),'unrelated success erased known preflight failure');
+  } else {
+   for(const plan of [{...frozen.plan,base_branch:'main'},{...frozen.plan,base_sha:'c'.repeat(40)},{...frozen.plan,action:'pr_update'},{...frozen.plan,branch:'fix/other'},{...frozen.plan,stack:stack('b',2).plan.stack}]) {
+    controls.update('a',{...canonical(frozen),plan});await pause();
+    check(!button('Done')&&document.body.innerText.includes('Checking result'),'other publication settled frozen intent');
+   }
+   controls.update('a',{...canonical(frozen),last_submit_push_sha:sha,head_repository:'owner/repo',last_submit_base_branch:'release'});
+   await wait(()=>!!button('Done'),'exact publication settlement');
+   check(document.body.innerText.includes('Sent to GitHub'),'exact success not shown');
+  }
+  controls.activate();await pause();check(controls.calls.join(',')==='a','drift caused repeat publication');
+  reports.push({case:'success-drift-'+mode,calls:[...controls.calls]});
+  root.render(null);await pause();
+ }
+
+
+ await begin('stack');sendConfirmation().click();await wait(()=>controls.calls.length===1,'stack identity callback');
+ await wait(()=>document.body.innerText.includes('Checking result'),'stack identity pending');
+ const member=controls.records.find(r=>r.id==='b');
+ for(const [key,value] of Object.entries({id:'other',position:1,total:3,base_branch:'main',parent_record_id:'other'})) {
+  controls.update('b',{...canonical(member),number:2,url:'https://github.com/team/repo/pull/2',plan:{...member.plan,stack:{...member.plan.stack,[key]:value}}});await pause();
+  check(!button('Done')&&document.querySelectorAll('.co-run-approval-list li')[1]?.innerText.includes('Checking result'),'other stack publication settled member '+key);
+ }
+ controls.update('b',{...canonical(member),number:2,url:'https://github.com/team/repo/pull/2',last_submit_base_branch:'stack/chain/1'});
+ await wait(()=>!!button('Done'),'exact stack identity settlement');check(controls.calls.join(',')==='stack:a,b','stack drift replayed publication');
+ reports.push({case:'success-stack-drift',calls:[...controls.calls]});root.render(null);await pause();
  for(const mode of ['preflight-send','preflight-ready','preflight-stack']) {
   if(mode==='preflight-ready') {root.render(<App key={mode} mode={mode}/>);await wait(()=>!!button('Request review'),'preflight ready offer');button('Request review').click();await wait(approval,'preflight ready approval')}
   else await begin(mode);

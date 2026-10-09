@@ -38,14 +38,14 @@ test('known scoped failures retain their honest failure outcome rather than a gr
 test('closed or merged drafts and updates show their observed state, never an unproven action-success label',async t=>{
  const api=await load(t);if(!api)return
  for(const mode of ['ready','send']) for(const state of ['closed','merged']) {
-  assert.equal(api.batchRecordOutcome({...opened,status:mode==='ready'?'draft':'prepared',plan:{...opened.plan,action:'pr_update'}},{...opened,status:state},{pending:true},mode),state)
+  assert.equal(api.batchRecordOutcome({...opened,status:mode==='ready'?'draft':'prepared',plan:{...opened.plan,action:'pr_update'}},{...opened,status:state,plan:{...opened.plan,action:'pr_update'}},{pending:true},mode),state)
  }
 })
 test('an existing PR link and static planned head cannot settle an unconfirmed update without its canonical publication marker',async t=>{
  const api=await load(t);if(!api)return
  const update={...record,number:1,plan:{...record.plan,action:'pr_update'}}
- assert.equal(api.batchRecordOutcome(update,opened,{pending:true},'send'),'checking')
- assert.equal(api.batchRecordOutcome(update,{...opened,last_submit_push_sha:record.plan.head_sha},{pending:true},'send'),'done')
+ assert.equal(api.batchRecordOutcome(update,{...opened,plan:update.plan},{pending:true},'send'),'checking')
+ assert.equal(api.batchRecordOutcome(update,{...opened,plan:update.plan,last_submit_push_sha:record.plan.head_sha},{pending:true},'send'),'done')
 })
 
 const phase={...record,updated_at:'2026-10-08T22:00:00Z',plan:{...record.plan,action:'pr',branch:'fix/a',base_branch:'main'}}
@@ -173,5 +173,49 @@ test('explicit preflight rejection is not an uncertain public attempt, but canno
   assert.equal(api.batchRecordOutcome(frozen,{...frozen,status:'submitting'},stopped,mode),'checking')
   assert.equal(api.batchRecordOutcome(frozen,{...frozen,readying:true},stopped,mode),'checking')
   assert.equal(api.batchRecordOutcome(frozen,opened,stopped,mode),'done','canonical settlement still wins')
+ }
+})
+
+// Publication adds receipts, not permission to change the confirmed intent.
+test('canonical public outcomes require the same frozen publication intent in every phase',async t=>{
+ const api=await load(t);if(!api)return
+ const stopped={notAttempted:true,error:'Approval changed',failure:{owner:'agent',code:'approval_changed'}}
+ for(const source of [phase,stacked]) for(const mode of ['send','ready']) {
+  const frozen={...source,...(mode==='ready'?{status:'draft',number:1,url:opened.url}:{})}
+  const publicRecord={...frozen,status:'open',number:1,url:opened.url}
+  const plans=[]
+  for(const key of ['action','branch','base_branch','base_sha']) {
+   plans.push({...frozen.plan,[key]:'different'})
+   const removed={...frozen.plan};delete removed[key]
+   if(frozen.plan[key]!==undefined)plans.push(removed)
+  }
+  if(source===stacked) {
+   for(const [key,value] of Object.entries({id:'other',position:1,total:3,base_branch:'main',parent_record_id:'other'}))
+    plans.push({...frozen.plan,stack:{...frozen.plan.stack,[key]:value}})
+   for(const value of [null,undefined,{}, {...frozen.plan.stack,total:1}])plans.push({...frozen.plan,stack:value})
+   const removed={...frozen.plan};delete removed.stack;plans.push(removed)
+   const absentParent={...frozen.plan,stack:{...frozen.plan.stack}};delete absentParent.stack.parent_record_id;plans.push(absentParent)
+   for(const value of [null,undefined,42])plans.push({...frozen.plan,stack:{...frozen.plan.stack,parent_record_id:value}})
+  } else plans.push({...frozen.plan,stack:stacked.plan.stack})
+  for(const plan of plans) for(const status of ['draft','open','landing','closed','merged']) {
+   const current={...publicRecord,status,plan}
+   assert.equal(api.canonicalBatchRecordOutcome(frozen,current,mode),null,mode+' '+status+' '+JSON.stringify(plan))
+   assert.deepEqual(api.batchRecordOutcome(frozen,current,stopped,mode),{notAttempted:true,error:stopped.error})
+   for(const outcome of [{pending:true},{uncertain:true},{ok:true},{alreadyHandled:true},{}])
+    assert.equal(api.batchRecordOutcome(frozen,current,outcome,mode),'checking')
+  }
+  // Owning publication writes these operational fields without rewriting plan.
+  const published={...publicRecord,branch:frozen.plan.branch,head_repository:'owner/repo',
+   publication_stage:'ready',submitted_at:failed.updated_at,updated_at:failed.updated_at,
+   last_submit_push_sha:frozen.plan.head_sha,last_submit_base_branch:source===stacked?'stack/chain/1':'main',
+   last_submit_upstream_sha:'c'.repeat(40),last_pushed_branch:'owner:'+frozen.plan.branch}
+  if(source===stacked)published.plan={...published.plan,stack:{...published.plan.stack,name:'New display name'}}
+  assert.equal(api.canonicalBatchRecordOutcome(frozen,{...published,last_submit_base_branch:'other'},mode),null,'observed target cannot contradict frozen target')
+  for(const outcome of [stopped,{pending:true},{uncertain:true},{}])
+   assert.equal(api.batchRecordOutcome(frozen,published,outcome,mode),'done')
+  for(const status of ['closed','merged'])assert.equal(api.canonicalBatchRecordOutcome(frozen,{...published,status},mode),status)
+  const fallback={...frozen,branch:'fix/a',plan:{...frozen.plan}};delete fallback.plan.branch
+  assert.equal(api.canonicalBatchRecordOutcome(fallback,{...published,plan:fallback.plan,branch:'fix/other'},mode),null)
+  assert.equal(api.canonicalBatchRecordOutcome(fallback,{...published,plan:fallback.plan,branch:'fix/a'},mode),'done')
  }
 })

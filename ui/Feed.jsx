@@ -180,18 +180,23 @@ export function canonicalBatchRecordOutcome(record, current, mode) {
       key => currentStack[key] === frozenStack[key],
     )
   ))
-  const exactFailureIntent = exactStack
+  const exactPublicationIntent = exactStack
     && (current.plan?.branch || current.branch || '') === (record.plan?.branch || record.branch || '')
     && ['action', 'branch', 'base_branch', 'base_sha'].every(
       key => current.plan?.[key] === record.plan?.[key],
     )
-  if (failedStatus && exactFailureIntent && typeof error === 'string' && error.trim()
+  if (failedStatus && exactPublicationIntent && typeof error === 'string' && error.trim()
     && /^[a-f0-9]{40}$/i.test(record.plan?.head_sha || '')
     && after > before && (newDiagnostic || newSubmitAttempt)
     && !String(code || '').endsWith('unconfirmed')) {
     return { error }
   }
-  if (!publicIdentity) return null
+  // Publication may add a PR number, head repository and operational receipts,
+  // but it does not change the approved plan. A same-head result for another
+  // branch, target or stack cannot settle this frozen action (even as closed).
+  const targetBranch = frozenStack?.baseBranch || record.plan?.base_branch
+  if (!publicIdentity || !exactPublicationIntent
+    || targetBranch && current.last_submit_base_branch && current.last_submit_base_branch !== targetBranch) return null
   // A terminal public state is an observed outcome, not proof that this
   // ready/update action succeeded. Keep its label distinct from completion.
   if (['closed', 'merged'].includes(current.status)) return current.status
