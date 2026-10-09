@@ -539,9 +539,8 @@ def _is_autopilot(rec):
 
 def _attention_update(rec, node):
   patch = {}
-  notify = None
   if not isinstance(node, dict):
-    return patch, notify
+    return patch
 
   def set_if_changed(key, value):
     if (value or rec.get(key)) and rec.get(key) != value:
@@ -663,20 +662,19 @@ def _attention_update(rec, node):
   if attention:
     patch["needs_attention"] = True
     patch["attention"] = attention
-    if current_attention.get("key") != attention["key"]:
-      notify = attention
-  return patch, notify
+  return patch
 
 
 # A push about one contribution opens that contribution, not the app's front
 # page. `review:<id>` is the app-intent the shell delivers to index.jsx, which
-# selects the record in whichever section it currently sits.
-_RECORD_INTENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+# selects the record in whichever section it currently sits. The complete
+# shell intent is at most 128 characters, including the seven in `review:`.
+_RECORD_INTENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,120}")
 
 
 def _record_target(rec):
   record_id = str(rec.get("id") or "")
-  if _RECORD_INTENT_ID.match(record_id):
+  if _RECORD_INTENT_ID.fullmatch(record_id):
     return "/shell/?app=%s&intent=review:%s" % (APP_ID, record_id)
   return "/shell/?app=%s" % APP_ID
 
@@ -738,6 +736,68 @@ def _respond_autopilot(rec, attention):
     return True
 
 
+def _deliver_attention(name):
+  # A prior pass may have durably written the attention but lost delivery.
+  # Detection is not delivery. The scheduled runner owns single-flight for
+  # this app; the record owns confirmation across runs. Re-read before routing
+  # so a concurrent Dismiss, escalation or terminal transition stays in charge.
+  path = _record_path(name)
+  try:
+    raw, headers = _call("GET", path, headers={"x-mobius-version": "1"})
+    rec = json.loads(raw)
+    etag = headers.get("ETag")
+    pending = rec.get("attention")
+    if (
+      not etag or not _is_target(rec) or not rec.get("needs_attention")
+      or not isinstance(pending, dict) or not pending.get("key")
+      # /escalate owns human_required delivery, not this job.
+      or pending.get("type") == "human_required"
+    ):
+      return
+    if (
+      _is_autopilot(rec) and pending.get("type") in ACTIONABLE_ATTENTION
+      and _respond_autopilot(rec, pending)
+    ):
+      return
+    # Legacy attention has no delivery proof either; announce it once rather
+    # than infer success from its presence on the record.
+    if pending.get("announced_at"):
+      return
+    _notify_attention(rec, pending)
+    # /notifications/send has no idempotency key (a tag only groups OS
+    # pushes). Confirm only a successful response, never merely detection or
+    # a transient /respond result. An ambiguous send or a crash before this
+    # CAS can still repeat a notification; exactly-once needs endpoint support.
+    for attempt in range(3):
+      current = rec.get("attention")
+      if (
+        not _is_target(rec) or not rec.get("needs_attention")
+        or not isinstance(current, dict)
+        or (current.get("key"), current.get("detected_at"))
+          != (pending.get("key"), pending.get("detected_at"))
+        or current.get("announced_at")
+      ):
+        return
+      updated = dict(rec)
+      updated["attention"] = dict(current, announced_at=now)
+      try:
+        _call("PUT", path, updated, headers={"If-Match": etag})
+        return
+      except urllib.error.HTTPError as exc:
+        if exc.code != 412 or attempt == 2:
+          raise
+      # Merge only confirmation into a fresh record; never restore a stale
+      # attention or overwrite unrelated changes from another writer.
+      raw, headers = _call("GET", path, headers={"x-mobius-version": "1"})
+      rec = json.loads(raw)
+      etag = headers.get("ETag")
+      if not etag:
+        return
+  except Exception as exc:
+    print("contribute: attention delivery %s pending: %s" % (name, exc),
+          file=sys.stderr)
+
+
 now = (
   datetime.datetime.now(datetime.timezone.utc)
   .replace(microsecond=0)
@@ -748,7 +808,7 @@ now = (
 for alias, (name, rec, etag) in aliases.items():
   node = data.get(alias)
   new_status = _live_status(node)
-  patch, attention_notice = _attention_update(rec, node)
+  patch = _attention_update(rec, node)
   was = rec.get("status")
   if was == "landing" and new_status in ("open", "draft"):
     new_status = None
@@ -758,20 +818,7 @@ for alias, (name, rec, etag) in aliases.items():
       patch["needs_attention"] = False
       patch["attention"] = None
   if not patch:
-    # A prior pass may have durably written the attention and then lost the
-    # /respond call. Retry that same stable key until the platform claims or
-    # dedupes it; otherwise one transient restart silently strands the review.
-    pending = (
-      rec.get("attention")
-      if rec.get("needs_attention") and isinstance(rec.get("attention"), dict)
-      else None
-    )
-    if (
-      pending
-      and _is_autopilot(rec)
-      and pending.get("type") in ACTIONABLE_ATTENTION
-    ):
-      _respond_autopilot(rec, pending)
+    _deliver_attention(name)
     continue
   if not etag:
     print("contribute: skip %s — storage version unavailable" % name,
@@ -815,41 +862,7 @@ for alias, (name, rec, etag) in aliases.items():
             file=sys.stderr)
   if new_status == "merged":
     _finish_publication_connection(updated)
-  # Attention routing. For an autopilot record we hand actionable events to the
-  # background loop (POST /respond) and stay SILENT — the owner is normally
-  # contacted only on merged / closed / human_required (the last sent
-  # server-side by /escalate). For a classic record, or an autopilot event the
-  # loop cannot handle, notify exactly as before.
-  #
-  # The owner hears about an attention KEY once: only when this pass newly
-  # raised it (attention_notice). A standing flag from an earlier pass — or a
-  # human_required one the platform already announced at /escalate — must not
-  # re-notify just because this pass wrote some other field; it is only
-  # re-offered to the autopilot loop, whose /respond dedupes by key.
-  if attention_notice:
-    handled = False
-    if (
-      _is_autopilot(updated)
-      and attention_notice.get("type") in ACTIONABLE_ATTENTION
-    ):
-      handled = _respond_autopilot(updated, attention_notice)
-    if not handled:
-      try:
-        _notify_attention(updated, attention_notice)
-      except Exception:
-        pass
-  else:
-    standing = (
-      updated.get("attention")
-      if updated.get("needs_attention") and isinstance(updated.get("attention"), dict)
-      else None
-    )
-    if (
-      standing
-      and _is_autopilot(updated)
-      and standing.get("type") in ACTIONABLE_ATTENTION
-    ):
-      _respond_autopilot(updated, standing)
+  _deliver_attention(name)
   if new_status == "merged" and was != "merged":
     title = rec.get("title") or "contribution"
     try:
