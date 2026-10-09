@@ -14,14 +14,35 @@ export const githubPull = record => {
 }
 export const settled = record => ['draft', 'open', 'landing', 'merged', 'closed'].includes(record?.status) && githubPull(record)
 export const publicationPhaseKey = unit => JSON.stringify([unit.key, unit.ready.map(rec => [rec.id, rec.plan?.action, rec.plan?.head_sha])])
-export function publicationPhaseResult(phase, fresh, outcome = {}) {
+// Historical results use the same full-plan target projection as the durable
+// session. The complete copied chain is evidence; today's plan cannot fill it.
+export function publicationContextMatches(context, records) {
+  return Array.isArray(context) && context.length > 0 && Array.isArray(records)
+    && context.every(before => validContributeRecordId(before?.id) && ['pr', 'pr_update'].includes(before.plan?.action))
+    && context.every(before => {
+    const matches = records.filter(record => record?.id === before.id)
+    const beforeAt = Date.parse(before.updated_at), currentAt = Date.parse(matches[0]?.updated_at)
+    return matches.length === 1 && attemptTarget(before) === attemptTarget(matches[0])
+      && (!Number.isFinite(beforeAt) || Number.isFinite(currentAt) && currentAt >= beforeAt)
+  }) && context.every(before => {
+    const current = records.find(record => record?.id === before.id)
+    const unit = publicationStackUnit(current, records)
+    const historical = publicationStackUnit(before, context)
+    return !unit || unit.records.length === unit.total
+      && ['ready', 'settled'].includes(stackReadiness(historical).code)
+      && unit.records.every(member => context.some(record => record.id === member.id))
+  })
+}
+export function publicationPhaseResult(phase, fresh, outcome = {}, context = phase) {
+  if (!publicationContextMatches(context, fresh)) return { state: 'checking' }
   if (phase.length && phase.every(member => settled(fresh.find(record => record?.id === member.id)))) return { state: 'sent' }
   if (outcome.pending || outcome.ok || outcome.alreadyHandled || outcome.failure?.owner === 'automatic') return { state: 'checking' }
   return { state: 'failed', note: outcome.error || 'Could not confirm the result. Check Contribute before trying again.' }
 }
-export const pendingPhaseBlocks = (progress, item, records) => Object.values(progress).some(result => result.unitKey === item.unitKey &&
-  result.state === 'checking' && result.phaseIds.some(id => item.phase.some(record => record.id === id)) &&
-  !result.phaseIds.every(id => settled(records.find(record => record.id === id))))
+export const pendingPhaseBlocks = (progress, item, records) => Object.values(progress).some(result =>
+  (result.unitKey === item.unitKey || result.phaseIds.some(id => item.phase.some(record => record.id === id))) &&
+  ['sending', 'checking'].includes(result.state) &&
+  (!publicationContextMatches(result.context, records) || !result.phaseIds.every(id => settled(records.find(record => record.id === id)))))
 const blocker = (record, reviewStatus) => {
   if (!record) return 'Reading this contribution…'
   if (record.status !== 'prepared') return record.status === 'abandoned' ? 'This contribution was dismissed.' : 'This contribution is not ready to send.'
@@ -51,7 +72,7 @@ const currentReviewBlocker = (record, reviewStatus) => reviewStateFor(record, re
 const CHECKPOINT_BYTES = 32768
 // Reuse the approval schema's stable full-plan projection, excluding lifecycle
 // facts. New-PR receipt fields are generated outcomes, not named update targets.
-const attemptTarget = record => contributionApprovalFingerprint(record && {
+export const attemptTarget = record => contributionApprovalFingerprint(record && {
   id: record.id, type: record.type, repo: record.plan?.repo || record.repo,
   title: record.plan?.title || record.title,
   branch: record.plan?.branch || record.branch,
@@ -479,5 +500,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     emit()
     return true
   }
-  return { sessionId, hydrate, updateLedger, activate, cancel, confirm, handleEvent, emit, dispose: () => { alive = false } }
+  return { sessionId, hydrate, updateLedger, activate, cancel, confirm, handleEvent, emit,
+    readUnit: id => copy(unitFor(id)),
+    readAction: id => makeAction({ key: `chat-send:${id}`, label: 'Contribute' }), dispose: () => { alive = false } }
 }

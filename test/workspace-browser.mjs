@@ -17,6 +17,7 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { runFallbackAttributionChecks } from './test/inline-fallback-attribution-fixture.jsx'
 import { runInlineCanonicalFailureChecks } from './test/inline-canonical-failure-fixture.jsx'
 import { runUpperUiStatusChecks } from './test/upper-ui-status-fixture.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
@@ -297,6 +298,7 @@ window.runWorkspaceChecks = async () => {
   const checks = []
   async function check(name, run) { await run(); checks.push({ name, status: 'pass' }) }
   try {
+    checks.push(...await runFallbackAttributionChecks())
     await check('mounted cycle Refresh recovers a lost start and ambiguous Stop without duplicate admission', async () => {
       const originalChat={...window.mobius.chat}
       let visible=false, offline=false, stopped=false, startCount=0, stopCount=0, recoveredScope=''
@@ -958,7 +960,7 @@ function cdp(browser) {
   return { events, onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) }, send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = ++serial
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 45000)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, method === 'Runtime.evaluate' ? 180000 : 45000)
       pending.set(id, { resolve, reject, timer })
       browser.stdio[3].write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
     })

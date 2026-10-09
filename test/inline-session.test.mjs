@@ -30,7 +30,7 @@ test('legacy batch pending suffix cannot borrow approval; settled phase gets a n
   const prefix = { key: 'stack:s', ready: [a, b] }
   const suffix = { key: 'stack:s', ready: [b] }
   assert.notEqual(publicationPhaseKey(prefix), publicationPhaseKey(suffix))
-  const progress = { [publicationPhaseKey(prefix)]: { state: 'checking', unitKey: 'stack:s', phaseIds: ['a', 'b'] } }
+  const progress = { [publicationPhaseKey(prefix)]: { state: 'checking', unitKey: 'stack:s', phaseIds: ['a', 'b'], context: [a, b] } }
   const item = { unitKey: 'stack:s', phase: [b] }
   assert.equal(pendingPhaseBlocks(progress, item, [a, b]), true)
   assert.equal(pendingPhaseBlocks(progress, item, [{ ...a, status: 'open', number: 1, url: 'https://github.com/team/repo/pull/1' }, b]), true)

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { qualityReviewFor, reviewStateFor } from '../review.js'
-import { pendingPhaseBlocks, publicationPhaseKey, publicationPhaseResult, settled } from '../inline-session.js'
+import { attemptTarget, createInlineSession, publicationContextMatches, settled } from '../inline-session.js'
 import { loadFreshContributionRecord } from '../storage.js'
 import { publicationStackUnit, stackPublicationRecords, stackReadiness } from '../stack.js'
 import { ContributionCard, RepoLink } from './ContributionCard.jsx'
@@ -16,6 +16,80 @@ export function newerRecord(left, right) {
   if (!left || !right) return left || right || null
   const stamp = rec => String(rec.updated_at || rec.created_at || '')
   return stamp(right) > stamp(left) ? right : left
+}
+
+// Click-open and passive blocks share one outcome owner. This adapter only
+// connects ordinary clicks/rendering to that session; it saves no approval,
+// emits no host event, and cannot expand a host capability or retry Send.
+function useFallbackPublication(ids, records, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh, ledger = records) {
+  const key = ids.join(',')
+  const session = useRef(null), latest = useRef(null), published = useRef(null)
+  const [state, setState] = useState(null), [snapshots, setSnapshots] = useState({})
+  latest.current = { records, ledger, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh }
+  useEffect(() => {
+    const initial = latest.current
+    const members = [...new Set(ids.flatMap(id => {
+      const record = initial.records.find(rec => rec.id === id)
+      return record ? (publicationStackUnit(record, initial.records)?.records || [record]).map(rec => rec.id) : [id]
+    }))]
+    const actions = members.map(id => ({ key: `chat-send:${id}`, label: 'Contribute' }))
+    if (ids.length) actions.push({ key: `chat-send-batch:${key}`, label: 'Contribute all' })
+    const next = createInlineSession({ sessionId: `fallback:${key}`, actions,
+      publish: value => { published.current = value; setState(value) },
+      loadExact: loadFreshContributionRecord,
+      send: record => { remember([record]); return latest.current.onSend(record) },
+      sendStack: chain => { remember(chain); return latest.current.onSendStack(chain) },
+      refresh: () => latest.current.onRefresh?.(),
+    })
+    session.current = next; published.current = null; setState(null); setSnapshots({})
+    next.updateLedger(initial.ledger, initial.ledgerReady, initial.reviewStatus)
+    void next.hydrate()
+    return () => { next.dispose(); if (session.current === next) session.current = null }
+  }, [key])
+  useEffect(() => {
+    session.current?.updateLedger(ledger, ledgerReady, reviewStatus)
+    void session.current?.hydrate()
+  }, [ledger, ledgerReady, reviewStatus])
+  function remember(copied) {
+    setSnapshots(previous => ({ ...previous, ...Object.fromEntries(copied.map(record => [record.id, structuredClone(record)])) }))
+  }
+  const action = id => state && (state.actions.find(item => item.key === `chat-send:${id}`) || session.current?.readAction(id))
+  const batch = state?.actions.find(item => item.key === `chat-send-batch:${key}`)
+  async function contribute(actionKey) {
+    const current = published.current?.actions.find(item => item.key === actionKey)
+    if (!session.current || !current || current.disabled) return { pending: true }
+    // Copy the visible target before activation/hash awaits. It is only local
+    // presentation history; the session separately owns frozen approval/proof.
+    const addressed = actionKey.startsWith('chat-send-batch:') ? ids : [actionKey.slice('chat-send:'.length)]
+    const copied = [...new Map(addressed.flatMap(id => {
+      const record = displayRecords.find(rec => rec.id === id)
+      return record ? publicationStackUnit(record, displayRecords)?.records || [record] : []
+    }).map(record => [record.id, record])).values()]
+    const context = [...new Map(addressed.flatMap(id => session.current.readUnit(id).records).map(record => [record.id, record])).values()]
+    if (!publicationContextMatches(copied, context)) return { pending: true }
+    remember(copied)
+    session.current.activate(actionKey)
+    if (published.current?.actions.find(item => item.key === actionKey)?.confirming) await session.current.confirm(actionKey)
+    return { pending: true }
+  }
+  const projected = new Map(records.map(record => [record.id, record]))
+  if (state) for (const id of ids) for (const record of session.current?.readUnit(id).records || []) projected.set(record.id, record)
+  const displayRecords = [...projected.values()].map(record => {
+    const before = snapshots[record.id]
+    if (!before) return record
+    const receipt = action(record.id)?.links.some(link => link.url === settled(record)?.url)
+    // Unattributed public data cannot leak through a generic card's own links.
+    return receipt || record.status === 'prepared' && attemptTarget(before) === attemptTarget(record) ? record : before
+  })
+  for (const before of Object.values(snapshots)) if (!displayRecords.some(record => record.id === before.id)) displayRecords.push(before)
+  return { records: displayRecords, action, batch, attempted: snapshots,
+    send: id => contribute(`chat-send:${id}`), sendAll: () => contribute(`chat-send-batch:${key}`),
+    async refresh() { await onRefresh?.(); await session.current?.hydrate() } }
+}
+function FallbackResult({ action }) {
+  if (!action) return null
+  return <p role="status" className="co-review-note">{action.status}{action.note ? ` · ${action.note}` : ''}
+    {action.links.map(link => <a key={link.url} className="co-repo-link" href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>)}</p>
 }
 
 // The same conditions the queue's Send button checks: a reviewed, current,
@@ -42,20 +116,10 @@ export function ReviewNote({ records }) {
   </details>
 }
 
-function SendConfirm({ record, reviewState, onSend, onClose }) {
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
+function SendConfirm({ record, reviewState, onSend, onClose, disabled = false, busy = false }) {
   const blocker = sendBlocker(record, reviewState)
   const repo = record.plan?.repo || record.repo || ''
   const updating = record.plan?.action === 'pr_update'
-  async function send() {
-    setBusy(true); setNote('')
-    try {
-      const outcome = (await onSend(record)) || {}
-      if (!outcome.ok && !outcome.pending && !outcome.alreadyHandled) setNote(outcome.error || 'Could not send this pull request. Refresh before trying again.')
-    } catch { setNote('The result could not be confirmed. Refresh before trying again.') }
-    finally { setBusy(false) }
-  }
   if (blocker) return <div className="co-inline-confirm is-blocked" role="status"><strong>{blocker}</strong>
     {record.status !== 'prepared' && record.url ? <a className="co-repo-link" href={record.url} target="_blank" rel="noopener noreferrer">View it on GitHub</a> : null}</div>
   return <div className="co-inline-confirm" role="group" aria-label="Confirm send">
@@ -65,16 +129,13 @@ function SendConfirm({ record, reviewState, onSend, onClose }) {
     </div>
     <div className="co-inline-confirm-actions">
       <button type="button" className="co-btn" disabled={busy} onClick={onClose}>Not now</button>
-      <button type="button" className="co-btn co-btn-primary" disabled={busy} aria-busy={busy} onClick={send}>{busy ? 'Sending…' : updating ? 'Contribute update' : 'Contribute'}</button>
+      <button type="button" className="co-btn co-btn-primary" disabled={busy || disabled} aria-busy={busy} onClick={() => onSend(record)}>{busy ? 'Sending…' : updating ? 'Contribute update' : 'Contribute'}</button>
     </div>
     <ReviewNote records={[record]} />
-    {note ? <p role="alert" className="co-review-note">{note}</p> : null}
   </div>
 }
 
-function StackSend({ unit, ledgerReady, reviewStatus, onSendStack }) {
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
+function StackSend({ unit, ledgerReady, reviewStatus, onSendStack, disabled = false, busy = false }) {
   const readiness = stackReadiness(unit)
   const phase = stackPublicationRecords(unit)
   // Linked layers come from the full ledger; until it arrives a chain only
@@ -84,19 +145,10 @@ function StackSend({ unit, ledgerReady, reviewStatus, onSendStack }) {
   const blocked = phase.map(record => sendBlocker(record, reviewStateFor(record, reviewStatus))).find(Boolean)
   if (blocked) return <p className="co-review-note" role="status">{blocked}</p>
   const label = readiness.updating ? `Contribute ${phase.length} ${phase.length === 1 ? 'update' : 'updates'}` : `Contribute ${phase.length} linked ${phase.length === 1 ? 'PR' : 'PRs'}`
-  async function send() {
-    setBusy(true); setNote('')
-    try {
-      const outcome = (await onSendStack(unit.records)) || {}
-      if (!outcome.ok && !outcome.pending && !outcome.alreadyHandled) setNote(outcome.error || 'Could not send this chain. Refresh before trying again.')
-    } catch { setNote('The result could not be confirmed. Refresh before trying again.') }
-    finally { setBusy(false) }
-  }
   return <div className="co-review-actions" role="group" aria-label="Linked contribution actions">
-    <button type="button" className="co-icon-btn co-send-btn is-primary" disabled={busy} aria-busy={busy} onClick={send}>
+    <button type="button" className="co-icon-btn co-send-btn is-primary" disabled={busy || disabled} aria-busy={busy} onClick={() => onSendStack(unit.records)}>
       <Icon name="send" /><span>{busy ? 'Sending…' : label}</span>
     </button>
-    {note ? <p role="status" className="co-review-note">{note}</p> : null}
   </div>
 }
 
@@ -113,17 +165,23 @@ export function InlinePreparedView({ target, appId, records, ledgerReady, review
     return () => { alive = false }
   }, [target.id])
   const exactRecord = exact.id === target.id ? exact.record : null
-  const record = newerRecord(records.find(item => item.id === target.id), exactRecord)
+  const loaded = newerRecord(records.find(item => item.id === target.id), exactRecord)
+  const observed = useMemo(() => loaded ? [loaded, ...records.filter(item => item.id !== loaded.id)] : records, [loaded, records])
+  const publication = useFallbackPublication([target.id], observed, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh, records)
+  const record = publication.records.find(item => item.id === target.id)
+  const action = publication.action(target.id)
+  const attempted = Boolean(publication.attempted[target.id])
+  const locked = attempted && action?.disabled
   const missing = !record && ledgerReady && exact.id === target.id && exact.read
-  const unit = record ? publicationStackUnit(record, [record, ...records.filter(item => item.id !== record.id)]) : null
+  const unit = record ? publicationStackUnit(record, publication.records) : null
   function openFullView() {
     window.parent.postMessage({ type: 'moebius:open-app', appId, intent: `review:${target.id}` }, '*')
   }
   async function refresh() {
     setRefreshing(true)
-    try { await onRefresh?.() } finally { setRefreshing(false) }
+    try { await publication.refresh() } finally { setRefreshing(false) }
   }
-  return <section className="co-projects-view co-workspace co-inline-view is-embedded" aria-label="Prepared contribution">
+  return <section className="co-projects-view co-workspace co-inline-view is-embedded" aria-label="Prepared contribution" aria-busy={!action || action.busy}>
     <style>{`.co-inline-confirm { display:grid; gap:12px; margin:0 0 14px; padding:14px 16px; border:1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius:12px; background:color-mix(in srgb, var(--accent) 10%, transparent); } .co-inline-confirm > div:first-child { display:grid; gap:4px; } .co-inline-confirm strong { font-size:16px; } .co-inline-confirm span { color:var(--muted); font-size:14px; } .co-inline-confirm.is-blocked { border-color:var(--border); background:var(--surface-2, var(--surface)); } .co-inline-confirm-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; } .co-inline-review-note summary { cursor:pointer; color:var(--muted); font-size:14px; } .co-inline-review-note p { margin:8px 0 0; font-size:14px; line-height:1.5; color:var(--text); } .co-workspace.co-inline-view.is-embedded { padding:16px 20px 40px; } .co-inline-view > .co-board-actions { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; } .co-inline-stack > h2 { font-size:18px; margin:4px 0 12px; } .co-inline-stack .co-card + .co-card { margin-top:12px; }`}</style>
     <div className="co-board-actions">
       <button className="co-quiet-action" onClick={openFullView}>Open in Contribute <Icon name="right" /></button>
@@ -133,22 +191,23 @@ export function InlinePreparedView({ target, appId, records, ledgerReady, review
     {missing ? <p role="alert">This contribution is no longer in Contribute. It may have been dismissed or replaced.</p> : null}
     {record && unit ? <div className="co-inline-stack">
       <h2>{unit.name} · {unit.records.length} linked {unit.records.length === 1 ? 'change' : 'changes'}</h2>
-      {confirming ? <div className="co-inline-confirm" role="group" aria-label="Confirm send">
+      {confirming && !locked ? <div className="co-inline-confirm" role="group" aria-label="Confirm send">
         <div><strong>Contribute this linked chain to <RepoLink repo={unit.records[0]?.plan?.repo || unit.records[0]?.repo} />?</strong>
           <span>Opens each layer publicly from your GitHub account, parent first. Nothing merges. Every reviewed change is below.</span></div>
         <div className="co-inline-confirm-actions"><button type="button" className="co-btn" onClick={() => setConfirming(false)}>Not now</button>
-          <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={onSendStack} /></div>
+          <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} /></div>
         <ReviewNote records={unit.records.filter(member => member.status === 'prepared')} />
       </div> : null}
       {unit.records.map(member => <ContributionCard key={member.id} rec={member} reviewState={reviewStateFor(member, reviewStatus)}
         loadDiff={loadDiff} initialExpanded={member.id === record.id} showDecision={false} />)}
-      {confirming ? null : <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={onSendStack} />}
+      {confirming || locked ? null : <StackSend unit={unit} ledgerReady={ledgerReady} reviewStatus={reviewStatus} onSendStack={() => publication.send(target.id)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} />}
     </div> : null}
-    {record && !unit && confirming ? <SendConfirm record={record} reviewState={reviewStateFor(record, reviewStatus)} onSend={onSend} onClose={() => setConfirming(false)} /> : null}
+    {attempted ? <FallbackResult action={action} /> : null}
+    {record && !unit && confirming && !locked ? <SendConfirm record={record} reviewState={reviewStateFor(record, reviewStatus)} busy={Boolean(action?.busy)} disabled={!action || action.disabled} onSend={() => publication.send(target.id)} onClose={() => setConfirming(false)} /> : null}
     {/* No source-chat button here: the reader is already in a chat. While the
         confirmation is open it is the only Send, so the card shows none. */}
     {record && !unit ? <ContributionCard rec={record} reviewState={reviewStateFor(record, reviewStatus)}
-      onSend={confirming || reviewStateFor(record, reviewStatus)?.state !== 'ready' ? undefined : onSend} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
+      onSend={confirming || locked || action?.disabled || reviewStateFor(record, reviewStatus)?.state !== 'ready' ? undefined : () => publication.send(target.id)} onDismiss={onDismiss} loadDiff={loadDiff} initialExpanded /> : null}
   </section>
 }
 
@@ -168,9 +227,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
   const ids = target.ids || []
   const key = ids.join(',')
   const [exact, setExact] = useState({ key: '', byId: {} })
-  const [progress, setProgress] = useState({})
-  const [canonical, setCanonical] = useState({})
-  const [busy, setBusy] = useState(false)
+
   const [refreshing, setRefreshing] = useState(false)
   useEffect(() => {
     let alive = true
@@ -182,66 +239,44 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
     }
     return () => { alive = false }
   }, [key])
-  const currentRecords = [...records.map(record => newerRecord(record, canonical[record.id])),
-    ...Object.values(canonical).filter(record => !records.some(item => item.id === record.id))]
+  const observed = useMemo(() => [...records.map(record => newerRecord(record, exact.key === key ? exact.byId[record.id]?.record : null)),
+    ...Object.values(exact.key === key ? exact.byId : {}).map(value => value.record).filter(record => record && !records.some(item => item.id === record.id))], [records, exact, key])
+  const publication = useFallbackPublication(ids, observed, ledgerReady, reviewStatus, onSend, onSendStack, onRefresh, records)
+  const currentRecords = publication.records
+  const busy = Boolean(publication.batch?.busy)
   const items = ids.map(id => {
     const read = exact.key === key && Boolean(exact.byId[id])
-    const record = newerRecord(currentRecords.find(item => item.id === id), read ? exact.byId[id].record : null)
+    const record = currentRecords.find(item => item.id === id)
     const unit = record ? publicationStackUnit(record, [record, ...currentRecords.filter(item => item.id !== record.id)]) : null
     const item = { id, read: read && ledgerReady, record, unit }
     const phase = unit ? stackPublicationRecords(unit) : record?.status === 'prepared' ? [record] : []
     const unitKey = unit ? `stack:${unit.id}` : `record:${id}`
-    return { ...item, phase, unitKey, phaseKey: publicationPhaseKey({ key: unitKey, ready: phase }),
+    return { ...item, phase, unitKey,
       blocker: batchItemBlocker(item, reviewStatus, ledgerReady) }
   })
   // One stack is one publication unit, even if the block names two layers.
   // A later phase gets a fresh key and therefore needs a fresh confirmation.
-  const ready = [...new Map(items.filter(item => !item.blocker && item.phase.length && !progress[item.phaseKey] && !pendingPhaseBlocks(progress, item, currentRecords))
+  const ready = [...new Map(items.filter(item => !item.blocker && item.phase.length && (!publication.action(item.id) || !publication.action(item.id).disabled))
     .map(item => [item.unitKey, item])).values()]
   const loading = items.some(item => (!item.record && !item.read)
     || (item.unit && !ledgerReady && stackReadiness(item.unit).code === 'incomplete'))
-  // Every ready item starts at once; the server serializes whatever must not
-  // overlap, and each row reports its own result as it lands.
-  async function sendAll() {
-    setBusy(true)
-    setProgress(current => ({ ...current, ...Object.fromEntries(ready.map(item => [item.phaseKey, {
-      state: 'sending', unitKey: item.unitKey, phaseIds: item.phase.map(record => record.id),
-    }])) }))
-    await Promise.all(ready.map(async item => {
-      let outcome
-      try {
-        outcome = (item.unit ? await onSendStack(item.unit.records) : await onSend(item.record)) || {}
-      } catch { outcome = { pending: true } }
-      const fresh = await Promise.all(item.phase.map(async member => {
-        try { return await loadFreshContributionRecord(member.id) } catch { return null }
-      }))
-      setCanonical(current => ({ ...current, ...Object.fromEntries(fresh.filter(Boolean).map(record => [record.id, record])) }))
-      const next = publicationPhaseResult(item.phase, fresh, outcome)
-      setProgress(current => ({ ...current, [item.phaseKey]: { ...next, unitKey: item.unitKey, phaseIds: item.phase.map(record => record.id) } }))
-    }))
-    setBusy(false)
-  }
+  async function sendAll() { await publication.sendAll() }
   async function refresh() {
     setRefreshing(true)
-    try { await onRefresh?.() } finally { setRefreshing(false) }
+    try { await publication.refresh() } finally { setRefreshing(false) }
   }
   const status = item => {
-    const done = progress[item.phaseKey]
-    const pendingEarlier = pendingPhaseBlocks(progress, item, currentRecords)
+    const action = publication.action(item.id)
     const members = item.unit?.records || (item.record ? [item.record] : [])
-    const links = [...new Map(members.map(settled).filter(Boolean).map(link => [link.url, link])).values()]
+    const links = [...new Map(members.flatMap(member => publication.action(member.id)?.links || (!action ? [settled(member)].filter(Boolean) : [])).map(link => [link.url, link])).values()]
     const linkView = links.map(link => <a key={link.url} className="co-repo-link" href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>)
-    if (done?.state === 'sending') return <span className="co-batch-status is-busy">Sending…</span>
-    if (done?.state === 'checking') return <span className="co-batch-status is-busy">Checking result… {linkView}</span>
-    if (done?.state === 'sent') return <span className="co-batch-status is-sent">Sent {linkView}</span>
-    if (done?.state === 'failed') return <span className="co-batch-status is-failed">{done.note} {linkView}</span>
-    if (pendingEarlier) return <span className="co-batch-status is-busy">Checking earlier result… {linkView}</span>
-    if (item.record && item.record.status !== 'prepared') {
-      return <span className="co-batch-status">{links.length ? <>Already sent {linkView}</> : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
-    }
+    const attempted = Boolean(publication.attempted[item.id])
+    if (action && attempted) return <span className={`co-batch-status ${action.busy ? 'is-busy' : action.status === 'Needs attention' ? 'is-failed' : ''}`}>
+      {action.busy ? 'Sending…' : action.status === 'Checking result' ? 'Checking result…' : ['Open','Draft','Closed','Merged','Sent'].includes(action.status) ? 'Sent' : action.note || action.status} {linkView}</span>
+    if (item.record && item.record.status !== 'prepared') return <span className="co-batch-status">{links.length ? <>Already sent {linkView}</> : item.record.status === 'abandoned' ? 'Dismissed' : 'Not ready'}</span>
     return item.blocker ? <span className="co-batch-status">{item.blocker} {linkView}</span> : <span className="co-batch-status is-ready">Ready {linkView}</span>
   }
-  const finished = Object.keys(progress).length > 0 && !busy
+  const finished = Object.keys(publication.attempted).length > 0 && !busy
   return <section className="co-projects-view co-workspace co-inline-view is-embedded" aria-label="Contribute several">
     <style>{`.co-workspace.co-inline-view.is-embedded { padding:16px 20px 40px; } .co-inline-confirm { display:grid; gap:12px; margin:0 0 14px; padding:14px 16px; border:1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius:12px; background:color-mix(in srgb, var(--accent) 10%, transparent); } .co-inline-confirm > div:first-child { display:grid; gap:4px; } .co-inline-confirm strong { font-size:16px; } .co-inline-confirm > div:first-child > span { color:var(--muted); font-size:14px; } .co-inline-confirm-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; } .co-inline-review-note summary { cursor:pointer; color:var(--muted); font-size:14px; } .co-inline-review-note p { margin:8px 0 0; font-size:14px; line-height:1.5; } .co-batch-list { list-style:none; margin:0; padding:0; border:1px solid var(--border); border-radius:10px; } .co-batch-list > li { display:grid; gap:2px; padding:10px 12px; } .co-batch-list > li + li { border-top:1px solid var(--border); } .co-batch-list b { font-weight:600; overflow-wrap:anywhere; } .co-batch-meta { display:flex; flex-wrap:wrap; gap:4px 10px; font-size:13px; color:var(--muted); } .co-batch-status.is-ready, .co-batch-status.is-sent { color:var(--green, #3fb950); font-weight:600; } .co-batch-status.is-failed { color:var(--danger, #f85149); } .co-batch-status.is-busy { color:var(--text); }`}</style>
     <div className="co-board-actions"><button className="co-quiet-action" disabled={refreshing || busy} onClick={refresh}><Icon name="refresh" /> {refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
@@ -264,7 +299,7 @@ export function InlineBatchView({ target, records, ledgerReady, reviewStatus, on
         })}
       </ul>
       <div className="co-inline-confirm-actions">
-        <button type="button" className="co-btn co-btn-primary" disabled={busy || loading || ready.length === 0} aria-busy={busy} onClick={sendAll}>
+        <button type="button" className="co-btn co-btn-primary" disabled={busy || loading || ready.length === 0 || !publication.batch || publication.batch.disabled} aria-busy={busy} onClick={sendAll}>
           {busy ? 'Contributing…' : loading ? 'Checking…' : `Contribute all ${ready.length}`}
         </button>
       </div>
