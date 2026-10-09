@@ -90,6 +90,7 @@
     "ui/ProjectControls.jsx",
     "collaboration.js",
     "ui/PullRequests.jsx",
+    "ui/GithubParts.jsx",
     "ui/TaskPane.jsx",
     "workspace-theme.js",
     "ui/useProjectCycle.js",

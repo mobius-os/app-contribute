@@ -4,7 +4,7 @@ import { discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
-  headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRefOid: 'b'.repeat(40), repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' },
+  headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: 'b'.repeat(40) } }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' },
   author: { login: 'owner' }, assignees: { nodes: [] }, ...extra })
 
 test('assignment and merge follow distinct repository permissions, never organisation membership', () => {
@@ -68,7 +68,7 @@ test('review-and-merge confirmation enumerates exact versions and excludes extra
 })
 
 
-test('the grant request preserves selected public head AND target, never a later view', () => {
+test('the grant request binds the selected head and the live target-branch tip, not the PR comparison base', () => {
   const pr = pull(1)
   const choice = { request_id: 'same-retry', mode: 'review_merge', pulls: [pr] }
   assert.deepEqual(reviewRunRequest(choice), { request_id: 'same-retry', mode: 'review_merge', items: [{

@@ -21,12 +21,12 @@ test('exact proposal inspection never advances its selected versions or writes t
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, '/api/github/graphql')
     assert.doesNotMatch(options.body, /mutation/)
-    return new Response(JSON.stringify({data:{p0:{ nameWithOwner:'owner/project', viewerPermission:permission, pullRequest:{number:7,title:'A change',url:'https://github.com/owner/project/pull/7',state:'OPEN',headRefOid:item.head_sha,baseRefOid:item.base_sha,baseRefName:'main', ...changes} }}}))
+    return new Response(JSON.stringify({data:{p0:{ nameWithOwner:'owner/project', viewerPermission:permission, pullRequest:{number:7,title:'A change',url:'https://github.com/owner/project/pull/7',state:'OPEN',headRefOid:item.head_sha,baseRefOid:'d'.repeat(40),baseRef:{target:{oid:item.base_sha}},baseRefName:'main', ...changes} }}}))
   })
   assert.equal((await inspectReviewSelection('fixture', proposal)).canMerge, true)
   permission = 'READ'
   assert.equal((await inspectReviewSelection('fixture', proposal)).canMerge, false)
-  for (const change of [{state:'CLOSED'},{headRefOid:'c'.repeat(40)},{baseRefOid:'c'.repeat(40)},{baseRefName:'another'},{number:8}]) {
+  for (const change of [{state:'CLOSED'},{headRefOid:'c'.repeat(40)},{baseRef:{target:{oid:'c'.repeat(40)}}},{baseRefName:'another'},{number:8}]) {
     changes = change
     await assert.rejects(inspectReviewSelection('fixture', proposal), /changed or closed/)
   }

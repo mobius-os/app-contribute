@@ -117,14 +117,12 @@ function ProjectDetail({
   onRefresh,
   renderActivity,
   navigation,
-  renderControls,
   sourceRevision,
+  refreshing,
 }) {
-  const [cycle, setCycle] = useState(null)
   const [publicKeys, setPublicKeys] = useState(new Set())
   const projectView = useRef(null)
   const pendingScroll = useRef(null)
-  const facts = projectBoardFacts(project)
   const activeId = navigation.selectedId || ''
   function preservingScroll(change) {
     const page = projectView.current?.closest('.co-page')
@@ -138,32 +136,29 @@ function ProjectDetail({
     pendingScroll.current = null
   }, [activeId])
   const task = {
-    cycle, setCycle, publicKeys, setPublicKeys, activeId,
+    publicKeys, setPublicKeys, activeId,
     explicit: !!navigation.selectedId,
     open: id => preservingScroll(() => navigation.onSelect(id)),
     close: () => preservingScroll(navigation.onBack),
   }
-  const canUpdate = project.available && project.canonical_repo && project.kind !== 'external'
   return (
     <TaskContext.Provider value={task}>
       <article ref={projectView} className="co-workspace">
         <header className="co-workspace-head">
           <div className="co-workspace-title"><ProjectGlyph project={project} /><div>
             <div className="co-workspace-name-row"><h2>{project.name}</h2>
-              {canUpdate ? <button className="co-icon-action" aria-label={`Check for updates. ${facts.shared}`} title="Check for updates" onClick={() => task.open('task:update')}><Icon name="refresh" size={17} /></button> : null}
+              <button className="co-icon-action" aria-label="Refresh project status" title="Refresh project status" disabled={refreshing} aria-busy={refreshing} onClick={onRefresh}><Icon name="refresh" size={17} /></button>
             </div>
-            <p><span>{project.canonical_repo || 'Only on your Möbius'}{project.viewerPermission ? ` · ${['ADMIN', 'MAINTAIN', 'WRITE'].includes(project.viewerPermission) ? 'Maintainer' : 'Contributor'}` : ''}</span>
-              {project.viewerPermission === 'ADMIN' ? <a className="co-workspace-access" href={`https://github.com/${project.canonical_repo}/settings/access`} target="_blank" rel="noopener noreferrer">People &amp; access</a> : null}
+            <p>{project.canonical_repo ? <a href={`https://github.com/${project.canonical_repo}`} target="_blank" rel="noopener noreferrer">{project.canonical_repo}</a> : <span>Only on your Möbius</span>}
             </p>
           </div></div>
         </header>
         <div className="co-workspace-body">
           <div className="co-workspace-inventory">
-            {renderControls?.(project)}
             {renderActivity?.(project, navigation)}
           </div>
         </div>
-        <TaskPane id="task:files">
+        <TaskPane id="task:files" dock={false}>
           <h3>Files, branch and versions</h3>
           <p>See changed files and the exact versions being compared. Most work doesn’t need this view.</p>
           <ProjectFileChanges key={sourceRevision} project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
@@ -240,7 +235,6 @@ export function SourceMap({
   onRetry,
   loadProjectDiff,
   renderActivity,
-  renderControls,
   repositoryPicker,
   onProjectOpenChange,
 }) {
@@ -419,7 +413,6 @@ export function SourceMap({
 
       {!selectedProject ? (
         <>
-          {renderControls?.(null)}
           {renderActivity?.(null, activityNavigation)}
           <div className="co-directory">
           <label className="co-project-search">
@@ -473,10 +466,10 @@ export function SourceMap({
             key={selectedProject.key}
             project={selectedProject}
             loadProjectDiff={loadProjectDiff}
-            onRefresh={onRetry}
+            onRefresh={refreshProjects}
+            refreshing={manualRefresh === 'running'}
             renderActivity={renderActivity}
             navigation={activityNavigation}
-            renderControls={renderControls}
             sourceRevision={snapshot?.generated_at}
           />
         </div>

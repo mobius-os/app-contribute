@@ -18,7 +18,7 @@ contribution. This app is the dashboard for that loop:
   There is no separate Reviews destination. All projects, Local changes and
   Updates filter the same searchable overview.
 - **Task-first controls** — open a project to see its work list beside one
-  contextual task, with a compact project switcher rather than another sidebar. **Prepare changes** is the main action; **Get up to date**
+  contextual task, with a compact project switcher rather than another sidebar. **Prepare changes** is the main action; **Pull updates**
   stays visible in the project header. A permitted maintainer can choose
   **Continue through merge** without granting unknown future public actions.
   Preparation stays private, and updates use the reviewed adapter rather than
@@ -325,3 +325,5 @@ phone journeys without GitHub writes or agent starts. It requires an installed
 Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
+
+Project Refresh renews source, contribution, PR and run status without pulling code.
