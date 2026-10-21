@@ -9,6 +9,7 @@
   "icon": "icon.png",
   "entry": "index.jsx",
   "offline_capable": true,
+  "embeds_agent": true,
   "offline": {
     "reads": true,
     "writes": "none",
