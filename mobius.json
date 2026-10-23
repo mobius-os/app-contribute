@@ -103,6 +103,10 @@
     "review_prs.py",
     "pull-details.js",
     "service.py",
-    "ui/PullRequestDetail.jsx"
+    "ui/PullRequestDetail.jsx",
+    "chat-blocks.js",
+    "provenance.js",
+    "pull-view.js",
+    "pr_block.py"
   ]
 }

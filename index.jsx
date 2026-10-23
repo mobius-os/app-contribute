@@ -72,7 +72,8 @@ import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { discoverRepositories, mayMerge } from './collaboration.js'
+import { discoverRepositories, discoverRepository, mayMerge } from './collaboration.js'
+import { chatBlockTarget } from './chat-blocks.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -158,6 +159,30 @@ export default function ContributeApp({ appId, token }) {
   const [omittedCount, setOmittedCount] = useState(0)
   const [sourceSnapshot, setSourceSnapshot] = useState(null)
   const [projectFocus, setProjectFocus] = useState(null)
+  // A chat PR link leases one exact PR in its project; the PR view hands the
+  // lease back when the owner leaves that PR's detail or the project.
+  const [pullFocus, setPullFocus] = useState(null)
+  const pullFocusRef = useRef(null)
+  pullFocusRef.current = pullFocus
+  const sourceProjectsRef = useRef([])
+  const tokenRef = useRef(token)
+  tokenRef.current = token
+  const releasePullFocus = useCallback(nonce => setPullFocus(old => old?.nonce === nonce ? null : old), [])
+  function openPullFocus(target, nonce) {
+    setSelectionError('')
+    setPullFocus({ repo: target.repo, number: target.number, nonce })
+    const repo = target.repo.toLowerCase()
+    const project = sourceProjectsRef.current.find(item => item.canonical_repo?.toLowerCase() === repo)
+    if (project) { setProjectFocus({ key: project.key, nonce }); return }
+    void discoverRepository(tokenRef.current, target.repo).then(repository => {
+      if (pullFocusRef.current?.nonce !== nonce) return
+      setProjectFocus({ key: `external:${repository.nameWithOwner.toLowerCase()}`, repository, nonce })
+    }, error => {
+      if (pullFocusRef.current?.nonce !== nonce) return
+      setSelectionError(error.message)
+      releasePullFocus(nonce)
+    })
+  }
   const [projectOpen, setProjectOpen] = useState(false)
   const [sourceLoading, setSourceLoading] = useState(true)
   const [sourceError, setSourceError] = useState('')
@@ -589,6 +614,12 @@ export default function ContributeApp({ appId, token }) {
     function onReviewIntent(event) {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
       if (event.data?.type !== 'moebius:app-intent') return
+      const pullTarget = chatBlockTarget(event.data.intent)
+      if (pullTarget) {
+        closeSelection()
+        openPullFocus(pullTarget, String(event.data.nonce ?? crypto.randomUUID()))
+        return
+      }
       const selectionId = reviewSelectionIdFromIntent(event.data.intent)
       if (selectionId) { void openSelection(selectionId); return }
       const target = contributionReviewTargetFromIntent(event.data.intent)
@@ -1387,10 +1418,15 @@ export default function ContributeApp({ appId, token }) {
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
+  // A linked repository outside the owner's lists still opens as a project.
+  const linkedRepository = projectFocus?.repository
   const sourceProjects = useMemo(
-    () => attachSourceProjects(sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos),
-    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos],
+    () => attachSourceProjects(sourceSnapshot, records, incomingReviews,
+      linkedRepository ? [...repositoryAccess.repositories, linkedRepository] : repositoryAccess.repositories,
+      linkedRepository ? [...followedRepos, linkedRepository.nameWithOwner] : followedRepos),
+    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, linkedRepository],
   )
+  sourceProjectsRef.current = sourceProjects
   const contributionRun = useMemo(() => buildContributionRun({
     records,
     reviewStatus,
@@ -1424,6 +1460,7 @@ export default function ContributeApp({ appId, token }) {
   function renderPullRequests(project, navigation) {
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
+      focusPull={pullFocus} onFocusRelease={releasePullFocus}
       records={recordsForProject(records, project)} onRecord={record => {
         const found = findRunItemByRecord(projectRun(project), record.id)
         if (found) navigation.onSelect(found.item.id)

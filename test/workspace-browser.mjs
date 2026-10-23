@@ -56,9 +56,11 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], githubRetries: 0 }
+const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], githubRetries: 0 }
 const values = new Map(), navigation = [], reviewRuns = []
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
+// Reachable only by exact read, as a closed PR is absent from open search.
+const closedPulls = [pull(11, { title: 'Closed contribution', state: 'CLOSED' })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
 const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql')
 function forbidden(kind) {
@@ -85,7 +87,7 @@ window.fetch = async (url, options = {}) => {
     if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
     if (call.body.query.includes('ContributeExactPull')) {
       const number=Number(call.body.query.match(/pullRequest\(number:(\d+)/)?.[1])
-      const pr=pulls.find(pr=>pr.number===number)
+      const pr=pulls.find(pr=>pr.number===number) || closedPulls.find(pr=>pr.number===number)
       ensure(call.body.query.includes('owner:"owner"') && call.body.query.includes('name:"project"'),'Exact read used another repository')
       return response({data:{repository:{pullRequest:{...pr,
         headRefOid:window.exactHeadChanged?'e'.repeat(40):pr.headRefOid,
@@ -93,7 +95,7 @@ window.fetch = async (url, options = {}) => {
       }}}})
     }
     if (call.body.query.includes('ContributePullContext')) {
-      const pr=pulls.find(pr=>pr.number===call.body.variables.number)
+      const pr=[...pulls, ...closedPulls].find(pr=>pr.number===call.body.variables.number)
       ensure(call.body.variables.owner==='owner' && call.body.variables.name==='project','Wrong context repository')
       return response({data:{repository:{pullRequest:{...pr,
         reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},
@@ -144,7 +146,7 @@ window.fetch = async (url, options = {}) => {
       if(call.url.includes('/status?')) return response({sha:head,total_count:1,statuses:[{id:2,context:'Build',state:'success'}]})
       return forbidden('unknown commit read')(call.url)
     }
-    const number = Number(call.url.match(/(?:pulls|issues)\/(\d+)/)?.[1]); const pr=pulls.find(item=>item.number===number)
+    const number = Number(call.url.match(/(?:pulls|issues)\/(\d+)/)?.[1]); const pr=[...pulls, ...closedPulls].find(item=>item.number===number)
     if (call.url.includes('/files?')) return response([{filename:'change.js',additions:1,deletions:0,status:'modified',patch:'@@ -1 +1 @@\n-old\n+safe change'}])
     if (call.url.includes('/comments?')) return response([{id:1,body:'Please check this edge case',user:{login:'reviewer'},created_at:'2026-09-07T14:00:00Z'}])
     if (call.url.includes('/reviews?')) return response([])
@@ -206,6 +208,12 @@ function Fixture() {
   const [records, setRecords] = useState([prepared, {...prepared,id:'fixture-dismissed',title:'Dismissed local proposal',summary:'Dismissed local proposal',status:'abandoned',plan:{...prepared.plan,title:'Dismissed local proposal'}}])
   const [selectionId, setSelectionId] = useState(null)
   const [allProjects, setAllProjects] = useState(projects)
+  const [focusPull, setFocusPull] = useState(null)
+  window.focusPullFixture = setFocusPull
+  const [projectFocus, setProjectFocus] = useState(null)
+  window.focusProjectFixture = setProjectFocus
+  window.setRecordsFixture = setRecords
+  function releaseFocus(nonce) { calls.releases.push(nonce); setFocusPull(old => old?.nonce === nonce ? null : old) }
   window.openSelectionFixture = setSelectionId
   function repositoryAdded(repo) { setAllProjects(old => [...old, {key:'external:' + repo.nameWithOwner,kind:'external',name:repo.nameWithOwner,canonical_repo:repo.nameWithOwner,contributions:[]}]) }
 
@@ -234,7 +242,7 @@ function Fixture() {
   }
   async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
-    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
+    {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
       repositoryPicker={<RepositoryPicker token="fixture-only" connected onAdded={repositoryAdded} />}
       renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
@@ -243,7 +251,7 @@ function Fixture() {
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
-          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} />}
+          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
       />}</ProjectControls></> : null} />}
   </main></div>
 }
@@ -791,6 +799,71 @@ window.runWorkspaceChecks = async () => {
       window.finishGithubRetry()
       await until(()=>!button('Checking…') && query('.co-pr-row'),'Retry did not recover the PR list')
       ensure(mutationRequests().length===before,'Connection retry mutated public work')
+    })
+    const exactReads = () => calls.requests.filter(call => call.body?.query?.includes('ContributeExactPull')).length
+    const listReads = () => calls.requests.filter(call => call.body?.query?.includes('ContributePullRequests')).length
+    const focusedDetail = number => query('.co-pr-detail[aria-label="Details for PR ' + number + '"]')
+    const prRow = number => query('[data-pr="owner/project#' + number + '"]')
+    await check('a chat PR link opens the exact later-page or closed PR read-only, then releases it on leaving', async () => {
+      await chooseProject('Fixture project'); await inventory()
+      window.fixturePaging = true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => prRow(7) && !prRow(8), 'Paged inventory did not load')
+      const exactBefore = exactReads(), listBefore = listReads(), mutationsBefore = mutationRequests().length
+      window.focusPullFixture({ repo: 'owner/project', number: 8, nonce: 'later-page' })
+      await until(() => focusedDetail(8) && prRow(8)?.classList.contains('is-highlighted'), 'Later-page link did not open its exact PR')
+      window.setRecordsFixture(old => [...old, { id: 'fixture-closed', type: 'pr', status: 'closed', repo: 'owner/project', number: 11,
+        title: 'Closed contribution', chat_id: 'source-11', quality_review: { chat_id: 'review-11' } }])
+      window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'closed' })
+      await until(() => focusedDetail(11) && prRow(11)?.classList.contains('is-highlighted'), 'Closed link did not open its exact PR')
+      ensure(!prRow(8), 'A replaced link stayed pinned')
+      ensure(prRow(11).querySelector('input[type="checkbox"]').disabled && !prRow(11).querySelector('[aria-label="Assign PR 11"]')
+        && !prRow(11).querySelector('.co-pr-agent-action'), 'Closed PR became selectable, assignable or startable')
+      ensure(!button('Take on with agent', focusedDetail(11)) && !button('Assign', focusedDetail(11)), 'Closed PR detail offered new work')
+      await until(() => text(focusedDetail(11)).includes('Fixture PR description 11'), 'Closed PR detail did not read its own conversation')
+      ensure(!text(focusedDetail(11)).includes('changed since the list was loaded'), 'Closed PR detail treated its exact read as stale')
+      ensure(exactReads() - exactBefore === 2 && listReads() === listBefore, 'Links scanned open pages instead of exact identities')
+      const provenance = query('.co-gh-provenance')
+      const links = [...provenance.querySelectorAll('.co-gh-chat-link')]
+      ensure(links.map(text).join('|') === 'Local preparation|Source conversation|Review conversation', 'Provenance is not one combined section: ' + links.map(text))
+      ensure(document.querySelectorAll('.co-gh-provenance').length === 1, 'Provenance repeated')
+      for (const link of links) {
+        const box = link.getBoundingClientRect()
+        ensure(box.height >= 44 && box.width >= 44, 'Provenance hit area below 44px: ' + text(link) + ' ' + box.width + 'x' + box.height)
+      }
+      const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent')
+      Object.defineProperty(window, 'parent', { configurable: true, value: { postMessage(message, target) {
+        ensure(message.type === 'moebius:open-chat' && target === '*', 'Wrong shell conversation command')
+        calls.opened.push(message.chatId)
+      } } })
+      try { await click(links[1]) } finally { Object.defineProperty(window, 'parent', parentDescriptor) }
+      ensure(calls.opened.at(-1) === 'source-11', 'Provenance opened another conversation')
+      await click(links[0])
+      ensure(calls.opened.at(-1) === 'record:fixture-closed', 'Local preparation did not open its record')
+      query('[data-task="task:detail"]').focus(); await nativeEscape()
+      await until(() => !prRow(11), 'Closed PR stayed pinned after leaving its detail')
+      ensure(calls.releases.includes('closed') && mutationRequests().length === mutationsBefore, 'Leaving did not release the link, or opening it mutated work')
+      window.setRecordsFixture(old => old.filter(record => record.id !== 'fixture-closed'))
+      window.fixturePaging = false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => prRow(8), 'Inventory did not recover')
+    })
+    await check('switching project releases a chat PR link instead of pinning it on return', async () => {
+      window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'switch' })
+      await until(() => focusedDetail(11), 'Link did not open its PR')
+      await chooseProject('Other project')
+      ensure(calls.releases.includes('switch'), 'Leaving the project did not release the link')
+      await chooseProject('Fixture project')
+      await until(() => prRow(7), 'Project did not reopen')
+      ensure(!prRow(11) && !query('.co-pr-row.is-highlighted') && !query('.co-pr-detail'), 'A released link was pinned again')
+    })
+    await check('a repository looked up before local discovery opens its deduplicated local project', async () => {
+      await inventory(); window.mobius.nav.back()
+      await until(() => !query('.co-workspace') && query('.co-source-row'), 'Directory did not open')
+      window.focusProjectFixture({ key: 'external:owner/project', repository: { nameWithOwner: 'OWNER/Project' }, nonce: 'cold-repo' })
+      await until(() => text(query('.co-workspace-head')).includes('Fixture project'), 'Linked repository did not open its local project')
+      await until(() => prRow(7), 'Linked project did not show its PRs')
+      window.focusProjectFixture(null)
     })
     await check('host Back leaves the project once; inline details add no hidden back steps', async () => {
       await inventory(); await click(query('.co-pr-open'))

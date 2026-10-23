@@ -122,3 +122,25 @@ test('merge conflicts remain a human handoff, not an authorized rewrite', () => 
   assert.doesNotMatch(skill, /re_request_review/)
   assert.match(skill, /merge conflict[\s\S]*escalate it/)
 })
+
+test('install manifest ships every module the shipped UI imports', () => {
+  const shipped = new Set(manifest.source_files)
+  const pending = [manifest.entry]
+  const seen = new Set()
+  while (pending.length) {
+    const file = pending.pop()
+    if (seen.has(file)) continue
+    seen.add(file)
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+    for (const [, specifier] of source.matchAll(/^\s*(?:import|export)\b[^'"]*?from\s+['"](\.[^'"]+)['"]/gm)) {
+      pending.push(new URL(specifier, new URL(`../${file}`, import.meta.url)).pathname
+        .slice(new URL('../', import.meta.url).pathname.length))
+    }
+    assert.ok(file === manifest.entry || shipped.has(file), `${file} is imported but not shipped`)
+  }
+})
+
+test('a link-only chat block needs no passive block capability', () => {
+  assert.equal(JSON.stringify(manifest).includes('chat.blocks'), false)
+  assert.ok(manifest.source_files.includes('pr_block.py'))
+})
