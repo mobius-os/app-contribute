@@ -137,8 +137,11 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (idsFor(key).some(id => unreadable.has(id)) && !reading.size) return 'Could not read this contribution. Try again; nothing was sent.'
     if (!authoritative(key)) return ''
     if (runtime.connection !== 'connected') return 'Connect GitHub in Möbius Settings → Accounts to send.'
-    // Without server-side binding of the confirmed snapshot, chat never sends.
-    if (runtime.frozenBinding !== true) return 'Sending from chat needs a newer Möbius. Open Contribute to send.'
+    // Without server-side binding of the confirmed snapshot, or a review check
+    // addressed to these exact records, chat never sends.
+    if (runtime.frozenBinding !== true || !idsFor(key).every(id => runtime.reviewStatus?.addressed?.includes(id))) {
+      return 'Sending from chat needs a newer Möbius. Open Contribute to send.'
+    }
     if (readyUnits(key).length) return ''
     const all = units(key)
     return all.map(unit => unit.reason).find(Boolean) || (all.some(locked) ? UNKNOWN_NOTE : '')

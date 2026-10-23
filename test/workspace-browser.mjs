@@ -82,7 +82,7 @@ window.fetch = async (url, options = {}) => {
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
     if (call.url.includes('/review-status')) {
       const ids = new URL(call.url, location.origin).searchParams.getAll('record_id')
-      return response({ records: ids.map(id => ({ id, state: 'ready' })) })
+      return response({ records: ids.map(id => ({ id, state: 'ready' })), ...(ids.length ? { addressed_record_ids: ids } : {}) })
     }
     if (window.fullAppSubmit && call.method === 'POST' && call.url.endsWith('/submit')) return response(window.fullAppSubmit(call))
     if (call.url === '/api/github/graphql' && call.method === 'POST') {

@@ -25,7 +25,7 @@ function harness({ actions, records, checkpoint = null, retain = false, send, se
   const session = createInlineSession({ sessionId: 'session-1', actions, checkpoint, retain, publish: state => states.push(structuredClone(state)),
     loadExact: async id => store.has(id) ? structuredClone(store.get(id)) : null, onNeedRuntime: () => needs.push(true) })
   const runtime = () => ({ records: [...store.values()], ledgerReady: true, connection: 'connected', frozenBinding: true,
-    reviewStatus: { state: 'ready', byId: Object.fromEntries([...store.keys()].map(id => [id, { state: 'ready' }])) },
+    reviewStatus: { state: 'ready', addressed: [...store.keys()], byId: Object.fromEntries([...store.keys()].map(id => [id, { state: 'ready' }])) },
     send: async rec => { sends.push({ kind: 'single', ids: [rec.id], records: [structuredClone(rec)] }); return send ? send(rec) : { ok: true } },
     sendStack: async recs => { sends.push({ kind: 'stack', ids: recs.map(rec => rec.id), records: structuredClone(recs) }); return sendStack ? sendStack(recs) : { ok: true } },
     refresh() {}, ...extra })
@@ -177,13 +177,23 @@ test('chat never sends without server binding of the confirmed snapshot', async 
 })
 
 test('readiness fails closed without a current positive check of the exact record', async () => {
-  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { reviewStatus: { state: 'ready', byId: {} } } })
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { reviewStatus: { state: 'ready', addressed: ['one'], byId: {} } } })
   await openConfirm(h, 'chat-send:one')
   assert.equal(h.action('chat-send:one').confirming, false)
   assert.match(h.action('chat-send:one').note, /current source check/)
   const stale = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one', { record: { quality_review: { state: 'all_clear', reviewed_head_sha: NEXT } } })] })
   await openConfirm(stale, 'chat-send:one')
   assert.match(stale.action('chat-send:one').note, /needs review first/)
+})
+
+test('a review check that was not addressed to the card records never enables Confirm', async () => {
+  for (const addressed of [null, []]) {
+    const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')],
+      runtime: { reviewStatus: { state: 'ready', addressed, byId: { one: { state: 'ready' } } } } })
+    await openConfirm(h, 'chat-send:one')
+    assert.equal(h.action('chat-send:one').confirming, false)
+    assert.match(h.action('chat-send:one').note, /newer Möbius/)
+  }
 })
 
 test('a batch handle resolves only to the exact records listed on its card', () => {

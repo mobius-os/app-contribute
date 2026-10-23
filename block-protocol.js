@@ -9,6 +9,7 @@ export function readBlockSession(value) {
   if (typeof value?.sessionId !== 'string' || !value.sessionId || !Array.isArray(value.actions)) return null
   return {
     sessionId: value.sessionId,
+    generation: value.generation ?? null,
     actions: value.actions.filter(action => typeof action?.key === 'string').map(({ key, label }) => ({ key, label })),
     checkpoint: value.checkpoint && typeof value.checkpoint === 'object' ? { id: value.checkpoint.id, data: value.checkpoint.data } : null,
     retain: value.retain === true,
@@ -32,6 +33,10 @@ export function listenBlockSession({ onInit, onAction }) {
   return () => window.removeEventListener('message', listener)
 }
 
-export function publishBlockState(state) {
-  window.parent.postMessage({ type: STATE, ...state }, window.location.origin)
+// The host's session handle stamps its own session and document generation;
+// a session first announced by message is answered with a stamped message.
+export function publishBlockState(state, handle = null) {
+  const { sessionId, ...body } = state
+  if (handle?.sessionId === sessionId && typeof handle.setState === 'function') handle.setState(body)
+  else window.parent.postMessage({ type: STATE, sessionId, ...body }, window.location.origin)
 }

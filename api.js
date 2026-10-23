@@ -282,6 +282,9 @@ function approvalRefusal(detail) {
   if (detail?.code !== 'approval_changed') return null
   return {
     ...(detail.not_attempted === true ? { notAttempted: true } : {}),
+    // The current rows the server compared, so the app shows them at once.
+    ...(detail.record && typeof detail.record === 'object' ? { record: detail.record } : {}),
+    ...(Array.isArray(detail.records) ? { records: detail.records } : {}),
     error: detail.not_attempted === true
       ? 'The saved proposal changed. Review its current version and confirm again; nothing was sent.'
       : 'The saved proposal changed after an earlier attempt. Check Contribute before trying again.',

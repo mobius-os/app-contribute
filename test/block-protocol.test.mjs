@@ -28,6 +28,19 @@ test('only the parent shell on this origin can initialise or drive a card sessio
   delete globalThis.window
 })
 
+test('state goes through the host handle that stamps its session and generation', () => {
+  const { win, posted } = fakeWindow()
+  globalThis.window = win
+  const sent = []
+  const handle = { sessionId: 's', generation: 3, setState: state => sent.push(state) }
+  publishBlockState({ sessionId: 's', actions: [] }, handle)
+  assert.deepEqual(sent, [{ actions: [] }])
+  publishBlockState({ sessionId: 'other', actions: [] }, handle)
+  assert.equal(posted.length, 1, 'a message-announced session is answered by message')
+  delete globalThis.window
+  assert.equal(readBlockSession({ sessionId: 's', generation: 3, actions: [] }).generation, 3)
+})
+
 test('state goes only to the parent on this origin and session input is normalised', () => {
   const { win, posted } = fakeWindow()
   globalThis.window = win
@@ -36,5 +49,5 @@ test('state goes only to the parent on this origin and session input is normalis
   delete globalThis.window
   assert.equal(readBlockSession({ actions: [] }), null)
   assert.deepEqual(readBlockSession({ sessionId: 's', actions: [], retain: 'yes', checkpoint: { id: 'c', data: '{}', other: 1 } }),
-    { sessionId: 's', actions: [], checkpoint: { id: 'c', data: '{}' }, retain: false, recoveryError: false })
+    { sessionId: 's', generation: null, actions: [], checkpoint: { id: 'c', data: '{}' }, retain: false, recoveryError: false })
 })

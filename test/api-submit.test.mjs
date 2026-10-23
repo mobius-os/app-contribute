@@ -99,6 +99,9 @@ test('a changed confirmed snapshot is released only when the server certifies no
   const certified = await withFetch(refusal(true), () => submitContribution({ appId: 80, token: 't', rec: { id: 'ready-pr' }, expectedRecord: {} }))
   assert.equal(certified.notAttempted, true)
   assert.equal(certified.failure.code, 'approval_changed')
+  const withRow = await withFetch(json({ detail: { code: 'approval_changed', not_attempted: true, record: { id: 'ready-pr', status: 'prepared' } } }, 409),
+    () => submitContribution({ appId: 80, token: 't', rec: { id: 'ready-pr' }, expectedRecord: {} }))
+  assert.deepEqual(withRow.record, { id: 'ready-pr', status: 'prepared' }, 'the current row is handed back for display')
   const uncertified = await withFetch(refusal(false), () => submitContributionStack({ appId: 80, token: 't', recordIds: ['a', 'b'], expectedRecords: [] }))
   assert.equal(uncertified.notAttempted, undefined)
   assert.match(uncertified.error, /earlier attempt/)
