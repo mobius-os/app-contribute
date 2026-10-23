@@ -517,18 +517,35 @@ export function normalizeAppSettings(raw) {
 }
 
 // App-level preferences (not per-contribution): publication and Autopilot.
-// Missing/unreadable → defaults. A saved copy that still has the retired
-// app-wide model keys is rewritten without them, once.
+// Missing/unreadable → defaults. Any explicit save writes the normalized copy,
+// which drops the retired app-wide model keys.
 export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)
-    const settings = normalizeAppSettings(raw)
-    if (raw && typeof raw === 'object' && RETIRED_SETTINGS.some(key => key in raw)) {
-      try { await window.mobius.storage.set(SETTINGS_FILE, settings) } catch { /* a later save drops them */ }
-    }
-    return settings
+    if (raw && typeof raw === 'object' && RETIRED_SETTINGS.some(key => key in raw)) await clearRetiredSettings()
+    return normalizeAppSettings(raw)
   } catch {
     return normalizeAppSettings(null)
+  }
+}
+
+// Remove the retired keys with a versioned compare-and-set on the copy read
+// at that moment, never a blind write: a settings save that lands in between
+// changes the version, and the retry keeps that newer value. Best effort; a
+// later explicit save drops the keys anyway.
+async function clearRetiredSettings(attempts = 3) {
+  const storage = window.mobius.storage
+  if (typeof storage?.getWithVersion !== 'function' || typeof storage?.durableWrite !== 'function') return
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const { value, version, offline } = await storage.getWithVersion(SETTINGS_FILE)
+      if (offline || !version || !value || typeof value !== 'object' || !RETIRED_SETTINGS.some(key => key in value)) return
+      const cleaned = Object.fromEntries(Object.entries(value).filter(([key]) => !RETIRED_SETTINGS.includes(key)))
+      await storage.durableWrite(SETTINGS_FILE, cleaned, { ifMatch: version })
+      return
+    } catch (error) {
+      if (error?.code !== 'conflict' && error?.status !== 412) return
+    }
   }
 }
 

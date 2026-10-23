@@ -60,16 +60,35 @@ class PullBlockTests(unittest.TestCase):
     self.assertEqual(module.bounded('\U0001F680' * 120), '\U0001F680' * 120, 'exactly 240 units fits unchanged')
 
   def test_unreadable_pr_is_one_line_not_a_traceback(self):
+    # Hermetic: the `gh` process is replaced, so no real GitHub read happens.
     import subprocess, io, contextlib
     from unittest import mock
-    failure = subprocess.CalledProcessError(1, ['gh'], stderr='gh: Not Found (HTTP 404)\n')
-    stderr = io.StringIO()
-    with mock.patch.object(module, 'gh_read', side_effect=failure), mock.patch('sys.argv', ['pr_block.py', 'owner/repo#7']), \
-         contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+    cases = {
+      'missing': ('gh: Not Found (HTTP 404)\n', 'could not read that pull request (gh: Not Found (HTTP 404))'),
+      'inaccessible': ('gh: Resource not accessible by integration (HTTP 403)\n',
+                       'could not read that pull request (gh: Resource not accessible by integration (HTTP 403))'),
+    }
+    for name, (gh_error, expected) in cases.items():
+      with self.subTest(name):
+        calls = []
+        def failing_run(command, **kwargs):
+          calls.append(command)
+          raise subprocess.CalledProcessError(1, command, stderr=gh_error)
+        stderr = io.StringIO()
+        with mock.patch.object(module.subprocess, 'run', side_effect=failing_run), mock.patch('sys.argv', ['pr_block.py', 'owner/repo#7']), \
+             contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+          module.main()
+        self.assertEqual(calls, [['gh', 'api', 'repos/owner/repo/pulls/7']], 'one read through the replaced gh')
+        message = str(raised.exception.code)
+        self.assertEqual(message, f'pr_block.py: {expected}. Check the number and that you can access the repository.')
+        self.assertNotIn('\n', message)
+        self.assertNotIn('Traceback', stderr.getvalue())
+    with mock.patch.object(module.subprocess, 'run', side_effect=subprocess.TimeoutExpired(['gh'], 60)), mock.patch('sys.argv', ['pr_block.py', 'owner/repo#7']), \
+         self.assertRaises(SystemExit) as slow:
       module.main()
-    self.assertIn('could not read that pull request (gh: Not Found (HTTP 404))', str(raised.exception.code))
-    self.assertNotIn('Traceback', stderr.getvalue())
-    with mock.patch('sys.argv', ['pr_block.py', 'not a pr']), self.assertRaises(SystemExit) as invalid:
+    self.assertEqual(str(slow.exception.code), 'pr_block.py: GitHub did not answer in time. Try again.')
+    with mock.patch.object(module.subprocess, 'run', side_effect=AssertionError('an invalid reference must not read')), \
+         mock.patch('sys.argv', ['pr_block.py', 'not a pr']), self.assertRaises(SystemExit) as invalid:
       module.main()
     self.assertIn('Use owner/repository#123', str(invalid.exception.code))
 
