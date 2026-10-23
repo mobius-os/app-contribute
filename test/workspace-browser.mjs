@@ -806,7 +806,7 @@ window.runWorkspaceChecks = async () => {
       ensure(button('Send again', query('[data-task="task:update"]')), 'A failed start offered no way to send it again')
       window.failStart=false
       const finish=button('Send again', query('[data-task="task:update"]')); finish.click(); finish.click()
-      await until(()=>text(query('[data-task="task:update"]')).includes('This start never reached Möbius. Start it again.') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
+      await until(()=>text(query('[data-task="task:update"]')).includes('This start isn’t in any conversation. Start it again.') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
       ensure(calls.starts.length===starts,'Send again created a conversation for an unheld start')
       await click(button('Start pull'))
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')

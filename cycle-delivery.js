@@ -23,7 +23,7 @@ export async function deliverCycleMessage(token, request, fetcher = globalThis.f
   try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { /* UTC */ }
   const agent = applyModel && request.agent?.model ? { provider: request.agent.provider, model: request.agent.model, ...(request.agent.effort ? { effort: request.agent.effort } : {}) } : null
   const failed = (error, extra = {}) => ({ ok: false, error, ...extra })
-  if (boundChat) return sendToChat(String(boundChat), { reused: false })
+  if (boundChat) return sendToChat(String(boundChat))
   let started
   try {
     started = await fetcher('/api/app-chats/start', { method: 'POST', headers, body: JSON.stringify({
@@ -39,7 +39,7 @@ export async function deliverCycleMessage(token, request, fetcher = globalThis.f
   const chatId = data?.chat_id ? String(data.chat_id) : ''
   if (!chatId) return failed('Could not start the agent. Send again.')
   if (data.outcome !== 'reused') return { ok: true, chatId, outcome: 'started', modelApplied: Boolean(agent) }
-  return sendToChat(chatId, { reused: true })
+  return sendToChat(chatId)
 
   // This cycle is one more message in an existing conversation. Its provider
   // is fixed once it has started; the platform refuses a switch.

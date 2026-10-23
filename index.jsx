@@ -337,7 +337,7 @@ export default function ContributeApp({ appId, token }) {
         reused: started.reused === true,
         outcome: started.outcome || (started.reused ? 'reused' : 'started'),
       }
-    } catch (error) {
+    } catch {
       return { ok: false, error: 'Could not start the agent. Try again.' }
     } finally {
       agentStartRef.current = false

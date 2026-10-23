@@ -1,7 +1,6 @@
 import { fetchLiveStates } from './api.js'
-import { mayMerge, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from './collaboration.js'
+import { mayMerge, requestOptions, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from './collaboration.js'
 import { workflowAgent } from './review-prompts.js'
-import { requestOptions } from './collaboration.js'
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/
 const SHA = /^[a-f0-9]{40}$/

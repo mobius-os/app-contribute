@@ -34,15 +34,18 @@ const STATUS_LABELS = {
   scheduled: 'Waiting to continue', deleted: 'Conversation deleted',
 }
 
+// No model chosen: the launch uses the chat default.
+const DEFAULT_AGENT = Object.freeze({ provider: '', model: '', effort: '' })
+
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
   const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
   const { cycle } = workflow
   const [error, setError] = useState('')
   const [follow, setFollow] = useState(false)
-  const [prepareAgent, setPrepareAgent] = useState({ provider: '', model: '', effort: '' })
-  const [pullAgent, setPullAgent] = useState({ provider: '', model: '', effort: '' })
-  const [cycleAgent, setCycleAgent] = useState({ provider: '', model: '', effort: '' })
+  const [prepareAgent, setPrepareAgent] = useState(DEFAULT_AGENT)
+  const [pullAgent, setPullAgent] = useState(DEFAULT_AGENT)
+  const [cycleAgent, setCycleAgent] = useState(DEFAULT_AGENT)
   // Only positive platform evidence of work in progress blocks another cycle.
   // Every cycle is one message in the project's single conversation, so an
   // unknown status is not a second owner risk.

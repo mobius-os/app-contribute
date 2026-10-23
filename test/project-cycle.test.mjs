@@ -562,7 +562,7 @@ test('a retry that finds its rejected conversation deleted settles this mount so
   assert.deepEqual(platform.active().map(chat => chat.messages), [[saved.cycle.cid.replace(/:1$/, ':2')]])
 })
 
-test('a first start that never reached Möbius says so, not that a conversation was lost', async t => {
+test('a first start in no conversation says so, not that a conversation was lost', async t => {
   const { platform, until, pane, ready } = await realCycles(t)
   const p = pane(); await ready(p)
   // fetch throws before the request reaches the server: nothing is created.
@@ -574,6 +574,6 @@ test('a first start that never reached Möbius says so, not that a conversation 
   const again = await p.render().sendAgain()
   assert.equal(again.closed, true)
   await until(() => p.render().cycle.phase === 'idle')
-  assert.equal(p.render().cycle.error, 'This start never reached Möbius. Start it again.')
+  assert.equal(p.render().cycle.error, 'This start isn’t in any conversation. Start it again.')
   assert.equal(platform.chats.length, 0, 'nothing was created by the retry')
 })
