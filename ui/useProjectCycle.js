@@ -101,16 +101,26 @@ export function useProjectCycle(projectKey, deliver) {
   //   deleted or never created; the retry is refused rather than recreating
   //   the scope, and the owner can start new work instead.
   // - Model and effort are applied until one attempt applied them.
+  // Whenever a delivery settles or closes the durable cycle, or finds it
+  // already settled elsewhere, this mount shows exactly what the record says.
+  async function settleFromRecord(requestedProject, error = '') {
+    await recheck()
+    if (error && isCurrent(requestedProject)) setCycle(current => ({ ...current, error }))
+  }
   async function send(requestedProject, planned) {
+    // The cycle stays unconfirmed: offer it again, and observe whichever
+    // conversation is known so the phase never stays on 'starting'.
     const keepUnsent = (error, extra = {}) => {
-      if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: planned, ...extra, phase: extra.chatId || current.chatId ? 'checking' : 'idle', error }))
+      const known = extra.chatId || cycle.chatId
+      if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: planned, ...extra, phase: known ? 'checking' : 'idle', error }))
+      if (known) void refresh(known)
       return { ok: false, unsent: true, error }
     }
     let fresh
     try { fresh = await loadCurrentCycle(requestedProject) } catch { return keepUnsent('The project record could not be checked, so nothing was sent. Send again.') }
     const current = fresh.cycle
     if (fresh.k !== planned.k || current?.cid !== planned.cid || current.delivered || current.closed) {
-      await recheck()
+      await settleFromRecord(requestedProject)
       return { ok: false, superseded: true, error: '' }
     }
     let chatId = current.chat_id || ''
@@ -121,7 +131,7 @@ export function useProjectCycle(projectKey, deliver) {
       if (rows.length > 1) return keepUnsent('More than one conversation answers this project. Open them before continuing.')
       if (!rows.length) {
         await updateCurrentCycle(requestedProject, planned.k, planned.cid, { closed: true })
-        if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: null, phase: current.chatId ? current.phase : 'idle', error: NOT_SENT_AGAIN }))
+        await settleFromRecord(requestedProject, NOT_SENT_AGAIN)
         return { ok: false, closed: true, error: NOT_SENT_AGAIN }
       }
       chatId = String(rows[0].id)
@@ -137,13 +147,11 @@ export function useProjectCycle(projectKey, deliver) {
       { chatId: reached, modelApplied: outcome.modelApplied, delivered: Boolean(outcome.ok && reached), closed: Boolean(outcome.gone) })
     if (!isCurrent(requestedProject)) return outcome
     if (outcome?.gone) {
-      setCycle(current => ({ ...current, unsent: null, error: NOT_SENT_AGAIN }))
+      await settleFromRecord(requestedProject, NOT_SENT_AGAIN)
       return { ok: false, closed: true, error: NOT_SENT_AGAIN }
     }
     if (!outcome?.ok || !reached) {
-      const result = keepUnsent(outcome?.error || 'This start was not confirmed. Send it again.', reached ? { chatId: reached } : {})
-      if (reached || cycle.chatId) void refresh(reached || cycle.chatId)
-      return result
+      return keepUnsent(outcome?.error || 'This start was not confirmed. Send it again.', reached ? { chatId: reached } : {})
     }
     setCycle(current => ({ ...current, unsent: null, chatId: reached, title: planned.action.title, event: planned.action.event, phase: 'running', error: '' }))
     return { ok: true, chatId: reached }

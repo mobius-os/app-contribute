@@ -232,6 +232,7 @@ function platformStandIn() {
         if (chat?.messages.length) return [200, { chat_id: chat.id, outcome: 'reused' }]
         if (!chat) chats.push(chat = { id: 'chat-' + (chats.length + 1), scope: body.scope, provider: body.provider || 'claude', model: body.model, messages: [], deleted: false })
         if (platform.hold) await platform.hold
+        if (platform.rejectFirstTurn > 0) { platform.rejectFirstTurn--; return [502, { detail: { code: 'first_turn_rejected', chat_id: chat.id } }] }
         chat.messages.push(body.cid)
         return [200, { chat_id: chat.id, outcome: 'started' }]
       })
@@ -533,4 +534,30 @@ test('R8-2: a stale retry never rolls back a newer cycle\'s model, and a retry d
   assert.equal((await b.render().sendAgain()).ok, true)
   assert.equal(patches(), patched, 'the retry did not PATCH again')
   assert.equal(platform.messages().filter(cid => cid === scope + ':4').length, 1)
+})
+
+test('R9: a retry that finds its rejected conversation deleted settles this mount so Start works without a reload', async t => {
+  const { storage, platform, until, pane, ready } = await realCycles(t)
+  const p = pane(); await ready(p)
+  platform.rejectFirstTurn = 1
+  assert.equal((await p.render().start(ACTION)).ok, false)
+  const saved = await storage.loadCycleState('fixture-project')
+  assert.equal(saved.cycle.chat_id, 'chat-1', 'the rejected first turn named its conversation')
+  assert.equal(saved.chat_id, '', 'nothing was delivered')
+  // Reload, then the owner deletes that conversation.
+  const reloaded = pane(); await ready(reloaded)
+  assert.ok(reloaded.render().cycle.unsent)
+  platform.chats[0].deleted = true
+  const again = await reloaded.render().sendAgain()
+  assert.equal(again.closed, true)
+  await until(() => reloaded.render().cycle.phase === 'idle')
+  const cycle = reloaded.render().cycle
+  assert.equal(cycle.phase, 'idle', 'the same mount reflects the closed cycle: ' + JSON.stringify(cycle))
+  assert.equal(Boolean(cycle.unsent), false)
+  assert.match(cycle.error, /not sent again/)
+  // Same mount, no reload: an explicit Start succeeds.
+  const next = await reloaded.render().start({ ...ACTION, title: 'Start over' })
+  assert.equal(next.ok, true, JSON.stringify(next))
+  assert.equal(reloaded.render().cycle.chatId, 'chat-2')
+  assert.deepEqual(platform.active().map(chat => chat.messages), [[saved.cycle.cid.replace(/:1$/, ':2')]])
 })
