@@ -10,6 +10,12 @@
   "entry": "index.jsx",
   "offline_capable": true,
   "embeds_agent": true,
+  "capabilities": {
+    "chat.blocks.passive": {
+      "version": 1,
+      "reason": "Shows the current state of the contributions a chat card names, and sends them to GitHub only after you press Confirm on that card."
+    }
+  },
   "offline": {
     "reads": true,
     "writes": "none",
@@ -111,6 +117,11 @@
     "pr_block.py",
     "review-prompts.js",
     "ui/ReviewPromptSettings.jsx",
-    "ui/RunDetail.jsx"
+    "ui/RunDetail.jsx",
+    "send-readiness.js",
+    "inline-session.js",
+    "block-protocol.js",
+    "ui/InlineBlockSession.jsx",
+    "prepared_block.py"
   ]
 }

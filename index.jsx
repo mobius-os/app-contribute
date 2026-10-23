@@ -74,7 +74,9 @@ import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
-import { chatBlockTarget } from './chat-blocks.js'
+import { cardRecordIds, chatBlockTarget } from './chat-blocks.js'
+import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
+import { readBlockSession } from './block-protocol.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -151,7 +153,24 @@ function stalePublicApproval() {
   }
 }
 
-export default function ContributeApp({ appId, token }) {
+// Lets the chat host run this app headless behind a Contribute card.
+export const appBlockSessions = true
+
+// A chat card starts with exact record reads only. The ordinary app, with its
+// account, ledger and review reads and its guarded Send handlers, mounts only
+// once the owner taps the card's action, and stays invisible.
+export default function ContributeEntry({ appId, token, blockSession = null }) {
+  const [runtimeWanted, setRuntimeWanted] = useState(false)
+  const [runtime, setRuntime] = useState(null)
+  const addressed = useMemo(() => cardRecordIds((readBlockSession(blockSession)?.actions || []).map(action => action.key)), [blockSession])
+  if (!blockSession) return <ContributeApp appId={appId} token={token} />
+  return <>
+    <InlineBlockSession blockSession={blockSession} runtime={runtime} onNeedRuntime={() => setRuntimeWanted(true)} />
+    {runtimeWanted ? <ContributeApp appId={appId} token={token} addressedRecordIds={addressed} onPublicationRuntime={setRuntime} /> : null}
+  </>
+}
+
+function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationRuntime = null }) {
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'checking' })
@@ -387,7 +406,7 @@ export default function ContributeApp({ appId, token }) {
     const requestId = reviewStatusRequestRef.current + 1
     reviewStatusRequestRef.current = requestId
     setReviewStatus((current) => ({ ...current, state: 'loading' }))
-    const outcome = await fetchReviewStatus(token, appId)
+    const outcome = await fetchReviewStatus(token, appId, addressedRecordIds || [])
     if (requestId !== reviewStatusRequestRef.current) return null
     if (outcome.ok) {
       const indexed = indexReviewStatus(outcome.data)
@@ -401,7 +420,7 @@ export default function ContributeApp({ appId, token }) {
     }
     setReviewStatus(next)
     return next
-  }, [token, appId])
+  }, [token, appId, addressedRecordIds])
 
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
@@ -804,6 +823,8 @@ export default function ContributeApp({ appId, token }) {
   // New PRs use the connected owner's GitHub identity. Existing-PR updates
   // stay on the personal GitHub identity that owns their public branch. Both
   // actions consume one exact reviewed record and remain explicit clicks.
+  // `rec` is the exact record the owner confirmed. Where the platform binds
+  // it, the server compares it under its publication lock before any write.
   const onSend = useCallback(async (rec) => {
     let canonical = null
     try {
@@ -844,7 +865,7 @@ export default function ContributeApp({ appId, token }) {
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
-      outcome = await updateContribution({ appId, token, rec: refreshed })
+      outcome = await updateContribution({ appId, token, rec: refreshed, expectedRecord: connRef.current.frozenBinding ? rec : null })
     } else {
       const decision = contributionPathDecision(
         refreshed,
@@ -865,6 +886,7 @@ export default function ContributeApp({ appId, token }) {
             rec: refreshed,
             autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
             publicationStage: 'ready',
+            expectedRecord: connRef.current.frozenBinding ? rec : null,
           })
     }
     if (outcome.ok) {
@@ -960,6 +982,7 @@ export default function ContributeApp({ appId, token }) {
     }
     refreshReviewStatus()
     return {
+      ...(outcome.notAttempted ? { notAttempted: true } : {}),
       error: outcome.error || 'Could not submit this PR.',
       failure: outcome.failure,
     }
@@ -1248,6 +1271,10 @@ export default function ContributeApp({ appId, token }) {
       token,
       recordIds: currentRecords.map((rec) => rec.id),
       publicationStage: 'ready',
+      // The owner confirmed the whole chain, including public context.
+      expectedRecords: connRef.current.frozenBinding
+        ? currentRecords.map((current) => stackRecords.find((approved) => approved.id === current.id))
+        : null,
     })
     const updates = outcome.ok || outcome.records || []
     if (updates.length > 0) {
@@ -1339,6 +1366,7 @@ export default function ContributeApp({ appId, token }) {
     }
     refreshReviewStatus()
     return {
+      ...(outcome.notAttempted ? { notAttempted: true } : {}),
       error: outcome.error || 'Could not submit this PR stack.',
       failure: outcome.failure,
     }
@@ -1465,6 +1493,16 @@ export default function ContributeApp({ appId, token }) {
   // read settles, an unavailable GitHub status is rendered as a retryable
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
+
+  // Behind a chat card, hand the inline session this app's own state and
+  // guarded Send handlers; there is no second publication path.
+  useEffect(() => {
+    onPublicationRuntime?.({
+      records, ledgerReady: ledgerReady && ledgerCurrentRef.current, reviewStatus,
+      connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
+      send: onSend, sendStack: onSendStack, refresh: () => refreshCoordinatorRef.current(),
+    })
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, conn, onSend, onSendStack])
 
   // One workspace owns project context and the exact contribution beneath it.
   return (

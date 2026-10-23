@@ -52,6 +52,8 @@ export async function fetchGithubStatus(token) {
       state: s.connected ? 'connected' : 'disconnected',
       login: s.login || '',
       autopilotAvailable: s.autopilot_available === true,
+      // The server binds a Send to the exact record the owner confirmed.
+      frozenBinding: Array.isArray(s.frozen_publication_binding?.record_fields),
     }
   } catch (error) {
     // Network failure (offline, backend restarting) — not a platform verdict.
@@ -124,10 +126,13 @@ export async function fetchSourceDiff(token, project) {
 // worktree, and stored-diff drift before the owner reaches the public Send
 // action. A failed check keeps the feed usable and preserves any stronger
 // submit error already persisted on the record.
-export async function fetchReviewStatus(token, appId) {
+// `recordIds` asks for exactly those records and their stacks, however old;
+// without it the platform checks its recent records.
+export async function fetchReviewStatus(token, appId, recordIds = []) {
+  const query = recordIds.length ? '?' + recordIds.map(id => 'record_id=' + encodeURIComponent(id)).join('&') : ''
   try {
     const r = await fetchRead(
-      '/api/github/contributions/' + encodeURIComponent(appId) + '/review-status',
+      '/api/github/contributions/' + encodeURIComponent(appId) + '/review-status' + query,
       { headers: authHeaders(token) },
     )
     if (!r.ok) {
@@ -203,6 +208,7 @@ export async function submitContribution({
   rec,
   autopilot = true,
   publicationStage = 'ready',
+  expectedRecord = null,
 }) {
   try {
     const r = await fetch(
@@ -219,6 +225,7 @@ export async function submitContribution({
         body: JSON.stringify({
           autopilot: !!autopilot,
           publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
+          ...(expectedRecord ? { expected_record: expectedRecord } : {}),
         }),
       }
     )
@@ -248,6 +255,7 @@ export async function submitContribution({
     ) {
       return { alreadyHandled: true }
     }
+    if (approvalRefusal(detail)) return approvalRefusal(detail)
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not submit this PR.',
@@ -268,10 +276,23 @@ export async function submitContribution({
   }
 }
 
+// A server refusal that the confirmed snapshot changed. Only its certified
+// `not_attempted` releases the action for a fresh confirmation.
+function approvalRefusal(detail) {
+  if (detail?.code !== 'approval_changed') return null
+  return {
+    ...(detail.not_attempted === true ? { notAttempted: true } : {}),
+    error: detail.not_attempted === true
+      ? 'The saved proposal changed. Review its current version and confirm again; nothing was sent.'
+      : 'The saved proposal changed after an earlier attempt. Check Contribute before trying again.',
+    failure: { owner: 'agent', code: 'approval_changed' },
+  }
+}
+
 // Owner-approved fast-forward of an already-open pull request. A prepared
 // `pr_update` record carries the exact new head and complete reviewed diff; the
 // platform verifies the live PR identity before it pushes anything.
-export async function updateContribution({ appId, token, rec }) {
+export async function updateContribution({ appId, token, rec, expectedRecord = null }) {
   try {
     const r = await fetch(
       '/api/github/contributions/' +
@@ -281,7 +302,7 @@ export async function updateContribution({ appId, token, rec }) {
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(expectedRecord ? { expected_record: expectedRecord } : {}),
       },
     )
     const body = await r.json().catch(() => null)
@@ -302,6 +323,7 @@ export async function updateContribution({ appId, token, rec }) {
         failure: { owner: 'owner', status: r.status },
       }
     }
+    if (approvalRefusal(detail)) return approvalRefusal(detail)
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || 'Could not update this PR.',
@@ -447,6 +469,7 @@ async function writeContributionStack({
   recordIds,
   operation,
   publicationStage = 'ready',
+  expectedRecords = null,
 }) {
   const updating = operation === 'update'
   try {
@@ -461,6 +484,7 @@ async function writeContributionStack({
           ...(updating ? {} : {
             publication_stage: publicationStage === 'draft' ? 'draft' : 'ready',
           }),
+          ...(expectedRecords ? { expected_records: expectedRecords } : {}),
         }),
       }
     )
@@ -490,6 +514,7 @@ async function writeContributionStack({
     ) {
       return { alreadyHandled: true }
     }
+    if (approvalRefusal(detail)) return approvalRefusal(detail)
     if (detail && typeof detail === 'object') {
       return {
         error: detail.message || (updating

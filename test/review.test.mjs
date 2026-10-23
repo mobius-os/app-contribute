@@ -397,7 +397,7 @@ test('all private handoffs use changed-work scopes instead of permanent one-shot
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
   assert.match(appSource, /refreshed\.plan\?\.action === 'pr_update'/)
-  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
+  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed, expectedRecord: connRef\.current\.frozenBinding \? rec : null \}\)/)
   assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
@@ -445,7 +445,7 @@ test('submit failures lead back to private agent recovery without overstating a 
   assert.match(cardSource, /onStart=\{onReview\}/)
   assert.match(cardSource, /Review needs refreshing/)
   assert.match(cardSource, /<summary>Technical details<\/summary>/)
-  assert.match(cardSource, /const submitFailed = Boolean\(rec\.last_submit_error\)/)
+  assert.match(cardSource, /const submitFailed = sendNeedsAttention\(rec\)/)
   assert.match(cardSource, /!reviewIncomplete && !submitFailed/)
 })
 

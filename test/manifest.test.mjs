@@ -140,7 +140,10 @@ test('install manifest ships every module the shipped UI imports', () => {
   }
 })
 
-test('a link-only chat block needs no passive block capability', () => {
-  assert.equal(JSON.stringify(manifest).includes('chat.blocks'), false)
-  assert.ok(manifest.source_files.includes('pr_block.py'))
+test('the chat-card capability says plainly that it can send after Confirm', () => {
+  const capability = manifest.capabilities['chat.blocks.passive']
+  assert.equal(capability.version, 1)
+  assert.match(capability.reason, /sends them to GitHub only after you press Confirm/)
+  assert.doesNotMatch(capability.reason, /without sending/)
+  assert.ok(manifest.source_files.includes('prepared_block.py'))
 })

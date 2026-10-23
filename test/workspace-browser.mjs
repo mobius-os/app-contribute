@@ -77,9 +77,14 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
   if (window.fullAppFixture) {
-    if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
+    if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '',
+      ...(window.fullAppBinding ? { frozen_publication_binding: { record_fields: ['plan'] } } : {}) })
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
-    if (call.url.endsWith('/review-status')) return response({ records: [] })
+    if (call.url.includes('/review-status')) {
+      const ids = new URL(call.url, location.origin).searchParams.getAll('record_id')
+      return response({ records: ids.map(id => ({ id, state: 'ready' })) })
+    }
+    if (window.fullAppSubmit && call.method === 'POST' && call.url.endsWith('/submit')) return response(window.fullAppSubmit(call))
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
       if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
@@ -1185,6 +1190,51 @@ window.runWorkspaceChecks = async () => {
       ensure(headings.map(h=>text(h)).join('|')==='GitHub account|Agent prompts', 'Settings section order or headings differ')
       ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
       await click(button('Done',panel))
+    })
+    await check('a chat card sends only after Confirm, through the guarded app handler with the confirmed snapshot', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const record = { ...prepared, id: 'card-record', updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64) } }
+      values.set('contributions/card-record.json', structuredClone(record))
+      window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: [{ type: 'file', name: 'card-record.json', content: structuredClone(record) }] })
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const submits = []
+      window.fullAppSubmit = call => {
+        submits.push(call.body)
+        const sent = { ...record, status: 'open', number: 9, url: 'https://github.com/owner/project/pull/9', updated_at: '2026-10-20T11:00:00Z' }
+        values.set('contributions/card-record.json', structuredClone(sent))
+        return { record: sent, url: sent.url }
+      }
+      // This page is the top-level shell stand-in: capture the app's state
+      // messages and deliver host events exactly as the parent document would.
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:card-record')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-1', key: 'chat-send:card-record', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled, 'Card state was not published')
+        ensure(!calls.requests.slice(before).some(call => call.url === '/api/github/status'), 'An idle card mounted the full app')
+        fire('activate', 'card-n1')
+        await until(() => card()?.confirming, 'Contribute did not become Confirm: ' + JSON.stringify(card()))
+        ensure(card().confirmation?.[0]?.facts?.some(fact => fact.label === 'Version' && fact.value === HEAD.slice(0, 12)), 'Confirm lacked the app-sourced identity')
+        ensure(calls.requests.some(call => call.url.includes('/review-status?record_id=card-record')), 'Card did not ask for its addressed review status')
+        ensure(!submits.length, 'Activation sent')
+        fire('confirm', 'card-n2'); fire('confirm', 'card-n3')
+        await until(() => card()?.hidden && card().links?.[0]?.url === 'https://github.com/owner/project/pull/9', 'Sent card did not settle to its PR')
+        ensure(submits.length === 1, 'Confirm did not send exactly once: ' + submits.length)
+        ensure(submits[0].expected_record?.id === 'card-record' && submits[0].expected_record.plan.head_sha === HEAD, 'Send did not carry the confirmed snapshot')
+        ensure(states.at(-1).checkpoint === null, 'A proven result kept its recovery checkpoint')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppSubmit = null; window.fullAppBinding = false
+        root.render(null)
+      }
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
