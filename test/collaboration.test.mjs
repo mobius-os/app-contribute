@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls } from '../collaboration.js'
+import { discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -96,4 +96,17 @@ test('merge option is available only for an entirely eligible exact selection', 
   assert.match(render([pull(1)]), /Merge when safe/)
   assert.doesNotMatch(render([pull(1), pull(2, {repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})]), /Merge when safe/)
   assert.doesNotMatch(render([pull(1, {isDraft:true})]), /Merge when safe/)
+})
+
+test('an exact PR read rejects a response for another repository or number', async t => {
+  let answer
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ data: { repository: { pullRequest: answer } } })))
+  answer = pull(7)
+  assert.equal((await discoverPull('test', 'team/repo', 7)).number, 7)
+  for (const wrong of [pull(8), pull(7, { repository: { nameWithOwner: 'other/repo', viewerPermission: 'WRITE' } }), null]) {
+    answer = wrong
+    await assert.rejects(discoverPull('test', 'team/repo', 7), /unavailable to your GitHub account/)
+  }
+  await assert.rejects(discoverPull('test', 'not a repository', 7), /valid pull request/)
+  await assert.rejects(discoverPull('test', 'team/repo', 0), /valid pull request/)
 })
