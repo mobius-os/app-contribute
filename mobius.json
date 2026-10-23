@@ -78,6 +78,7 @@
     "contributing/adapter-mobius.md",
     "contributing/adapter-github.md",
     "contributing/legacy-bot.md",
+    "attached-work.md",
     "review-followup.md",
     "ui/Icons.jsx",
     "ui/BatchAction.jsx",

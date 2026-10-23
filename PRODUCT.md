@@ -21,9 +21,11 @@ shared for review, and whether shared updates have been checked. Choose one proj
 
 ## Operating Context
 
-Changes still begin in their source chats. Chat-specific preparation remains
-there; Contribute is the cross-chat project overview. Current code establishes
-what needs preparation; chat diffs are provenance, not a second source tree.
+Changes still begin in their source chats, and a chat's Changes view only lists
+its edits. To prepare them, ask the conversation that owns them, or prepare the
+whole project in Contribute, the cross-chat project overview. Current code
+establishes what needs preparation; chat diffs are provenance, not a second
+source tree.
 
 The landing view is a searchable project index, without global mutation controls. Each project shows
 local/private/public work and its last-known shared-version relationship.
@@ -45,8 +47,7 @@ position. Agent work progresses in place; only actual questions need the owner.
 - Existing local and private work must be preserved during reconciliation.
 - Project status can establish source relationships, but it cannot always infer whether local differences are reusable, personal, or already covered. The UI must distinguish clear preparation candidates from work that needs sorting.
 - The same workflow should extend beyond Möbius-owned projects as project adapters grow.
-- Chat keeps only decisions and attention above the composer; healthy public and settled work belongs in the chat's persistent Changes view and in Contribute.
-- Recorded edits may prompt one lightweight preparation card. The card never performs private preparation until the owner presses it.
+- Chat keeps only decisions and attention above the composer; healthy public and settled work belongs in Contribute.
 - Deterministic status refresh, accepted-work recognition, duplicate detection, and lost-response reconciliation run automatically; they never summon an agent merely to repeat the ledger.
 - One changed-work conversation owns the remaining private judgment. Repeated actions reuse it until the represented source or contribution head changes.
 - The normal personal-GitHub publication opens reviewed pull requests ready for
@@ -97,9 +98,8 @@ Live local project status, private contribution records and stored diffs, and co
 3. Lead with project position; group the same review run by decision within the selected scope.
 4. Make detail and diffs immediate once an item is selected.
 5. Keep one deliberate owner checkpoint for public actions.
-6. Let the source chat start and complete its work, Changes preserve that
-   lifecycle, and Contribute project the project-scoped run without inventing a
-   second workflow.
+6. Let the source chat start and complete its work, and Contribute project the
+   project-scoped run without inventing a second workflow.
 7. Automate facts; reserve agent work for intent, grouping, review, and repair.
 8. Completed intent disappears; failures continue automatically unless a real
    owner or account decision is required.

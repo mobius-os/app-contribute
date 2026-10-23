@@ -124,14 +124,8 @@ personal or don't propose.
 ## The approval gate
 
 Private preparation begins only from an explicit partner request, including a
-project-level or **Prepare to submit** handoff from Contribute. The source chat's
-automatic **Changes ready to organize** card is the lightweight preparation
-suggestion after coherent file edits: it only reflects already-recorded work
-and never starts an agent, reviews a diff, or inspects GitHub on its own. Do not
-duplicate that visible choice with another question at the end of the turn.
-Pressing **Prepare to submit** on the card or in Changes is an explicit
-private-preparation request; dismissing it only hides that revision of the
-suggestion and keeps the work in Changes and Contribute.
+project-level or **Prepare to submit** handoff from Contribute. A chat's
+**Changes** view only lists its edits; it is never a request or approval.
 
 **One decision, no duplicate approval.** Proceed without requiring the matching
 Contribute press when the owner's instruction already covers the action. Run
