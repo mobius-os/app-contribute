@@ -78,9 +78,14 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
   if (window.fullAppFixture) {
-    if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
+    if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '',
+      ...(window.fullAppBinding ? { frozen_publication_binding: { record_fields: ['plan'] } } : {}) })
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
-    if (call.url.endsWith('/review-status')) return response({ records: [] })
+    if (call.url.includes('/review-status')) {
+      const ids = new URL(call.url, location.origin).searchParams.getAll('record_id')
+      return response({ records: ids.map(id => ({ id, state: 'ready' })), ...(ids.length ? { addressed_record_ids: ids } : {}) })
+    }
+    if (window.fullAppSubmit && call.method === 'POST' && call.url.endsWith('/submit')) return response(window.fullAppSubmit(call))
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
       if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
@@ -365,7 +370,7 @@ window.runWorkspaceChecks = async () => {
   async function check(name, run) {
     await run()
     const page=query('.co-page')
-    ensure(!page || page.scrollWidth<=page.clientWidth+1,'Workspace overflows horizontally at '+name+': '+page.scrollWidth+' > '+page.clientWidth)
+    if (page) ensure(page.scrollWidth<=page.clientWidth+1,'Workspace overflows horizontally at '+name+': '+page.scrollWidth+' > '+page.clientWidth)
     checks.push({ name, status: 'pass' })
   }
   try {
@@ -1218,6 +1223,152 @@ window.runWorkspaceChecks = async () => {
       ensure(headings.map(h=>text(h)).join('|')==='GitHub account|Agent prompts', 'Settings section order or headings differ')
       ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
       await click(button('Done',panel))
+    })
+    await check('a chat card sends only after Confirm, through the guarded app handler with the confirmed snapshot', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const record = { ...prepared, id: 'card-record', updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 3 insertions(+), 1 deletion(-)' } }
+      values.set('contributions/card-record.json', structuredClone(record))
+      window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: [{ type: 'file', name: 'card-record.json', content: structuredClone(record) }] })
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const submits = []
+      window.fullAppSubmit = call => {
+        submits.push(call.body)
+        const sent = { ...record, status: 'open', number: 9, url: 'https://github.com/owner/project/pull/9', updated_at: '2026-10-20T11:00:00Z' }
+        values.set('contributions/card-record.json', structuredClone(sent))
+        return { record: sent, url: sent.url }
+      }
+      // This page is the top-level shell stand-in: capture the app's state
+      // messages and deliver host events exactly as the parent document would.
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:card-record')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-1', key: 'chat-send:card-record', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', generation: 4, actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled, 'Card state was not published')
+        ensure(!calls.requests.slice(before).some(call => call.url === '/api/github/status'), 'An idle card mounted the full app')
+        fire('activate', 'card-n1')
+        await until(() => card()?.confirming, 'Contribute did not become Confirm: ' + JSON.stringify(card()))
+        ensure(card().confirmation?.[0]?.facts?.some(fact => fact.label === 'Version' && fact.value === HEAD.slice(0, 12)), 'Confirm lacked the app-sourced identity')
+        ensure(calls.requests.some(call => call.url.includes('/review-status?record_id=card-record')), 'Card did not ask for its addressed review status')
+        // The hidden runtime runs only what inline Send needs and renders nothing.
+        const sinceCard = calls.requests.slice(before)
+        ensure(!sinceCard.some(call => call.url === '/api/github/source-status' || /ContributeRepositories|ContributeIncomingReviews/.test(call.body?.query || '') || (call.body?.query || '').includes('resource(url:')),
+          'The card ran workspace-only reads: ' + JSON.stringify(sinceCard.map(call => call.url + ' ' + String(call.body?.query || '').slice(0, 40))))
+        ensure(!document.querySelector('.co-root'), 'The card rendered the workspace')
+        ensure(!submits.length, 'Activation sent')
+        fire('confirm', 'card-n2'); fire('confirm', 'card-n3')
+        await until(() => card()?.hidden && card().links?.[0]?.url === 'https://github.com/owner/project/pull/9', 'Sent card did not settle to its PR')
+        ensure(submits.length === 1, 'Confirm did not send exactly once: ' + submits.length)
+        ensure(submits[0].expected_record?.id === 'card-record' && submits[0].expected_record.plan.head_sha === HEAD, 'Send did not carry the confirmed snapshot')
+        ensure(states.at(-1).checkpoint === null, 'A proven result kept its recovery checkpoint')
+        ensure(states.length && states.every(state => state.generation === 4), 'A state report did not name its document generation')
+        ensure(states.every(state => state.actions.filter(action => action.confirming).length <= 1), 'More than one action asked for confirmation')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppSubmit = null; window.fullAppBinding = false
+        root.render(null)
+      }
+    })
+    await check('Try again on an incomplete ledger waits for its whole re-read, then reaches Confirm', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const record = { ...prepared, id: 'ledger-record', updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 3 insertions(+)' } }
+      values.set('contributions/ledger-record.json', structuredClone(record))
+      // The first listing is incomplete; the second (Try again's re-read) is held, then lands complete.
+      let listings = 0, complete = false, releaseListing
+      const held = new Promise(resolve => { releaseListing = resolve })
+      window.mobius.storage.listWithStatus = async () => {
+        listings++
+        if (listings === 2) await held
+        return { complete, entries: [{ type: 'file', name: 'ledger-record.json', content: structuredClone(record) }] }
+      }
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:ledger-record')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-ledger', key: 'chat-send:ledger-record', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-ledger', generation: 6, actions: [{ key: 'chat-send:ledger-record', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled, 'Card state was not published')
+        fire('activate', 'ledger-n1')
+        for (let i = 0; i < 150 && !(card()?.label === 'Try again' && !card().disabled); i++) await new Promise(resolve => setTimeout(resolve, 50))
+        ensure(card()?.label === 'Try again' && !card().disabled && /Could not read every contribution/.test(card().note || ''), 'An incomplete ledger did not offer Try again: ' + JSON.stringify(card()))
+        ensure(listings === 1, 'Unexpected listings before Try again: ' + listings)
+        complete = true
+        fire('activate', 'ledger-n2')
+        for (let i = 0; i < 30; i++) await frame()
+        ensure(listings === 2, 'Try again did not re-read the ledger: ' + listings)
+        ensure(card()?.label === 'Checking…' && card().disabled, 'An intermediate report ended the check: ' + JSON.stringify(card()))
+        fire('activate', 'ledger-n3')
+        for (let i = 0; i < 10; i++) await frame()
+        ensure(listings === 2, 'A second Try again started another refresh while one was running')
+        releaseListing()
+        for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 50))
+        ensure(card()?.confirming, 'The completed re-read did not reach Confirm: ' + JSON.stringify(card()))
+        ensure(!calls.requests.slice(before).some(call => call.method === 'POST' && /\/(submit|submit-stack|update-stack|update-existing)$/.test(call.url)), 'Something was sent')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
+        releaseListing()
+        root.render(null)
+      }
+    })
+    await check('a card naming one layer of a stack reaches Confirm, and sends nothing if binding is lost before the write', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const layer = (id, position, parent) => ({ ...prepared, id, updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, title: 'Layer ' + id, branch: 'stack/s1/0' + position, head_sha: position === 1 ? HEAD : BASE, diff_sha256: 'd'.repeat(64),
+          diff_stat: '2 files changed, 5 insertions(+), 1 deletion(-)', ...(parent ? { base_sha: HEAD } : {}),
+          stack: { id: 's1', name: 'Stack', position, total: 2, base_branch: parent ? 'stack/s1/01' : 'main', ...(parent ? { parent_record_id: parent } : {}) } },
+        quality_review: { state: 'all_clear', reviewed_head_sha: position === 1 ? HEAD : BASE } })
+      const records = [layer('stack-base', 1, ''), layer('stack-top', 2, 'stack-base')]
+      for (const record of records) values.set('contributions/' + record.id + '.json', structuredClone(record))
+      window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: records.map(record => ({ type: 'file', name: record.id + '.json', content: structuredClone(record) })) })
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:stack-base')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-2', key: 'chat-send:stack-base', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: 'chat-send:stack-base', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled && card().badges?.length, 'Stack card state was not published')
+        fire('activate', 'stack-n1')
+        // Wait on timers rather than animation frames: the hidden runtime mounts behind the card.
+        for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 100))
+        await until(() => card()?.confirming, 'A one-layer stack card never reached Confirm: ' + JSON.stringify(card()) + ' requests: ' + JSON.stringify(calls.requests.slice(before).map(call => call.method + ' ' + call.url)))
+        const statusQueries = calls.requests.slice(before).filter(call => call.url.includes('/review-status')).map(call => call.url)
+        ensure(statusQueries.some(url => url.includes('record_id=stack-base') && url.includes('record_id=stack-top')), 'The review check was not addressed to every prepared layer: ' + JSON.stringify(statusQueries))
+        ensure(card().confirmation.length === 2 && card().confirmation.every(item => item.facts.some(fact => fact.label === 'Change' && fact.value === '2 files · +5 −1')), 'Confirm lacked the stack phase or its size')
+        // The platform stops advertising the binding before the write.
+        window.fullAppBinding = false
+        const statusReads = calls.requests.filter(call => call.url === '/api/github/status').length
+        window.dispatchEvent(new Event('focus'))
+        await until(() => calls.requests.filter(call => call.url === '/api/github/status').length > statusReads, 'The connection was not re-read')
+        await frame(); await frame()
+        fire('confirm', 'stack-n2')
+        await until(() => /no longer confirms the exact version/.test(card()?.note || '') || states.some(state => (state.actions || []).some(action => /no longer confirms the exact version/.test(action.note || ''))), 'A lost binding did not refuse: ' + JSON.stringify(card()))
+        ensure(!calls.requests.slice(before).some(call => call.method === 'POST' && /\/(submit|submit-stack|update-stack|update-existing)$/.test(call.url)), 'An unbound send was made')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
+        root.render(null)
+      }
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,

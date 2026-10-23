@@ -341,6 +341,24 @@ People & access link. Partial batch assignments report each failed PR.
 Contract review: this simplifies presentation at the app-owned boundary, reuses
 existing action owners, and adds no alternate public authority or merge path.
 
+### Send from chat
+
+`prepared_block.py <record-id>…` prints a chat card for prepared work. The chat
+runs Contribute headless behind the card (`chat.blocks.passive`): reading the
+card performs only exact record reads; tapping **Contribute** (or **Contribute
+all**) starts a send-only runtime that renders nothing and reads only the
+complete ledger, the GitHub connection and the current review status of the
+card's records plus every prepared layer of their stacks. It then turns the same
+button into **Confirm** with the app-supplied identity and size of every change.
+Confirm calls the same guarded Send handlers as the workspace and passes the
+confirmed snapshot as `expected_record(s)`; without that platform binding the
+card never sends, including when the binding disappears between Confirm and the
+write.
+Independent units are sent in parallel; a stack's layers in order. Only
+attempts whose outcome is unknown survive a reload, as a bounded checkpoint of
+ids, and lock their unit until a read shows the result. A batch card's action
+is `chat-send-batch:<16-hex handle>`, bound to the exact records the card lists.
+
 ### PR links from chat
 
 `pr_block.py owner/repo#123` prints a static chat block for one PR. Opening it
