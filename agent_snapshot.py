@@ -295,7 +295,13 @@ def main() -> int:
   parser.add_argument("--limit", type=int, default=100)
   parser.add_argument("--json", action="store_true")
   parser.add_argument("--offline", action="store_true", help="skip the one GitHub batch")
+  # Retired attached-work flag, still accepted and ignored for one release window
+  # so a platform without the informational-Changes change does not fail here.
+  # Remove after that window.
+  parser.add_argument("--work-json", help=argparse.SUPPRESS)
   args = parser.parse_args()
+  if args.work_json is not None:
+    print("agent_snapshot: --work-json is retired and ignored; attached-work preparation no longer exists.", file=sys.stderr)
   try:
     ledger = args.ledger_dir or find_ledger(args.db)
     records = load_active(ledger, max(1, min(args.limit, 500)))

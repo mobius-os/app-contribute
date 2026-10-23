@@ -100,8 +100,28 @@ test('existing PR updates require exact public metadata without mutating it', ()
 test('retired attached-work settlement is gone; Changes is informational only', () => {
   assert.doesNotMatch(prose, /settle_chat_changes|Changes ready to organize|--work-json|attached-work/)
   assert.match(core, /\*\*Changes\*\* view only lists its edits; it is never a request or approval/)
-  assert.equal(existsSync(new URL('../attached-work.md', import.meta.url)), false)
   assert.equal(existsSync(new URL('../settle_chat_changes.py', import.meta.url)), false)
+})
+
+// For one release window an older Möbius may still start the retired helper
+// from Changes. The stub makes that helper stop and report; remove it after.
+test('the attached-work stub tells an older helper the flow is retired and to change nothing', () => {
+  const stub = read('attached-work.md').replace(/\s+/g, ' ')
+  assert.match(stub, /Attached-work preparation is retired/)
+  assert.match(stub, /Make no changes/)
+  assert.match(stub, /Report back to the owner/)
+  assert.match(stub, /Remove it after that window/)
+  assert.doesNotMatch(stub, /agent_snapshot\.py|--work-json|restage|CAS/i, 'the stub gives no work instructions')
+})
+
+// The owner-facing docs outside the skill no longer describe Changes as a
+// place where preparation or settlement happens.
+test('product docs describe Changes as informational, not as a preparation flow', () => {
+  const docs = ['README.md', 'PRODUCT.md', 'contributing/ledger.md'].map(name => read(name).replace(/\s+/g, ' ')).join(' ')
+  assert.doesNotMatch(docs, /continue in its existing \*\*Changes\*\* view|settled work belongs in the chat's persistent Changes view|Recorded edits may prompt one lightweight preparation card|Changes preserve that lifecycle|Changes view settle/)
+  const ui = read('ui/SourceConversations.jsx')
+  assert.doesNotMatch(ui, /view: 'changes'|Open Changes|choose Changes/)
+  assert.match(ui, /ask it to prepare its changes/)
 })
 
 test('linked private reviews are locked until verified terminal cleanup', () => {

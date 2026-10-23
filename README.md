@@ -25,7 +25,7 @@ contribution. This app is the dashboard for that loop:
   blindly rebasing the live checkout. On phones, a task takes the screen and
   **Back to project** restores the same inventory.
 - **Choose scope** — prepare all local work in a project, or find a source
-  conversation and continue in its existing **Changes** view. This metadata
+  conversation, open it and ask it to prepare its changes. This metadata
   picker requires the companion platform source-chats route; older runtimes
   show an actionable error and leave project preparation available.
 - **Exact batches** — ready work can be inspected and approved together within

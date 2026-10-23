@@ -133,3 +133,16 @@ class AgentSnapshotTests(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class RetiredWorkJsonTests(unittest.TestCase):
+  def test_work_json_is_accepted_and_ignored_for_one_release_window(self):
+    import io, contextlib, sys
+    with tempfile.TemporaryDirectory() as ledger:
+      argv = ["agent_snapshot.py", "--ledger-dir", ledger, "--offline", "--json", "--work-json", '{"paths": ["x"]}']
+      out, err = io.StringIO(), io.StringIO()
+      with patch.object(sys, "argv", argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        self.assertEqual(snapshot.main(), 0)
+      self.assertEqual(json.loads(out.getvalue())["active"], 0)
+      self.assertNotIn("records", json.loads(out.getvalue()), "no attached-work view is produced")
+      self.assertIn("--work-json is retired and ignored", err.getvalue())

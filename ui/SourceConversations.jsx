@@ -21,12 +21,12 @@ export function SourceConversations({ project, token, appId }) {
     <h3>Choose what to prepare</h3>
     <button className="co-scope-row" onClick={() => task.open('task:prepare')}><strong>All local work in {project.name}</strong><span>Group related work across conversations.</span><Icon name="right" size={16} /></button>
     <h4>One conversation</h4>
-    <p>Continue in its Changes view. Preparation stays with the conversation that owns the work.</p>
+    <p>Open the conversation and ask it to prepare its changes. Preparation stays with the conversation that owns the work.</p>
     {state.phase === 'loading' ? <p role="status">Finding source conversations…</p> : null}
-    {state.phase === 'error' ? <div role="alert"><p>Source conversations couldn’t load. {state.error}</p><button className="co-btn" onClick={() => setAttempt(old => old + 1)}>Try again</button><p>You can still open a conversation directly and choose Changes.</p></div> : null}
+    {state.phase === 'error' ? <div role="alert"><p>Source conversations couldn’t load. {state.error}</p><button className="co-btn" onClick={() => setAttempt(old => old + 1)}>Try again</button><p>You can still open a conversation directly and ask it to prepare its changes.</p></div> : null}
     {state.phase === 'ready' && !state.chats.length ? <p>No source conversations were found for this project. Its current code can still be prepared as a whole.</p> : null}
-    {state.chats.map(chat => <button className="co-scope-row" key={chat.chat_id} onClick={() => window.parent.postMessage({ type: 'moebius:open-chat', chatId: chat.chat_id, view: 'changes' }, '*')}>
-      <strong>{chat.title || 'Source conversation'}</strong><span>Open Changes</span><Icon name="right" size={16} />
+    {state.chats.map(chat => <button className="co-scope-row" key={chat.chat_id} onClick={() => window.parent.postMessage({ type: 'moebius:open-chat', chatId: chat.chat_id }, '*')}>
+      <strong>{chat.title || 'Source conversation'}</strong><span>Open conversation</span><Icon name="right" size={16} />
     </button>)}
   </TaskPane>
 }
