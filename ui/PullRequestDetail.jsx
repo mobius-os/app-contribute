@@ -4,6 +4,7 @@ import { MarkdownView } from './MarkdownView.jsx'
 import DiffView from './diff/DiffView.jsx'
 import { Icon } from './Icons.jsx'
 import { ChecksBadge, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
+import { openAgentConversation } from './BatchAction.jsx'
 
 export function DateLabel({ value, prefix = '' }) {
   if (!value || !Number.isFinite(Date.parse(value))) return null
@@ -23,6 +24,18 @@ function threadLocation(thread) {
   }
   if (Number.isInteger(thread.originalLine)) return `original line ${thread.originalStartLine && thread.originalStartLine !== thread.originalLine ? `${thread.originalStartLine}–` : ''}${thread.originalLine}`
   return 'line unavailable'
+}
+const PROVENANCE_HINTS = { source: 'Created or updated this PR', review: 'Reviewed this PR', fix: 'Fixed this PR' }
+// One place for where this PR came from: its local preparation in Contribute
+// and the conversations that created, reviewed or fixed it.
+function PullProvenance({ record, onRecord, conversations }) {
+  const local = record && onRecord
+  if (!local && !conversations.length) return null
+  return <section className="co-gh-provenance" aria-label="Where this PR came from">
+    <Icon name="feedback" size={16} /><span>From</span>
+    {local ? <button type="button" className="co-gh-chat-link" onClick={() => onRecord(record)}>Local preparation</button> : null}
+    {conversations.map(link => <button type="button" className="co-gh-chat-link" key={link.chat_id} title={PROVENANCE_HINTS[link.role]} onClick={() => openAgentConversation(link.chat_id)}>{link.title}</button>)}
+  </section>
 }
 function ReadErrors({ errors, onRetry }) {
   return errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={onRetry}>Retry</button></p>)
@@ -85,7 +98,7 @@ export function PullRequestDetail(props) {
   const identity = `${pr.repository?.nameWithOwner}#${pr.number}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
   return <PullRequestDetailView key={identity} {...props} />
 }
-function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record }) {
+function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, readOnly = false, provenance = [] }) {
   const [tab, setTab] = useState('conversation')
   const [cache, setCache] = useState(() => cacheStore?.entries || {})
   const cacheRef = useRef(cache)
@@ -190,11 +203,12 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
     </header>
     <div className="co-pr-detail-actions">
-      <button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview?.('review')}><Icon name="prepare" /> Take on with agent</button>
-      {canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}><Icon name="person" /> Assign</button> : null}
+      {!readOnly ? <button className="co-btn co-btn-primary" disabled={stale} onClick={() => onReview?.('review')}><Icon name="prepare" /> Take on with agent</button> : null}
+      {!readOnly && canAssign ? <button className="co-btn" disabled={stale} onClick={onAssign}><Icon name="person" /> Assign</button> : null}
       {status ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
       <DetailLink href={pr.url}>Open on GitHub</DetailLink>
     </div>
+    <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
     <nav className="co-detail-tabs" aria-label="Pull request details">{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}
       {key === 'files' && Number.isInteger(pr.changedFiles) ? <><span className="co-tab-count">{pr.changedFiles}</span><span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span></> : null}
       {key === 'checks' ? <ChecksBadge pr={pr} /> : null}</button>)}</nav>
@@ -211,7 +225,6 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       {readState(related, 'related issues', retryRelated)}
       {ready(related) ? <PullRelated data={related.data} /> : null}
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
-      {record && onRecord ? <button className="co-quiet-action" onClick={() => onRecord(record)}>Local preparation &amp; source conversation</button> : null}
     </> : null}
     {tab !== 'conversation' ? readState(view, tab === 'files' ? 'files' : 'checks') : null}
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}

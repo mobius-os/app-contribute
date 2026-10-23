@@ -210,6 +210,20 @@ resume. Keep questions and blockers together in the parent conversation and
 notify the owner with its link. The same selected PR can be reviewed without
 merging by choosing **Review**.
 
+## Link a PR in chat
+
+To point the owner at one public PR, print its link block:
+
+```bash
+python3 /data/apps/contribute/pr_block.py 'owner/repository#123'
+```
+
+Paste the printed `mobius-app` fence unchanged. It is a static snapshot (state,
+author, size, labels) whose intent `pull-request:owner/repository#123` opens
+that exact PR in its Contribute project, including closed or later-page PRs.
+Opening it never starts, approves or sends anything; continue any work in its
+source or review conversation. Do not edit the facts or imply it reviewed code.
+
 ## Prepare & merge
 
 **Prepare & merge** for local work remains a continuous workflow toward merge,

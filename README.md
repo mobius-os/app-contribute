@@ -305,6 +305,17 @@ People & access link. Partial batch assignments report each failed PR.
 Contract review: this simplifies presentation at the app-owned boundary, reuses
 existing action owners, and adds no alternate public authority or merge path.
 
+### PR links from chat
+
+`pr_block.py owner/repo#123` prints a static chat block for one PR. Opening it
+sends the intent `pull-request:owner/repo#123`: Contribute opens that PR's
+project, reads the exact PR (closed or beyond the first page included), opens
+its detail and highlights its row. The PR stays pinned only while that detail
+is open; leaving it or the project releases it. Closed PRs are read-only. The
+detail's **From** line links the local preparation and the source, review and
+fix conversations for that exact repository and number. The block declares no
+executable capability and grants nothing.
+
 ## Workspace checks
 
 Run the local unit, rendering and Python contracts:

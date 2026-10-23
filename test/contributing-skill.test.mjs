@@ -215,3 +215,11 @@ test('pull-request records are staged and reviewed through Contribute, never han
   assert.doesNotMatch(prose, /CAS-(store|mark|update) `?quality_review/)
   assert.doesNotMatch(attached, /"quality_review": \{/)
 })
+
+test('the read-only PR link helper has its own routing row outside maintainer rights', () => {
+  const skill = readFileSync(new URL('../contributing/SKILL.md', import.meta.url), 'utf8')
+  const rows = skill.split('\n').filter(line => line.startsWith('|'))
+  const rights = rows.find(line => line.includes('upstream push or merge rights'))
+  assert.ok(rights && !rights.includes('pr_block.py'), 'pr_block.py is not filed under maintainer rights')
+  assert.ok(rows.some(line => line.includes('pr_block.py') && /no rights needed/.test(line)))
+})
