@@ -183,6 +183,7 @@ navigator.sendBeacon = forbidden('sendBeacon')
 window.open = forbidden('window.open')
 window.addEventListener('error', event => calls.forbidden.push({ kind: 'runtime error', message: event.message }))
 window.addEventListener('unhandledrejection', event => calls.forbidden.push({ kind: 'unhandled rejection', message: String(event.reason) }))
+window.cycleChats = new Map()
 window.mobius = {
   online: true,
   storage: {
@@ -212,6 +213,8 @@ window.mobius = {
   chat: {
     start: async action => { calls.starts.push(structuredClone(action)); return { chatId: 'prepare-' + calls.starts.length } },
     status: async id => { calls.status.push(id); return { running: true } },
+    // The project's live scoped conversations, as the platform lists them.
+    list: async ({ scope } = {}) => window.cycleChats.has(scope) ? [{ id: window.cycleChats.get(scope) }] : [],
     stop: async id => { calls.stops.push(id); return {stopped:true} },
     open: id => calls.opened.push(id),
   },
@@ -273,7 +276,7 @@ function Fixture() {
   }
   // Project work arrives with its cycle id; the platform's de-duplication
   // returns the same conversation for a repeated id.
-  const cycleChats = new Map()
+  const cycleChats = window.cycleChats
   async function start(action) {
     if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}
     const started = await window.mobius.chat.start(action)
@@ -792,10 +795,14 @@ window.runWorkspaceChecks = async () => {
       window.failStart=true; await click(button('Start pull'))
       await until(()=>text(query('[data-task="task:update"]')).includes('Fixture agent unavailable'),'Agent-start failure missing')
       ensure(calls.starts.length===starts,'Failed handoff counted as started')
-      // A failed start keeps its cycle; Send again sends the same cycle id.
+      // A failed start keeps its cycle for Send again. No conversation holds
+      // it, so Send again refuses to create one; the owner starts new work.
       ensure(button('Send again', query('[data-task="task:update"]')), 'A failed start offered no way to send it again')
       window.failStart=false
       const finish=button('Send again', query('[data-task="task:update"]')); finish.click(); finish.click()
+      await until(()=>text(query('[data-task="task:update"]')).includes('not sent again') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
+      ensure(calls.starts.length===starts,'Send again created a conversation for an unheld start')
+      await click(button('Start pull'))
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
       const action=calls.starts.at(-1)
       ensure(action.event==='update_source_projects' && action.draft.includes('app:other') && !action.draft.includes('app:fixture'),'Update scope drifted')

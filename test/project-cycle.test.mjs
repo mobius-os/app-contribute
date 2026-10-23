@@ -8,9 +8,9 @@ import { deliverCycleMessage } from '../cycle-delivery.js'
 // The hook's effects observe only a fixture runtime/storage. No DOM, real
 // conversation, saved partner record, or application transport is involved.
 const source = readFileSync(new URL('../ui/useProjectCycle.js', import.meta.url), 'utf8')
-function fixture({ saved = null, runtime = {}, statusError = false, stopResult = { stopped: true }, begin = async () => ({ ok: false, error: 'Fixture start refused' }), record = async () => true, deliver = () => assert.fail('Observation must not start an agent') } = {}) {
+function fixture({ saved = null, runtime = {}, statusError = false, stopResult = { stopped: true }, begin = async () => ({ ok: false, error: 'Fixture start refused' }), current, update = async () => true, list = async () => [], deliver = () => assert.fail('Observation must not start an agent') } = {}) {
   const slots = [], effects = [], calls = []
-  let cursor = 0
+  let cursor = 0, planned = null
   const context = vm.createContext({
     useState(initial) {
       const index = cursor++
@@ -24,8 +24,10 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
     useCallback: callback => callback,
     useEffect: effect => { effects.push(effect) },
     loadCycleState: async key => { calls.push(['load', key]); return typeof saved === 'function' ? saved() : saved },
-    beginProjectCycle: (...args) => { calls.push(['begin', args[0]]); return begin(...args) },
-    recordCycleDelivery: (...args) => { calls.push(['record', ...args]); return record(...args) },
+    beginProjectCycle: async (...args) => { calls.push(['begin', args[0]]); const result = await begin(...args); if (result?.ok) planned = result; return result },
+    // By default the online record's current cycle is the one this fixture began.
+    loadCurrentCycle: async key => { calls.push(['current', key]); if (current) return current(key); return planned ? { k: planned.k, cycle: { k: planned.k, cid: planned.cid, action: planned.action } } : { k: 0, cycle: null } },
+    updateCurrentCycle: (...args) => { calls.push(['update', ...args]); return update(...args) },
     freezeStartAction,
     openAgentConversation: id => { calls.push(['open', id]); return { ok: true } },
     document: { hidden: false },
@@ -33,7 +35,7 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
       calls.push(['status', id])
       if (typeof statusError === 'function' ? statusError(id) : statusError) throw Error('Fixture unavailable')
       return typeof runtime === 'function' ? runtime(id) : runtime
-    }, stop: async id => { calls.push(['stop', id]); return stopResult } } }, addEventListener() {}, removeEventListener() {} },
+    }, list: async options => { calls.push(['list', options?.scope]); return list(options) }, stop: async id => { calls.push(['stop', id]); return stopResult } } }, addEventListener() {}, removeEventListener() {} },
     setInterval: () => 1, clearInterval() {},
   })
   vm.runInContext(source.replace(/^import .*\n/gm, '').replace(/export (function|const) /g, '$1 '), context)
@@ -244,6 +246,7 @@ function platformStandIn() {
       return reply(200, {})
     }
     const send = url.match(/^\/api\/chats\/([^/]+)\/messages$/)
+    if (send && platform.failSend > 0) { platform.failSend--; return reply(503, {}) }
     if (send) {
       const result = await serial(async () => {
         const chat = chats.find(row => row.id === decodeURIComponent(send[1]) && !row.deleted)
@@ -283,7 +286,8 @@ async function realCycles(t) {
   }
   const pane = () => {
     const f = fixture({ saved: () => storage.loadCycleState('fixture-project'), runtime, statusError: id => !platform.chats.some(row => row.id === id && !row.deleted),
-      begin: (...args) => storage.beginProjectCycle(...args), record: (...args) => storage.recordCycleDelivery(...args),
+      begin: (...args) => storage.beginProjectCycle(...args), current: (...args) => storage.loadCurrentCycle(...args), update: (...args) => storage.updateCurrentCycle(...args),
+      list: async ({ scope }) => platform.active().filter(chat => chat.scope === scope).map(chat => ({ id: chat.id })),
       deliver: request => deliverCycleMessage('app-token', request, platform.fetch) })
     return f
   }
@@ -340,9 +344,11 @@ test('a stale pane re-sending cycle k after k+1 started adds no message', async 
   assert.equal((await b.render().start({ ...ACTION, title: 'Next', draft: 'Next work' })).ok, true)
   const scope = await storage.projectCycleScope('fixture-project')
   assert.deepEqual(platform.messages(), [scope + ':1', scope + ':2'])
-  // The stale pane's Send again repeats cycle 1's id: a duplicate, nothing new.
+  // The stale pane's Send again consults the record first: no request at all.
+  const before = platform.requests.length
   const stale = await a.render().sendAgain()
-  assert.equal(stale.ok, true)
+  assert.equal(stale.superseded, true)
+  assert.equal(platform.requests.length, before, 'no PATCH, start or send')
   assert.deepEqual(platform.messages(), [scope + ':1', scope + ':2'])
   assert.equal(platform.active().length, 1)
   assert.equal((await storage.loadCycleState('fixture-project')).k, 2, 'the stale delivery does not rewind the record')
@@ -435,4 +441,96 @@ test('delivery reports refusals without claiming the cycle was sent', async () =
   assert.equal(seen[0][2].cid, 's:1')
   assert.equal(seen[0][2].scope, 's')
   assert.equal(seen[0][2].owner_visible, true)
+})
+
+test('Send again after a confirmed delivery is a no-op', async t => {
+  const { platform, until, pane, ready } = await realCycles(t)
+  const p = pane(); await ready(p)
+  const planned = (await p.render().start(ACTION)) && p.render().cycle
+  assert.equal(planned.chatId, 'chat-1')
+  const scope = platform.chats[0].scope
+  // A pane still showing the cycle as unsent (for example, it missed the confirmation).
+  p.setCycle({ ...p.render().cycle, unsent: { k: 1, cid: scope + ':1', scope, action: freezeStartAction(ACTION) } })
+  const before = platform.requests.length
+  const result = await p.render().sendAgain()
+  assert.equal(result.superseded, true)
+  assert.equal(platform.requests.length, before, 'nothing is requested for a delivered cycle')
+  await until(() => !p.render().cycle.unsent)
+  assert.equal(Boolean(p.render().cycle.unsent), false, 'the pane shows the current state')
+})
+
+test('R8-1: a delivered cycle is not replayed into the conversation that replaced its deleted one', async t => {
+  const { storage, platform, pane, ready } = await realCycles(t)
+  const stale = pane(); await ready(stale)
+  await stale.render().start(ACTION)
+  const scope = await storage.projectCycleScope('fixture-project')
+  // The stale pane keeps an old view of cycle 1 as unsent.
+  stale.setCycle({ ...stale.render().cycle, unsent: { k: 1, cid: scope + ':1', scope, action: freezeStartAction(ACTION) } })
+  platform.chats[0].deleted = true
+  const other = pane(); await ready(other)
+  assert.equal((await other.render().start({ ...ACTION, title: 'Cycle two', draft: 'Second work' })).ok, true)
+  assert.equal(platform.active()[0].id, 'chat-2')
+  const before = platform.requests.length
+  await stale.render().sendAgain()
+  assert.equal(platform.requests.length, before)
+  assert.deepEqual(platform.chats.map(chat => chat.messages), [[scope + ':1'], [scope + ':2']], 'cycle 1 was admitted exactly once')
+})
+
+test('R8-1: an unconfirmed cycle whose conversation was deleted is not sent again into a new one', async t => {
+  const { storage, platform, pane, ready } = await realCycles(t)
+  const p = pane(); await ready(p)
+  platform.lose = 1
+  await p.render().start(ACTION)
+  assert.ok(p.render().cycle.unsent, 'the acknowledgement was lost')
+  const scope = await storage.projectCycleScope('fixture-project')
+  platform.chats[0].deleted = true
+  // The retry arrives before any cycle 2.
+  const reloaded = pane(); await ready(reloaded)
+  const before = platform.requests.length
+  const again = await reloaded.render().sendAgain()
+  assert.equal(again.closed, true)
+  assert.match(reloaded.render().cycle.error, /not sent again/)
+  assert.equal(platform.requests.length, before, 'no start or send was made')
+  assert.deepEqual(platform.messages(), [scope + ':1'], 'cycle 1 was admitted exactly once')
+  // After a reload it is not offered again; new work is an explicit new cycle.
+  const later = pane(); await ready(later)
+  assert.equal(Boolean(later.render().cycle.unsent), false)
+  assert.equal((await later.render().start({ ...ACTION, title: 'New work' })).ok, true)
+  assert.deepEqual(platform.active().map(chat => chat.messages), [[scope + ':2']])
+})
+
+test('R8-2: a stale retry never rolls back a newer cycle\'s model, and a retry does not re-apply one', async t => {
+  const { platform, until, pane, ready } = await realCycles(t)
+  const a = pane(); await ready(a)
+  await a.render().start(ACTION)
+  a.setCycle({ ...a.render().cycle, phase: 'complete' })
+  // Cycle 2 picks model X.
+  const x = { ...ACTION, title: 'Cycle two', agent: { provider: 'codex', model: 'model-x' } }
+  await a.render().start(x)
+  assert.equal(platform.chats[0].model, 'model-x')
+  // Pane B moves on to cycle 3 with model Y.
+  const b = pane(); await ready(b)
+  b.setCycle({ ...b.render().cycle, phase: 'complete' })
+  assert.equal((await b.render().start({ ...ACTION, title: 'Cycle three', agent: { provider: 'codex', model: 'model-y' } })).ok, true)
+  assert.equal(platform.chats[0].model, 'model-y')
+  // Pane A's stale retry of cycle 2 changes nothing.
+  const scope = platform.chats[0].scope
+  a.setCycle({ ...a.render().cycle, unsent: { k: 2, cid: scope + ':2', scope, action: freezeStartAction(x) } })
+  const before = platform.requests.length
+  await a.render().sendAgain()
+  assert.equal(platform.requests.length, before, 'no PATCH and no send')
+  assert.equal(platform.chats[0].model, 'model-y', 'the newer selection is kept')
+  // A retry of the current cycle after its model was applied does not PATCH again.
+  b.setCycle({ ...b.render().cycle, phase: 'complete' })
+  platform.failSend = 1
+  const z = { ...ACTION, title: 'Cycle four', agent: { provider: 'codex', model: 'model-z' } }
+  assert.equal((await b.render().start(z)).ok, false)
+  assert.equal(platform.chats[0].model, 'model-z')
+  platform.chats[0].model = 'owner-changed'
+  const patches = () => platform.requests.filter(([method]) => method === 'PATCH').length
+  const patched = patches()
+  await until(() => b.render().cycle.unsent)
+  assert.equal((await b.render().sendAgain()).ok, true)
+  assert.equal(patches(), patched, 'the retry did not PATCH again')
+  assert.equal(platform.messages().filter(cid => cid === scope + ':4').length, 1)
 })

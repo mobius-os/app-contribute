@@ -1,6 +1,6 @@
 // Project-local progress over the project's one durable agent conversation.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { beginProjectCycle, freezeStartAction, loadCycleState, recordCycleDelivery } from '../storage.js'
+import { beginProjectCycle, freezeStartAction, loadCurrentCycle, loadCycleState, updateCurrentCycle } from '../storage.js'
 import { openAgentConversation } from './BatchAction.jsx'
 
 // Run statuses the platform still owns (models.NONTERMINAL_RUN_STATUSES).
@@ -70,7 +70,7 @@ export function useProjectCycle(projectKey, deliver) {
         : { phase: 'idle', chatId: '', history: [], error: '' })
       return
     }
-    const current = saved.cycle && !saved.cycle.delivered ? { ...saved.cycle, scope: saved.scope || saved.cycle.cid.replace(/:\d+$/, '') } : null
+    const current = saved.cycle && !saved.cycle.delivered && !saved.cycle.closed ? { ...saved.cycle, scope: saved.scope || saved.cycle.cid.replace(/:\d+$/, '') } : null
     setCycle({
       chatId: saved.chat_id || '', k: saved.k || 0, title: saved.title, event: saved.event, startedAt: saved.started_at, history: saved.history || [],
       unsent: current, phase: saved.chat_id ? 'checking' : 'idle', error: current ? 'This start was not confirmed. Send it again; a message that already arrived is not sent twice.' : '',
@@ -90,22 +90,63 @@ export function useProjectCycle(projectKey, deliver) {
     window.addEventListener('focus', check)
     return () => { clearInterval(timer); window.removeEventListener('focus', check) }
   }, [cycle.chatId, cycle.phase, refresh])
-  // Deliver cycle k. Safe to repeat from any pane: the message id is fixed.
+  const NOT_SENT_AGAIN = 'No conversation holds this start any more, so it was not sent again. Start new work to send it.'
+  // Deliver cycle k, only while the project record names k as its current,
+  // unconfirmed cycle. Everything else (a superseded or delivered cycle, an
+  // unreadable record) sends nothing and changes nothing.
+  // - The first attempt is recorded before it is made, and is the only one
+  //   that may create the project's conversation.
+  // - A retry is bound to the conversation that cycle went to (recorded, or
+  //   the scope's one live conversation). With none, the conversation was
+  //   deleted or never created; the retry is refused rather than recreating
+  //   the scope, and the owner can start new work instead.
+  // - Model and effort are applied until one attempt applied them.
   async function send(requestedProject, planned) {
-    let outcome
-    try { outcome = await deliver({ ...planned.action, scope: planned.scope, cid: planned.cid }) }
-    catch { outcome = { ok: false, error: 'Could not reach Möbius. Send again.' } }
-    if (!isCurrent(requestedProject)) return outcome
-    if (!outcome?.ok || !outcome.chatId) {
-      const error = outcome?.error || 'This start was not confirmed. Send it again.'
-      const chatId = outcome?.chatId ? String(outcome.chatId) : ''
-      setCycle(current => ({ ...current, unsent: planned, chatId: chatId || current.chatId, phase: chatId || current.chatId ? 'checking' : 'idle', error }))
-      if (chatId || cycle.chatId) void refresh(chatId || cycle.chatId)
+    const keepUnsent = (error, extra = {}) => {
+      if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: planned, ...extra, phase: extra.chatId || current.chatId ? 'checking' : 'idle', error }))
       return { ok: false, unsent: true, error }
     }
-    await recordCycleDelivery(requestedProject, planned.k, outcome.chatId)
-    if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: null, chatId: outcome.chatId, title: planned.action.title, event: planned.action.event, phase: 'running', error: '' }))
-    return { ok: true, chatId: outcome.chatId }
+    let fresh
+    try { fresh = await loadCurrentCycle(requestedProject) } catch { return keepUnsent('The project record could not be checked, so nothing was sent. Send again.') }
+    const current = fresh.cycle
+    if (fresh.k !== planned.k || current?.cid !== planned.cid || current.delivered || current.closed) {
+      await recheck()
+      return { ok: false, superseded: true, error: '' }
+    }
+    let chatId = current.chat_id || ''
+    if (current.attempted && !chatId) {
+      let rows = null
+      try { rows = await window.mobius.chat.list({ scope: planned.scope }) } catch { rows = null }
+      if (!Array.isArray(rows)) return keepUnsent('Möbius could not check this start, so nothing was sent. Send again.')
+      if (rows.length > 1) return keepUnsent('More than one conversation answers this project. Open them before continuing.')
+      if (!rows.length) {
+        await updateCurrentCycle(requestedProject, planned.k, planned.cid, { closed: true })
+        if (isCurrent(requestedProject)) setCycle(current => ({ ...current, unsent: null, phase: current.chatId ? current.phase : 'idle', error: NOT_SENT_AGAIN }))
+        return { ok: false, closed: true, error: NOT_SENT_AGAIN }
+      }
+      chatId = String(rows[0].id)
+    }
+    if (!current.attempted && !await updateCurrentCycle(requestedProject, planned.k, planned.cid, { attempted: true })) {
+      return keepUnsent('This start could not be saved before sending, so nothing was sent. Send again.')
+    }
+    let outcome
+    try { outcome = await deliver({ ...current.action, scope: planned.scope, cid: current.cid, ...(chatId ? { chatId } : {}), applyModel: !current.model_applied }) }
+    catch { outcome = { ok: false, error: 'Could not reach Möbius. Send again.' } }
+    const reached = outcome?.chatId ? String(outcome.chatId) : ''
+    if (reached || outcome?.modelApplied || outcome?.gone) await updateCurrentCycle(requestedProject, planned.k, planned.cid,
+      { chatId: reached, modelApplied: outcome.modelApplied, delivered: Boolean(outcome.ok && reached), closed: Boolean(outcome.gone) })
+    if (!isCurrent(requestedProject)) return outcome
+    if (outcome?.gone) {
+      setCycle(current => ({ ...current, unsent: null, error: NOT_SENT_AGAIN }))
+      return { ok: false, closed: true, error: NOT_SENT_AGAIN }
+    }
+    if (!outcome?.ok || !reached) {
+      const result = keepUnsent(outcome?.error || 'This start was not confirmed. Send it again.', reached ? { chatId: reached } : {})
+      if (reached || cycle.chatId) void refresh(reached || cycle.chatId)
+      return result
+    }
+    setCycle(current => ({ ...current, unsent: null, chatId: reached, title: planned.action.title, event: planned.action.event, phase: 'running', error: '' }))
+    return { ok: true, chatId: reached }
   }
   async function start(action) {
     if (!action || sending.current) return { ok: false, error: 'Work is already starting.' }

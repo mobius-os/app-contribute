@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   collaborationRequest, matchingPulls, prKey, reviewForPull, reviewRunRequest,
 } from '../collaboration.js'
-import { beginProjectCycle, loadCycleState, projectCycleScope, recordCycleDelivery, saveCycleState } from '../storage.js'
+import { beginProjectCycle, loadCurrentCycle, loadCycleState, projectCycleScope, saveCycleState, updateCurrentCycle } from '../storage.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
 // Real React SSR through the app's bundler. These tests do not claim browser
@@ -230,8 +230,12 @@ test('a new project cycle keeps the previous conversation and refuses a pane tha
   assert.deepEqual((await loadCycleState('fixture-project')).cycle.action, action)
   assert.equal((await beginProjectCycle('fixture-project', action, 0)).ok, false, 'a pane that saw cycle 0 cannot start cycle 1 again')
   assert.equal((await loadCycleState('fixture-project')).chat_id, 'old-chat')
-  assert.equal(await recordCycleDelivery('fixture-project', 1, 'new-chat'), true)
-  assert.equal(await recordCycleDelivery('fixture-project', 7, 'other-chat'), false, 'a stale delivery never rewrites a newer record')
+  assert.equal((await loadCurrentCycle('fixture-project')).cycle.cid, scope + ':1')
+  assert.equal(await updateCurrentCycle('fixture-project', 1, scope + ':1', { attempted: true, modelApplied: true }), true)
+  assert.equal(await updateCurrentCycle('fixture-project', 1, scope + ':1', { chatId: 'new-chat', delivered: true }), true)
+  assert.equal(await updateCurrentCycle('fixture-project', 7, scope + ':7', { chatId: 'other-chat', delivered: true }), false, 'a stale delivery never rewrites a newer record')
+  assert.equal(await updateCurrentCycle('fixture-project', 1, 'other-scope:1', { delivered: true }), false, 'the cycle id must match too')
+  assert.deepEqual([value.cycle.attempted, value.cycle.model_applied, value.cycle.chat_id], [true, true, 'new-chat'])
   const saved = await loadCycleState('fixture-project')
   assert.equal(saved.chat_id, 'new-chat')
   assert.equal(saved.cycle.delivered, true)

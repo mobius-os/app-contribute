@@ -297,7 +297,10 @@ function normalizeCycle(raw) {
   const action = freezeStartAction(raw.action)
   if (!action) return null
   return { k: raw.k, cid: raw.cid.slice(0, 200), action, title: action.title, event: action.event || '',
-    started_at: typeof raw.started_at === 'string' ? raw.started_at : '', delivered: raw.delivered === true }
+    started_at: typeof raw.started_at === 'string' ? raw.started_at : '', delivered: raw.delivered === true,
+    ...(typeof raw.chat_id === 'string' && raw.chat_id ? { chat_id: raw.chat_id.slice(0, 128) } : {}),
+    ...(raw.model_applied === true ? { model_applied: true } : {}), ...(raw.attempted === true ? { attempted: true } : {}),
+    ...(raw.closed === true ? { closed: true } : {}) }
 }
 // Older records counted cycles as `seq`.
 const cycleNumber = raw => Number.isSafeInteger(raw?.k) && raw.k >= 0 ? raw.k : Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
@@ -422,10 +425,10 @@ export async function saveCycleState(state, projectKey) {
 // All of a project's agent work runs in ONE app-owned conversation, scoped
 // `contribute-cycle:<project digest>`. The platform keeps at most one active
 // conversation per scope, so a project can never have two owners. Cycle k is
-// one message in it with the deterministic id `<scope>:<k>`; the platform
-// de-duplicates sends by that id, so retries, lost responses and stale panes
-// re-deliver nothing. k comes from this CAS'd record, but correctness does not
-// depend on it: a stale k only re-sends a message that was already delivered.
+// one message in it with the deterministic id `<scope>:k`. The platform
+// de-duplicates that id per conversation, not per scope, so this record is
+// consulted before every delivery: only its current, unconfirmed cycle is
+// ever sent, and a retry stays bound to the conversation it went to.
 export async function projectCycleScope(projectKey) {
   return `contribute-cycle:${(await cycleKey(projectKey)).replace(/^project-cycles\/|\.json$/g, '').slice(0, 32)}`
 }
@@ -458,15 +461,32 @@ export async function beginProjectCycle(projectKey, action = {}, observedK = 0) 
   }
 }
 
-// Display state only: the conversation that received cycle k. A record that
-// has already moved on to a later cycle is left alone.
-export async function recordCycleDelivery(projectKey, k, chatId) {
+// The authoritative current cycle, read online immediately before any
+// delivery. Throws when it cannot be read online.
+export async function loadCurrentCycle(projectKey) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion) throw new Error('Safe cycle starts are unavailable in this Möbius version.')
+  const { value, offline } = await storage.getWithVersion(await cycleKey(projectKey))
+  if (offline) throw new Error('Reconnect before sending.')
+  return { k: cycleNumber(value), cycle: normalizeCycle(value?.cycle), chat_id: typeof value?.chat_id === 'string' ? value.chat_id : '' }
+}
+
+// Update cycle k's own facts (the conversation it went to, whether its model
+// was applied, whether it was delivered) only while k is still current.
+export async function updateCurrentCycle(projectKey, k, cid, facts = {}) {
   const storage = window.mobius?.storage
   try {
     const key = await cycleKey(projectKey)
     const { value, version, offline } = await storage.getWithVersion(key)
-    if (offline || !version || cycleNumber(value) !== k || !value?.cycle) return false
-    const receipt = await storage.durableWrite(key, { ...value, chat_id: String(chatId), cycle: { ...value.cycle, delivered: true } }, { ifMatch: version })
+    if (offline || !version || cycleNumber(value) !== k || value?.cycle?.cid !== cid) return false
+    const cycle = { ...value.cycle }
+    if (facts.chatId) cycle.chat_id = String(facts.chatId)
+    if (facts.modelApplied) cycle.model_applied = true
+    if (facts.delivered) cycle.delivered = true
+    if (facts.attempted) cycle.attempted = true
+    if (facts.closed) cycle.closed = true
+    const next = { ...value, ...(facts.delivered && facts.chatId ? { chat_id: String(facts.chatId) } : {}), cycle }
+    const receipt = await storage.durableWrite(key, next, { ifMatch: version })
     return receipt?.durability === 'synced'
   } catch { return false }
 }
