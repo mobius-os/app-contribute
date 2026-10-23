@@ -5,6 +5,7 @@ import { pullConversations, recordsForPull } from '../provenance.js'
 import { PullRequestDetail } from './PullRequestDetail.jsx'
 import { Avatar, ChecksBadge, GithubLabel, PullStateIcon, REVIEW_DECISION, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
+import { useFocusLease } from './useFocusLease.js'
 import { Icon } from './Icons.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
@@ -113,6 +114,9 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
 // `focusPull` is a navigation lease from a chat link: while it is held, that
 // exact PR stays in view (even when closed or on a later page) and its detail
 // is open. Leaving the detail or the project hands the lease back.
+// A run opens beside its PR when it covers one; batches open under the header.
+const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerCase()}#${run.items[0].number}` : ''
+
 export function PullRequests({ appId, token, project, conn, onChanged, records = [], onRecord, refreshKey, focusPull, onFocusRelease }) {
   const repo = project?.canonical_repo || ''
   const task = useProjectTask()
@@ -124,8 +128,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
   const focusRef = useRef(null)
   focusRef.current = focusKey ? { key: focusKey, nonce: focusPull.nonce, repo: focusPull.repo, number: focusPull.number } : null
-  const releaseRef = useRef(onFocusRelease)
-  releaseRef.current = onFocusRelease
   const [focusError, setFocusError] = useState(null)
   const [runs, setRuns] = useState([])
   const [runError, setRunError] = useState('')
@@ -236,15 +238,17 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     setOpened(focusKey)
     task?.open('task:detail')
   }, [focusRow, focusKey, focusPull?.nonce])
-  const focusDetailOpen = !!focusKey && focusOpened.current === focusPull?.nonce && task?.activeId === 'task:detail' && opened === focusKey
-  const leaseShown = useRef('')
-  useEffect(() => {
-    if (focusDetailOpen) { leaseShown.current = focusPull.nonce; return }
-    const shown = leaseShown.current
-    leaseShown.current = ''
-    if (shown) releaseRef.current?.(shown)
-  }, [focusDetailOpen, focusPull?.nonce])
-  useEffect(() => () => { if (focusRef.current) releaseRef.current?.(focusRef.current.nonce) }, [])
+  // The lease is held while the owner works on that PR: its detail, or a
+  // review, assignment or run pane anchored to its row. Releasing earlier
+  // would drop a later-page PR's row, and the pane rendered inside it.
+  const activeRun = task?.activeId?.startsWith('task:run:') ? runs.find(run => `task:run:${run.id}` === task.activeId) : null
+  const focusWorking = !!focusKey && focusOpened.current === focusPull?.nonce && (
+    (task?.activeId === 'task:detail' && opened === focusKey)
+    || (task?.activeId === 'task:review' && choice?.anchor === focusKey)
+    || (task?.activeId === 'task:assign' && assigning?.anchor === focusKey)
+    || (activeRun && runAnchor(activeRun) === focusKey))
+  const linkedHere = focusPull && focusPull.repo?.toLowerCase() === repo.toLowerCase() ? focusPull.nonce : ''
+  useFocusLease({ nonce: linkedHere, held: focusWorking, connected: conn.state === 'connected', release: onFocusRelease })
   const visible = matchingPulls(pulls, filter, conn.login).filter(pr => !query.trim() || `${pr.number} ${pr.title} ${pr.author?.login || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   const selectableVisible = visible.filter(isOpenPull)
   const selection = pulls.filter(pr => isOpenPull(pr) && selected.has(prKey(pr)))
@@ -295,8 +299,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     setAssigning(Object.assign(pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), { anchor }))
     task?.open('task:assign')
   }
-  // A run opens beside its PR when it covers one; batches open under the header.
-  const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerCase()}#${run.items[0].number}` : ''
   const runTitle = run => run.mode === 'review_merge' ? 'Review & merge' : 'Private review'
   // Saved conversations outlive the open-PR inventory. Its current snapshot
   // provides context, never new approval or a fresh verdict for old findings.
