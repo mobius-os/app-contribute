@@ -53,5 +53,7 @@ test('the picker is app-owned: no shell runtime selector, monochrome marks, comp
   const css = await readFile(new URL('../workspace-theme.js', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /createModelSelector/)
   assert.doesNotMatch(css, /#d97757/i, 'provider marks follow the text color, as in the composer')
-  assert.match(css, /\.co-effort-stop \{[^}]*width:13px; height:13px;/)
+  // A 44px target per stop; the 13px dot is only the visible mark.
+  assert.match(css, /\.co-effort-stop \{[^}]*width:44px; height:44px;/)
+  assert.match(css, /\.co-effort-stop::before \{[^}]*width:13px; height:13px;/)
 })

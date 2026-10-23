@@ -1,6 +1,6 @@
 // Project-local progress over the platform's durable conversation owner.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { claimProjectCycle, loadCycleState, settleProjectCycleClaim } from '../storage.js'
+import { claimProjectCycle, freezeStartAction, loadCycleState, settleProjectCycleClaim } from '../storage.js'
 import { openAgentConversation } from './BatchAction.jsx'
 
 // Observe explicit runtime facts; an unavailable or incomplete status is not
@@ -22,13 +22,16 @@ export function projectCyclePhase(runtime) {
 export const TERMINAL_SCOPE_CODES = ['scope_cancelled', 'scope_deleted']
 
 // Every scoped start has exactly one of three outcomes. Only a certified
-// non-admission may release its reservation; anything else stays owned.
-export function startOutcome(outcome) {
+// non-admission may release its reservation; anything else stays owned. A
+// local refusal proves only that *this* request did not leave: on a retry of
+// an earlier uncertain start it says nothing about that start, so only the
+// platform's scope-wide verdict (cancelled/deleted) can release it.
+export function startOutcome(outcome, { retry = false } = {}) {
   if (outcome?.ok && outcome.chatId) return { state: 'admitted', chatId: String(outcome.chatId) }
-  if (outcome?.notStarted || TERMINAL_SCOPE_CODES.includes(outcome?.code)) {
+  if (TERMINAL_SCOPE_CODES.includes(outcome?.code) || outcome?.notStarted && !retry) {
     return { state: 'not_admitted', error: outcome.error || 'Nothing was started.' }
   }
-  return { state: 'unknown' }
+  return { state: 'unknown', ...(outcome?.notStarted ? { error: outcome.error } : {}) }
 }
 
 const UNRESOLVED_START = 'This start is not confirmed. It stays reserved, so no second agent starts. Finish starting it, or check again.'
@@ -73,7 +76,7 @@ export function useProjectCycle(projectKey, startAgentTask) {
     }
     const base = { chatId: saved.chat_id, title: saved.title, event: saved.event, startedAt: saved.started_at, history: saved.history || [], error: '' }
     if (saved.pending) {
-      const unresolved = { ...base, pending: true, pendingId: saved.pending.id, pendingTitle: saved.pending.title, pendingEvent: saved.pending.event, phase: 'unknown', error: UNRESOLVED_START }
+      const unresolved = { ...base, pending: true, pendingId: saved.pending.id, pendingTitle: saved.pending.title, pendingEvent: saved.pending.event, pendingAction: saved.pending.action || null, phase: 'unknown', error: UNRESOLVED_START }
       setCycle(unresolved)
       try {
         const scope = `contribute-cycle:${saved.pending.id}`
@@ -126,8 +129,9 @@ export function useProjectCycle(projectKey, startAgentTask) {
       return { ok: false, error: outcome.error }
     }
     if (outcome.state === 'unknown') {
-      if (current()) setCycle({ ...previous, pending: true, pendingId: claimId, pendingTitle: action.title, pendingEvent: action.event, phase: 'unknown', error: UNRESOLVED_START })
-      return { ok: false, reserved: true, error: UNRESOLVED_START }
+      const error = outcome.error ? `${outcome.error} ${UNRESOLVED_START}` : UNRESOLVED_START
+      if (current()) setCycle({ ...previous, pending: true, pendingId: claimId, pendingTitle: action.title, pendingEvent: action.event, pendingAction: freezeStartAction(action), phase: 'unknown', error })
+      return { ok: false, reserved: true, error }
     }
     const saved = { chat_id: outcome.chatId, title: action.title, event: action.event, started_at: new Date().toISOString(), scope: `contribute-cycle:${claimId}` }
     const recorded = await settleProjectCycleClaim(requestedProject, claimId, saved)
@@ -136,8 +140,8 @@ export function useProjectCycle(projectKey, startAgentTask) {
     if (current()) setCycle({ shortcutError, phase: recorded ? 'running' : 'unknown', chatId: saved.chat_id, title: saved.title, event: saved.event, startedAt: saved.started_at, history, error: shortcutError })
     return { ok: true, chatId: outcome.chatId }
   }
-  async function admit(action, claimId) {
-    try { return startOutcome(await startAgentTask({ ...action, scope: `contribute-cycle:${claimId}` })) }
+  async function admit(action, claimId, retry = false) {
+    try { return startOutcome(await startAgentTask({ ...action, scope: `contribute-cycle:${claimId}` }), { retry }) }
     catch { return { state: 'unknown' } }
   }
   async function start(action) {
@@ -162,14 +166,18 @@ export function useProjectCycle(projectKey, startAgentTask) {
   // Explicit recovery of a reserved start whose outcome is unknown. Replaying
   // the same scope is idempotent on the platform: it returns the admitted
   // conversation or admits its first turn once; it never starts a second agent.
-  async function finishStart(action) {
+  // It replays the exact frozen payload (work, title, model), never a choice
+  // rebuilt from today's project state.
+  async function finishStart() {
     const claimId = cycle.pendingId
-    if (!claimId || !action || starting.current) return { ok: false, error: 'There is no reserved start to finish.' }
+    const action = cycle.pendingAction
+    if (!claimId || starting.current) return { ok: false, error: 'There is no reserved start to finish.' }
+    if (!action) return { ok: false, error: 'This older start did not save its exact work, so it cannot be finished here. Discard it, then start again.' }
     starting.current = true
     observation.current++
     const previous = cycle
     setCycle(current => ({ ...current, phase: 'starting', error: '' }))
-    try { return await settleStart(projectKey, claimId, action, { ...previous, pending: false }, await admit(action, claimId)) }
+    try { return await settleStart(projectKey, claimId, action, { ...previous, pending: false }, await admit(action, claimId, true)) }
     finally { starting.current = false }
   }
   // Where the platform can fence a scope, the owner may abandon a reserved

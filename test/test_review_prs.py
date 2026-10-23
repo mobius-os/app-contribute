@@ -125,16 +125,26 @@ class AdapterTests(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, "saved selection changed"):
       run(core, "example/project#7")
 
-  def test_run_block_is_printed_for_a_listed_run_only(self):
-    core = FakeCore(responses={("GET", "/api/github/contributions/80/review-runs"): {"runs": [{"id": "run-87654321", "mode": "review_merge", "execution_state": "running", "items": [ITEM]}]}})
+  def test_run_block_reads_the_exact_run_even_beyond_the_recent_list(self):
+    missing = HTTPError("u", 404, "missing", {}, io.BytesIO(b"{}"))
+    core = FakeCore(responses={("GET", "/api/github/contributions/80/review-runs"): {"runs": []},
+      ("GET", "/api/github/contributions/80/review-runs/run-87654321"): {"run": {"id": "run-87654321", "mode": "review_merge", "execution_state": "running", "items": [ITEM]}},
+      ("GET", "/api/github/contributions/80/review-runs/run-00000000"): missing})
     printed = run(core, "--block", "run-87654321")
     block = json.loads(printed.split("\n")[1])
     self.assertEqual((block["intent"], block["title"]), ("review-run:run-87654321", "Review & merge"))
     self.assertIn({"label": "Pull requests", "value": "example/project#7"}, block["facts"])
+    self.assertFalse(any(call[1].endswith("/review-runs") for call in core.calls if call[0] == "api"), "the capped list is not consulted")
     with self.assertRaisesRegex(ValueError, "not in Contribute"):
       run(core, "--block", "run-00000000")
     with self.assertRaisesRegex(ValueError, "Invalid run identity"):
       run(core, "--block", "../escape")
+
+  def test_run_block_names_public_effects(self):
+    base = {"id": "run-12345678", "mode": "review", "items": [ITEM]}
+    self.assertEqual(adapter.run_block({**base, "options": {"post_review": False}})["title"], "Private review")
+    self.assertEqual(adapter.run_block({**base, "options": {"post_review": True}})["title"], "GitHub review")
+    self.assertEqual(adapter.run_block({**base, "mode": "review_fix_merge", "options": {"post_review": True}})["title"], "Review, fix & merge")
 
   def test_selection_id_cannot_escape_app_data(self):
     with self.assertRaisesRegex(ValueError, "Invalid saved selection id"):

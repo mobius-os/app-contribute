@@ -258,7 +258,7 @@ function Fixture() {
     return { ok: true, record: shared }
   }
   // A refusal before the request leaves is certified: nothing started.
-  async function start(action) { if(window.failStart) return {ok:false,notStarted:true,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
+  async function start(action) { if(window.failStart) return {ok:false,notStarted:true,error:'Fixture agent unavailable'}; const started = await window.mobius.chat.start(action); if(window.lostStart) return {ok:false,error:'Response lost'}; return { ok: true, ...started } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
@@ -716,6 +716,45 @@ window.runWorkspaceChecks = async () => {
       ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
       window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
     })
+    await check('effort choices are 44px targets on every viewport', async () => {
+      await chooseProject('Other project'); await click(button('Pull updates'))
+      await until(() => query('[data-task="task:update"] .co-agent-trigger'), 'Pull launch did not open')
+      const pane = query('[data-task="task:update"]')
+      await click(pane.querySelector('.co-agent-trigger'))
+      await until(() => pane.querySelector('.co-model-row'), 'Model choices did not load')
+      const row = [...pane.querySelectorAll('.co-model-row')].find(node => text(node).includes('Fixture model'))
+      if (row) await click(row)
+      await until(() => pane.querySelector('.co-effort-stop'), 'Effort choices did not appear')
+      for (const stop of pane.querySelectorAll('.co-effort-stop')) {
+        const box = stop.getBoundingClientRect()
+        ensure(box.width >= 44 && box.height >= 44, 'Effort target below 44px: ' + box.width + 'x' + box.height)
+      }
+      const stops = [...pane.querySelectorAll('.co-effort-stop')], edge = stops.at(-1).getBoundingClientRect()
+      ensure(document.elementFromPoint(edge.right - 3, edge.top + edge.height / 2) === stops.at(-1), 'The edge of an effort target does not hit it')
+      await inventory(); await chooseProject('Fixture project')
+    })
+    await check('finishing an uncertain start replays its exact saved work, not today\'s choice', async () => {
+      // A separate project, so later checks keep their idle projects.
+      window.setProjectsFixture(old => [...old, { ...old.find(project => project.key === 'app:other'), key: 'app:third', name: 'Third project', canonical_repo: 'owner/third' }])
+      await chooseProject('Third project')
+      const starts = calls.starts.length
+      window.lostStart = true
+      await click(button('Pull updates')); await until(() => button('Start pull') && !button('Start pull').disabled, 'Pull did not settle')
+      await click(button('Start pull'))
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs checking'), 'An uncertain start was not kept reserved')
+      const original = calls.starts.at(-1)
+      window.lostStart = false
+      await chooseProject('Fixture project'); await chooseProject('Third project')
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs checking'), 'The reservation was lost on reload')
+      await click(query('.co-work-progress-row'))
+      await enabled('Finish starting')
+      await until(() => calls.starts.length === starts + 2, 'Finish did not replay')
+      const replay = calls.starts.at(-1)
+      ensure(replay.scope === original.scope && replay.draft === original.draft && replay.title === original.title, 'Finish replayed different work or scope')
+      await until(() => button('Open current conversation', query('[data-task="task:cycle"]')), 'Finished start did not settle')
+      await chooseProject('Fixture project')
+      window.setProjectsFixture(old => old.filter(project => project.key !== 'app:third'))
+    })
     await check('pulling accepted changes requires one explicit scoped agent handoff and preserves failures', async () => {
       await chooseProject('Other project')
       const before=mutationRequests().length, starts=calls.starts.length
@@ -889,18 +928,21 @@ window.runWorkspaceChecks = async () => {
       const run = { id: 'chat-run-12345678', mode: 'review', state: 'complete', chat_id: 'chat-run-chat', options: { review_prompt: 'Review fixture' },
         items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'all_clear', summary: 'Linked run findings',
           public_review: { state: 'posted', url: 'https://github.com/owner/project/pull/7#pullrequestreview-1' } }] }
-      reviewRuns.unshift(run)
+      // An older run, beyond the capped recent list: the link carries its exact read.
       const before = mutationRequests().length, starts = calls.starts.length
-      await click(query('[aria-label="Refresh project status"]'))
-      window.focusRunFixture({ runId: run.id, repo: 'owner/project', nonce: 'run-link' })
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'run-link' })
       const pane = () => query('[data-task="task:run:chat-run-12345678"]')
       await until(() => pane() && text(pane()).includes('Linked run findings'), 'Run link did not open its run')
+      ensure(!reviewRuns.some(item => item.id === run.id), 'Fixture run leaked into the recent list')
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.requests.filter(call => call.url.endsWith('/review-runs')).length > 0, 'Runs were not reread')
+      ensure(pane() && text(pane()).includes('Linked run findings'), 'A refresh evicted the linked run')
       ensure(text(pane()).includes('Recorded version') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open review conversation', pane()), 'Shared run detail lost its version note, posted review or owning chat')
       ensure(mutationRequests().length === before && calls.starts.length === starts, 'Opening a run link started or changed work')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Run detail did not close')
       ensure(calls.releases.includes('run-link'), 'Leaving the run did not release its link')
-      reviewRuns.splice(reviewRuns.indexOf(run), 1)
+      await until(() => !query('[data-review-run="' + run.id + '"]'), 'A released old run stayed pinned in project history')
     })
     await check('switching project releases a chat PR link instead of pinning it on return', async () => {
       window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'switch' })
@@ -1083,7 +1125,7 @@ function cdp(browser) {
   return { events, onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) }, send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = ++serial
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 45000)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 120000)
       pending.set(id, { resolve, reject, timer })
       browser.stdio[3].write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
     })

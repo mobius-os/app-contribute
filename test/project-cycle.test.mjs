@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { freezeStartAction } from '../storage.js'
 
 // The hook's effects observe only a fixture runtime/storage. No DOM, real
 // conversation, saved partner record, or application transport is involved.
@@ -23,6 +24,7 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
     useEffect: effect => { effects.push(effect) },
     loadCycleState: async key => { calls.push(['load', key]); return typeof saved === 'function' ? saved() : saved },
     claimProjectCycle: (...args) => { calls.push(['claim', args[0]]); return claim(...args) },
+    freezeStartAction,
     settleProjectCycleClaim: async (...args) => { calls.push(['settle', ...args]); if (!settle) assert.fail('Fixture must not settle a claim'); return settle(...args) },
     openAgentConversation: id => { calls.push(['open', id]); return { ok: true } },
     document: { hidden: false },
@@ -149,7 +151,8 @@ test('working motion is opt-in and reduced-motion collapses it', () => {
   assert.match(controls, /Start fresh full merge cycle/)
   assert.match(controls, /TaskPane id="task:cycle"/)
   assert.match(controls, /start\(fullCycleAction, cycleAgent\)/)
-  assert.match(controls, /mayMerge\(project\.viewerPermission\) \? contributionCycleAction/)
+  assert.match(controls, /mayMerge\(project\.viewerPermission\) && cycleAction \? \{ \.\.\.cycleAction, merge: true \}/)
+  assert.match(controls, /workflow\.finishStart\(\)/)
   assert.match(controls, /start\(run\.privateAction, prepareAgent\)/)
   assert.match(controls, /start\(projectUpdateAction\(\[project\], Date\.now\(\)\), pullAgent\)/)
   assert.match(controls, /Local work/)
@@ -257,21 +260,71 @@ test('a start has three outcomes; only a certified non-admission releases its re
   assert.deepEqual(released.calls.filter(([kind]) => kind === 'settle').map(call => call[3]), [null])
 })
 
-test('an unknown start is finished by replaying the same scope, never a second one', async () => {
-  let saved = null, attempts = []
+const ACTION = { title: 'Prepare', draft: 'Only record A', event: 'private', agent: { provider: 'codex', model: 'chosen-model', effort: 'high' } }
+
+test('an unknown start is finished by replaying its exact frozen payload under the same scope', async () => {
+  let saved = null
+  const attempts = []
   const f = fixture({ saved: () => saved, runtime: { running: true },
-    claim: async () => { saved = { pending: { id: 'claim-lost', title: 'Prepare', event: 'private' } }; return { ok: true, id: 'claim-lost' } },
-    start: async action => { attempts.push(action.scope); return attempts.length === 1 ? { ok: false, error: 'Lost response' } : { ok: true, chatId: 'chat-one' } },
+    claim: async (key, previous, action) => { saved = { pending: { id: 'claim-lost', title: action.title, event: action.event, action: freezeStartAction(action) } }; return { ok: true, id: 'claim-lost' } },
+    start: async action => { attempts.push(JSON.parse(JSON.stringify(action))); return attempts.length === 1 ? { ok: false, error: 'Lost response' } : { ok: true, chatId: 'chat-one' } },
     settle: async (key, id, next) => { assert.equal(id, 'claim-lost'); saved = next; return true } })
   f.render(); await f.restore()
-  await f.render().start({ title: 'Prepare', event: 'private' })
+  await f.render().start(ACTION)
   assert.equal(f.render().cycle.pending, true)
-  assert.equal(f.render().cycle.pendingId, 'claim-lost')
-  await f.render().finishStart({ title: 'Prepare', event: 'private' })
-  assert.deepEqual(attempts, ['contribute-cycle:claim-lost', 'contribute-cycle:claim-lost'])
-  assert.equal(f.render().cycle.chatId, 'chat-one')
-  assert.equal(Boolean(f.render().cycle.pending), false)
+  // Reload: recovery reads only the saved reservation, never current choices.
+  const reloaded = fixture({ saved: () => saved, runtime: { running: true },
+    start: async action => { attempts.push(JSON.parse(JSON.stringify(action))); return { ok: true, chatId: 'chat-one' } },
+    settle: async (key, id, next) => { saved = next; return true } })
+  reloaded.render(); await reloaded.restore()
+  await reloaded.render().finishStart()
+  assert.deepEqual(attempts.map(action => action.scope), ['contribute-cycle:claim-lost', 'contribute-cycle:claim-lost'])
+  assert.equal(attempts[1].draft, 'Only record A', 'the replay carries the original work')
+  assert.deepEqual(attempts[1].agent, ACTION.agent, 'the replay keeps the originally chosen model')
+  assert.equal(reloaded.render().cycle.chatId, 'chat-one')
   assert.equal(f.calls.filter(([kind]) => kind === 'claim').length, 1)
+})
+
+test('a locally refused retry never releases an earlier uncertain start (no second owner)', async () => {
+  let saved = null, attempts = 0, claims = 0
+  const liveChats = []
+  const f = fixture({ saved: () => saved, runtime: { running: true },
+    claim: async (key, previous, action) => { saved = { pending: { id: 'claim-' + (++claims), action: freezeStartAction(action) } }; return { ok: true, id: saved.pending.id } },
+    start: async () => {
+      attempts++
+      if (attempts === 1) { liveChats.push('old-admitted'); return { ok: false, error: 'Response lost' } }
+      if (attempts === 2) return { ok: false, notStarted: true, error: 'Another agent task is already starting.' }
+      liveChats.push('new-admitted'); return { ok: true, chatId: 'new-admitted' }
+    },
+    settle: async (key, id, next) => { saved = next; return true } })
+  f.render(); await f.restore()
+  await f.render().start(ACTION)
+  await f.render().finishStart()
+  assert.equal(saved?.pending?.id, 'claim-1', 'the reservation survives a local refusal of its retry')
+  assert.equal(f.render().cycle.pending, true)
+  assert.equal(f.render().cycle.phase, 'unknown')
+  assert.match(f.render().cycle.error, /already starting/)
+  // Reload, then try a fresh start: the reservation still blocks it.
+  const reloaded = fixture({ saved: () => saved, runtime: { running: true }, claim: async () => assert.fail('A second scope was reserved') })
+  reloaded.render(); await reloaded.restore()
+  assert.equal(reloaded.render().cycle.pendingId, 'claim-1')
+  assert.equal((await reloaded.render().start(ACTION)).ok, false)
+  assert.deepEqual(liveChats, ['old-admitted'])
+})
+
+test('a legacy reservation without its frozen work cannot be finished by reconstruction', async () => {
+  const f = fixture({ saved: { pending: { id: 'claim-legacy', title: 'Prepare', event: 'private' } } })
+  f.render(); await f.restore()
+  const result = await f.render().finishStart()
+  assert.equal(result.ok, false)
+  assert.match(result.error, /did not save its exact work/)
+  assert.equal(f.render().cycle.pending, true)
+})
+
+test('the frozen start keeps exact work and model fields only', () => {
+  assert.equal(freezeStartAction({ title: 'x' }), null)
+  assert.deepEqual(freezeStartAction({ ...ACTION, scope: 'ignored', extra: 1, merge: true }),
+    { title: 'Prepare', draft: 'Only record A', event: 'private', merge: true, agent: ACTION.agent })
 })
 
 test('discarding a reserved start releases it only when the platform fences the scope', async () => {

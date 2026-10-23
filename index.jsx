@@ -192,13 +192,14 @@ export default function ContributeApp({ appId, token }) {
   async function openRunFocus(id, nonce) {
     setSelectionError('')
     setPullFocus({ runId: id, nonce })
+    // Read the exact run: the recent list is capped and would hide older runs.
     let run = null
-    try { run = (await collaborationRequest(tokenRef.current, appId, 'review-runs')).runs?.find(item => item.id === id) || null }
+    try { run = (await collaborationRequest(tokenRef.current, appId, `review-runs/${encodeURIComponent(id)}`)).run || null }
     catch (error) { if (pullFocusRef.current?.nonce === nonce) { setSelectionError(error.message); releasePullFocus(nonce) } return }
     if (pullFocusRef.current?.nonce !== nonce) return
     const repo = run?.items?.[0]?.repo
     if (!repo) { setSelectionError('This review run is not in Contribute’s history.'); releasePullFocus(nonce); return }
-    setPullFocus({ runId: id, repo, nonce })
+    setPullFocus({ runId: id, repo, run, nonce })
     openRepository(repo, nonce)
   }
   const [projectOpen, setProjectOpen] = useState(false)

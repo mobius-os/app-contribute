@@ -299,7 +299,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const runFocusRef = useRef(null)
   runFocusRef.current = runFocusId ? focusRun : null
   const runOpened = useRef('')
-  const runPresent = !!runFocusId && runs.some(run => run.id === runFocusId)
+  const runPresent = !!runFocusId && (runs.some(run => run.id === runFocusId) || focusRun?.run?.id === runFocusId)
   useEffect(() => {
     if (!runPresent || runOpened.current === focusRun.nonce) return
     runOpened.current = focusRun.nonce
@@ -333,7 +333,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     }
   }, [opened, detailVisible, task?.activeId, task?.close])
   if (conn.state !== 'connected' || !project || !repo) return null
-  const relevantRuns = runs.filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
+  // A linked run is shown from its exact read while its lease is held, even
+  // when it is older than the capped recent list; a refresh cannot evict it.
+  const linkedRun = runFocusId && focusRun.run?.id === runFocusId && !runs.some(run => run.id === runFocusId) ? [focusRun.run] : []
+  const relevantRuns = [...linkedRun, ...runs].filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
   const statusFor = pr => reviewForPull(relevantRuns, pr)
   const detailPr = pulls.find(pr => prKey(pr) === opened)
   function inspect(pr) { setOpened(prKey(pr)); task?.open('task:detail') }
@@ -366,7 +369,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     setBusy(true); setRunError('')
     try {
       const result=await collaborationRequest(token,appId,`review-runs/${encodeURIComponent(run.id)}/stop`,{})
-      setRuns(old=>old.map(item=>item.id===run.id ? result.run : item))
+      setRuns(old=>old.some(item=>item.id===run.id) ? old.map(item=>item.id===run.id ? result.run : item) : [result.run, ...old])
     } catch(error) {setRunError(error.message)}
     finally {setBusy(false)}
   }

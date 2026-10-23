@@ -219,9 +219,14 @@ test('fresh project cycle claim keeps the previous conversation and excludes a c
       return { durability: 'synced' }
     },
   } } }
-  const first = await claimProjectCycle('fixture-project', 'old-chat')
+  const action = { title: 'New full merge cycle', draft: 'Exact work', event: 'contribution_cycle', merge: true, agent: { provider: 'codex', model: 'chosen' } }
+  assert.equal((await claimProjectCycle('fixture-project', 'old-chat', { title: 'No draft' })).ok, false, 'an incomplete start is never reserved')
+  const first = await claimProjectCycle('fixture-project', 'old-chat', action)
   assert.equal(first.ok, true)
-  assert.equal((await claimProjectCycle('fixture-project', 'old-chat')).ok, false)
+  // The reservation carries the exact work and model it will replay.
+  assert.deepEqual(value.pending.action, action)
+  assert.deepEqual((await loadCycleState('fixture-project')).pending.action, action)
+  assert.equal((await claimProjectCycle('fixture-project', 'old-chat', action)).ok, false)
   assert.equal((await loadCycleState('fixture-project')).chat_id, 'old-chat')
   assert.equal(await settleProjectCycleClaim('fixture-project', first.id, {
     chat_id: 'new-chat', title: 'New full merge cycle', started_at: '2026-10-02T16:00:00Z',

@@ -260,6 +260,24 @@ export async function cacheSourceSnapshot(snapshot) {
   }
 }
 
+// The exact start the owner chose, frozen with its reservation so recovery
+// replays that work and model unchanged instead of rebuilding today's choice.
+const START_FIELDS = ['title', 'draft', 'event', 'scopeLabel', 'count', 'merge']
+export function freezeStartAction(action) {
+  if (typeof action?.title !== 'string' || typeof action?.draft !== 'string' || !action.title || !action.draft) return null
+  const frozen = Object.fromEntries(START_FIELDS.filter(key => action[key] !== undefined).map(key => [key, action[key]]))
+  const agent = action.agent
+  if (agent?.provider && agent?.model) frozen.agent = { provider: String(agent.provider), model: String(agent.model), ...(agent.effort ? { effort: String(agent.effort) } : {}) }
+  return JSON.parse(JSON.stringify(frozen))
+}
+
+function normalizePending(raw) {
+  if (!raw || typeof raw.id !== 'string') return null
+  const action = freezeStartAction(raw.action)
+  return { id: raw.id.slice(0, 80), previous_chat_id: String(raw.previous_chat_id || '').slice(0, 128),
+    title: String(raw.title || '').slice(0, 240), event: String(raw.event || '').slice(0, 80), ...(action ? { action } : {}) }
+}
+
 export function normalizeCycleState(raw) {
   if (!raw || typeof raw !== 'object') return null
   const chatId = typeof raw.chat_id === 'string' ? raw.chat_id.trim() : ''
@@ -271,7 +289,7 @@ export function normalizeCycleState(raw) {
     ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
     ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
     ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined })).filter(Boolean) } : {}),
-    ...(raw.pending && typeof raw.pending.id === 'string' ? { pending: { id: raw.pending.id.slice(0, 80), previous_chat_id: String(raw.pending.previous_chat_id || '').slice(0, 128), title: String(raw.pending.title || '').slice(0, 240), event: String(raw.pending.event || '').slice(0, 80) } } : {}),
+    ...(normalizePending(raw.pending) ? { pending: normalizePending(raw.pending) } : {}),
   }
 }
 
@@ -335,7 +353,7 @@ export async function loadCycleState(projectKey) {
     const key = await cycleKey(projectKey)
     const raw = await window.mobius.storage.get(key)
     const current = normalizeCycleState(raw)
-    if (!current && raw?.pending?.id) return { pending: raw.pending, history: [] }
+    if (!current && normalizePending(raw?.pending)) return { pending: normalizePending(raw.pending), history: [] }
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
@@ -381,7 +399,9 @@ export async function claimProjectCycle(projectKey, previousChatId = '', action 
     const current = normalizeCycleState(value)
     if ((current?.chat_id || '') !== previousChatId || value?.pending) return { ok: false, error: 'Project work changed in another view. Refresh before starting.' }
     const id = globalThis.crypto.randomUUID()
-    const next = { ...(value || {}), schema: 2, pending: { id, previous_chat_id: previousChatId, title: String(action.title || '').slice(0, 240), event: String(action.event || '').slice(0, 80) } }
+    const frozen = freezeStartAction(action)
+    if (!frozen) return { ok: false, notStarted: true, error: 'This agent handoff is incomplete.' }
+    const next = { ...(value || {}), schema: 2, pending: normalizePending({ id, previous_chat_id: previousChatId, title: frozen.title, event: frozen.event, action: frozen }) }
     const receipt = await storage.durableWrite(key, next, version ? { ifMatch: version } : { ifNoneMatch: true })
     if (receipt?.durability !== 'synced') return { ok: false, error: 'Cycle reservation was not confirmed online. Refresh before trying again.' }
     return { ok: true, id }

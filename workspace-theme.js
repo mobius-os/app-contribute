@@ -213,19 +213,21 @@ export const WORKSPACE_CSS = `
 .co-effort-indent { margin:4px 12px 8px 52px; }
 .co-effort { display:flex; align-items:center; gap:12px; min-width:0; }
 .co-effort.is-disabled { opacity:.55; }
-.co-effort-track { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; justify-content:space-between; }
-.co-effort-track::before { content:''; position:absolute; left:7px; right:7px; top:50%; height:2px; background:var(--border); border-radius:2px; transform:translateY(-50%); }
-.co-effort-stop { position:relative; width:13px; height:13px; flex-shrink:0; padding:0; border:1.5px solid var(--border); border-radius:50%; background:var(--surface); cursor:pointer; transition:background .15s,border-color .15s,transform .15s; }
-@media (hover:hover) and (pointer:fine) { .co-effort-stop:hover:not(:disabled) { border-color:var(--accent); } }
-.co-effort-stop.is-filled,.co-effort-stop.is-on { background:var(--accent); border-color:var(--accent); }
-.co-effort-stop.is-on { transform:scale(1.3); box-shadow:0 0 0 3px var(--accent-dim); }
+.co-effort-track { position:relative; flex:1; min-width:0; height:44px; display:flex; align-items:center; justify-content:space-between; }
+.co-effort-track::before { content:''; position:absolute; left:22px; right:22px; top:50%; height:2px; background:var(--border); border-radius:2px; transform:translateY(-50%); }
+/* Each stop is a 44px target; the 13px dot is only its visible mark. */
+.co-effort-stop { position:relative; width:44px; height:44px; flex-shrink:0; padding:0; border:0; border-radius:50%; background:none; cursor:pointer; }
+.co-effort-stop::before { content:''; position:absolute; left:50%; top:50%; box-sizing:border-box; width:13px; height:13px; border:1.5px solid var(--border); border-radius:50%; background:var(--surface); transform:translate(-50%,-50%); transition:background .15s,border-color .15s,transform .15s; }
+@media (hover:hover) and (pointer:fine) { .co-effort-stop:hover:not(:disabled)::before { border-color:var(--accent); } }
+.co-effort-stop.is-filled::before,.co-effort-stop.is-on::before { background:var(--accent); border-color:var(--accent); }
+.co-effort-stop.is-on::before { transform:translate(-50%,-50%) scale(1.3); box-shadow:0 0 0 3px var(--accent-dim); }
 .co-effort-stop:disabled { cursor:not-allowed; }
-.co-effort-stop:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.co-effort-stop:focus-visible { outline:2px solid var(--accent); outline-offset:-8px; }
 .co-effort-label { min-width:70px; font-size:14px; font-weight:500; color:var(--text); white-space:nowrap; text-align:right; }
 .co-model-note { margin:8px 10px; color:var(--muted); font-size:14px; }
 .co-model-note button { margin-left:6px; border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; text-decoration:underline; }
 @media (max-width:520px) { .co-model-row { min-height:44px; gap:10px; padding:7px 8px; } }
-@media (prefers-reduced-motion:reduce) { .co-effort-stop,.co-agent-trigger-chevron { transition:none; } }
+@media (prefers-reduced-motion:reduce) { .co-effort-stop::before,.co-agent-trigger-chevron { transition:none; } }
 .co-change-total { display:inline-flex; align-items:baseline; gap:7px; font-variant-numeric:tabular-nums; }
 .co-change-total b { color:var(--green); font-weight:650; }
 .co-change-total em { color:var(--danger); font-style:normal; font-weight:650; }

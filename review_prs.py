@@ -114,7 +114,9 @@ def run_block(run):
   if not RUN_ID.fullmatch(str(run.get("id") or "")):
     raise ValueError("Invalid run identity.")
   items = run.get("items") or []
-  title = RUN_TITLES.get(run.get("mode"), "Private review")
+  # The same public-effect naming as the app's run view: posting is not private.
+  posted = run.get("mode") == "review" and (run.get("options") or {}).get("post_review") is True
+  title = "GitHub review" if posted else RUN_TITLES.get(run.get("mode"), "Private review")
   return {"app": "contribute", "intent": f"review-run:{run['id']}", "title": title, "inline": False,
     "facts": [{"label": "Pull requests", "value": ", ".join(f"{item['repo']}#{item['number']}" for item in items)[:240] or "None"},
       {"label": "Status", "value": str(run.get("execution_state") or run.get("state") or "unknown")[:240]}]}
@@ -161,7 +163,13 @@ def main(argv=None, core=None):
   if args.block:
     if not RUN_ID.fullmatch(args.block):
       raise ValueError("Invalid run identity.")
-    run = next((run for run in (core.api(core.review_path(app_id, "/review-runs")) or {}).get("runs", []) if run.get("id") == args.block), None)
+    # The exact run, however old; the recent list is capped.
+    try:
+      run = (core.api(core.review_path(app_id, "/review-runs/" + args.block)) or {}).get("run")
+    except HTTPError as error:
+      if error.code != 404:
+        raise
+      run = None
     if not run:
       raise ValueError("That run is not in Contribute's review history.")
     print(fence(run_block(run)))

@@ -56,9 +56,13 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   // merged records that touch incoming files overstated pending updates.
   const incoming = project.incomingFiles > 0 || (!project.semanticAvailable && project.originBehind > 0) ? incomingCount(project) : ''
   // Starting a full merge cycle needs merge rights; seeing existing cycles never does.
-  const fullCycleAction = mayMerge(project.viewerPermission) ? contributionCycleAction(run, [project]) : null
-  const pendingAction = cycle.pendingEvent === 'update_source_projects' ? projectUpdateAction([project], Date.now())
-    : fullCycleAction && cycle.pendingEvent === fullCycleAction.event ? fullCycleAction : run?.privateAction
+  const cycleAction = contributionCycleAction(run, [project])
+  const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
+  // Recovery replays the reserved start exactly; it never substitutes today's
+  // work or model. A full cycle still needs merge rights to be finished.
+  const mergeRights = mayMerge(project.viewerPermission)
+  const finishBlocker = !cycle.pendingAction ? 'This older start did not save its exact work. Discard it, then start again.'
+    : cycle.pendingAction.merge && !mergeRights ? 'Finishing this full merge cycle needs merge rights.' : ''
   async function start(action, agent) {
     setError('')
     try {
@@ -74,8 +78,9 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   // project configures new work from its Prepare action instead.
   const hasCycle = Boolean(cycle.chatId || cycle.pending || cycle.history?.length || cycle.phase === 'unknown')
   const pendingRecovery = cycle.pending && cycle.pendingId ? <div className="co-cycle-actions">
-    <button type="button" className="co-btn co-btn-primary" disabled={!pendingAction} onClick={() => workflow.finishStart({ ...pendingAction, agent: cycleAgent })}>Finish starting</button>
+    <button type="button" className="co-btn co-btn-primary" disabled={Boolean(finishBlocker)} onClick={() => workflow.finishStart()}>Finish starting</button>
     {workflow.canDiscardStart ? <button type="button" className="co-btn" onClick={workflow.discardStart}>Discard this start</button> : null}
+    {finishBlocker ? <p className="co-task-footnote">{finishBlocker}</p> : null}
   </div> : null
   const progressRow = hasCycle ? <section className="co-cycle-outlet" aria-label="Project work">
     <button type="button" className="co-work-progress-row" onClick={() => task?.open('task:cycle')} aria-expanded={task?.activeId === 'task:cycle'} aria-busy={active}>
