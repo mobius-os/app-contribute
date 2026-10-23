@@ -1,7 +1,18 @@
 // Project-local progress over the platform's durable conversation owner.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { claimProjectCycle, freezeStartAction, loadCycleState, settleProjectCycleClaim } from '../storage.js'
+import { abandonProjectCycleClaim, claimProjectCycle, freezeStartAction, loadCycleState, readProjectCycleClaim, settleProjectCycleClaim } from '../storage.js'
 import { openAgentConversation } from './BatchAction.jsx'
+
+// A conversation that is not running a turn still owns its project while the
+// platform reports work it will resume on its own: an outstanding durable
+// Wait (armed, or fired but not yet delivered), queued messages, a
+// continuation or recovery run, compaction, or live background helpers.
+export function pendingContinuation(runtime) {
+  const count = value => Array.isArray(value) ? value.length : 0
+  return count(runtime.waits) > 0 || count(runtime.pending_messages) > 0 || Boolean(runtime.continuation_wait)
+    || Boolean(runtime.recovery_run_id) || Boolean(runtime.compacting) || ['queued', 'pending'].includes(runtime.run_status)
+    || Number(runtime.background_helpers?.count) > 0
+}
 
 // Observe explicit runtime facts; an unavailable or incomplete status is not
 // evidence that the owner paused, stopped, or completed the work.
@@ -9,6 +20,8 @@ export function projectCyclePhase(runtime) {
   if (!runtime || typeof runtime !== 'object' || runtime.error) return 'unknown'
   if (runtime.running === true) return 'running'
   if (runtime.pending_question_id) return 'waiting'
+  // Checked before any goal status: work that will resume is not finished.
+  if (pendingContinuation(runtime)) return 'scheduled'
   const status = runtime.goal?.status || runtime.status
   if (status === 'failed') return 'failed'
   if (status === 'paused') return 'paused'
@@ -37,7 +50,8 @@ export const scopedChatStarted = row => row?.has_messages === true
 
 // An older reservation without its saved work cannot be replayed; Check again
 // still finds its conversation if that start was admitted.
-export const LEGACY_START = 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started.'
+export const LEGACY_START = 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started; if it never started, abandon it.'
+const SUPERSEDED_START = 'This start was already settled in another view, so nothing was started here.'
 const UNRESOLVED_START = 'This start is not confirmed. It stays reserved, so no second agent starts. Finish starting it, or check again.'
 
 export function useProjectCycle(projectKey, startAgentTask) {
@@ -58,7 +72,15 @@ export function useProjectCycle(projectKey, startAgentTask) {
         error: phase === 'unknown' ? 'Progress is unavailable. Open the conversation to check.' : current.shortcutError || '',
       }))
     } catch {
-      if (alive.current && identity.current === requestedProject && (generation === undefined || generation === observation.current)) setCycle(current => current.chatId !== saved.chat_id || (current.pending && !reconcile) || (current.phase === 'stopping' && !afterStop) ? current : ({ ...current, phase: 'unknown', runtime: null, error: 'Progress is unavailable. Open the conversation to check.' }))
+      const applies = () => alive.current && identity.current === requestedProject && (generation === undefined || generation === observation.current)
+      if (applies()) setCycle(current => current.chatId !== saved.chat_id || (current.pending && !reconcile) || (current.phase === 'stopping' && !afterStop) ? current : ({ ...current, phase: 'unknown', runtime: null, error: 'Progress is unavailable. Open the conversation to check.' }))
+      // A failed read is not evidence of deletion. The app's complete list of
+      // its active conversations is: a successful list without this saved
+      // conversation means the owner deleted it, which finishes its cycle.
+      let deleted = false
+      try { const rows = await window.mobius.chat.list({}); deleted = Array.isArray(rows) && !rows.some(row => String(row?.id) === String(saved.chat_id)) }
+      catch { /* Unknown stays unknown. */ }
+      if (deleted && applies()) setCycle(current => current.chatId !== saved.chat_id || (current.pending && !reconcile) || (current.phase === 'stopping' && !afterStop) ? current : ({ ...current, phase: 'deleted', runtime: null, pending: reconcile ? false : current.pending, error: '' }))
     }
   }, [projectKey])
   // Both mount and explicit Refresh observe the same saved owner. Empty or
@@ -120,13 +142,14 @@ export function useProjectCycle(projectKey, startAgentTask) {
     if (!cycle.chatId || cycle.pending) return
     const check = () => { if (!document.hidden) void refresh({ chat_id: cycle.chatId }) }
     // The conversation is durable; this mounted view only observes it.
-    const timer = cycle.phase === 'complete' ? null : setInterval(check, 5000)
+    const timer = ['complete', 'deleted'].includes(cycle.phase) ? null : setInterval(check, 5000)
     window.addEventListener('focus', check)
     return () => { clearInterval(timer); window.removeEventListener('focus', check) }
   }, [cycle.chatId, cycle.pending, cycle.phase, refresh])
   // Settle the outcome of one reserved scoped start, whichever path observed it.
   async function settleStart(requestedProject, claim, action, previous, outcome) {
     const current = () => alive.current && identity.current === requestedProject
+    if (outcome.state === 'superseded') return { ok: false, superseded: true, error: SUPERSEDED_START }
     if (outcome.state === 'spent') {
       const released = await settleProjectCycleClaim(requestedProject, claim.id, null)
       if (current()) setCycle(released ? { ...previous, pending: false, phase: previous.chatId ? previous.phase : 'idle', error: outcome.error }
@@ -145,13 +168,27 @@ export function useProjectCycle(projectKey, startAgentTask) {
     if (current()) setCycle({ shortcutError, phase: recorded ? 'running' : 'unknown', chatId: saved.chat_id, title: saved.title, event: saved.event, startedAt: saved.started_at, history, error: shortcutError })
     return { ok: true, chatId: outcome.chatId }
   }
-  async function admit(action, scope) {
-    try { return startOutcome(await startAgentTask({ ...action, scope })) }
+  // Every Start and Finish re-reads the online claim immediately before the
+  // scoped start and proceeds only while it is still pending at exactly this
+  // scope. The platform's scoped start ignores deleted conversations, so a
+  // stale pane replaying a cycle another view already settled (and the owner
+  // then deleted) would otherwise recreate it beside its successor.
+  async function admit(requestedProject, claim, action) {
+    let fresh
+    try { fresh = await readProjectCycleClaim(requestedProject) }
+    catch { return { state: 'unknown', error: 'The reservation could not be re-checked, so nothing was started.' } }
+    if (!fresh || fresh.id !== claim.id || (fresh.scope || `contribute-cycle:${fresh.id}`) !== claim.scope) return { state: 'superseded' }
+    try { return startOutcome(await startAgentTask({ ...action, scope: claim.scope })) }
     catch { return { state: 'unknown' } }
+  }
+  // A start another view settled is shown as that view left it.
+  function afterAdmission(result) {
+    if (result?.superseded || result?.abandoned) void recheck().then(() => { if (result.superseded && alive.current) setCycle(current => ({ ...current, error: current.error || SUPERSEDED_START })) })
+    return result
   }
   async function start(action) {
     if (!action || starting.current) return { ok: false, error: 'Work is already starting.' }
-    if (['restoring', 'checking', 'starting', 'running', 'waiting', 'stopping', 'unknown'].includes(cycle.phase)) return { ok: false, error: 'Check or stop the current work before starting another cycle.' }
+    if (['restoring', 'checking', 'starting', 'running', 'waiting', 'scheduled', 'stopping', 'unknown'].includes(cycle.phase)) return { ok: false, error: 'Check or stop the current work before starting another cycle.' }
     // The exact, platform-bounded start is fixed before anything is reserved;
     // the reservation and every replay carry this same payload.
     const frozen = freezeStartAction(action)
@@ -160,6 +197,7 @@ export function useProjectCycle(projectKey, startAgentTask) {
     observation.current++
     const requestedProject = projectKey
     const previous = cycle
+    let result
     setCycle(current => ({ ...current, phase: 'starting', error: '' }))
     try {
       let claim
@@ -170,13 +208,14 @@ export function useProjectCycle(projectKey, startAgentTask) {
         return claim
       }
       const reserved = { id: claim.id, scope: claim.scope || `contribute-cycle:${claim.id}` }
-      return await settleStart(requestedProject, reserved, frozen, previous, await admit(frozen, reserved.scope))
-    } finally { starting.current = false }
+      result = await settleStart(requestedProject, reserved, frozen, previous, await admit(requestedProject, reserved, frozen))
+      return result
+    } finally { starting.current = false; afterAdmission(result) }
   }
   // Finish starting asks the platform's scoped start again for the same scope
-  // with the saved work and model. That call is idempotent: it returns the
-  // started conversation, admits the first turn of an empty one, or creates
-  // the only one. It is always safe to repeat.
+  // with the saved work and model, after confirming the claim is still pending
+  // at that scope. While the scope's conversation exists, that call returns
+  // it, admits the first turn of an empty one, or creates the only one.
   async function finishStart() {
     const claim = { id: cycle.pendingId, scope: cycle.pendingScope || `contribute-cycle:${cycle.pendingId}` }
     const action = cycle.pendingAction
@@ -186,26 +225,40 @@ export function useProjectCycle(projectKey, startAgentTask) {
     observation.current++
     const previous = cycle
     setCycle(current => ({ ...current, phase: 'starting', error: '' }))
-    try { return await settleStart(projectKey, claim, action, { ...previous, pending: false }, await admit(action, claim.scope)) }
-    finally { starting.current = false }
+    let result
+    try { result = await settleStart(projectKey, claim, action, { ...previous, pending: false }, await admit(projectKey, claim, action)); return result }
+    finally { starting.current = false; afterAdmission(result) }
   }
-  // Where the platform can fence a scope, the owner may abandon a reserved
-  // start instead: a cancelled or deleted scope is certified never admitted.
-  const canDiscardStart = typeof globalThis.window?.mobius?.chat?.cancelStart === 'function'
-  async function discardStart() {
+  // The owner's explicit way out of a reserved start the platform will not
+  // admit (for example, its provider was removed). Allowed only when a fresh
+  // lookup of this exact scope finds no started conversation; one started
+  // conversation settles the cycle instead. Never automatic.
+  async function abandonStart() {
     const claim = { id: cycle.pendingId, scope: cycle.pendingScope || `contribute-cycle:${cycle.pendingId}` }
-    if (!claim.id || !canDiscardStart || starting.current) return
-    starting.current = true
+    if (!claim.id || starting.current) return { ok: false, error: 'There is no reserved start to abandon.' }
+    const requestedProject = projectKey
     const previous = { ...cycle, pending: false }
+    const keep = error => { if (alive.current && identity.current === requestedProject) setCycle(current => ({ ...current, ...cycle, phase: 'unknown', error })); return { ok: false, error } }
+    starting.current = true
+    observation.current++
+    setCycle(current => ({ ...current, phase: 'checking', error: '' }))
+    let result
     try {
-      let fenced
-      try { fenced = await window.mobius.chat.cancelStart({ scope: claim.scope }) } catch { fenced = null }
-      const outcome = fenced?.outcome === 'started' && fenced.chatId ? { state: 'admitted', chatId: fenced.chatId }
-        : ['cancelled', 'deleted'].includes(fenced?.outcome) ? { state: 'spent', error: 'The reserved start was cancelled; nothing was started.' }
-        : { state: 'unknown' }
-      // The saved replay payload survives an unknown fence outcome.
-      await settleStart(projectKey, claim, cycle.pendingAction || { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, outcome)
-    } finally { starting.current = false }
+      let fresh, rows
+      try { fresh = await readProjectCycleClaim(requestedProject) } catch { return result = keep('The reservation could not be re-checked. Nothing was abandoned.') }
+      if (!fresh || fresh.id !== claim.id) return result = { ok: false, superseded: true, error: SUPERSEDED_START }
+      try { rows = await window.mobius.chat.list({ scope: claim.scope }) } catch { rows = null }
+      if (!Array.isArray(rows)) return result = keep('Möbius could not check this start, so it stays reserved. Try again.')
+      const started = rows.filter(scopedChatStarted)
+      if (started.length > 1) return result = keep('More than one conversation answers this start. Open them before continuing.')
+      if (started.length === 1) {
+        result = await settleStart(requestedProject, claim, cycle.pendingAction || { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, { state: 'admitted', chatId: String(started[0].id) })
+        return result
+      }
+      if (!await abandonProjectCycleClaim(requestedProject, claim.id)) return result = keep('The start could not be abandoned. Check again.')
+      if (alive.current && identity.current === requestedProject) setCycle({ ...previous, pendingId: '', pendingScope: '', pendingAction: null, phase: previous.chatId ? 'checking' : 'idle', error: '' })
+      return result = { ok: true, abandoned: true }
+    } finally { starting.current = false; afterAdmission(result) }
   }
   async function stop() {
     const chatId = cycle.chatId
@@ -221,5 +274,5 @@ export function useProjectCycle(projectKey, startAgentTask) {
       if (identity.current === requestedProject) setCycle(current => current.chatId === chatId ? ({ ...current, pending: true, phase:'unknown', error:'Could not confirm Stop. Open the conversation to check; nothing was restarted.' }) : current)
     }
   }
-  return { cycle, start, stop, recheck, finishStart, discardStart, canDiscardStart, open: (chatId = cycle.chatId) => openAgentConversation(chatId) }
+  return { cycle, start, stop, recheck, finishStart, abandonStart, open: (chatId = cycle.chatId) => openAgentConversation(chatId) }
 }

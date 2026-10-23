@@ -412,12 +412,14 @@ export async function saveCycleState(state, projectKey) {
 }
 
 // A project's cycles are numbered. Cycle n's identity is the deterministic
-// platform scope `contribute-cycle:<project digest>:<n>`, and the platform's
-// scoped start is the exactly-once primitive for it: under a per-(app, scope)
-// lock it returns the started conversation, retries an empty one in place, or
-// creates at most one. Starting and finishing therefore just call it again
-// with the same scope. The CAS reservation records that scope and the frozen
-// start; n advances only when that scope's conversation is confirmed started.
+// platform scope `contribute-cycle:<project digest>:<n>`. Under a per-(app,
+// scope) lock the platform's scoped start returns that scope's active
+// conversation, retries an empty one in place, or creates one; it ignores
+// deleted conversations. So the CAS reservation, not the platform, decides
+// whether n may still start: every Start and Finish re-reads it first and
+// proceeds only while n is pending. n is consumed by its confirmed started
+// conversation, the platform's cancellation of that scope, or the owner's
+// explicit abandonment after a lookup found it never started.
 export async function claimProjectCycle(projectKey, previousChatId = '', action = {}) {
   const storage = window.mobius?.storage
   if (!storage?.getWithVersion || !storage?.durableWrite) return { ok: false, error: 'Safe cycle starts are unavailable in this Möbius version.' }
@@ -440,6 +442,36 @@ export async function claimProjectCycle(projectKey, previousChatId = '', action 
   }
 }
 
+// The authoritative pending reservation, read online immediately before any
+// call to the platform's scoped start. Throws when it cannot be read online,
+// so an unreadable claim is never mistaken for a settled one.
+export async function readProjectCycleClaim(projectKey) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion) throw new Error('Safe cycle starts are unavailable in this Möbius version.')
+  const { value, offline } = await storage.getWithVersion(await cycleKey(projectKey))
+  if (offline) throw new Error('Reconnect before starting.')
+  return normalizePending(value?.pending)
+}
+
+// The owner abandons reserved cycle n after a fresh lookup found no started
+// conversation for its scope. The CAS record keeps n as abandoned and moves
+// seq past it, so every pane's pre-start re-read refuses to start n again and
+// the next cycle uses scope n+1.
+export async function abandonProjectCycleClaim(projectKey, claimId) {
+  const storage = window.mobius?.storage
+  try {
+    const key = await cycleKey(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline || value?.pending?.id !== claimId || !version) return false
+    const pending = normalizePending(value.pending)
+    const seq = Number.isSafeInteger(pending.n) ? Math.max(pending.n, cycleSeq(value)) : cycleSeq(value)
+    const abandoned = [{ scope: pending.scope, ...(Number.isSafeInteger(pending.n) ? { n: pending.n } : {}), at: new Date().toISOString() }, ...abandonedCycles(value)].slice(0, 20)
+    const receipt = await storage.durableWrite(key, { ...value, schema: 3, seq, pending: undefined, abandoned }, { ifMatch: version })
+    return receipt?.durability === 'synced'
+  } catch { return false }
+}
+const abandonedCycles = value => Array.isArray(value?.abandoned) ? value.abandoned.filter(item => typeof item?.scope === 'string').slice(0, 20) : []
+
 export async function settleProjectCycleClaim(projectKey, claimId, started = null) {
   const storage = window.mobius?.storage
   try {
@@ -456,7 +488,7 @@ export async function settleProjectCycleClaim(projectKey, claimId, started = nul
     // the platform's own cancellation of that exact scope.
     const seq = Number.isSafeInteger(value.pending.n) ? value.pending.n : cycleSeq(value)
     const next = started
-      ? { schema: 3, ...normalizeCycleState(started), seq, history }
+      ? { schema: 3, ...normalizeCycleState(started), seq, history, ...(abandonedCycles(value).length ? { abandoned: abandonedCycles(value) } : {}) }
       : { ...value, schema: 3, seq, pending: undefined }
     const receipt = await storage.durableWrite(key, next, { ifMatch: version })
     return receipt?.durability === 'synced'

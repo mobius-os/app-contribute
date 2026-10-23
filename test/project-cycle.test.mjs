@@ -7,7 +7,7 @@ import { freezeStartAction } from '../storage.js'
 // The hook's effects observe only a fixture runtime/storage. No DOM, real
 // conversation, saved partner record, or application transport is involved.
 const source = readFileSync(new URL('../ui/useProjectCycle.js', import.meta.url), 'utf8')
-function fixture({ saved = null, runtime = {}, statusError = false, stopResult = { stopped: true }, claim = async () => ({ ok: false, error: 'Fixture claim refused' }), list = async () => [], settle, start = () => assert.fail('Observation must not start an agent'), cancelStart } = {}) {
+function fixture({ saved = null, runtime = {}, statusError = false, stopResult = { stopped: true }, claim = async () => ({ ok: false, error: 'Fixture claim refused' }), list = async () => [], settle, start = () => assert.fail('Observation must not start an agent'), readClaim, abandon } = {}) {
   const slots = [], effects = [], calls = []
   let cursor = 0
   const context = vm.createContext({
@@ -25,6 +25,9 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
     loadCycleState: async key => { calls.push(['load', key]); return typeof saved === 'function' ? saved() : saved },
     claimProjectCycle: (...args) => { calls.push(['claim', args[0]]); return claim(...args) },
     freezeStartAction,
+    // By default the online claim is the fixture's saved reservation.
+    readProjectCycleClaim: async key => { calls.push(['readClaim', key]); if (readClaim) return readClaim(key); const value = typeof saved === 'function' ? await saved() : saved; return value?.pending || null },
+    abandonProjectCycleClaim: async (...args) => { calls.push(['abandon', ...args]); if (!abandon) assert.fail('Fixture must not abandon a claim'); return abandon(...args) },
     settleProjectCycleClaim: async (...args) => { calls.push(['settle', ...args]); if (!settle) assert.fail('Fixture must not settle a claim'); return settle(...args) },
     openAgentConversation: id => { calls.push(['open', id]); return { ok: true } },
     document: { hidden: false },
@@ -32,8 +35,7 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
       calls.push(['status', id])
       if (typeof statusError === 'function' ? statusError() : statusError) throw Error('Fixture unavailable')
       return typeof runtime === 'function' ? runtime(id) : runtime
-    }, list: async options => { calls.push(['list', options.scope]); return list(options) }, stop: async id => { calls.push(['stop', id]); return stopResult },
-      ...(cancelStart ? { cancelStart: async options => { calls.push(['cancelStart', options.scope]); return cancelStart(options) } } : {}) } }, addEventListener() {}, removeEventListener() {} },
+    }, list: async options => { calls.push(['list', options.scope]); return list(options) }, stop: async id => { calls.push(['stop', id]); return stopResult } } }, addEventListener() {}, removeEventListener() {} },
     setInterval: () => 1, clearInterval() {},
   })
   vm.runInContext(source.replace(/^import .*\n/gm, '').replace(/export (function|const) /g, '$1 '), context)
@@ -77,7 +79,7 @@ test('restoring a named paused cycle observes status without resuming, stopping,
 })
 
 test('status failure retains named saved work as unknown, never paused or successful', async () => {
-  const f = fixture({ saved: { chat_id: 'fixture-chat', title: 'Pull accepted work', event: 'update_source_projects', started_at: '2026-09-10T12:00:00Z' }, statusError: true })
+  const f = fixture({ saved: { chat_id: 'fixture-chat', title: 'Pull accepted work', event: 'update_source_projects', started_at: '2026-09-10T12:00:00Z' }, statusError: true, list: async () => [{ id: 'fixture-chat' }] })
   f.render()
   await f.restore()
   const { cycle } = f.render()
@@ -87,7 +89,7 @@ test('status failure retains named saved work as unknown, never paused or succes
   assert.equal(cycle.startedAt, '2026-09-10T12:00:00Z')
   assert.match(cycle.error, /Progress is unavailable/)
   assert.equal(cycle.runtime, null)
-  assert.deepEqual(f.calls, [['load', 'fixture-project'], ['status', 'fixture-chat']])
+  assert.deepEqual(f.calls, [['load', 'fixture-project'], ['status', 'fixture-chat'], ['list', undefined]])
 })
 
 test('an unconfirmed Stop leaves the saved cycle blocked and does not restart it', async () => {
@@ -207,7 +209,7 @@ test('empty, offline, or unreadable rechecks never release an unresolved reserva
 
 test('ambiguous Stop can be read-only rechecked on the same mounted conversation', async () => {
   let offline=false, runtime={running:true}
-  const f=fixture({saved:{chat_id:'same-chat',title:'Reserved'},runtime:()=>runtime,statusError:()=>offline,stopResult:{stopped:false}})
+  const f=fixture({saved:{chat_id:'same-chat',title:'Reserved'},runtime:()=>runtime,statusError:()=>offline,stopResult:{stopped:false},list:async()=>{if(offline)throw Error('Offline');return [{id:'same-chat'}]}})
   f.render();await f.restore()
   await f.render().stop()
   assert.equal(f.render().cycle.pending,true)
@@ -320,52 +322,16 @@ test('the frozen start keeps exact work and model fields only', () => {
     { title: 'Prepare', draft: 'Only record A', event: 'private', merge: true, agent: ACTION.agent })
 })
 
-test('discarding a reserved start releases it only when the platform fences the scope', async () => {
-  for (const [fenced, released] of [[{ outcome: 'cancelled' }, true], [{ outcome: 'deleted' }, true], [{ outcome: 'started', chatId: 'late-chat' }, false]]) {
-    let saved = { pending: { id: 'claim-reload', title: 'Prepare', event: 'private' } }
-    const settled = []
-    const f = fixture({ saved: () => saved, runtime: { running: true }, cancelStart: async () => fenced,
-      settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
-    f.render(); await f.restore()
-    assert.equal(f.render().cycle.pendingId, 'claim-reload', 'a reload restores the reserved identity')
-    assert.equal(f.render().canDiscardStart, true)
-    await f.render().discardStart()
-    assert.deepEqual(f.calls.filter(([kind]) => kind === 'cancelStart'), [['cancelStart', 'contribute-cycle:claim-reload']])
-    if (released) { assert.deepEqual(settled, [null]); assert.equal(Boolean(f.render().cycle.pending), false) }
-    else { assert.equal(settled[0].chat_id, 'late-chat'); assert.equal(f.render().cycle.chatId, 'late-chat') }
-  }
-  const unfenced = fixture({ saved: { pending: { id: 'claim-x' } }, cancelStart: async () => { throw Error('offline') } })
-  unfenced.render(); await unfenced.restore()
-  await unfenced.render().discardStart()
-  assert.equal(unfenced.render().cycle.pending, true, 'an unknown fence keeps the reservation')
-})
-
-test('a failed discard keeps the saved work immediately replayable', async () => {
-  let saved = { pending: { id: 'claim-keep', title: ACTION.title, event: ACTION.event, action: freezeStartAction(ACTION) } }
-  const replays = []
-  const f = fixture({ saved: () => saved, runtime: { running: true }, cancelStart: async () => { throw Error('offline') },
-    start: async action => { replays.push(JSON.parse(JSON.stringify(action))); return { ok: true, chatId: 'kept-chat' } },
-    settle: async (key, id, next) => { saved = next; return true } })
-  f.render(); await f.restore()
-  await f.render().discardStart()
-  assert.equal(f.render().cycle.pending, true)
-  assert.equal(f.render().cycle.pendingAction?.draft, ACTION.draft, 'the replay payload survived the failed fence')
-  await f.render().finishStart()
-  assert.equal(replays[0].draft, ACTION.draft)
-  assert.equal(replays[0].scope, 'contribute-cycle:claim-keep')
-})
-
 test('reserved-start guidance names only controls that exist on this Möbius', async t => {
   const { frontendModules, renderModule } = await import('./render-harness.mjs')
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { reservedStartBlocker } = await renderModule(`export { reservedStartBlocker } from './ui/ProjectControls.jsx'`)
-  const withoutFence = reservedStartBlocker({ action: null, mergeRights: true, canDiscard: false })
-  assert.doesNotMatch(withoutFence, /Discard/, 'no instruction to use a control this Möbius lacks')
-  assert.match(withoutFence, /cannot safely cancel it, so it stays reserved\. Check again/)
-  assert.match(reservedStartBlocker({ action: null, mergeRights: true, canDiscard: true }), /Discard it, then start again/)
+  const legacy = reservedStartBlocker({ action: null, mergeRights: true })
+  assert.doesNotMatch(legacy, /Discard/, 'no instruction to use a control this Möbius lacks')
+  assert.match(legacy, /Check again finds its conversation if it started; if it never started, abandon it/)
   // A saved start is always finishable, even after merge rights are lost.
-  assert.equal(reservedStartBlocker({ action: { ...ACTION, merge: true }, canDiscard: false }), '')
-  assert.equal(reservedStartBlocker({ action: ACTION, canDiscard: false }), '')
+  assert.equal(reservedStartBlocker({ action: { ...ACTION, merge: true } }), '')
+  assert.equal(reservedStartBlocker({ action: ACTION }), '')
 })
 
 test('a new full-cycle reservation that never reached the platform is finished, not stranded, after merge rights are lost', async () => {
@@ -399,7 +365,6 @@ test('a new full-cycle reservation that never reached the platform is finished, 
       start: async action => { sent.push(JSON.parse(JSON.stringify(action))); return { ok: true, chatId: 'cycle-chat' } } })
     reloaded.render(); await reloaded.restore()
     await until(() => reloaded.render().cycle.pendingId)
-    assert.equal(reloaded.render().canDiscardStart, false)
     assert.equal(reloaded.render().cycle.pendingAction?.merge, true, JSON.stringify(reloaded.render().cycle))
     const result = await reloaded.render().finishStart()
     assert.equal(result.ok, true)
@@ -417,7 +382,7 @@ test('a start is bounded to the platform limits before it is reserved', async ()
   assert.ok(String(action.scopeLabel).length > 120, 'fixture: a valid long app name exceeds the platform label limit')
   let claimed = null
   const sent = []
-  const f = fixture({ claim: async (key, previous, payload) => { claimed = payload; return { ok: true, id: 'claim-long' } },
+  const f = fixture({ claim: async (key, previous, payload) => { claimed = payload; return { ok: true, id: 'claim-long' } }, readClaim: async () => ({ id: 'claim-long' }),
     start: async request => { sent.push(request); return { ok: true, chatId: 'long-chat' } }, settle: async () => true })
   f.render(); await f.restore()
   assert.equal((await f.render().start({ ...action, scopeLabel: action.scopeLabel + '\nwith a newline' })).ok, true)
@@ -478,7 +443,9 @@ for (const retryStatus of [413, 422]) test(`an admitted start whose response was
 })
 
 // Real storage helpers over an online CAS fixture, and a platform stand-in with
-// the scoped start's contract: one conversation per scope, ever.
+// the scoped start's G1 contract: one active conversation per scope. Deleting
+// a conversation removes it from the map, after which the platform's scoped
+// start would create a new one for that scope, as the real route does.
 async function realCycles(t) {
   const storage = await import('../storage.js')
   const stored = new Map(), versions = new Map()
@@ -496,7 +463,8 @@ async function realCycles(t) {
   const until = async predicate => { for (let i = 0; i < 400 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 5)) }
   const pane = (start, list = async ({ scope }) => chats.has(scope) ? [{ ...chats.get(scope) }] : []) => fixture({
     saved: () => storage.loadCycleState('fixture-project'), runtime: { running: true },
-    claim: (...args) => storage.claimProjectCycle(...args), settle: (...args) => storage.settleProjectCycleClaim(...args), start, list })
+    claim: (...args) => storage.claimProjectCycle(...args), settle: (...args) => storage.settleProjectCycleClaim(...args),
+    readClaim: (...args) => storage.readProjectCycleClaim(...args), abandon: (...args) => storage.abandonProjectCycleClaim(...args), start, list })
   return { storage, chats, until, pane }
 }
 
@@ -554,4 +522,157 @@ test('repeating Finish is idempotent and a finished cycle advances to the next s
   assert.equal(next.render().cycle.chatId, 'chat-1')
   assert.deepEqual([...chats.keys()], [scope1, scope1.replace(/:1$/, ':2')])
   assert.equal((await storage.loadCycleState('fixture-project')).seq, 2)
+})
+
+test('a stale Finish cannot recreate a settled cycle the owner deleted while its successor runs', async t => {
+  const { storage, chats, until, pane } = await realCycles(t)
+  const sent = []
+  let lose = true
+  // G1's scoped start: reuse an active conversation, else create one.
+  const platform = async action => {
+    sent.push(action.scope)
+    if (!chats.has(action.scope)) chats.set(action.scope, { id: 'chat-' + sent.length, has_messages: true })
+    return lose ? { ok: false, error: 'Response lost' } : { ok: true, chatId: chats.get(action.scope).id }
+  }
+  const a = pane(platform)
+  a.render(); await a.restore(); await until(() => a.render().cycle.phase === 'idle')
+  await a.render().start(ACTION)
+  const scope1 = a.render().cycle.pendingScope
+  assert.equal(a.render().cycle.pending, true, 'pane A keeps cycle 1 pending')
+  // Pane B settles cycle 1 from its started conversation, then starts cycle 2.
+  lose = false
+  const b = pane(platform)
+  b.render(); await b.restore(); await until(() => b.render().cycle.chatId)
+  b.setCycle({ ...b.render().cycle, phase: 'complete' })
+  await b.render().start(ACTION)
+  const scope2 = scope1.replace(/:1$/, ':2')
+  assert.equal((await storage.loadCycleState('fixture-project')).scope, scope2)
+  // The owner deletes cycle 1's conversation; the platform no longer sees it.
+  chats.delete(scope1)
+  const before = sent.length
+  const result = await a.render().finishStart()
+  assert.equal(result.ok, false)
+  assert.equal(sent.length, before, 'the stale pane did not call the scoped start')
+  assert.equal(chats.has(scope1), false, 'the deleted cycle was not recreated')
+  await until(() => a.render().cycle.chatId === chats.get(scope2).id)
+  assert.equal(Boolean(a.render().cycle.pending), false, 'the stale pane now shows the current cycle')
+  assert.equal((await storage.loadCycleState('fixture-project')).seq, 2)
+})
+
+test('a reservation the platform permanently refuses can be abandoned only after a fresh lookup finds nothing started', async t => {
+  const { storage, chats, until, pane } = await realCycles(t)
+  let refused = true
+  const sent = []
+  // A provider removed after the choice: the platform refuses before creating anything.
+  const platform = async action => {
+    sent.push(action.scope)
+    if (refused) return { ok: false, status: 422, error: 'Unknown provider' }
+    if (!chats.has(action.scope)) chats.set(action.scope, { id: 'chat-' + sent.length, has_messages: true })
+    return { ok: true, chatId: chats.get(action.scope).id }
+  }
+  const p = pane(platform)
+  p.render(); await p.restore(); await until(() => p.render().cycle.phase === 'idle')
+  await p.render().start(ACTION)
+  const scope1 = p.render().cycle.pendingScope
+  // A stale second pane keeps the same reservation in view.
+  const stale = pane(platform)
+  stale.render(); await stale.restore(); await until(() => stale.render().cycle.pendingId)
+  // Reload, Finish is refused again, then the owner abandons it.
+  const reloaded = pane(platform)
+  reloaded.render(); await reloaded.restore(); await until(() => reloaded.render().cycle.pendingId)
+  await reloaded.render().finishStart()
+  assert.equal(reloaded.render().cycle.pending, true, 'a refusal never releases on its own')
+  const abandoned = await reloaded.render().abandonStart()
+  assert.equal(abandoned.ok, true)
+  assert.deepEqual(reloaded.calls.filter(([kind]) => kind === 'list').at(-1), ['list', scope1], 'abandon looked up the exact scope')
+  const saved = await storage.loadCycleState('fixture-project')
+  assert.equal(saved, null, 'no current conversation and no reservation')
+  await until(() => reloaded.render().cycle.phase === 'idle')
+  // The stale pane's Finish of the abandoned cycle starts nothing.
+  const before = sent.length
+  assert.equal((await stale.render().finishStart()).ok, false)
+  assert.equal(sent.length, before, 'no pane starts an abandoned cycle')
+  // A fresh cycle uses n+1.
+  refused = false
+  await reloaded.render().start(ACTION)
+  assert.equal(sent.at(-1), scope1.replace(/:1$/, ':2'))
+  assert.equal(reloaded.render().cycle.chatId, chats.get(sent.at(-1)).id)
+  assert.equal((await storage.loadCycleState('fixture-project')).seq, 2)
+})
+
+test('abandon settles a start that did begin, and keeps the reservation when the lookup fails', async t => {
+  const { storage, chats, until, pane } = await realCycles(t)
+  const platform = async action => { chats.set(action.scope, { id: 'begun-chat', has_messages: true }); return { ok: false, error: 'Response lost' } }
+  const p = pane(platform)
+  p.render(); await p.restore(); await until(() => p.render().cycle.phase === 'idle')
+  await p.render().start(ACTION)
+  const failing = pane(platform, async () => { throw Error('offline') })
+  failing.render(); await failing.restore(); await until(() => failing.render().cycle.pendingId)
+  assert.equal((await failing.render().abandonStart()).ok, false)
+  assert.equal(failing.render().cycle.pending, true, 'an unavailable lookup abandons nothing')
+  assert.ok((await storage.loadCycleState('fixture-project')).pending)
+  const result = await p.render().abandonStart()
+  assert.equal(result.ok, true)
+  assert.equal(p.render().cycle.chatId, 'begun-chat', 'the started conversation settles the cycle instead')
+  const saved = await storage.loadCycleState('fixture-project')
+  assert.equal(saved.chat_id, 'begun-chat')
+  assert.equal(saved.pending, undefined)
+})
+
+test('a deleted settled conversation finishes its cycle so the next one can start', async () => {
+  let rows = [], listFails = false
+  const claims = []
+  const f = fixture({ saved: { chat_id: 'gone-chat', title: 'Old work', scope: 'contribute-cycle:x:1' }, statusError: true,
+    list: async options => { assert.equal(Object.keys(options).length, 0, 'the complete app list, not one scope'); if (listFails) throw Error('offline'); return rows },
+    claim: async (...args) => { claims.push(args); return { ok: false, error: 'Fixture claim refused' } } })
+  // Still listed: an unreadable status stays unknown and blocks starts.
+  rows = [{ id: 'gone-chat' }]
+  f.render(); await f.restore()
+  assert.equal(f.render().cycle.phase, 'unknown')
+  assert.equal((await f.render().start(ACTION)).ok, false)
+  listFails = true
+  await f.render().recheck()
+  assert.equal(f.render().cycle.phase, 'unknown', 'an unavailable list is not evidence of deletion')
+  // Absent from a successful list: the owner deleted it.
+  listFails = false; rows = [{ id: 'other-chat' }]
+  await f.render().recheck()
+  assert.equal(f.render().cycle.phase, 'deleted')
+  assert.equal(f.render().cycle.chatId, 'gone-chat', 'its history is kept')
+  await f.render().start(ACTION)
+  assert.equal(claims.length, 1, 'a new cycle may start')
+  assert.equal(claims[0][1], 'gone-chat')
+  assert.equal(claims.length, 1)
+})
+
+test('a durable Wait or other pending continuation keeps the cycle active until it settles', async () => {
+  const { phase } = fixture()
+  for (const runtime of [
+    { running: false, goal: { status: 'open' }, waits: [{ status: 'armed' }] },
+    { running: false, goal: { status: 'completed' }, waits: [{ status: 'fired' }] },
+    { running: false, pending_messages: [{ content: 'queued' }] },
+    { running: false, continuation_wait: { id: 'w' } },
+    { running: false, recovery_run_id: 'run-1' },
+    { running: false, background_helpers: { count: 1, items: [{}] } },
+    { running: false, run_status: 'queued' },
+  ]) assert.equal(phase(runtime), 'scheduled', JSON.stringify(runtime))
+  assert.equal(phase({ running: false, pending_question_id: 'q', waits: [{}] }), 'waiting', 'an owner question is still a question')
+  assert.equal(phase({ running: false, goal: { status: 'completed' }, waits: [], pending_messages: [], background_helpers: { count: 0, items: [] } }), 'complete')
+  assert.equal(phase({ running: false, waits: [] }), 'inactive')
+  // Armed Wait: the next cycle is refused; once it resumes and completes, it is allowed.
+  let runtime = { running: false, goal: { status: 'open' }, waits: [{ status: 'armed' }] }
+  const claims = []
+  const f = fixture({ saved: { chat_id: 'waiting-chat', title: 'Work' }, runtime: () => runtime,
+    claim: async (...args) => { claims.push(args); return { ok: false, error: 'Fixture claim refused' } } })
+  f.render(); await f.restore()
+  assert.equal(f.render().cycle.phase, 'scheduled')
+  assert.equal((await f.render().start(ACTION)).ok, false)
+  assert.equal(claims.length, 0, 'no second owner while the Wait is armed')
+  runtime = { running: true, goal: { status: 'open' }, waits: [] }
+  await f.render().recheck()
+  assert.equal(f.render().cycle.phase, 'running')
+  runtime = { running: false, goal: { status: 'completed' }, waits: [] }
+  await f.render().recheck()
+  assert.equal(f.render().cycle.phase, 'complete')
+  await f.render().start(ACTION)
+  assert.equal(claims.length, 1)
 })

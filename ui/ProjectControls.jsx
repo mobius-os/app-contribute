@@ -31,6 +31,7 @@ const STATUS_LABELS = {
   restoring: 'Checking saved work', checking: 'Checking work status', starting: 'Starting agent', stopping: 'Stopping work',
   waiting: 'Your agent has a question', paused: 'Work paused', failed: 'Work failed', stopped: 'Work stopped',
   inactive: 'Agent not running', complete: 'Run completed', unknown: 'Status unknown',
+  scheduled: 'Waiting to continue', deleted: 'Conversation deleted',
 }
 
 // Why a reserved start cannot be finished here, naming only controls that exist.
@@ -38,10 +39,11 @@ const STATUS_LABELS = {
 // it is never re-gated by today's merge rights: the gate decides whether a
 // *new* cycle may start, and GitHub plus the platform's merge executor still
 // enforce rights at merge time. A start with saved work is always finishable.
-export function reservedStartBlocker({ action, canDiscard }) {
+// Abandon is always offered: it first looks the scope up again, so it settles
+// a start that did begin rather than discarding it.
+export function reservedStartBlocker({ action }) {
   if (action) return ''
-  return canDiscard ? 'This older start did not save its exact work. Discard it, then start again.'
-    : 'This older start did not save its exact work, and this Möbius cannot safely cancel it, so it stays reserved. Check again finds its conversation if it started.'
+  return 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started; if it never started, abandon it.'
 }
 
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
@@ -54,7 +56,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const [pullAgent, setPullAgent] = useState({ provider: '', model: '', effort: '' })
   const [cycleAgent, setCycleAgent] = useState({ provider: '', model: '', effort: '' })
   const checking = ['restoring', 'checking', 'unknown'].includes(cycle.phase)
-  const active = ['starting', 'running', 'checking', 'stopping'].includes(cycle.phase)
+  const active = ['starting', 'running', 'scheduled', 'checking', 'stopping'].includes(cycle.phase)
   const moving = ['starting', 'running'].includes(cycle.phase)
   const waiting = cycle.phase === 'waiting'
   const statusLabel = cycle.phase === 'running'
@@ -71,7 +73,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
   // Recovery replays the reserved start exactly; it never substitutes today's
   // work or model, and is not re-gated by today's merge rights.
-  const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction, canDiscard: workflow.canDiscardStart })
+  const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction })
   async function start(action, agent) {
     setError('')
     try {
@@ -88,7 +90,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const hasCycle = Boolean(cycle.chatId || cycle.pending || cycle.history?.length || cycle.phase === 'unknown')
   const pendingRecovery = cycle.pending && cycle.pendingId ? <div className="co-cycle-actions">
     <button type="button" className="co-btn co-btn-primary" disabled={Boolean(finishBlocker)} onClick={() => workflow.finishStart()}>Finish starting</button>
-    {workflow.canDiscardStart ? <button type="button" className="co-btn" onClick={workflow.discardStart}>Discard this start</button> : null}
+    <button type="button" className="co-btn" disabled={['checking', 'starting'].includes(cycle.phase)} onClick={() => workflow.abandonStart()}>Abandon this start</button>
     {finishBlocker ? <p className="co-task-footnote">{finishBlocker}</p> : null}
   </div> : null
   const progressRow = hasCycle ? <section className="co-cycle-outlet" aria-label="Project work">
@@ -101,8 +103,8 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
       {cycle.chatId ? <p><strong>Current:</strong> {cycle.title || 'Project work'} · {statusLabel}{cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="Started " /></> : null}</p> : <p>No current cycle.</p>}
       <div className="co-cycle-actions">
         <button type="button" className="co-btn" disabled={['checking', 'restoring', 'starting', 'stopping'].includes(cycle.phase)} onClick={workflow.recheck}><Icon name="refresh" /> Check again</button>
-        {cycle.chatId ? <button type="button" className="co-btn" onClick={() => workflow.open()}>{waiting ? 'Answer question' : 'Open current conversation'}</button> : null}
-        {['running', 'waiting', 'paused'].includes(cycle.phase) ? <button type="button" className="co-btn" onClick={workflow.stop}>{cycle.phase === 'paused' ? 'Cancel paused work' : 'Cancel active work'}</button> : null}
+        {cycle.chatId && cycle.phase !== 'deleted' ? <button type="button" className="co-btn" onClick={() => workflow.open()}>{waiting ? 'Answer question' : 'Open current conversation'}</button> : null}
+        {['running', 'waiting', 'scheduled', 'paused'].includes(cycle.phase) ? <button type="button" className="co-btn" onClick={workflow.stop}>{cycle.phase === 'paused' ? 'Cancel paused work' : 'Cancel active work'}</button> : null}
       </div>
       {pendingRecovery}
       {fullCycleAction && !cycle.pending ? <>

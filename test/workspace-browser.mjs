@@ -785,6 +785,7 @@ window.runWorkspaceChecks = async () => {
       ensure(calls.starts.length===starts,'Failed handoff counted as started')
       // A failed start stays reserved under its scope; Finish starting replays it.
       ensure(button('Finish starting', query('[data-task="task:update"]')), 'A failed start offered no way to finish it')
+      ensure(button('Abandon this start', query('[data-task="task:update"]')), 'A failed start offered no explicit way to abandon it')
       window.failStart=false
       const finish=button('Finish starting', query('[data-task="task:update"]')); finish.click(); finish.click()
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
