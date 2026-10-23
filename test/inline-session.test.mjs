@@ -2,13 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { batchHandle, cardRecordIds, sendTarget } from '../chat-blocks.js'
 import { reviewAddressFor } from '../send-readiness.js'
-import { attemptOutcome, confirmationItem, descriptionExcerpt, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
+import { attemptOutcome, confirmationItem, descriptionExcerpt, SIZE_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
 function prepared(id, extra = {}) {
   const head = extra.head || HEAD
   return { id, type: 'pr', status: 'prepared', repo: 'owner/repo', updated_at: '2026-10-20T10:00:00Z',
-    plan: { action: 'pr', repo: 'owner/repo', title: `Change ${id}`, branch: `fix/${id}`, head_sha: head, diff_sha256: 'd'.repeat(64), ...extra.plan },
+    // As staging records it: `git diff --shortstat` of the reviewed change.
+    plan: { action: 'pr', repo: 'owner/repo', title: `Change ${id}`, branch: `fix/${id}`, head_sha: head, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 2 insertions(+)', ...extra.plan },
     quality_review: { state: 'all_clear', reviewed_head_sha: head }, ...extra.record }
 }
 function layer(id, position, parent, status = 'prepared') {
@@ -63,7 +64,7 @@ test('Contribute becomes Confirm with the complete app-sourced identity of each 
   assert.equal(item.title, 'Change one')
   assert.ok(item.facts.length <= 8)
   for (const fact of item.facts) assert.ok(fact.label && fact.value && fact.value.length <= 512, JSON.stringify(fact))
-  assert.deepEqual(item.facts.map(fact => fact.label), ['Repository', 'Action', 'Branch', 'Version', 'Reviewed diff', 'Review'])
+  assert.deepEqual(item.facts.map(fact => fact.label), ['Repository', 'Action', 'Branch', 'Version', 'Reviewed diff', 'Change', 'Review'])
   const sized = confirmationItem(prepared('sized', { plan: { diff_stat: ' 3 files changed, 40 insertions(+), 2 deletions(-)' } }))
   assert.deepEqual(sized.facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '3 files · +40 −2' }, 'Confirm shows how big the change is')
   const stacked = confirmationItem({ ...layer('base', 1, ''), plan: { ...layer('base', 1, '').plan, diff_stat: '1 file changed, 1 insertion(+)' } })
@@ -461,4 +462,34 @@ test('a card retry reads the review status even before the first ledger read fin
     refresh()
     assert.deepEqual(calls, [ready ? 'full refresh' : 'review status'], `ledger ready: ${ready}`)
   }
+})
+
+test('a change without a readable size is never offered for Confirm, single or in a stack', async () => {
+  for (const [name, diffStat] of [['missing', undefined], ['empty', ''], ['malformed', 'lots of changes']]) {
+    const unsized = { plan: { diff_stat: diffStat } }
+    // A single contribution.
+    const single = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one', unsized)] })
+    await openConfirm(single, 'chat-send:one')
+    let state = single.action('chat-send:one')
+    assert.equal(state.confirming, false, `${name}: single`)
+    assert.equal(state.disabled, true, `${name}: single stays blocked`)
+    assert.equal(state.note, SIZE_NOTE)
+    single.fire('chat-send:one', 'confirm'); await tick()
+    assert.equal(single.sends.length, 0)
+    // One layer of a two-layer stack lacks its size: the whole phase is blocked.
+    const base = layer('base', 1, ''), top = layer('top', 2, 'base')
+    top.plan.base_sha = base.plan.head_sha
+    top.plan.diff_stat = diffStat
+    const stack = harness({ actions: [{ key: 'chat-send:base' }], records: [base, top] })
+    await openConfirm(stack, 'chat-send:base')
+    state = stack.action('chat-send:base')
+    assert.equal(state.confirming, false, `${name}: stack`)
+    assert.equal(state.note, SIZE_NOTE)
+    assert.equal(stack.sends.length, 0)
+  }
+  // A staged --shortstat, including deletions only, is accepted.
+  const deletions = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one', { plan: { diff_stat: ' 2 files changed, 7 deletions(-)' } })] })
+  await openConfirm(deletions, 'chat-send:one')
+  assert.equal(deletions.action('chat-send:one').confirming, true)
+  assert.equal(deletions.action('chat-send:one').confirmation[0].facts.find(fact => fact.label === 'Change').value, '2 files · +0 −7')
 })

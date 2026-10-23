@@ -1229,7 +1229,7 @@ window.runWorkspaceChecks = async () => {
       await frame(); await frame()
       values.clear()
       const record = { ...prepared, id: 'card-record', updated_at: '2026-10-20T10:00:00Z',
-        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64) } }
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 3 insertions(+), 1 deletion(-)' } }
       values.set('contributions/card-record.json', structuredClone(record))
       window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: [{ type: 'file', name: 'card-record.json', content: structuredClone(record) }] })
       window.fullAppConnected = true; window.fullAppBinding = true

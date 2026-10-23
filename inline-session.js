@@ -112,7 +112,11 @@ export function confirmationItem(record) {
 const relayed = record => record?.submission_mode === 'mobius-bot'
 export const RELAY_NOTE = 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.'
 // A frozen record is confirmable only when its whole identity is present.
-const confirmable = record => !relayed(record) && confirmationItem(record).facts.every(fact => fact.value)
+// The owner must see how big each change is, so a record without a readable
+// diff stat is never confirmable (staging always records one from Git).
+const sized = record => Boolean(changeSize(record?.plan))
+export const SIZE_NOTE = 'This contribution needs a fresh check in Contribute before it can be sent: its change size is missing.'
+const confirmable = record => !relayed(record) && sized(record) && confirmationItem(record).facts.every(fact => fact.value)
 
 const PUBLIC_LABELS = { draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }
 
@@ -179,6 +183,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (idsFor(key).some(id => relayed(current().get(id)))) return RELAY_NOTE
     if (readyUnits(key).length) return ''
     const all = units(key)
+    if (all.some(unit => unit.ready.length && !unit.ready.every(sized))) return SIZE_NOTE
     return all.map(unit => unit.reason).find(Boolean) || (all.some(locked) ? UNKNOWN_NOTE : '')
   }
 
