@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { batchHandle, cardRecordIds, sendTarget } from '../chat-blocks.js'
 import { reviewAddressFor } from '../send-readiness.js'
-import { attemptOutcome, confirmationItem, descriptionExcerpt, SIZE_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
+import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, SIZE_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
 function prepared(id, extra = {}) {
@@ -518,4 +518,54 @@ test('a malformed shortstat suffix keeps the card blocked', async () => {
     assert.equal(state.note, SIZE_NOTE)
     assert.equal(h.sends.length, 0)
   }
+})
+
+test('an incomplete ledger ends the check with a clear note instead of a silent Checking…', async () => {
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')] })
+  h.session.start(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  // The first ledger read finished but could not list every contribution.
+  h.session.updateRuntime({ ...h.runtime(), ledgerReady: false, ledger: 'incomplete' }); await tick()
+  let state = h.action('chat-send:one')
+  assert.equal(state.confirming, false)
+  assert.notEqual(state.label, 'Checking…', 'the check ended')
+  assert.equal(state.note, LEDGER_NOTE)
+  assert.equal(state.disabled, false, 'the owner can try again')
+  h.fire('chat-send:one', 'confirm'); await tick()
+  assert.equal(h.sends.length, 0)
+  // While the ledger is still loading, it keeps checking.
+  const loading = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')] })
+  loading.session.start(); await tick()
+  loading.fire('chat-send:one', 'activate'); await tick()
+  loading.session.updateRuntime({ ...loading.runtime(), ledgerReady: false, ledger: 'loading' }); await tick()
+  assert.equal(loading.action('chat-send:one').label, 'Checking…')
+  // Once a later read is complete, a retry reaches Confirm.
+  h.session.updateRuntime({ ...h.runtime(), ledger: 'current' }); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(h.action('chat-send:one').confirming, true)
+})
+
+test('the description excerpt keeps emphasis and skips comments and code fences', () => {
+  assert.equal(descriptionExcerpt('**Summary** of the fix'), '**Summary** of the fix', 'emphasis is not a list marker')
+  assert.equal(descriptionExcerpt('*important* change'), '*important* change')
+  assert.equal(descriptionExcerpt('- First point'), 'First point')
+  assert.equal(descriptionExcerpt('+ Added thing'), 'Added thing')
+  assert.equal(descriptionExcerpt('> Quoted'), 'Quoted')
+  assert.equal(descriptionExcerpt('1. Step one'), 'Step one')
+  assert.equal(descriptionExcerpt('#hashtag-like start'), '#hashtag-like start', 'not a heading without a space')
+  assert.equal(descriptionExcerpt('<!-- template: fill in -->\nReal summary'), 'Real summary')
+  assert.equal(descriptionExcerpt('<!--\nmulti-line\ncomment\n-->\nAfter the comment'), 'After the comment')
+  assert.equal(descriptionExcerpt('```js\nconst x = 1\n```\nProse after code'), 'Prose after code')
+  assert.equal(descriptionExcerpt('## Summary\n\nRetries once.'), 'Retries once.')
+})
+
+test('the card runtime reports the ledger as loading, current or incomplete', async () => {
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  const expression = app.match(/\n\s*ledger: ([^\n]+),\n/)?.[1]
+  assert.ok(expression, 'the runtime exposes ledger')
+  const state = (ledgerReady, current) => new Function('ledgerReady', 'ledgerCurrentRef', `return ${expression}`)(ledgerReady, { current })
+  assert.equal(state(false, false), 'loading')
+  assert.equal(state(true, true), 'current')
+  assert.equal(state(true, false), 'incomplete')
 })

@@ -17,6 +17,7 @@ const CHECKPOINT_BYTES = 32768
 const MAX_ATTEMPTS = 24
 const UNRESOLVED = new Set(['sending', 'unknown'])
 const UNKNOWN_NOTE = 'The result is not confirmed yet. Check Contribute before trying again.'
+export const LEDGER_NOTE = 'Could not read every contribution. Open Contribute to send.'
 export const RECOVERY_NOTE = 'The previous result from this card could not be restored. Open Contribute to check it; nothing will be sent from here.'
 
 // ---- Recovery checkpoint: unresolved attempt identities only, never records,
@@ -84,9 +85,18 @@ export function changeSize(plan) {
 // The first line of prose in a PR description (headings skipped), as plain
 // bounded text.
 export function descriptionExcerpt(body, max = 160) {
-  const lines = String(body || '').split('\n').map(value => value.trim()).filter(Boolean)
-  const prose = lines.find(value => !value.startsWith('#')) || lines[0] || ''
-  const line = prose.replace(/^(#+|[-*>]|\d+\.)\s*/, '').trim()
+  // Skip HTML comments (also across lines) and fenced code blocks; prefer
+  // prose over headings.
+  let fenced = false
+  const lines = String(body || '').replace(/<!--[\s\S]*?(-->|$)/g, '').split('\n').map(value => value.trim())
+    .filter(value => {
+      if (/^(```|~~~)/.test(value)) { fenced = !fenced; return false }
+      return value && !fenced
+    })
+  const prose = lines.find(value => !/^#+\s/.test(value)) || lines[0] || ''
+  // Strip a block marker only when it is one (followed by whitespace), so
+  // emphasis such as **Summary** stays intact.
+  const line = prose.replace(/^(#+|[-*+>]|\d+\.)\s+/, '').trim()
   return line.length <= max ? line : line.slice(0, max - 1).trimEnd() + '…'
 }
 
@@ -177,6 +187,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (!runtime) return ''
     if (runtime.reviewStatus?.state === 'unavailable') return 'Could not verify the current review. Try again; nothing was sent.'
     if (idsFor(key).some(id => unreadable.has(id)) && !reading.size) return 'Could not read this contribution. Try again; nothing was sent.'
+    if (ledgerIncomplete()) return LEDGER_NOTE
     if (!authoritative(key)) return ''
     if (runtime.connection !== 'connected') return 'Connect GitHub in Möbius Settings → Accounts to send.'
     // Without server-side binding of the confirmed snapshot, or a review check
@@ -205,7 +216,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const checking = activating === key
     const loading = ids.some(id => !now.has(id) && reading.has(id))
     // A failed check or read can be retried; retrying only reads again.
-    const retry = runtime?.reviewStatus?.state === 'unavailable' || ids.some(id => unreadable.has(id))
+    const retry = runtime?.reviewStatus?.state === 'unavailable' || ids.some(id => unreadable.has(id)) || ledgerIncomplete()
     const reason = fault || blockedReason(key)
     const label = busy ? 'Contributing…' : checking ? 'Checking…' : loading ? 'Loading…'
       : unknown && ids.length === 1 ? 'Check again' : retry ? 'Try again' : item.label || 'Contribute'
@@ -255,7 +266,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // done, but a named record could not be read or the review check is
   // unavailable. It ends the activation so the card offers Try again.
   const preflightFailed = key => Boolean(runtime) && !reading.size && !awaitingCheck
-    && (idsFor(key).some(id => unreadable.has(id)) || runtime.reviewStatus?.state === 'unavailable')
+    && (idsFor(key).some(id => unreadable.has(id)) || runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete())
+  // The ledger read finished but could not list every contribution, so the
+  // whole stack and current versions cannot be verified from here.
+  const ledgerIncomplete = () => runtime?.ledger === 'incomplete'
 
   function settle() {
     const now = current()

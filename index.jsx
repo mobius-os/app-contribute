@@ -1531,7 +1531,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // guarded Send handlers; there is no second publication path.
   useEffect(() => {
     onPublicationRuntime?.({
+      // The ledger is loading until its first read finishes, then current, or
+      // incomplete when that read could not list every contribution.
       records, ledgerReady: ledgerReady && ledgerCurrentRef.current,
+      ledger: !ledgerReady ? 'loading' : ledgerCurrentRef.current ? 'current' : 'incomplete',
       reviewStatus: reviewStatus.address === reviewAddressKey ? reviewStatus : { ...reviewStatus, state: 'loading' },
       connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
       // The relay route cannot bind a confirmed snapshot, so chat never uses it.
