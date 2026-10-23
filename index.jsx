@@ -626,8 +626,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // preserves exactly one trailing refresh when an event arrives mid-flight.
   // There is deliberately no timer: a hidden/idle app consumes no resources.
   const refreshWorkRef = useRef(null)
-  const runRefreshWork = useCallback(async () => {
-    if (document.visibilityState !== 'visible') return
+  const runRefreshWork = useCallback(async ({ force = false } = {}) => {
+    // A card's explicit Try again runs even while the frame is not visible.
+    if (!force && document.visibilityState !== 'visible') return
     // Mount already owns the first authoritative scan. Startup focus and
     // visibility events must not queue another full pass behind it.
     if (!ledgerReadyRef.current) return
@@ -1527,6 +1528,19 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
+  // A card's Try again: once the first ledger read is done, the full pass
+  // (ledger, review status, connection); before that, the review status on its
+  // own. Either way the card then gets a fresh report, even when nothing changed.
+  const [cardReport, setCardReport] = useState(0)
+  const cardRefresh = useCallback(async () => {
+    try {
+      if (ledgerReadyRef.current) await runRefreshWork({ force: true })
+      else await refreshReviewStatus()
+    } finally {
+      setCardReport(count => count + 1)
+    }
+  }, [runRefreshWork, refreshReviewStatus])
+
   // Behind a chat card, hand the inline session this app's own state and
   // guarded Send handlers; there is no second publication path.
   useEffect(() => {
@@ -1541,12 +1555,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // Chat sends require the binding at the moment of the write, too.
       send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
       sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
-      // A card's retry always reads the review status again. The full refresh
-      // pass (ledger, status, connection) waits for the first ledger read, so
-      // during startup the status is read on its own.
-      refresh: () => ledgerReadyRef.current ? refreshCoordinatorRef.current() : refreshReviewStatus(),
+      refresh: cardRefresh,
     })
-  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, refreshReviewStatus])
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardReport])
 
   if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.

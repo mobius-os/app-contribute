@@ -303,7 +303,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     activating = key
     awaitingCheck = false
     if (!runtime) onNeedRuntime?.()
-    else if (runtime.reviewStatus?.state === 'unavailable') { awaitingCheck = true; runtime.refresh?.() }
+    // A failed check or an incomplete ledger is read again by the app; the card
+    // waits for its next report.
+    else if (runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete()) { awaitingCheck = true; runtime.refresh?.() }
     void read(allIds())
   }
 

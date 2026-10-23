@@ -449,18 +449,19 @@ test('a retry during the first ledger read never strands the card on Checking', 
   assert.equal(h.sends.length, 0)
 })
 
-test('a card retry reads the review status even before the first ledger read finishes', async () => {
-  // The runtime's refresh wiring, executed from index.jsx's source.
+test('a card retry reads the review status before the first ledger read, the full ledger after, and always reports back', async () => {
+  // The card runtime's refresh, executed from index.jsx's source.
   const { readFileSync } = await import('node:fs')
   const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
-  const wiring = app.match(/\n\s*refresh: (\(\) => [^\n]+),\n/)?.[1]
-  assert.ok(wiring, 'the card runtime exposes refresh')
+  assert.match(app, /\n\s*refresh: cardRefresh,\n/, 'the card runtime exposes cardRefresh')
+  const body = app.match(/const cardRefresh = useCallback\((async \(\) => \{[\s\S]*?\n  \}), \[/)?.[1]
+  assert.ok(body, 'cardRefresh is defined')
   for (const ready of [false, true]) {
     const calls = []
-    const refresh = new Function('ledgerReadyRef', 'refreshCoordinatorRef', 'refreshReviewStatus', `return ${wiring}`)(
-      { current: ready }, { current: () => calls.push('full refresh') }, () => calls.push('review status'))
-    refresh()
-    assert.deepEqual(calls, [ready ? 'full refresh' : 'review status'], `ledger ready: ${ready}`)
+    const refresh = new Function('ledgerReadyRef', 'runRefreshWork', 'refreshReviewStatus', 'setCardReport', `return ${body}`)(
+      { current: ready }, async options => calls.push(['full refresh', options]), async () => calls.push(['review status']), () => calls.push(['report']))
+    await refresh()
+    assert.deepEqual(calls, ready ? [['full refresh', { force: true }], ['report']] : [['review status'], ['report']], `ledger ready: ${ready}`)
   }
 })
 
@@ -520,12 +521,14 @@ test('a malformed shortstat suffix keeps the card blocked', async () => {
   }
 })
 
-test('an incomplete ledger ends the check with a clear note instead of a silent Checking…', async () => {
-  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')] })
+test('an incomplete ledger ends the check with a clear note, and Try again re-reads the ledger to recover', async () => {
+  const refreshes = []
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { refresh: () => refreshes.push(true) } })
+  const incomplete = () => h.session.updateRuntime({ ...h.runtime(), ledgerReady: false, ledger: 'incomplete' })
   h.session.start(); await tick()
   h.fire('chat-send:one', 'activate'); await tick()
   // The first ledger read finished but could not list every contribution.
-  h.session.updateRuntime({ ...h.runtime(), ledgerReady: false, ledger: 'incomplete' }); await tick()
+  incomplete(); await tick()
   let state = h.action('chat-send:one')
   assert.equal(state.confirming, false)
   assert.notEqual(state.label, 'Checking…', 'the check ended')
@@ -533,16 +536,21 @@ test('an incomplete ledger ends the check with a clear note instead of a silent 
   assert.equal(state.disabled, false, 'the owner can try again')
   h.fire('chat-send:one', 'confirm'); await tick()
   assert.equal(h.sends.length, 0)
+  // Try again asks the app to read the whole ledger again and waits for it.
+  refreshes.length = 0
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(refreshes.length, 1, 'Try again requested a full ledger re-read')
+  assert.equal(h.action('chat-send:one').label, 'Checking…', 'waiting for the re-read')
+  // The app's next report: the ledger is now complete.
+  h.session.updateRuntime({ ...h.runtime(), ledger: 'current' }); await tick()
+  assert.equal(h.action('chat-send:one').confirming, true, 'Confirm is reachable after Try again')
+  assert.equal(h.sends.length, 0)
   // While the ledger is still loading, it keeps checking.
   const loading = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')] })
   loading.session.start(); await tick()
   loading.fire('chat-send:one', 'activate'); await tick()
   loading.session.updateRuntime({ ...loading.runtime(), ledgerReady: false, ledger: 'loading' }); await tick()
   assert.equal(loading.action('chat-send:one').label, 'Checking…')
-  // Once a later read is complete, a retry reaches Confirm.
-  h.session.updateRuntime({ ...h.runtime(), ledger: 'current' }); await tick()
-  h.fire('chat-send:one', 'activate'); await tick()
-  assert.equal(h.action('chat-send:one').confirming, true)
 })
 
 test('the description excerpt keeps emphasis and skips comments and code fences', () => {
