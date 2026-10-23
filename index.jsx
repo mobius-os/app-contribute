@@ -165,6 +165,9 @@ function relayFromChatRefusal() {
   }
 }
 
+// The longest a card's explicit Try again may take before it settles as failed.
+export const CARD_REFRESH_DEADLINE_MS = 20000
+
 // Lets the chat host run this app headless behind a Contribute card.
 export const appBlockSessions = true
 
@@ -1543,14 +1546,23 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     if (cardRefreshRef.current) return cardRefreshRef.current
     setCardRefreshes(state => ({ ...state, running: true }))
     const run = (async () => {
+      // A read whose response never settles (network timeouts end at the
+      // headers, not the body) or that fails still completes this refresh, so
+      // the card returns to Try again. A late result only updates state; the
+      // card's activation has already ended, so it cannot arm Confirm.
+      let timer
+      const deadline = new Promise(resolve => { timer = setTimeout(resolve, CARD_REFRESH_DEADLINE_MS) })
       try {
+        let work
         if (ledgerReadyRef.current) {
           forceRefreshRef.current = true
-          await refreshCoordinatorRef.current()
+          work = refreshCoordinatorRef.current()
         } else {
-          await refreshReviewStatus()
+          work = refreshReviewStatus()
         }
+        await Promise.race([Promise.resolve(work).catch(() => {}), deadline])
       } finally {
+        clearTimeout(timer)
         cardRefreshRef.current = null
         setCardRefreshes(state => ({ running: false, done: state.done + 1 }))
       }

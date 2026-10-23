@@ -316,7 +316,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     else if (runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete()) {
       if ('refreshDone' in runtime) awaitDone = (Number(runtime.refreshDone) || 0) + 1
       else awaitLegacy = true
-      if (!runtime.refreshing) runtime.refresh?.()
+      // A failed refresh is reported through refreshDone; never leave its
+      // rejection unhandled.
+      if (!runtime.refreshing) Promise.resolve(runtime.refresh?.()).catch(() => {})
     }
     void read(allIds())
   }

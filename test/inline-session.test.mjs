@@ -459,7 +459,7 @@ test('a card refresh runs one at a time, through the coordinator after the first
   for (const ready of [false, true]) {
     const calls = [], states = []
     let finish
-    const make = new Function('ledgerReadyRef', 'cardRefreshRef', 'forceRefreshRef', 'refreshCoordinatorRef', 'refreshReviewStatus', 'setCardRefreshes', `return ${body}`)
+    const make = (...args) => new Function('ledgerReadyRef', 'cardRefreshRef', 'forceRefreshRef', 'refreshCoordinatorRef', 'refreshReviewStatus', 'setCardRefreshes', 'CARD_REFRESH_DEADLINE_MS', `return ${body}`)(...args, 20000)
     const forceRefreshRef = { current: false }
     let state = { running: false, done: 0 }
     const refresh = make({ current: ready }, { current: null }, forceRefreshRef,
@@ -605,4 +605,57 @@ test('the card runtime reports the ledger as loading, current or incomplete', as
   assert.equal(state(false, false), 'loading')
   assert.equal(state(true, true), 'current')
   assert.equal(state(true, false), 'incomplete')
+})
+
+test('a card refresh settles as failed after its deadline or a rejection, never leaving the card waiting', async t => {
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  const deadline = Number(app.match(/export const CARD_REFRESH_DEADLINE_MS = (\d+)/)?.[1])
+  assert.ok(deadline >= 10000 && deadline <= 30000, 'one named deadline of about 20 s')
+  const body = app.match(/const cardRefresh = useCallback\((\(\) => \{[\s\S]*?\n  \}), \[/)?.[1]
+  const make = (work, onState) => new Function('ledgerReadyRef', 'cardRefreshRef', 'forceRefreshRef', 'refreshCoordinatorRef', 'refreshReviewStatus', 'setCardRefreshes', 'CARD_REFRESH_DEADLINE_MS', `return ${body}`)(
+    { current: true }, { current: null }, { current: false }, { current: work }, work, update => onState(update), deadline)
+  // A read that never settles.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let state = { running: false, done: 0 }
+  const hung = make(() => new Promise(() => {}), update => { state = update(state) })()
+  assert.deepEqual(state, { running: true, done: 0 })
+  t.mock.timers.tick(deadline - 1); await Promise.resolve()
+  assert.equal(state.running, true, 'still running before the deadline')
+  t.mock.timers.tick(1); await hung
+  assert.deepEqual(state, { running: false, done: 1 }, 'the deadline completes the refresh')
+  t.mock.timers.reset()
+  // A rejected read: completed, and no unhandled rejection.
+  const unhandled = []
+  const onUnhandled = reason => unhandled.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    state = { running: false, done: 0 }
+    await make(() => Promise.reject(new Error('listing failed')), update => { state = update(state) })()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(state, { running: false, done: 1 })
+    assert.deepEqual(unhandled, [])
+  } finally { process.off('unhandledRejection', onUnhandled) }
+})
+
+test('a rejected card refresh leaves no unhandled rejection and ends on Try again', async () => {
+  const unhandled = []
+  const onUnhandled = reason => unhandled.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { refresh: () => Promise.reject(new Error('listing failed')) } })
+    const report = fields => h.session.updateRuntime({ ...h.runtime(), refreshing: false, refreshDone: 0, ...fields })
+    h.session.start(); await tick()
+    h.fire('chat-send:one', 'activate'); await tick()
+    report({ ledgerReady: false, ledger: 'incomplete' }); await tick()
+    h.fire('chat-send:one', 'activate'); await tick()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(unhandled, [], 'the rejection is handled')
+    // The app reports the failed refresh as completed.
+    report({ ledgerReady: false, ledger: 'incomplete', refreshDone: 1 }); await tick()
+    const state = h.action('chat-send:one')
+    assert.equal(state.label, 'Try again')
+    assert.equal(state.disabled, false)
+    assert.equal(state.confirming, false)
+  } finally { process.off('unhandledRejection', onUnhandled) }
 })
