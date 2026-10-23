@@ -1,154 +1,235 @@
 #!/usr/bin/env python3
-"""Prepare an exact Contribute approval link, or use explicit owning-chat consent.
+"""Contribute's adapter over the platform's GitHub review workflow.
 
-Preparation reads GitHub and saves non-authoritative selection data. Only the
-guarded platform review-run route can grant review-and-merge execution.
+The platform's `github_review.py` owns PR inspection, the frozen prompt/model
+preview, consent checks and admission. This adds only what Contribute owns: its
+app context, the saved approval link its review page opens, and a link-only
+chat block that opens a run in Contribute.
 """
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
+import importlib.util
+import inspect
 import json
 import os
+from pathlib import Path
 import re
-import subprocess
 import sys
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
 
-
-IDENTITY_FIELDS = ("repo", "number", "head_sha", "base_ref", "base_sha")
 SELECTION_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
-PR_REFERENCE = re.compile(r"^(?:https://github\.com/)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:#|/pull/)([1-9][0-9]*)/?$")
+RUN_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+CORE_FUNCTIONS = ("api", "prepare_selection", "freeze_preview", "verify_selection", "start_body", "review_path")
+RUN_TITLES = {"review_merge": "Review & merge", "review_fix_merge": "Review, fix & merge"}
 
 
-def api(path, *, method="GET", data=None, headers=None):
-  base = os.environ["API_BASE_URL"].rstrip("/")
-  token = os.environ["AGENT_TOKEN"]
-  request = Request(base + path, method=method,
-    data=json.dumps(data).encode() if data is not None else None,
-    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", **(headers or {})})
-  with urlopen(request, timeout=60) as response:
-    body = response.read()
-    return json.loads(body) if body else None
+def load_core(scripts_dir=None):
+  """Import the platform's canonical workflow; fail clearly on an older Möbius."""
+  directory = Path(scripts_dir or os.environ.get("SCRIPTS_DIR") or "")
+  path = directory / "github_review.py"
+  if not (scripts_dir or os.environ.get("SCRIPTS_DIR")) or not path.is_file():
+    raise ValueError("This Möbius has no core GitHub review workflow. Update Möbius to review PRs from Contribute.")
+  sys.path.insert(0, str(directory))
+  spec = importlib.util.spec_from_file_location("github_review", path)
+  core = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(core)
+  if any(not callable(getattr(core, name, None)) for name in CORE_FUNCTIONS):
+    raise ValueError("This Möbius's GitHub review workflow is too old for Contribute. Update Möbius.")
+  return core
 
 
-def find_app_id():
-  apps = [app for app in api("/api/apps/") if app.get("slug") == "contribute"]
+def find_app_id(core):
+  apps = [app for app in core.api("/api/apps/") if app.get("slug") == "contribute"]
+  if not apps:
+    raise ValueError('Contribute is not installed. Use python3 "$SCRIPTS_DIR/github_review.py" for core GitHub review workflows.')
   if len(apps) != 1:
     raise ValueError("Choose the installed Contribute app explicitly with --app-id.")
   return apps[0]["id"]
 
 
-def gh_api(endpoint):
-  result = subprocess.run(["gh", "api", endpoint], capture_output=True,
-    text=True, check=True, timeout=60)
-  return json.loads(result.stdout)
-
-
-def inspect_pr(reference):
-  match = PR_REFERENCE.fullmatch(reference)
-  if not match:
-    raise ValueError("Use owner/repository#123 or a github.com pull-request URL.")
-  repo, number = match.group(1), int(match.group(2))
-  pull = gh_api(f"repos/{repo}/pulls/{number}")
-  if pull.get("state") != "open" or pull.get("merged"):
-    raise ValueError(f"{reference} is no longer open.")
-  canonical_repo = pull["base"]["repo"]["full_name"]
-  if canonical_repo.lower() != repo.lower():
-    raise ValueError(f"{reference} moved to another repository; inspect its destination first.")
-  base_ref = pull["base"]["ref"]
-  base = gh_api(f"repos/{canonical_repo}/git/ref/heads/{quote(base_ref, safe='')}")
-  return {"repo": canonical_repo.lower(), "number": number,
-    "head_sha": pull["head"]["sha"], "base_ref": base_ref,
-    "base_sha": base["object"]["sha"], "title": pull["title"], "url": pull["html_url"]}
-
-
-def prepare_selection(references, mode, chat_id):
-  if not 1 <= len(references) <= 20:
-    raise ValueError("Select between 1 and 20 pull requests.")
-  items = sorted((inspect_pr(ref) for ref in references), key=lambda item: (item["repo"], item["number"]))
-  if len({(item["repo"], item["number"]) for item in items}) != len(items):
-    raise ValueError("Select each pull request only once.")
-  identity = {"mode": mode, "source_chat_id": chat_id,
-              "items": [{key: item[key] for key in IDENTITY_FIELDS} for item in items]}
-  digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:32]
-  return {**identity, "request_id": "selection-" + digest, "items": items,
-          "title": items[0]["title"] if len(items) == 1 else f"Review {len(items)} pull requests",
-          "created_at": datetime.now(timezone.utc).isoformat()}
-
-
 def selection_path(app_id, selection_id):
-  if not SELECTION_ID.fullmatch(selection_id):
+  if not SELECTION_ID.fullmatch(selection_id or ""):
     raise ValueError("Invalid saved selection id.")
   return f"/api/storage/apps/{app_id}/review-selections/{selection_id}.json"
 
 
-def save_selection(app_id, selection):
+def save_selection(core, app_id, selection):
+  """Create the saved approval link once; an existing one must be identical."""
   path = selection_path(app_id, selection["request_id"])
   try:
-    api(path, method="PUT", data=selection, headers={"If-None-Match": "*"})
+    core.api(path, method="PUT", data=selection, headers={"If-None-Match": "*"})
   except HTTPError as error:
     if error.code != 412:
       raise
-    previous = api(path)
-    if start_body(previous) != start_body(selection) or previous.get("source_chat_id") != selection["source_chat_id"]:
+    previous = core.api(path)
+    if core.start_body(previous) != core.start_body(selection) or previous.get("source_chat_id") != selection["source_chat_id"]:
       raise ValueError("The saved selection changed. Prepare a new selection rather than replacing it.") from error
+    core.verify_selection(previous)
     return previous
   return selection
 
 
-def start_body(selection):
-  return {"request_id": selection["request_id"], "mode": selection["mode"],
-          "items": [{key: item[key] for key in IDENTITY_FIELDS} for item in selection["items"]]}
+def capabilities(core, app_id):
+  presets = core.api(core.review_path(app_id, "/review-presets")) or {}
+  return presets.get("capabilities") or {}
 
 
-def main(argv=None):
+# The options each mode accepts, matching the app's own per-mode projection, so
+# a prepared link always re-previews to the same snapshot when it is opened.
+PROMPT_OPTIONS = {"review_prompt", "merge_prompt"}
+# The core accepts any positive integer; the app keeps a round cap only while
+# it is a safe JavaScript integer, so a larger one would leave a dead link.
+MAX_ROUNDS_LIMIT = 2 ** 53 - 1
+MODE_OPTIONS = {"review": PROMPT_OPTIONS | {"post_review"}, "review_merge": PROMPT_OPTIONS,
+                "review_fix_merge": PROMPT_OPTIONS | {"fix_prompt", "max_rounds"}}
+
+
+def validate_options(options, mode):
+  """Refuse options the selected mode cannot freeze, before any preview."""
+  if options is None:
+    return None
+  if "autopilot" in options:
+    raise ValueError("autopilot is not supported: Möbius has no automatic continuation for review workflows.")
+  allowed = MODE_OPTIONS[mode]
+  for key in options:
+    if key in allowed:
+      continue
+    if key in ("fix_prompt", "max_rounds"):
+      raise ValueError(f"{key} is only accepted with --mode review_fix_merge.")
+    if key == "post_review":
+      raise ValueError("post_review is only accepted with --mode review.")
+    raise ValueError(f"Unknown review option: {key}.")
+  for key in PROMPT_OPTIONS | {"fix_prompt"}:
+    if key in options and (not isinstance(options[key], str) or not options[key].strip()):
+      raise ValueError(f"{key} must be non-empty text.")
+  if "max_rounds" in options and (not isinstance(options["max_rounds"], int) or isinstance(options["max_rounds"], bool)
+                                  or not 1 <= options["max_rounds"] <= MAX_ROUNDS_LIMIT):
+    raise ValueError(f"max_rounds must be a whole number from 1 to {MAX_ROUNDS_LIMIT}.")
+  if "post_review" in options and options["post_review"] is not True:
+    raise ValueError("post_review may only be true; leave it out for a private review.")
+  return options
+
+
+def prepare(core, app_id, chat_id, args):
+  served = capabilities(core, app_id)
+  if args.mode == "review_fix_merge" and served.get("review_fix_merge") is not True:
+    raise ValueError("This Möbius does not offer Review, fix & merge yet. Use review or review_merge.")
+  if args.allow_mark_ready and (args.mode != "review_fix_merge" or served.get("draft_takeover") is not True):
+    raise ValueError("Marking drafts ready needs review_fix_merge on a Möbius that offers draft takeover.")
+  options = validate_options(read_object(args.options) if args.options else None, args.mode)
+  agent = read_object(args.agent) if args.agent else None
+  extra = {"allow_mark_ready": True} if args.allow_mark_ready else {}
+  if extra and "allow_mark_ready" not in inspect.signature(core.freeze_preview).parameters:
+    raise ValueError("This Möbius's GitHub review workflow cannot freeze draft readiness. Update Möbius.")
+  selection = core.freeze_preview(core.prepare_selection(args.prs, args.mode, chat_id, app_id), options, agent, **extra)
+  return save_selection(core, app_id, selection)
+
+
+def start(core, app_id, chat_id, selection, context):
+  if selection.get("source_chat_id") != chat_id:
+    link = "/shell/?" + urlencode({"chat": selection.get("source_chat_id", "")})
+    raise ValueError(f"This selection belongs to another source chat. Continue at {link}; do not borrow its consent.")
+  core.verify_selection(selection)
+  body = {**core.start_body(selection), "chat_approval": {"context": context}}
+  try:
+    return {**core.api(core.review_path(app_id, "/review-runs"), method="POST", data=body), "approved": True}
+  except HTTPError as error:
+    if error.code != 409:
+      raise
+    detail = json.loads(error.read()).get("detail")
+    if not isinstance(detail, dict) or not detail.get("chat_id"):
+      raise ValueError(detail or "This selection changed. Inspect it before preparing another approval.") from error
+    return {"approved": False, "already_owned": True, "message": detail.get("message"),
+            "review_url": "/shell/?" + urlencode({"chat": detail["chat_id"]})}
+
+
+def run_block(run):
+  """A static chat block that opens this run in Contribute. It grants nothing."""
+  if not RUN_ID.fullmatch(str(run.get("id") or "")):
+    raise ValueError("Invalid run identity.")
+  items = run.get("items") or []
+  # The same naming as the app's run view (`reviewRunTitle`): posting is not
+  # private, and a run whose mode is not reported is not assumed private. A
+  # core run started outside Contribute arrives minimized
+  # (`details_in_owning_chat`), with `post_review` at the top level.
+  minimized = run.get("details_in_owning_chat") is True
+  posted = (run.get("post_review") if minimized else (run.get("options") or {}).get("post_review")) is True
+  mode = run.get("mode")
+  title = RUN_TITLES.get(mode) or ("GitHub review" if posted else "Private review" if mode == "review" else "Review run")
+  return {"app": "contribute", "intent": f"review-run:{run['id']}", "title": title, "inline": False,
+    "facts": [{"label": "Pull requests", "value": ", ".join(f"{item['repo']}#{item['number']}" for item in items)[:240] or "None"},
+      {"label": "Status", "value": str(run.get("execution_state") or run.get("state") or "unknown")[:240]}]}
+
+
+def fence(block):
+  return "```mobius-app\n" + json.dumps(block, ensure_ascii=False) + "\n```"
+
+
+def read_object(path):
+  with open(path, encoding="utf-8") as source:
+    value = json.load(source)
+  if not isinstance(value, dict):
+    raise ValueError("Options and agent files must contain JSON objects.")
+  return value
+
+
+def main(argv=None, core=None):
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("prs", nargs="*", help="owner/repository#123 or full PR URL")
   parser.add_argument("--app-id", type=int)
-  parser.add_argument("--mode", choices=("review", "review_merge"), help="New selection mode; default: review")
+  parser.add_argument("--mode", choices=("review", "review_merge", "review_fix_merge"), help="New selection mode; default: review")
+  parser.add_argument("--options", help="JSON file: review_prompt/merge_prompt; fix_prompt/max_rounds only with --mode review_fix_merge; post_review only for review")
+  parser.add_argument("--agent", help="JSON file: provider/model/effort; frozen by the platform preview")
+  parser.add_argument("--allow-mark-ready", action="store_true", help="Takeover preview includes marking drafts ready after review/checks; not consent itself")
   parser.add_argument("--selection", help="Use an already prepared exact selection; never refresh its versions")
-  parser.add_argument("--approved-in-chat", action="store_true",
-                      help="The owner explicitly approved this exact action in this owning chat")
+  parser.add_argument("--approved-in-chat", action="store_true", help="The owner explicitly approved this exact action in this owning chat")
   parser.add_argument("--approval-context", help="Concise quote/reference and explanation of that explicit consent")
+  parser.add_argument("--block", metavar="RUN_ID", help="Print a link-only chat block for an existing run")
   args = parser.parse_args(argv)
   if args.selection and args.prs:
     parser.error("Use either a saved --selection or PR references, not both.")
-  if args.selection and args.mode:
-    parser.error("A saved selection already has an exact mode; prepare a new selection to change it.")
+  if args.selection and (args.mode or args.options or args.agent or args.allow_mark_ready):
+    parser.error("A saved selection already has exact mode/options/model; prepare a new selection to change it.")
   if args.approved_in_chat != bool(args.approval_context and args.approval_context.strip()):
     parser.error("--approved-in-chat requires --approval-context; context alone is not approval.")
-  app_id = args.app_id or find_app_id()
+  if args.approved_in_chat and not args.selection:
+    parser.error("Freeze a selection first; --approved-in-chat requires --selection and uses the existing scoped consent.")
+  if not args.block and not args.selection and not args.prs:
+    parser.error("Name the pull requests to review, a saved --selection, or a run --block.")
+  args.mode = args.mode or "review"
+  core = core or load_core()
+  app_id = args.app_id or find_app_id(core)
+  if args.block:
+    if not RUN_ID.fullmatch(args.block):
+      raise ValueError("Invalid run identity.")
+    # The exact run, however old; the recent list is capped.
+    try:
+      run = (core.api(core.review_path(app_id, "/review-runs/" + args.block)) or {}).get("run")
+    except HTTPError as error:
+      if error.code != 404:
+        raise
+      run = None
+    if not run:
+      raise ValueError("That run is not in Contribute's review history.")
+    print(fence(run_block(run)))
+    return
   chat_id = os.environ["CHAT_ID"]
   if args.selection:
-    selection = api(selection_path(app_id, args.selection))
+    selection = core.api(selection_path(app_id, args.selection))
     if selection.get("request_id") != args.selection:
       raise ValueError("The saved selection has a different identity.")
   else:
-    selection = save_selection(app_id, prepare_selection(args.prs, args.mode or "review", chat_id))
+    selection = prepare(core, app_id, chat_id, args)
   result = {"selection": selection,
             "approval_url": "/shell/?" + urlencode({"app": app_id, "intent": "review-selection:" + selection["request_id"]}, quote_via=quote),
             "approved": False}
   if args.approved_in_chat:
-    if selection.get("source_chat_id") != chat_id:
-      link = "/shell/?" + urlencode({"chat": selection.get("source_chat_id", "")})
-      raise ValueError(f"This selection belongs to another source chat. Continue at {link}; do not borrow its consent.")
-    body = {**start_body(selection), "chat_approval": {"context": args.approval_context.strip()}}
-    try:
-      result.update(api(f"/api/github/contributions/{app_id}/review-runs", method="POST", data=body))
-      result["approved"] = True
-    except HTTPError as error:
-      if error.code != 409:
-        raise
-      detail = json.loads(error.read()).get("detail")
-      if not isinstance(detail, dict) or not detail.get("chat_id"):
-        raise ValueError(detail or "This selection changed. Inspect it before preparing another approval.") from error
-      result.update(already_owned=True, message=detail.get("message"),
-                    review_url="/shell/?" + urlencode({"chat": detail["chat_id"]}))
-  print(json.dumps(result, indent=2))
+    result.update(start(core, app_id, chat_id, selection, args.approval_context.strip()))
+    if result.get("run", {}).get("id"):
+      result["block"] = fence(run_block(result["run"]))
+  print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
@@ -157,6 +238,6 @@ if __name__ == "__main__":
   except HTTPError as error:
     print(f"Contribute returned {error.code}: {error.read().decode(errors='replace')}", file=sys.stderr)
     sys.exit(1)
-  except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
+  except (ValueError, KeyError, OSError) as error:
     print(f"Could not prepare this review: {error}", file=sys.stderr)
     sys.exit(1)

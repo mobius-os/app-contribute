@@ -112,7 +112,11 @@ test('project controls keep preparation and updating direct without a competing 
   assert.doesNotMatch(html, /Bring accepted changes here/)
   assert.doesNotMatch(html, /Prepare &amp; merge|Prepare all|Update all/)
   assert.doesNotMatch(html, /More actions|View reviews/)
+  // Starting a full cycle is an option of Prepare, offered only with merge rights.
   assert.match(html, /Follow through to merge/)
+  assert.doesNotMatch(render({ ...props, project: { ...project, viewerPermission: 'READ' } }), /Follow through to merge/)
+  // An idle project has no permanent second workflow panel.
+  assert.doesNotMatch(html, /Project work|Full merge cycles/)
   assert.doesNotMatch(html, /Options &amp; process/)
   assert.doesNotMatch(html, /<details[^>]* open/)
   const loading = render({ ...props, loading: true })

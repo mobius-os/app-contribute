@@ -37,6 +37,7 @@ import {
 import { contributionActionScope, contributionApprovalIsCurrent, contributionPhaseApprovalIsCurrent, contributionReviewTargetFromIntent, focusedContributionNavigationReady, focusedContributionReady, indexReviewStatus, qualityReviewFor } from './review.js'
 import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
+import { deliverCycleMessage } from './cycle-delivery.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
@@ -72,7 +73,7 @@ import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { discoverRepositories, discoverRepository, mayMerge } from './collaboration.js'
+import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { chatBlockTarget } from './chat-blocks.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
@@ -168,13 +169,13 @@ export default function ContributeApp({ appId, token }) {
   const tokenRef = useRef(token)
   tokenRef.current = token
   const releasePullFocus = useCallback(nonce => setPullFocus(old => old?.nonce === nonce ? null : old), [])
-  function openPullFocus(target, nonce) {
-    setSelectionError('')
-    setPullFocus({ repo: target.repo, number: target.number, nonce })
-    const repo = target.repo.toLowerCase()
+  // Open the project that owns a repository: the local one when known,
+  // otherwise the repository as an external project.
+  function openRepository(repoName, nonce) {
+    const repo = repoName.toLowerCase()
     const project = sourceProjectsRef.current.find(item => item.canonical_repo?.toLowerCase() === repo)
     if (project) { setProjectFocus({ key: project.key, nonce }); return }
-    void discoverRepository(tokenRef.current, target.repo).then(repository => {
+    void discoverRepository(tokenRef.current, repoName).then(repository => {
       if (pullFocusRef.current?.nonce !== nonce) return
       setProjectFocus({ key: `external:${repository.nameWithOwner.toLowerCase()}`, repository, nonce })
     }, error => {
@@ -182,6 +183,25 @@ export default function ContributeApp({ appId, token }) {
       setSelectionError(error.message)
       releasePullFocus(nonce)
     })
+  }
+  function openPullFocus(target, nonce) {
+    setSelectionError('')
+    setPullFocus({ repo: target.repo, number: target.number, nonce })
+    openRepository(target.repo, nonce)
+  }
+  // A run link opens the run's own project with that run's detail.
+  async function openRunFocus(id, nonce) {
+    setSelectionError('')
+    setPullFocus({ runId: id, nonce })
+    // Read the exact run: the recent list is capped and would hide older runs.
+    let run = null
+    try { run = (await collaborationRequest(tokenRef.current, appId, `review-runs/${encodeURIComponent(id)}`)).run || null }
+    catch (error) { if (pullFocusRef.current?.nonce === nonce) { setSelectionError(error.message); releasePullFocus(nonce) } return }
+    if (pullFocusRef.current?.nonce !== nonce) return
+    const repo = run?.items?.[0]?.repo
+    if (!repo) { setSelectionError('This review run is not in Contribute’s history.'); releasePullFocus(nonce); return }
+    setPullFocus({ runId: id, repo, run, nonce })
+    openRepository(repo, nonce)
   }
   const [projectOpen, setProjectOpen] = useState(false)
   const [sourceLoading, setSourceLoading] = useState(true)
@@ -240,7 +260,6 @@ export default function ContributeApp({ appId, token }) {
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const submissionMethod = 'github'
-  const [agentChoice, setAgentChoice] = useState({ provider: '', model: '', effort: '' })
   const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
   useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
@@ -254,7 +273,6 @@ export default function ContributeApp({ appId, token }) {
   const reviewStatusRequestRef = useRef(0)
   const incomingReviewsRequestRef = useRef(0)
   const agentStartRef = useRef(false)
-  const agentChoiceRef = useRef(agentChoice)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
   const ledgerReadyRef = useRef(false)
@@ -262,7 +280,6 @@ export default function ContributeApp({ appId, token }) {
   // failure from it, so a still-partial feed never reads as "updated".
   const ledgerCurrentRef = useRef(false)
   useEffect(() => { connRef.current = conn }, [conn])
-  useEffect(() => { agentChoiceRef.current = agentChoice }, [agentChoice])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
 
   const signalReady = useCallback((details = {}) => {
@@ -282,12 +299,22 @@ export default function ContributeApp({ appId, token }) {
     if (agentStartRef.current) {
       return { ok: false, error: 'Another agent task is already starting.' }
     }
+    if (action.cid) {
+      // Project work: one deterministic message in the project's conversation.
+      agentStartRef.current = true
+      try {
+        const delivered = await deliverCycleMessage(tokenRef.current, action)
+        if (delivered.ok) window.mobius?.signal?.(action.event || 'contribute_agent_handoff', { item_count: Number(action.count || 0), outcome: delivered.outcome })
+        return delivered
+      } finally { agentStartRef.current = false }
+    }
     if (!window.mobius?.chat?.start) {
       return { ok: false, error: 'Agent handoffs are unavailable in this Möbius version.' }
     }
     agentStartRef.current = true
     try {
-      const chosenAgent = agentChoiceRef.current
+      // A launch carries its own model choice; none means the chat default.
+      const chosenAgent = action.agent || {}
       const started = await window.mobius.chat.start({
         title: action.title,
         draft: action.draft,
@@ -501,11 +528,6 @@ export default function ContributeApp({ appId, token }) {
       if (typeof appSettings.autopilot_default === 'boolean') {
         setAutopilotDefault(appSettings.autopilot_default)
       }
-      setAgentChoice({
-        provider: typeof appSettings.agent_provider === 'string' ? appSettings.agent_provider : '',
-        model: typeof appSettings.agent_model === 'string' ? appSettings.agent_model : '',
-        effort: typeof appSettings.agent_effort === 'string' ? appSettings.agent_effort : '',
-      })
       connRef.current = status
       setConn(status)
 
@@ -617,7 +639,9 @@ export default function ContributeApp({ appId, token }) {
       const pullTarget = chatBlockTarget(event.data.intent)
       if (pullTarget) {
         closeSelection()
-        openPullFocus(pullTarget, String(event.data.nonce ?? crypto.randomUUID()))
+        const nonce = String(event.data.nonce ?? crypto.randomUUID())
+        if (pullTarget.kind === 'run') void openRunFocus(pullTarget.id, nonce)
+        else openPullFocus(pullTarget, nonce)
         return
       }
       const selectionId = reviewSelectionIdFromIntent(event.data.intent)
@@ -1120,28 +1144,6 @@ export default function ContributeApp({ appId, token }) {
     saveAppSettings({ ...settings, autopilot_default: next })
   }, [])
 
-  const onChooseAgent = useCallback(async (next) => {
-    const normalized = {
-      provider: typeof next?.provider === 'string' ? next.provider : '',
-      model: typeof next?.model === 'string' ? next.model : '',
-      effort: typeof next?.effort === 'string' ? next.effort : '',
-    }
-    const previous = agentChoiceRef.current
-    agentChoiceRef.current = normalized
-    setAgentChoice(normalized)
-    const settings = await loadAppSettings()
-    const saved = await saveAppSettings({
-      ...settings,
-      agent_provider: normalized.provider,
-      agent_model: normalized.model,
-      agent_effort: normalized.effort,
-    })
-    if (!saved) {
-      agentChoiceRef.current = previous
-      setAgentChoice(previous)
-    }
-    return saved
-  }, [])
 
   const onAssignIncomingReview = useCallback(async (item) => {
     const repo = item?.repository?.nameWithOwner || ''
@@ -1449,18 +1451,10 @@ export default function ContributeApp({ appId, token }) {
       incomingReviews: [],
     }) : contributionRun
   }
-  function projectMergeRun(project) {
-    const projects = (project ? [project] : sourceProjects).filter(item => mayMerge(item.viewerPermission))
-    const repositories = new Set(projects.map(item => item.canonical_repo?.toLowerCase()))
-    return buildContributionRun({
-      records: records.filter(record => repositories.has((record.repo || record.plan?.repo || '').toLowerCase())),
-      reviewStatus, projects, incomingReviews: [],
-    })
-  }
   function renderPullRequests(project, navigation) {
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
-      focusPull={pullFocus} onFocusRelease={releasePullFocus}
+      focusPull={pullFocus?.number ? pullFocus : null} focusRun={pullFocus?.runId ? pullFocus : null} onFocusRelease={releasePullFocus}
       records={recordsForProject(records, project)} onRecord={record => {
         const found = findRunItemByRecord(projectRun(project), record.id)
         if (found) navigation.onSelect(found.item.id)
@@ -1479,9 +1473,8 @@ export default function ContributeApp({ appId, token }) {
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <ConnectionSettings
-            conn={conn} token={token} onChanged={refreshConnection}
+            appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
-            agentChoice={agentChoice} onChooseAgent={onChooseAgent}
           />
         </Header>
       </div>
@@ -1513,7 +1506,7 @@ export default function ContributeApp({ appId, token }) {
 
 
             {project ? <GithubPullsUnavailable conn={conn} onRetry={refreshConnection} /> : null}
-            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} mergeRun={projectMergeRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
+            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? () => renderPullRequests(project, navigation) : null}
               controls={controls}

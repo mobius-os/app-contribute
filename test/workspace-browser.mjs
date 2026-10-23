@@ -56,19 +56,27 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], githubRetries: 0 }
-const values = new Map(), navigation = [], reviewRuns = []
+const calls = { exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], githubRetries: 0 }
+const values = new Map(), versions = new Map(), navigation = [], reviewRuns = []
+let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 // Reachable only by exact read, as a closed PR is absent from open search.
 const closedPulls = [pull(11, { title: 'Closed contribution', state: 'CLOSED' })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
-const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql')
+// A prompt preview resolves settings; it is a read, not a public action.
+const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql' && !call.url.endsWith('/review-preview'))
 function forbidden(kind) {
   return (...args) => { calls.forbidden.push({ kind, args: args.map(String) }); throw new Error('Forbidden fixture transport: ' + kind) }
 }
 window.fetch = async (url, options = {}) => {
   const call = { url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null }
   calls.requests.push(call)
+  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['none','minimal','low','medium','high','xhigh'],default_effort:'low'}]}})
+  if (call.url === '/api/owner/model-prefs') return response({hidden_ids:[]})
+  if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'}})
+  if (window.presetsMissing && call.url === '/api/github/contributions/fixture-app/review-presets') return new Response(JSON.stringify({detail:'Not Found'}), {status:404})
+  if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
+  if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
@@ -112,6 +120,20 @@ window.fetch = async (url, options = {}) => {
     if (window.fixtureChangedHead) found = found.map(pr => pr.number===8 ? {...pr,headRefOid:'e'.repeat(40)} : pr)
     return response({ data: { search: { nodes: found, issueCount: pulls.length,
       pageInfo: { hasNextPage: Boolean(window.fixturePaging && !laterPage), endCursor: window.fixturePaging && !laterPage ? 'fixture-page-2' : null } } } })
+  }
+  // Runs older than the capped recent list are reachable only by exact id.
+  const oldRun = /^\/api\/github\/contributions\/fixture-app\/review-runs\/([\w-]+)(\/stop)?$/.exec(call.url)
+  if (oldRun && window.oldRuns?.has(oldRun[1])) {
+    if (oldRun[2]) {
+      const stopped = { ...window.oldRuns.get(oldRun[1]), execution_state: 'stopped', can_stop: false }
+      window.oldRuns.set(oldRun[1], stopped)
+      return response({ run: stopped })
+    }
+    calls.exactRuns.push(oldRun[1])
+    // Snapshot at request time; a held response is delivered later, as the network may.
+    const snapshot = structuredClone(window.oldRuns.get(oldRun[1]))
+    if (window.holdExactRun) await new Promise(resolve => { window.releaseExactRun = resolve })
+    return response({ run: snapshot })
   }
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') return response({ runs: reviewRuns })
@@ -162,6 +184,7 @@ navigator.sendBeacon = forbidden('sendBeacon')
 window.open = forbidden('window.open')
 window.addEventListener('error', event => calls.forbidden.push({ kind: 'runtime error', message: event.message }))
 window.addEventListener('unhandledrejection', event => calls.forbidden.push({ kind: 'unhandled rejection', message: String(event.reason) }))
+window.cycleChats = new Map()
 window.mobius = {
   online: true,
   storage: {
@@ -169,8 +192,15 @@ window.mobius = {
     set: async (key, value) => { values.set(key, structuredClone(value)) },
     remove: async key => { values.delete(key) },
     subscribe: () => () => {},
-    getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? 'fixture-version' : null}),
-    durableWrite: async (key, value) => values.set(key,structuredClone(value)),
+    getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? versions.get(key) || 'fixture-version' : null}),
+    // Compare-and-set like the platform: a stale version or create conflict fails.
+    durableWrite: async (key, value, condition = {}) => {
+      const version = values.has(key) ? versions.get(key) || 'fixture-version' : null
+      if ((condition.ifNoneMatch && version) || (condition.ifMatch && condition.ifMatch !== version)) throw Object.assign(new Error('CAS conflict'), {code:'conflict',status:412})
+      const next = 'fixture-version-' + (++versionCounter)
+      values.set(key,structuredClone(value)); versions.set(key,next)
+      return {durability:'synced',version:next}
+    },
   },
   nav: {
     open(name, callbacks) {
@@ -184,7 +214,9 @@ window.mobius = {
   chat: {
     start: async action => { calls.starts.push(structuredClone(action)); return { chatId: 'prepare-' + calls.starts.length } },
     status: async id => { calls.status.push(id); return { running: true } },
-    stop: forbidden('unexpected chat stop'),
+    // The project's live scoped conversations, as the platform lists them.
+    list: async ({ scope } = {}) => window.cycleChats.has(scope) ? [{ id: window.cycleChats.get(scope) }] : [],
+    stop: async id => { calls.stops.push(id); return {stopped:true} },
     open: id => calls.opened.push(id),
   },
 }
@@ -210,11 +242,14 @@ function Fixture() {
   const [allProjects, setAllProjects] = useState(projects)
   const [focusPull, setFocusPull] = useState(null)
   window.focusPullFixture = setFocusPull
+  const [focusRun, setFocusRun] = useState(null)
+  window.focusRunFixture = setFocusRun
   const [projectFocus, setProjectFocus] = useState(null)
   window.focusProjectFixture = setProjectFocus
   window.setRecordsFixture = setRecords
-  function releaseFocus(nonce) { calls.releases.push(nonce); setFocusPull(old => old?.nonce === nonce ? null : old) }
+  function releaseFocus(nonce) { calls.releases.push(nonce); setFocusPull(old => old?.nonce === nonce ? null : old); setFocusRun(old => old?.nonce === nonce ? null : old) }
   window.openSelectionFixture = setSelectionId
+  window.setProjectsFixture = setAllProjects
   function repositoryAdded(repo) { setAllProjects(old => [...old, {key:'external:' + repo.nameWithOwner,kind:'external',name:repo.nameWithOwner,canonical_repo:repo.nameWithOwner,contributions:[]}]) }
 
   function runFor(project) {
@@ -240,7 +275,16 @@ function Fixture() {
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
     return { ok: true, record: shared }
   }
-  async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
+  // Project work arrives with its cycle id; the platform's de-duplication
+  // returns the same conversation for a repeated id.
+  const cycleChats = window.cycleChats
+  async function start(action) {
+    if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}
+    const started = await window.mobius.chat.start(action)
+    if (action.cid) { if (!cycleChats.has(action.scope)) cycleChats.set(action.scope, started.chatId); started.chatId = cycleChats.get(action.scope) }
+    if(window.lostStart) return {ok:false,error:'Response lost'}
+    return { ok: true, ...started }
+  }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
@@ -251,7 +295,7 @@ function Fixture() {
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
-          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
+          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} focusRun={focusRun} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
       />}</ProjectControls></> : null} />}
   </main></div>
 }
@@ -292,6 +336,11 @@ async function fill(node, value) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,value)
   node.dispatchEvent(new Event('input',{bubbles:true}))
   await frame(); await frame()
+}
+// A launch resolves its frozen prompts/model before its approval is enabled.
+async function enabled(name) {
+  await until(() => button(name) && !button(name).disabled, name + ' did not become available')
+  await click(button(name))
 }
 async function inventory() {
   const close=query('.co-inline-close')
@@ -402,10 +451,15 @@ window.runWorkspaceChecks = async () => {
       await click(button('Unassigned',filters)); await fill(search,'Contribution')
       ensure(!query('input[aria-label="Select owner/project #8"]'),'Fixture filter did not hide selected PR')
       ensure(text(query('.co-pr-box-head')).includes('2 selected'),'Filtering discarded hidden selection')
+      // A Möbius without the core review routes: optional workflows say so, never "Checking…" forever.
+      window.presetsMissing=true
       await click(button('Take on with agent',query('.co-pr-box-head')))
       await until(()=>query('.co-pr-confirm'),'Filtered batch preview missing')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Hidden selected identity omitted from confirmation')
+      await until(()=>text(query('.co-pr-confirm')).includes('Needs a newer Möbius'),'A missing review-presets route kept checking')
+      ensure(!text(query('.co-pr-confirm')).includes('Checking what this Möbius supports'),'Unsupported workflows still read as a pending check')
       await click(button('Cancel',query('.co-pr-confirm')))
+      window.presetsMissing=false
       const trigger=query('.co-pr-open'), listBefore=query('.co-pr-list')
       trigger.focus(); await click(trigger)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 7'),'Inline detail did not load')
@@ -502,7 +556,8 @@ window.runWorkspaceChecks = async () => {
       await click(button('Take on with agent',query('.co-task-content')))
       await until(() => query('.co-pr-confirm'),'Individual review confirmation did not open')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 8') && text(query('.co-pr-confirm')).includes('ccccccc') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Individual review changed PR scope or version')
-      const mergeOption=query('.co-pr-confirm input[type="checkbox"]')
+      const optionInput=name=>[...query('.co-pr-confirm').querySelectorAll('label')].find(node=>text(node).includes(name))?.querySelector('input')
+      const mergeOption=optionInput('Merge when safe')
       ensure(mergeOption && !mergeOption.checked && button('Start private review'),'Individual review granted merge by default')
       await click(mergeOption)
       ensure(button('Allow review & merge'),'Individual merge choice did not require guarded approval')
@@ -537,16 +592,17 @@ window.runWorkspaceChecks = async () => {
       ensure(query('.co-pr-confirm').closest('.co-task-content')?.getAttribute('role')==='region','Batch review did not use an inline nonmodal region')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(query('.co-pr-confirm')).includes('aaaaaaa') && text(query('.co-pr-confirm')).includes('ccccccc'),'Exact heads absent')
-      ensure(!query('.co-pr-confirm input').checked && reviewRuns.length === 0,'Private review granted merge')
+      const mergeToggle=[...query('.co-pr-confirm').querySelectorAll('label')].find(node=>text(node).includes('Merge when safe'))?.querySelector('input')
+      ensure(mergeToggle && !mergeToggle.checked && reviewRuns.length === 0,'Private review granted merge')
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
       const region=query('.co-pr-confirm'), rect=region.getBoundingClientRect()
       ensure(rect.top >= 0 && rect.top < innerHeight && document.activeElement === region,'Review not visible/focused')
-      await click(query('.co-pr-confirm input'))
+      await click(mergeToggle)
       ensure(reviewRuns.length === 0,'Mode toggle counted as approval')
       ensure(text(query('.co-pr-confirm')).includes('current tip of the same target branch'),'Approval falsely pins the displayed base')
       ensure(text(query('.co-pr-confirm')).includes('fresh review of the combined code'),'Combined-code review missing from approval')
       window.liveBase='d'.repeat(40)
-      await click(button('Allow review & merge'))
+      await enabled('Allow review & merge')
       await until(() => reviewRuns.length === 1 && button('Open review conversation'),'Review did not start')
       const write=mutationRequests().at(-1)
       ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
@@ -559,7 +615,7 @@ window.runWorkspaceChecks = async () => {
     await check('review errors preserve exact selection for an explicit retry', async () => {
       await inventory(); await click(firstCheckbox); await click(button('Take on with agent'))
       window.failReview = true
-      await click(button('Start private review'))
+      await enabled('Start private review')
       await until(() => text(query('.co-pr-confirm')).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
       window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
@@ -568,7 +624,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length
       await click(firstCheckbox); await click(button('Take on with agent',query('.co-pr-box-head')))
       window.exactHeadChanged=true
-      await click(button('Start private review'))
+      await enabled('Start private review')
       await until(()=>text(query('.co-pr-confirm')).includes('changed since this list loaded'),'Changed code did not stop exact launch')
       ensure(mutationRequests().length===before && reviewRuns.length===1,'Changed code was approved')
       window.exactHeadChanged=false
@@ -676,8 +732,65 @@ window.runWorkspaceChecks = async () => {
       await chooseProject('Fixture project')
       await until(() => text(query('.co-work-progress-row')).includes('Agent working'),'Saved task did not restore')
       await click(query('.co-work-progress-row'))
-      await until(() => button('Open conversation'),'Saved conversation unavailable')
+      await until(() => button('Open current conversation',query('[data-task="task:cycle"]')),'Saved conversation unavailable')
       ensure(calls.status.includes('prepare-1') && calls.starts.length===1,'Restore restarted work')
+    })
+    await check('losing merge rights hides new cycle starts but keeps current work and history visible', async () => {
+      window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'READ' } : project))
+      await chooseProject('Other project'); await chooseProject('Fixture project')
+      await until(() => text(query('.co-work-progress-row')).includes('Agent working'), 'Current work hidden without merge rights')
+      await click(query('.co-work-progress-row'))
+      const pane = () => query('[data-task="task:cycle"]')
+      await until(() => pane() && button('Open current conversation', pane()), 'Cycle status hidden without merge rights')
+      ensure(!button('Start fresh full merge cycle', pane()), 'A read-only project offered a new merge cycle')
+      await click(button('Prepare changes'))
+      ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
+      window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
+    })
+    await check('effort choices are 44px targets on every viewport', async () => {
+      await chooseProject('Other project'); await click(button('Pull updates'))
+      await until(() => query('[data-task="task:update"] .co-agent-trigger'), 'Pull launch did not open')
+      const pane = query('[data-task="task:update"]')
+      await click(pane.querySelector('.co-agent-trigger'))
+      await until(() => pane.querySelector('.co-model-row'), 'Model choices did not load')
+      const row = [...pane.querySelectorAll('.co-model-row')].find(node => text(node).includes('Fixture model'))
+      if (row) await click(row)
+      await until(() => pane.querySelector('.co-effort-stop'), 'Effort choices did not appear')
+      for (const stop of pane.querySelectorAll('.co-effort-stop')) {
+        const box = stop.getBoundingClientRect()
+        ensure(box.width >= 44 && box.height >= 44, 'Effort target below 44px: ' + box.width + 'x' + box.height)
+      }
+      // Every supported level (six), and both edges of each target, are tappable.
+      const stops = [...pane.querySelectorAll('.co-effort-stop')]
+      ensure(stops.length === 6, 'Fixture did not offer the full effort scale')
+      for (const stop of stops) {
+        stop.scrollIntoView({ block: 'center', inline: 'nearest' }); await frame()
+        const box = stop.getBoundingClientRect()
+        for (const x of [box.left + 3, box.right - 3]) ensure(document.elementFromPoint(x, box.top + box.height / 2) === stop, 'An effort target edge does not hit it: ' + stop.getAttribute('aria-label'))
+      }
+      await inventory(); await chooseProject('Fixture project')
+    })
+    await check('finishing an uncertain start replays its exact saved work, not today\'s choice', async () => {
+      // A separate project, so later checks keep their idle projects.
+      window.setProjectsFixture(old => [...old, { ...old.find(project => project.key === 'app:other'), key: 'app:third', name: 'Third project', canonical_repo: 'owner/third' }])
+      await chooseProject('Third project')
+      const starts = calls.starts.length
+      window.lostStart = true
+      await click(button('Pull updates')); await until(() => button('Start pull') && !button('Start pull').disabled, 'Pull did not settle')
+      await click(button('Start pull'))
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'An unconfirmed start was not offered again')
+      const original = calls.starts.at(-1)
+      window.lostStart = false
+      await chooseProject('Fixture project'); await chooseProject('Third project')
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'The saved cycle was lost on reload')
+      await click(query('.co-work-progress-row'))
+      await enabled('Send again')
+      await until(() => calls.starts.length === starts + 2, 'Send again did not resend')
+      const replay = calls.starts.at(-1)
+      ensure(replay.cid && replay.cid === original.cid && replay.scope === original.scope && replay.draft === original.draft && replay.title === original.title, 'Send again sent a different cycle, work or scope')
+      await until(() => button('Open current conversation', query('[data-task="task:cycle"]')), 'Finished start did not settle')
+      await chooseProject('Fixture project')
+      window.setProjectsFixture(old => old.filter(project => project.key !== 'app:third'))
     })
     await check('pulling accepted changes requires one explicit scoped agent handoff and preserves failures', async () => {
       await chooseProject('Other project')
@@ -688,8 +801,14 @@ window.runWorkspaceChecks = async () => {
       window.failStart=true; await click(button('Start pull'))
       await until(()=>text(query('[data-task="task:update"]')).includes('Fixture agent unavailable'),'Agent-start failure missing')
       ensure(calls.starts.length===starts,'Failed handoff counted as started')
+      // A failed start keeps its cycle for Send again. No conversation holds
+      // it, so Send again refuses to create one; the owner starts new work.
+      ensure(button('Send again', query('[data-task="task:update"]')), 'A failed start offered no way to send it again')
       window.failStart=false
-      const start=button('Start pull'); start.click(); start.click()
+      const finish=button('Send again', query('[data-task="task:update"]')); finish.click(); finish.click()
+      await until(()=>text(query('[data-task="task:update"]')).includes('This start isn’t in any conversation. Start it again.') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
+      ensure(calls.starts.length===starts,'Send again created a conversation for an unheld start')
+      await click(button('Start pull'))
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
       const action=calls.starts.at(-1)
       ensure(action.event==='update_source_projects' && action.draft.includes('app:other') && !action.draft.includes('app:fixture'),'Update scope drifted')
@@ -848,6 +967,90 @@ window.runWorkspaceChecks = async () => {
       await click(query('[aria-label="Refresh project status"]'))
       await until(() => prRow(8), 'Inventory did not recover')
     })
+    await check('a chat run link opens that run in its project and starts nothing', async () => {
+      const run = { id: 'chat-run-12345678', mode: 'review', state: 'complete', chat_id: 'chat-run-chat', options: { review_prompt: 'Review fixture' },
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'all_clear', summary: 'Linked run findings',
+          public_review: { state: 'posted', url: 'https://github.com/owner/project/pull/7#pullrequestreview-1' } }] }
+      // An older run, beyond the capped recent list: the link carries its exact read.
+      const before = mutationRequests().length, starts = calls.starts.length
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'run-link' })
+      const pane = () => query('[data-task="task:run:chat-run-12345678"]')
+      await until(() => pane() && text(pane()).includes('Linked run findings'), 'Run link did not open its run')
+      ensure(!reviewRuns.some(item => item.id === run.id), 'Fixture run leaked into the recent list')
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run')
+      ensure(pane() && text(pane()).includes('Linked run findings'), 'A refresh evicted the linked run')
+      ensure(text(pane()).includes('Recorded version') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open review conversation', pane()), 'Shared run detail lost its version note, posted review or owning chat')
+      ensure(mutationRequests().length === before && calls.starts.length === starts, 'Opening a run link started or changed work')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Run detail did not close')
+      ensure(calls.releases.includes('run-link'), 'Leaving the run did not release its link')
+      await until(() => !query('[data-review-run="' + run.id + '"]'), 'A released old run stayed pinned in project history')
+      window.oldRuns = null
+    })
+    await check('a linked core run this app did not start renders honestly and is never observed here', async () => {
+      // G1's committed minimized projection: no prompt, findings or options.
+      const run = { id: 'core-run-1234', chat_id: 'core-owner-chat', state: 'reviewing', execution_state: 'running', mode: 'review_merge',
+        created_at: '2026-10-23T09:00:00Z', app_id: null, can_stop: false, post_review: false, details_in_owning_chat: true,
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'queued' }] }
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'core-run-link' })
+      const pane = () => query('[data-task="task:run:core-run-1234"]')
+      await until(() => pane() && text(pane()).includes('owning conversation'), 'Minimized run did not open')
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run')
+      const shown = text(pane())
+      ensure(shown.includes('Review & merge') && !shown.includes('Private review'), 'Minimized run was not titled by its mode')
+      ensure(!/prompt snapshot|Older PR version|findings will appear here/.test(shown), 'Minimized run showed prompt or version warnings')
+      ensure(button('Open the owning conversation for details', pane()) && !button('Stop workflow', pane()), 'Minimized run lacks its owning-conversation link or offers Stop')
+      ensure(!calls.requests.some(call => call.url.includes(run.id) && call.url.endsWith('/observe')), 'A run this app does not own was observed')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Run detail did not close')
+      window.oldRuns = null
+    })
+    await check('a linked old run keeps its newest state across refresh instead of its navigation snapshot', async () => {
+      const run = { id: 'old-run-87654321', mode: 'review', state: 'reviewing', execution_state: 'running', can_stop: true, chat_id: 'old-run-chat',
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'reviewing', summary: 'Old active run' }] }
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'old-run-link' })
+      const pane = () => query('[data-task="task:run:old-run-87654321"]')
+      await until(() => pane() && text(pane()).includes('Recorded status: Reviewing'), 'Old run did not open')
+      await click(button('Stop workflow', pane()))
+      await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run exactly')
+      await frame(); await frame()
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'A refresh resurrected the stale running snapshot')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Old run did not close')
+      window.oldRuns = null
+    })
+    await check('an exact run read issued before Stop cannot undo the confirmed Stop', async () => {
+      const run = { id: 'race-run-87654321', mode: 'review', state: 'reviewing', execution_state: 'running', can_stop: true, chat_id: 'race-run-chat',
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'reviewing', summary: 'Race run' }] }
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'race-run-link' })
+      const pane = () => query('[data-task="task:run:race-run-87654321"]')
+      await until(() => pane() && text(pane()).includes('Recorded status: Reviewing'), 'Race run did not open')
+      // Hold the exact read so it is issued before Stop and delivered after it.
+      window.holdExactRun = true
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore && window.releaseExactRun, 'Exact read was not issued')
+      window.holdExactRun = false
+      await click(button('Stop workflow', pane()))
+      await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
+      window.releaseExactRun(); window.releaseExactRun = null
+      for (let i = 0; i < 6; i++) await frame()
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'An older read overwrote the confirmed Stop')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Race run did not close')
+      window.oldRuns = null
+    })
     await check('a linked later-page PR keeps its row while its review or assignment pane is open', async () => {
       window.fixturePaging = true
       await click(query('[aria-label="Refresh project status"]'))
@@ -914,6 +1117,8 @@ window.runWorkspaceChecks = async () => {
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {
+      // The approval resolves its frozen preview before it can be pressed.
+      await until(() => button('Allow review & merge') && !button('Allow review & merge').disabled, 'Approval did not become available')
       const confirm = button('Allow review & merge')
       confirm.click(); confirm.click()
       await until(() => button('Open review conversation'), 'Approval did not open its owning conversation')
@@ -947,7 +1152,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => button('Allow review & merge'), 'Proposal not ready')
       const changed = savedSelection('selection-replaced'); changed.items[0].number = 8
       values.set('review-selections/selection-replaced.json', changed)
-      await click(button('Allow review & merge'))
+      await enabled('Allow review & merge')
       await until(() => text(query('.co-selection-page')).includes('changed while you were reading'), 'Proposal replacement was not detected')
       ensure(mutationRequests().length === beforeLink + 1, 'Replaced proposal was approved')
     })
@@ -997,7 +1202,7 @@ window.runWorkspaceChecks = async () => {
       // One authentic parent-window message represents returning from Settings.
       // No focus/click retries manufacture success or conceal duplicate work.
       window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
-      await until(() => text(query('.co-settings summary')).includes('reconnected-owner'), 'Foreground did not display the new account')
+      await until(() => query('.co-settings summary')?.getAttribute('aria-label')?.includes('reconnected-owner'), 'Foreground did not display the new account')
       const returning = calls.requests.slice(previous)
       ensure(returning.filter(call => call.url === '/api/github/status').length === 1, 'Foreground checked the account more than once')
       const overlays = returning.filter(call => call.url === '/api/github/graphql' && call.body.query.includes('resource(url:'))
@@ -1005,6 +1210,14 @@ window.runWorkspaceChecks = async () => {
       await until(() => values.get('feed-cache.json')?.records?.[0]?.status === 'merged', 'Foreground live state was not reconciled and cached')
       ensure(ledgerReads === 2, 'Foreground did not own exactly one fresh ledger scan')
       ensure(returning.every(call => call.method === 'GET' || call.url === '/api/github/graphql'), 'Foreground mutated public work')
+    })
+    await check('settings leads with the GitHub account then one prompt editor and a precise destination', async () => {
+      await click(query('.co-settings summary'))
+      await until(()=>query('.co-prompt-settings textarea'), 'Prompt editor did not settle')
+      const panel=query('.co-settings-panel'), headings=[...panel.querySelectorAll('h3')]
+      ensure(headings.map(h=>text(h)).join('|')==='GitHub account|Agent prompts', 'Settings section order or headings differ')
+      ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
+      await click(button('Done',panel))
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
@@ -1048,7 +1261,7 @@ function cdp(browser) {
   return { events, onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener) }, send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = ++serial
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 45000)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timed out: ' + method)) }, 120000)
       pending.set(id, { resolve, reject, timer })
       browser.stdio[3].write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0')
     })

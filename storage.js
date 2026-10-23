@@ -260,6 +260,51 @@ export async function cacheSourceSnapshot(snapshot) {
   }
 }
 
+// The exact start the owner chose, frozen with its cycle so Send again
+// resends that work and model unchanged instead of rebuilding today's choice.
+// Bounded to the platform's scoped-start limits (G1 `AppChatStart`: a
+// control-free `scope_label` of at most 120 characters, `model` at most 256,
+// non-empty content), so a cycle is only ever saved for a start the
+// platform can accept. Display text is shortened, never refused.
+export const START_LIMITS = { title: 200, scopeLabel: 120, event: 80, model: 256, provider: 64, effort: 32 }
+export function boundedStartText(value, max) {
+  const text = String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…'
+}
+export function freezeStartAction(action) {
+  const title = boundedStartText(action?.title, START_LIMITS.title)
+  if (!title || typeof action?.draft !== 'string' || !action.draft.trim()) return null
+  const frozen = { title, draft: action.draft }
+  for (const key of ['event', 'scopeLabel']) {
+    const value = action[key] === undefined ? '' : boundedStartText(action[key], START_LIMITS[key])
+    if (value) frozen[key] = value
+  }
+  if (Number.isSafeInteger(action.count)) frozen.count = action.count
+  if (action.merge === true) frozen.merge = true
+  const agent = action.agent
+  if (agent?.provider && agent?.model) {
+    const model = String(agent.model), provider = String(agent.provider), effort = agent.effort ? String(agent.effort) : ''
+    if (model.length > START_LIMITS.model || provider.length > START_LIMITS.provider || effort.length > START_LIMITS.effort) return null
+    frozen.agent = { provider, model, ...(effort ? { effort } : {}) }
+  }
+  return frozen
+}
+
+// One cycle of project work: its number k, its deterministic message id and
+// the exact frozen start it delivers. `delivered` is display state only.
+function normalizeCycle(raw) {
+  if (!raw || !Number.isSafeInteger(raw.k) || raw.k < 1 || typeof raw.cid !== 'string' || !raw.cid) return null
+  const action = freezeStartAction(raw.action)
+  if (!action) return null
+  return { k: raw.k, cid: raw.cid.slice(0, 200), action, title: action.title, event: action.event || '',
+    started_at: typeof raw.started_at === 'string' ? raw.started_at : '', delivered: raw.delivered === true,
+    ...(typeof raw.chat_id === 'string' && raw.chat_id ? { chat_id: raw.chat_id.slice(0, 128) } : {}),
+    ...(raw.model_applied === true ? { model_applied: true } : {}), ...(raw.attempted === true ? { attempted: true } : {}),
+    ...(raw.closed === true ? { closed: true } : {}) }
+}
+// Older records counted cycles as `seq`.
+const cycleNumber = raw => Number.isSafeInteger(raw?.k) && raw.k >= 0 ? raw.k : Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
+
 export function normalizeCycleState(raw) {
   if (!raw || typeof raw !== 'object') return null
   const chatId = typeof raw.chat_id === 'string' ? raw.chat_id.trim() : ''
@@ -267,10 +312,22 @@ export function normalizeCycleState(raw) {
   return {
     chat_id: chatId.slice(0, 128),
     started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
-    scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 128) : '',
+    scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 160) : '',
     ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
     ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
+    ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined, cycle: undefined })).filter(Boolean) } : {}),
+    ...(cycleNumber(raw) ? { k: cycleNumber(raw) } : {}),
+    ...(normalizeCycle(raw.cycle) ? { cycle: normalizeCycle(raw.cycle) } : {}),
   }
+}
+
+// A project record whose current cycle is not yet confirmed in a
+// conversation still carries that cycle, so it can be sent again.
+function normalizeProjectRecord(raw) {
+  const current = normalizeCycleState(raw)
+  if (current) return current
+  const cycle = normalizeCycle(raw?.cycle)
+  return cycle ? { chat_id: '', k: cycleNumber(raw) || cycle.k, cycle, history: normalizeCycleState({ chat_id: '-', history: raw.history })?.history || [] } : null
 }
 
 async function cycleKey(projectKey) {
@@ -331,7 +388,8 @@ async function migrateCycleState(key, legacy) {
 export async function loadCycleState(projectKey) {
   try {
     const key = await cycleKey(projectKey)
-    const current = normalizeCycleState(await window.mobius.storage.get(key))
+    const raw = await window.mobius.storage.get(key)
+    const current = normalizeProjectRecord(raw)
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
@@ -364,6 +422,75 @@ export async function saveCycleState(state, projectKey) {
   }
 }
 
+// All of a project's agent work runs in ONE app-owned conversation, scoped
+// `contribute-cycle:<project digest>`. The platform keeps at most one active
+// conversation per scope, so a project can never have two owners. Cycle k is
+// one message in it with the deterministic id `<scope>:k`. The platform
+// de-duplicates that id per conversation, not per scope, so this record is
+// consulted before every delivery: only its current, unconfirmed cycle is
+// ever sent, and a retry stays bound to the conversation it went to.
+export async function projectCycleScope(projectKey) {
+  return `contribute-cycle:${(await cycleKey(projectKey)).replace(/^project-cycles\/|\.json$/g, '').slice(0, 32)}`
+}
+
+// Record cycle k = observed + 1 with its frozen start, before delivering it.
+// A pane that observed an older k is refused, so two panes pressing Start on
+// the same state record (and send) one cycle.
+export async function beginProjectCycle(projectKey, action = {}, observedK = 0) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion || !storage?.durableWrite) return { ok: false, error: 'Safe cycle starts are unavailable in this Möbius version.' }
+  const frozen = freezeStartAction(action)
+  if (!frozen) return { ok: false, error: 'This agent handoff is incomplete.' }
+  try {
+    const key = await cycleKey(projectKey)
+    const scope = await projectCycleScope(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline) return { ok: false, error: 'Reconnect before starting new project work.' }
+    const previous = normalizeProjectRecord(value)
+    if (cycleNumber(value) !== observedK) return { ok: false, changed: true, error: 'Project work changed in another view. It is shown now; start again if you still need to.' }
+    const k = observedK + 1
+    const cycle = { k, cid: `${scope}:${k}`, action: frozen, started_at: new Date().toISOString(), delivered: false }
+    const history = [...(previous?.history || [])]
+    if (previous?.chat_id && previous.title) history.unshift({ chat_id: previous.chat_id, title: previous.title, event: previous.event, started_at: previous.started_at })
+    const next = { schema: 4, scope, chat_id: previous?.chat_id || '', title: frozen.title, event: frozen.event || '', started_at: cycle.started_at, k, cycle, history: history.slice(0, 50) }
+    const receipt = await storage.durableWrite(key, next, version ? { ifMatch: version } : { ifNoneMatch: true })
+    if (receipt?.durability !== 'synced') return { ok: false, error: 'This start was not saved online. Refresh before trying again.' }
+    return { ok: true, scope, k, cid: cycle.cid, action: frozen }
+  } catch {
+    return { ok: false, error: 'Project work changed in another view or could not be saved. Refresh and try again.' }
+  }
+}
+
+// The authoritative current cycle, read online immediately before any
+// delivery. Throws when it cannot be read online.
+export async function loadCurrentCycle(projectKey) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion) throw new Error('Safe cycle starts are unavailable in this Möbius version.')
+  const { value, offline } = await storage.getWithVersion(await cycleKey(projectKey))
+  if (offline) throw new Error('Reconnect before sending.')
+  return { k: cycleNumber(value), cycle: normalizeCycle(value?.cycle), chat_id: typeof value?.chat_id === 'string' ? value.chat_id : '' }
+}
+
+// Update cycle k's own facts (the conversation it went to, whether its model
+// was applied, whether it was delivered) only while k is still current.
+export async function updateCurrentCycle(projectKey, k, cid, facts = {}) {
+  const storage = window.mobius?.storage
+  try {
+    const key = await cycleKey(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline || !version || cycleNumber(value) !== k || value?.cycle?.cid !== cid) return false
+    const cycle = { ...value.cycle }
+    if (facts.chatId) cycle.chat_id = String(facts.chatId)
+    if (facts.modelApplied) cycle.model_applied = true
+    if (facts.delivered) cycle.delivered = true
+    if (facts.attempted) cycle.attempted = true
+    if (facts.closed) cycle.closed = true
+    const next = { ...value, ...(facts.delivered && facts.chatId ? { chat_id: String(facts.chatId) } : {}), cycle }
+    const receipt = await storage.durableWrite(key, next, { ifMatch: version })
+    return receipt?.durability === 'synced'
+  } catch { return false }
+}
+
 export async function clearCycleState() {
   try {
     await window.mobius.storage.remove(CYCLE_STATE)
@@ -377,26 +504,48 @@ const SETTINGS_FILE = 'settings.json'
 const DEFAULT_APP_SETTINGS = Object.freeze({
   autopilot_default: true,
   submission_method: 'github',
-  agent_provider: '',
-  agent_model: '',
-  agent_effort: '',
 })
+// Older builds kept one app-wide agent model here. Each launch now carries its
+// own model choice (none means the chat default), so these keys are retired.
+const RETIRED_SETTINGS = ['agent_provider', 'agent_model', 'agent_effort']
 
 export function normalizeAppSettings(raw) {
-  return raw && typeof raw === 'object'
-    ? { ...DEFAULT_APP_SETTINGS, ...raw, submission_method: 'github' }
-    : { ...DEFAULT_APP_SETTINGS }
+  const kept = raw && typeof raw === 'object'
+    ? Object.fromEntries(Object.entries(raw).filter(([key]) => !RETIRED_SETTINGS.includes(key)))
+    : {}
+  return { ...DEFAULT_APP_SETTINGS, ...kept, submission_method: 'github' }
 }
 
-// App-level preferences (not per-contribution): publication, Autopilot, and the
-// optional model used for new agent work started here. Missing/unreadable →
-// defaults; existing conversations retain the model they already use.
+// App-level preferences (not per-contribution): publication and Autopilot.
+// Missing/unreadable → defaults. Any explicit save writes the normalized copy,
+// which drops the retired app-wide model keys.
 export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)
+    if (raw && typeof raw === 'object' && RETIRED_SETTINGS.some(key => key in raw)) await clearRetiredSettings()
     return normalizeAppSettings(raw)
   } catch {
     return normalizeAppSettings(null)
+  }
+}
+
+// Remove the retired keys with a versioned compare-and-set on the copy read
+// at that moment, never a blind write: a settings save that lands in between
+// changes the version, and the retry keeps that newer value. Best effort; a
+// later explicit save drops the keys anyway.
+async function clearRetiredSettings(attempts = 3) {
+  const storage = window.mobius.storage
+  if (typeof storage?.getWithVersion !== 'function' || typeof storage?.durableWrite !== 'function') return
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const { value, version, offline } = await storage.getWithVersion(SETTINGS_FILE)
+      if (offline || !version || !value || typeof value !== 'object' || !RETIRED_SETTINGS.some(key => key in value)) return
+      const cleaned = Object.fromEntries(Object.entries(value).filter(([key]) => !RETIRED_SETTINGS.includes(key)))
+      await storage.durableWrite(SETTINGS_FILE, cleaned, { ifMatch: version })
+      return
+    } catch (error) {
+      if (error?.code !== 'conflict' && error?.status !== 412) return
+    }
   }
 }
 
