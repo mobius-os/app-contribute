@@ -983,6 +983,8 @@ window.runWorkspaceChecks = async () => {
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {
+      // The approval resolves its frozen preview before it can be pressed.
+      await until(() => button('Allow review & merge') && !button('Allow review & merge').disabled, 'Approval did not become available')
       const confirm = button('Allow review & merge')
       confirm.click(); confirm.click()
       await until(() => button('Open review conversation'), 'Approval did not open its owning conversation')
