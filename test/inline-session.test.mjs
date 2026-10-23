@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { batchHandle, cardRecordIds, sendTarget } from '../chat-blocks.js'
 import { reviewAddressFor } from '../send-readiness.js'
-import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, SIZE_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
+import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, REFRESH_FAILED_NOTE, SIZE_NOTE, TIMEOUT_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
 function prepared(id, extra = {}) {
@@ -471,7 +471,7 @@ test('a card refresh runs one at a time, through the coordinator after the first
     assert.deepEqual(calls, [ready ? ['full refresh', true] : ['review status']], `ledger ready: ${ready}`)
     assert.deepEqual(states, [{ running: true, done: 0 }])
     finish(); await first
-    assert.deepEqual(states.at(-1), { running: false, done: 1 }, 'completion is reported once the refresh settles')
+    assert.deepEqual(states.at(-1), { running: false, done: 1, outcome: 'done' }, 'completion is reported once the refresh settles')
   }
 })
 
@@ -623,7 +623,7 @@ test('a card refresh settles as failed after its deadline or a rejection, never 
   t.mock.timers.tick(deadline - 1); await Promise.resolve()
   assert.equal(state.running, true, 'still running before the deadline')
   t.mock.timers.tick(1); await hung
-  assert.deepEqual(state, { running: false, done: 1 }, 'the deadline completes the refresh')
+  assert.deepEqual(state, { running: false, done: 1, outcome: 'timeout' }, 'the deadline completes the refresh as a timeout')
   t.mock.timers.reset()
   // A rejected read: completed, and no unhandled rejection.
   const unhandled = []
@@ -633,7 +633,7 @@ test('a card refresh settles as failed after its deadline or a rejection, never 
     state = { running: false, done: 0 }
     await make(() => Promise.reject(new Error('listing failed')), update => { state = update(state) })()
     await new Promise(resolve => setImmediate(resolve))
-    assert.deepEqual(state, { running: false, done: 1 })
+    assert.deepEqual(state, { running: false, done: 1, outcome: 'failed' })
     assert.deepEqual(unhandled, [])
   } finally { process.off('unhandledRejection', onUnhandled) }
 })
@@ -658,4 +658,48 @@ test('a rejected card refresh leaves no unhandled rejection and ends on Try agai
     assert.equal(state.disabled, false)
     assert.equal(state.confirming, false)
   } finally { process.off('unhandledRejection', onUnhandled) }
+})
+
+test('a refresh that times out ends the check on Try again, and a late answer cannot complete it', async () => {
+  const refreshes = []
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { refresh: () => refreshes.push(true) } })
+  const report = fields => h.session.updateRuntime({ ...h.runtime(), refreshing: false, refreshDone: 0, refreshOutcome: '', ...fields })
+  const unavailable = { state: 'unavailable', byId: {}, addressed: ['one'] }
+  h.session.start(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  report({ reviewStatus: unavailable }); await tick()
+  assert.equal(h.action('chat-send:one').label, 'Try again')
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(refreshes.length, 1)
+  // The review check is still loading when the deadline passes.
+  report({ reviewStatus: { state: 'loading', byId: {} }, refreshing: true }); await tick()
+  report({ reviewStatus: { state: 'loading', byId: {} }, refreshDone: 1, refreshOutcome: 'timeout' }); await tick()
+  let state = h.action('chat-send:one')
+  assert.equal(state.label, 'Try again', 'the timed-out check ends')
+  assert.equal(state.disabled, false)
+  assert.equal(state.note, TIMEOUT_NOTE)
+  assert.equal(state.confirming, false)
+  // The late answer arrives: it updates data but cannot complete the ended activation.
+  report({ refreshDone: 1, refreshOutcome: 'timeout' }); await tick()
+  state = h.action('chat-send:one')
+  assert.equal(state.confirming, false, 'no Confirm from a late answer')
+  assert.equal(h.sends.length, 0)
+  // Only a new Try again reaches Confirm.
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(h.action('chat-send:one').confirming, true)
+  assert.equal(h.sends.length, 0)
+})
+
+test('a refresh that fails ends the check on Try again with a note', async () => {
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { refresh: () => {} } })
+  const report = fields => h.session.updateRuntime({ ...h.runtime(), refreshing: false, refreshDone: 0, refreshOutcome: '', ...fields })
+  h.session.start(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  report({ ledgerReady: false, ledger: 'incomplete' }); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  report({ ledger: 'current', refreshDone: 1, refreshOutcome: 'failed' }); await tick()
+  const state = h.action('chat-send:one')
+  assert.equal(state.confirming, false, 'a failed refresh never confirms, even if the data now looks complete')
+  assert.equal(state.label, 'Try again')
+  assert.equal(state.note, REFRESH_FAILED_NOTE)
 })

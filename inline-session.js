@@ -18,6 +18,8 @@ const MAX_ATTEMPTS = 24
 const UNRESOLVED = new Set(['sending', 'unknown'])
 const UNKNOWN_NOTE = 'The result is not confirmed yet. Check Contribute before trying again.'
 export const LEDGER_NOTE = 'Could not read every contribution. Open Contribute to send.'
+export const TIMEOUT_NOTE = 'Contribute didn’t answer in time. Try again.'
+export const REFRESH_FAILED_NOTE = 'Contribute couldn’t check this right now. Try again.'
 export const RECOVERY_NOTE = 'The previous result from this card could not be restored. Open Contribute to check it; nothing will be sent from here.'
 
 // ---- Recovery checkpoint: unresolved attempt identities only, never records,
@@ -161,6 +163,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // report as the answer.
   let awaitDone = -1
   let awaitLegacy = false
+  // Set when the refresh an activation waited for completed without an answer
+  // (timeout or failure). That activation has ended; only a new Try again can
+  // reach Confirm, whatever a late response later reports.
+  let refreshNote = ''
   const awaitingCheck = () => awaitLegacy || (awaitDone >= 0 && !(Number(runtime?.refreshDone) >= awaitDone))
   let frozen = null // { key, units } — the exact snapshot the owner confirms
   let ackNonce = null
@@ -220,7 +226,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const checking = activating === key
     const loading = ids.some(id => !now.has(id) && reading.has(id))
     // A failed check or read can be retried; retrying only reads again.
-    const retry = runtime?.reviewStatus?.state === 'unavailable' || ids.some(id => unreadable.has(id)) || ledgerIncomplete()
+    const retry = runtime?.reviewStatus?.state === 'unavailable' || ids.some(id => unreadable.has(id)) || ledgerIncomplete() || Boolean(refreshNote)
     const reason = fault || blockedReason(key)
     const label = busy ? 'Contributing…' : checking ? 'Checking…' : loading ? 'Loading…'
       : unknown && ids.length === 1 ? 'Check again' : retry ? 'Try again' : item.label || 'Contribute'
@@ -236,7 +242,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
       confirming,
       confirmation: confirming ? frozen.units.flatMap(unit => unit.ready.map(confirmationItem)) : null,
       hidden: published && !busy && !confirming,
-      note: text(fault || (unknown ? UNKNOWN_NOTE : '') || failure?.note || reason),
+      note: text(fault || (unknown ? UNKNOWN_NOTE : '') || failure?.note || (activating === key ? '' : refreshNote) || reason),
       tone, status, statusTone: tone,
       links: records.filter(isPublished).map(record => ({ label: `View PR #${publishedPull(record).number}`, url: publishedPull(record).url })),
       badges: records.length === 1 && records[0]?.status === 'prepared' && !reason ? [{ label: 'All clear', tone: 'success' }] : [],
@@ -281,7 +287,13 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (!activating) return
     // Decide only on the completed refresh, never on an intermediate report.
     if (awaitingCheck()) return
+    const waited = awaitDone >= 0
     awaitDone = -1
+    if (waited && ['timeout', 'failed'].includes(runtime?.refreshOutcome)) {
+      activating = ''
+      refreshNote = runtime.refreshOutcome === 'timeout' ? TIMEOUT_NOTE : REFRESH_FAILED_NOTE
+      return
+    }
     if (!authoritative(activating)) {
       if (preflightFailed(activating)) activating = ''
       return
@@ -310,6 +322,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     activating = key
     awaitDone = -1
     awaitLegacy = false
+    refreshNote = ''
     if (!runtime) onNeedRuntime?.()
     // A failed check or an incomplete ledger is read again by the app (one
     // refresh at a time); the card waits until that refresh completes.

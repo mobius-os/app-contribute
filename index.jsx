@@ -1540,7 +1540,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // card refresh runs at a time. The card sees `refreshing` while it runs and
   // `refreshDone` once it has completed, so intermediate reports are not
   // mistaken for its result.
-  const [cardRefreshes, setCardRefreshes] = useState({ running: false, done: 0 })
+  const [cardRefreshes, setCardRefreshes] = useState({ running: false, done: 0, outcome: '' })
   const cardRefreshRef = useRef(null)
   const cardRefresh = useCallback(() => {
     if (cardRefreshRef.current) return cardRefreshRef.current
@@ -1550,8 +1550,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // headers, not the body) or that fails still completes this refresh, so
       // the card returns to Try again. A late result only updates state; the
       // card's activation has already ended, so it cannot arm Confirm.
-      let timer
-      const deadline = new Promise(resolve => { timer = setTimeout(resolve, CARD_REFRESH_DEADLINE_MS) })
+      // The completion carries its outcome: done, failed, or timeout.
+      let timer, outcome = 'failed'
+      const deadline = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), CARD_REFRESH_DEADLINE_MS) })
       try {
         let work
         if (ledgerReadyRef.current) {
@@ -1560,11 +1561,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         } else {
           work = refreshReviewStatus()
         }
-        await Promise.race([Promise.resolve(work).catch(() => {}), deadline])
+        outcome = await Promise.race([Promise.resolve(work).then(() => 'done', () => 'failed'), deadline])
       } finally {
         clearTimeout(timer)
         cardRefreshRef.current = null
-        setCardRefreshes(state => ({ running: false, done: state.done + 1 }))
+        setCardRefreshes(state => ({ running: false, done: state.done + 1, outcome }))
       }
     })()
     cardRefreshRef.current = run
@@ -1585,7 +1586,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // Chat sends require the binding at the moment of the write, too.
       send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
       sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
-      refresh: cardRefresh, refreshing: cardRefreshes.running, refreshDone: cardRefreshes.done,
+      refresh: cardRefresh, refreshing: cardRefreshes.running, refreshDone: cardRefreshes.done, refreshOutcome: cardRefreshes.outcome,
     })
   }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
 
