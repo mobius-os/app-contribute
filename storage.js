@@ -262,13 +262,32 @@ export async function cacheSourceSnapshot(snapshot) {
 
 // The exact start the owner chose, frozen with its reservation so recovery
 // replays that work and model unchanged instead of rebuilding today's choice.
-const START_FIELDS = ['title', 'draft', 'event', 'scopeLabel', 'count', 'merge']
+// Bounded to the platform's scoped-start limits (G1 `AppChatStart`: a
+// control-free `scope_label` of at most 120 characters, `model` at most 256,
+// non-empty content), so a reservation is only ever made for a start the
+// platform can accept. Display text is shortened, never refused.
+export const START_LIMITS = { title: 200, scopeLabel: 120, event: 80, model: 256, provider: 64, effort: 32 }
+export function boundedStartText(value, max) {
+  const text = String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…'
+}
 export function freezeStartAction(action) {
-  if (typeof action?.title !== 'string' || typeof action?.draft !== 'string' || !action.title || !action.draft) return null
-  const frozen = Object.fromEntries(START_FIELDS.filter(key => action[key] !== undefined).map(key => [key, action[key]]))
+  const title = boundedStartText(action?.title, START_LIMITS.title)
+  if (!title || typeof action?.draft !== 'string' || !action.draft.trim()) return null
+  const frozen = { title, draft: action.draft }
+  for (const key of ['event', 'scopeLabel']) {
+    const value = action[key] === undefined ? '' : boundedStartText(action[key], START_LIMITS[key])
+    if (value) frozen[key] = value
+  }
+  if (Number.isSafeInteger(action.count)) frozen.count = action.count
+  if (action.merge === true) frozen.merge = true
   const agent = action.agent
-  if (agent?.provider && agent?.model) frozen.agent = { provider: String(agent.provider), model: String(agent.model), ...(agent.effort ? { effort: String(agent.effort) } : {}) }
-  return JSON.parse(JSON.stringify(frozen))
+  if (agent?.provider && agent?.model) {
+    const model = String(agent.model), provider = String(agent.provider), effort = agent.effort ? String(agent.effort) : ''
+    if (model.length > START_LIMITS.model || provider.length > START_LIMITS.provider || effort.length > START_LIMITS.effort) return null
+    frozen.agent = { provider, model, ...(effort ? { effort } : {}) }
+  }
+  return frozen
 }
 
 function normalizePending(raw) {

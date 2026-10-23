@@ -71,6 +71,7 @@ import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { startFailureStatus } from './ui/useProjectCycle.js'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { chatBlockTarget } from './chat-blocks.js'
@@ -331,7 +332,8 @@ export default function ContributeApp({ appId, token }) {
     } catch (error) {
       // After the request leaves, only the platform's own code can certify
       // that the scope was never admitted; anything else is unknown.
-      return { ok: false, ...(typeof error?.code === 'string' ? { code: error.code } : {}), error: 'Could not start the agent. Try again.' }
+      const status = startFailureStatus(error)
+      return { ok: false, ...(typeof error?.code === 'string' ? { code: error.code } : {}), ...(status ? { status } : {}), error: 'Could not start the agent. Try again.' }
     } finally {
       agentStartRef.current = false
     }

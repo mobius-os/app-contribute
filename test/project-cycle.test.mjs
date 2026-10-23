@@ -41,6 +41,7 @@ function fixture({ saved = null, runtime = {}, statusError = false, stopResult =
     calls,
     phase: context.projectCyclePhase,
     outcome: context.startOutcome,
+    failureStatus: context.startFailureStatus,
     render(projectKey = 'fixture-project') { cursor = 0; return context.useProjectCycle(projectKey, start) },
     setCycle(next) { slots[0] = next },
     get starting() { return slots[3]?.current },
@@ -104,11 +105,11 @@ test('a thrown project-cycle claim restores the prior phase and releases the loc
   const f = fixture({ claim: async () => { throw Error('Storage unavailable') } })
   f.render()
   f.setCycle({ phase: 'idle', chatId: '', history: [], error: '' })
-  const first = await f.render().start({ title: 'Fresh work' })
+  const first = await f.render().start({ title: 'Fresh work', draft: 'Fresh draft' })
   assert.equal(first.ok, false)
   assert.equal(f.render().cycle.phase, 'idle')
   assert.equal(f.starting, false)
-  await f.render().start({ title: 'Fresh work' })
+  await f.render().start({ title: 'Fresh work', draft: 'Fresh draft' })
   assert.equal(f.calls.filter(([kind]) => kind === 'claim').length, 2)
 })
 
@@ -170,7 +171,7 @@ test('mounted lost-start recheck recovers the exact saved reservation without du
     settle:async(key,id,next)=>{assert.equal(key,'fixture-project');assert.equal(id,saved.pending.id);saved=next;return true},
   })
   f.render();await f.restore()
-  await f.render().start({title:'Prepare',event:'private'})
+  await f.render().start({title:'Prepare',event:'private',draft:'Prepare draft'})
   assert.equal(f.render().cycle.pending,true)
   assert.equal(typeof f.render().recheck,'function')
   await f.render().recheck()
@@ -253,7 +254,7 @@ test('a start has three outcomes; only a certified non-admission releases its re
     start: async () => ({ ok: false, notStarted: true, error: 'Another agent task is already starting.' }),
     settle: async (key, id, next) => { assert.equal(id, 'claim-refused'); assert.equal(next, null); saved = null; return true } })
   released.render(); await released.restore()
-  const result = await released.render().start({ title: 'Prepare', event: 'private' })
+  const result = await released.render().start({ title: 'Prepare', event: 'private', draft: 'Prepare draft' })
   assert.equal(result.ok, false)
   assert.equal(Boolean(released.render().cycle.pending), false, 'a certified refusal released its reservation')
   assert.match(released.render().cycle.error, /already starting/)
@@ -415,4 +416,50 @@ test('a new full-cycle reservation that never reached the platform is finished, 
     assert.equal(reloaded.render().cycle.chatId, 'cycle-chat')
     assert.equal((await loadCycleState('fixture-project')).pending, undefined, 'the reservation settled to its conversation')
   } finally { globalThis.window = previousWindow }
+})
+
+test('a start is bounded to the platform limits before it is reserved', async () => {
+  const { projectUpdateAction } = await import('../review.js')
+  const project = { key: 'app:long', kind: 'app', name: 'A'.repeat(110) + ' tracker', canonical_repo: 'owner/long', available: true }
+  const action = projectUpdateAction([project], 1)
+  assert.ok(String(action.scopeLabel).length > 120, 'fixture: a valid long app name exceeds the platform label limit')
+  let claimed = null
+  const sent = []
+  const f = fixture({ claim: async (key, previous, payload) => { claimed = payload; return { ok: true, id: 'claim-long' } },
+    start: async request => { sent.push(request); return { ok: true, chatId: 'long-chat' } }, settle: async () => true })
+  f.render(); await f.restore()
+  assert.equal((await f.render().start({ ...action, scopeLabel: action.scopeLabel + '\nwith a newline' })).ok, true)
+  for (const payload of [claimed, sent[0]]) {
+    assert.ok(payload.scopeLabel.length <= 120 && !/[\u0000-\u001f]/.test(payload.scopeLabel), 'scope label within the platform limit')
+    assert.ok(payload.title.length <= 200)
+  }
+  assert.equal(sent[0].draft, action.draft, 'the work text itself is never shortened')
+  // A start the platform cannot accept is never reserved.
+  const refused = fixture({ claim: async () => assert.fail('An unacceptable start was reserved') })
+  refused.render(); await refused.restore()
+  assert.equal((await refused.render().start({ ...ACTION, agent: { provider: 'codex', model: 'm'.repeat(257) } })).ok, false)
+})
+
+test('a validation refusal of the exact saved start releases it; other failures never do', async () => {
+  const { failureStatus } = fixture()
+  assert.equal(failureStatus({ status: 422 }), 422)
+  assert.equal(failureStatus(new Error('window.mobius.chat.start: scoped start failed (422)')), 422)
+  assert.equal(failureStatus(new Error('network down')), undefined)
+  for (const [response, released] of [[{ ok: false, status: 422 }, true], [{ ok: false, status: 400 }, true],
+      [{ ok: false, status: 500 }, false], [{ ok: false, status: 409 }, false], [{ ok: false, status: 401 }, false], [{ ok: false, error: 'network' }, false]]) {
+    let saved = { pending: { id: 'claim-v', title: ACTION.title, event: ACTION.event, action: freezeStartAction(ACTION) } }
+    const settled = []
+    const f = fixture({ saved: () => saved, runtime: { running: true }, start: async () => response,
+      settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
+    f.render(); await f.restore()
+    await f.render().finishStart()
+    if (released) {
+      assert.deepEqual(settled, [null], `status ${response.status} releases`)
+      assert.equal(Boolean(f.render().cycle.pending), false)
+      assert.match(f.render().cycle.error, /refused this start/)
+    } else {
+      assert.deepEqual(settled, [], `${response.status || 'network'} keeps the reservation`)
+      assert.equal(f.render().cycle.pending, true)
+    }
+  }
 })

@@ -26,8 +26,23 @@ export const TERMINAL_SCOPE_CODES = ['scope_cancelled', 'scope_deleted']
 // local refusal proves only that *this* request did not leave: on a retry of
 // an earlier uncertain start it says nothing about that start, so only the
 // platform's scope-wide verdict (cancelled/deleted) can release it.
+// A request-validation refusal (400/413/422) is decided from the request body
+// before the platform looks up or creates anything. The saved start is replayed
+// byte for byte, so the same refusal certifies that this exact start was never
+// admitted, on the first attempt or any retry. Auth (401/403), conflicts
+// (409), throttling (429), 5xx and lost responses certify nothing.
+const VALIDATION_REFUSALS = [400, 413, 422]
+// The runtime reports the HTTP status on the error, or on older runtimes only
+// in its message ("…scoped start failed (422)").
+export function startFailureStatus(error) {
+  if (Number.isInteger(error?.status)) return error.status
+  return Number(/\((\d{3})\)$/.exec(String(error?.message || ''))?.[1]) || undefined
+}
 export function startOutcome(outcome, { retry = false } = {}) {
   if (outcome?.ok && outcome.chatId) return { state: 'admitted', chatId: String(outcome.chatId) }
+  if (VALIDATION_REFUSALS.includes(outcome?.status)) {
+    return { state: 'not_admitted', error: `Möbius refused this start (${outcome.status}), so nothing was started and its reservation is released. Start again.` }
+  }
   if (TERMINAL_SCOPE_CODES.includes(outcome?.code) || outcome?.notStarted && !retry) {
     return { state: 'not_admitted', error: outcome.error || 'Nothing was started.' }
   }
@@ -151,6 +166,10 @@ export function useProjectCycle(projectKey, startAgentTask) {
   async function start(action) {
     if (!action || starting.current) return { ok: false, error: 'Work is already starting.' }
     if (['restoring', 'checking', 'starting', 'running', 'waiting', 'stopping', 'unknown'].includes(cycle.phase)) return { ok: false, error: 'Check or stop the current work before starting another cycle.' }
+    // The exact, platform-bounded start is fixed before anything is reserved;
+    // the reservation and every replay carry this same payload.
+    const frozen = freezeStartAction(action)
+    if (!frozen) return { ok: false, error: 'This agent handoff is incomplete.' }
     starting.current = true
     observation.current++
     const requestedProject = projectKey
@@ -158,13 +177,13 @@ export function useProjectCycle(projectKey, startAgentTask) {
     setCycle(current => ({ ...current, phase: 'starting', error: '' }))
     try {
       let claim
-      try { claim = await claimProjectCycle(requestedProject, previous.chatId, action) }
+      try { claim = await claimProjectCycle(requestedProject, previous.chatId, frozen) }
       catch { claim = { ok: false, error: 'Could not reserve this project cycle. Refresh and try again.' } }
       if (!claim.ok) {
         if (alive.current && identity.current === requestedProject) setCycle({ ...previous, error: claim.error })
         return claim
       }
-      return await settleStart(requestedProject, claim.id, action, previous, await admit(action, claim.id))
+      return await settleStart(requestedProject, claim.id, frozen, previous, await admit(frozen, claim.id))
     } finally { starting.current = false }
   }
   // Explicit recovery of a reserved start whose outcome is unknown. Replaying

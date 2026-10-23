@@ -70,7 +70,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const cycleAction = contributionCycleAction(run, [project])
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
   // Recovery replays the reserved start exactly; it never substitutes today's
-  // work or model. A full cycle still needs merge rights to be finished.
+  // work or model, and is not re-gated by today's merge rights.
   const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction, canDiscard: workflow.canDiscardStart })
   async function start(action, agent) {
     setError('')
