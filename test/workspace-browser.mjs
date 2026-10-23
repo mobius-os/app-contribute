@@ -1276,6 +1276,55 @@ window.runWorkspaceChecks = async () => {
         root.render(null)
       }
     })
+    await check('Try again on an incomplete ledger waits for its whole re-read, then reaches Confirm', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const record = { ...prepared, id: 'ledger-record', updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 3 insertions(+)' } }
+      values.set('contributions/ledger-record.json', structuredClone(record))
+      // The first listing is incomplete; the second (Try again's re-read) is held, then lands complete.
+      let listings = 0, complete = false, releaseListing
+      const held = new Promise(resolve => { releaseListing = resolve })
+      window.mobius.storage.listWithStatus = async () => {
+        listings++
+        if (listings === 2) await held
+        return { complete, entries: [{ type: 'file', name: 'ledger-record.json', content: structuredClone(record) }] }
+      }
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:ledger-record')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-ledger', key: 'chat-send:ledger-record', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-ledger', generation: 6, actions: [{ key: 'chat-send:ledger-record', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled, 'Card state was not published')
+        fire('activate', 'ledger-n1')
+        for (let i = 0; i < 150 && !(card()?.label === 'Try again' && !card().disabled); i++) await new Promise(resolve => setTimeout(resolve, 50))
+        ensure(card()?.label === 'Try again' && !card().disabled && /Could not read every contribution/.test(card().note || ''), 'An incomplete ledger did not offer Try again: ' + JSON.stringify(card()))
+        ensure(listings === 1, 'Unexpected listings before Try again: ' + listings)
+        complete = true
+        fire('activate', 'ledger-n2')
+        for (let i = 0; i < 30; i++) await frame()
+        ensure(listings === 2, 'Try again did not re-read the ledger: ' + listings)
+        ensure(card()?.label === 'Checking…' && card().disabled, 'An intermediate report ended the check: ' + JSON.stringify(card()))
+        fire('activate', 'ledger-n3')
+        for (let i = 0; i < 10; i++) await frame()
+        ensure(listings === 2, 'A second Try again started another refresh while one was running')
+        releaseListing()
+        for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 50))
+        ensure(card()?.confirming, 'The completed re-read did not reach Confirm: ' + JSON.stringify(card()))
+        ensure(!calls.requests.slice(before).some(call => call.method === 'POST' && /\/(submit|submit-stack|update-stack|update-existing)$/.test(call.url)), 'Something was sent')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
+        releaseListing()
+        root.render(null)
+      }
+    })
     await check('a card naming one layer of a stack reaches Confirm, and sends nothing if binding is lost before the write', async () => {
       root.render(null)
       await frame(); await frame()

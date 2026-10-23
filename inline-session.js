@@ -154,10 +154,14 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   const unreadable = new Set()
   let runtime = null
   let activating = ''
-  // True from an activation that asked the app for a fresh review check until
-  // the app's next runtime report. No status value is ever held as pending:
-  // whatever the next report says, it is a current answer.
-  let awaitingCheck = false
+  // The app's refresh completion count an activation is waiting for. The app
+  // reports `refreshDone` (completed card refreshes) and `refreshing`; reports
+  // sent while that refresh is still running are intermediate and never end
+  // the activation. A runtime without these fields (older app) counts its next
+  // report as the answer.
+  let awaitDone = -1
+  let awaitLegacy = false
+  const awaitingCheck = () => awaitLegacy || (awaitDone >= 0 && !(Number(runtime?.refreshDone) >= awaitDone))
   let frozen = null // { key, units } — the exact snapshot the owner confirms
   let ackNonce = null
   let alive = true
@@ -265,7 +269,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // A preflight that finished without authority: every read for the card is
   // done, but a named record could not be read or the review check is
   // unavailable. It ends the activation so the card offers Try again.
-  const preflightFailed = key => Boolean(runtime) && !reading.size && !awaitingCheck
+  const preflightFailed = key => Boolean(runtime) && !reading.size && !awaitingCheck()
     && (idsFor(key).some(id => unreadable.has(id)) || runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete())
   // The ledger read finished but could not list every contribution, so the
   // whole stack and current versions cannot be verified from here.
@@ -275,6 +279,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const now = current()
     attempts = attempts.map(attempt => observeAttempt(attempt, now))
     if (!activating) return
+    // Decide only on the completed refresh, never on an intermediate report.
+    if (awaitingCheck()) return
+    awaitDone = -1
     if (!authoritative(activating)) {
       if (preflightFailed(activating)) activating = ''
       return
@@ -301,11 +308,16 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   function activate(key) {
     if (fault || sending() || frozen) return
     activating = key
-    awaitingCheck = false
+    awaitDone = -1
+    awaitLegacy = false
     if (!runtime) onNeedRuntime?.()
-    // A failed check or an incomplete ledger is read again by the app; the card
-    // waits for its next report.
-    else if (runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete()) { awaitingCheck = true; runtime.refresh?.() }
+    // A failed check or an incomplete ledger is read again by the app (one
+    // refresh at a time); the card waits until that refresh completes.
+    else if (runtime.reviewStatus?.state === 'unavailable' || ledgerIncomplete()) {
+      if ('refreshDone' in runtime) awaitDone = (Number(runtime.refreshDone) || 0) + 1
+      else awaitLegacy = true
+      if (!runtime.refreshing) runtime.refresh?.()
+    }
     void read(allIds())
   }
 
@@ -337,7 +349,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   return {
     sessionId,
     start() { emit(); if (allIds().length) void read(allIds()) },
-    updateRuntime(next) { runtime = next; awaitingCheck = false; settle(); emit() },
+    updateRuntime(next) { runtime = next; awaitLegacy = false; settle(); emit() },
     handleEvent(event) {
       if (!advertised.some(item => item.key === event?.key) || !['activate', 'cancel', 'confirm'].includes(event.event)
         || typeof event.nonce !== 'string' || !event.nonce || event.nonce.length > 128) return false

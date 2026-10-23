@@ -626,8 +626,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // preserves exactly one trailing refresh when an event arrives mid-flight.
   // There is deliberately no timer: a hidden/idle app consumes no resources.
   const refreshWorkRef = useRef(null)
-  const runRefreshWork = useCallback(async ({ force = false } = {}) => {
+  const forceRefreshRef = useRef(false)
+  const runRefreshWork = useCallback(async () => {
     // A card's explicit Try again runs even while the frame is not visible.
+    const force = forceRefreshRef.current
+    forceRefreshRef.current = false
     if (!force && document.visibilityState !== 'visible') return
     // Mount already owns the first authoritative scan. Startup focus and
     // visibility events must not queue another full pass behind it.
@@ -1529,17 +1532,32 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const checking = loading && records.length === 0 && !sourceSnapshot
 
   // A card's Try again: once the first ledger read is done, the full pass
-  // (ledger, review status, connection); before that, the review status on its
-  // own. Either way the card then gets a fresh report, even when nothing changed.
-  const [cardReport, setCardReport] = useState(0)
-  const cardRefresh = useCallback(async () => {
-    try {
-      if (ledgerReadyRef.current) await runRefreshWork({ force: true })
-      else await refreshReviewStatus()
-    } finally {
-      setCardReport(count => count + 1)
-    }
-  }, [runRefreshWork, refreshReviewStatus])
+  // (ledger, review status, connection) through the refresh coordinator, even
+  // while the frame is hidden; before that, the review status on its own. One
+  // card refresh runs at a time. The card sees `refreshing` while it runs and
+  // `refreshDone` once it has completed, so intermediate reports are not
+  // mistaken for its result.
+  const [cardRefreshes, setCardRefreshes] = useState({ running: false, done: 0 })
+  const cardRefreshRef = useRef(null)
+  const cardRefresh = useCallback(() => {
+    if (cardRefreshRef.current) return cardRefreshRef.current
+    setCardRefreshes(state => ({ ...state, running: true }))
+    const run = (async () => {
+      try {
+        if (ledgerReadyRef.current) {
+          forceRefreshRef.current = true
+          await refreshCoordinatorRef.current()
+        } else {
+          await refreshReviewStatus()
+        }
+      } finally {
+        cardRefreshRef.current = null
+        setCardRefreshes(state => ({ running: false, done: state.done + 1 }))
+      }
+    })()
+    cardRefreshRef.current = run
+    return run
+  }, [refreshReviewStatus])
 
   // Behind a chat card, hand the inline session this app's own state and
   // guarded Send handlers; there is no second publication path.
@@ -1555,9 +1573,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // Chat sends require the binding at the moment of the write, too.
       send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
       sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
-      refresh: cardRefresh,
+      refresh: cardRefresh, refreshing: cardRefreshes.running, refreshDone: cardRefreshes.done,
     })
-  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardReport])
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
 
   if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.
