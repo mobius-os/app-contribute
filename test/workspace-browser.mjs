@@ -271,7 +271,16 @@ function Fixture() {
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
     return { ok: true, record: shared }
   }
-  async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; const started = await window.mobius.chat.start(action); if(window.lostStart) return {ok:false,error:'Response lost'}; return { ok: true, ...started } }
+  // Project work arrives with its cycle id; the platform's de-duplication
+  // returns the same conversation for a repeated id.
+  const cycleChats = new Map()
+  async function start(action) {
+    if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}
+    const started = await window.mobius.chat.start(action)
+    if (action.cid) { if (!cycleChats.has(action.scope)) cycleChats.set(action.scope, started.chatId); started.chatId = cycleChats.get(action.scope) }
+    if(window.lostStart) return {ok:false,error:'Response lost'}
+    return { ok: true, ...started }
+  }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
@@ -760,16 +769,16 @@ window.runWorkspaceChecks = async () => {
       window.lostStart = true
       await click(button('Pull updates')); await until(() => button('Start pull') && !button('Start pull').disabled, 'Pull did not settle')
       await click(button('Start pull'))
-      await until(() => text(query('.co-work-progress-row')).includes('A start needs checking'), 'An uncertain start was not kept reserved')
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'An unconfirmed start was not offered again')
       const original = calls.starts.at(-1)
       window.lostStart = false
       await chooseProject('Fixture project'); await chooseProject('Third project')
-      await until(() => text(query('.co-work-progress-row')).includes('A start needs checking'), 'The reservation was lost on reload')
+      await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'The saved cycle was lost on reload')
       await click(query('.co-work-progress-row'))
-      await enabled('Finish starting')
-      await until(() => calls.starts.length === starts + 2, 'Finish did not replay')
+      await enabled('Send again')
+      await until(() => calls.starts.length === starts + 2, 'Send again did not resend')
       const replay = calls.starts.at(-1)
-      ensure(replay.scope === original.scope && replay.draft === original.draft && replay.title === original.title, 'Finish replayed different work or scope')
+      ensure(replay.cid && replay.cid === original.cid && replay.scope === original.scope && replay.draft === original.draft && replay.title === original.title, 'Send again sent a different cycle, work or scope')
       await until(() => button('Open current conversation', query('[data-task="task:cycle"]')), 'Finished start did not settle')
       await chooseProject('Fixture project')
       window.setProjectsFixture(old => old.filter(project => project.key !== 'app:third'))
@@ -783,11 +792,10 @@ window.runWorkspaceChecks = async () => {
       window.failStart=true; await click(button('Start pull'))
       await until(()=>text(query('[data-task="task:update"]')).includes('Fixture agent unavailable'),'Agent-start failure missing')
       ensure(calls.starts.length===starts,'Failed handoff counted as started')
-      // A failed start stays reserved under its scope; Finish starting replays it.
-      ensure(button('Finish starting', query('[data-task="task:update"]')), 'A failed start offered no way to finish it')
-      ensure(button('Abandon this start', query('[data-task="task:update"]')), 'A failed start offered no explicit way to abandon it')
+      // A failed start keeps its cycle; Send again sends the same cycle id.
+      ensure(button('Send again', query('[data-task="task:update"]')), 'A failed start offered no way to send it again')
       window.failStart=false
-      const finish=button('Finish starting', query('[data-task="task:update"]')); finish.click(); finish.click()
+      const finish=button('Send again', query('[data-task="task:update"]')); finish.click(); finish.click()
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
       const action=calls.starts.at(-1)
       ensure(action.event==='update_source_projects' && action.draft.includes('app:other') && !action.draft.includes('app:fixture'),'Update scope drifted')

@@ -37,6 +37,7 @@ import {
 import { contributionActionScope, contributionApprovalIsCurrent, contributionPhaseApprovalIsCurrent, contributionReviewTargetFromIntent, focusedContributionNavigationReady, focusedContributionReady, indexReviewStatus, qualityReviewFor } from './review.js'
 import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
+import { deliverCycleMessage } from './cycle-delivery.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator, isVisibleFrameMessage } from './refresh.js'
 import {
@@ -298,6 +299,15 @@ export default function ContributeApp({ appId, token }) {
     if (agentStartRef.current) {
       return { ok: false, error: 'Another agent task is already starting.' }
     }
+    if (action.cid) {
+      // Project work: one deterministic message in the project's conversation.
+      agentStartRef.current = true
+      try {
+        const delivered = await deliverCycleMessage(tokenRef.current, action)
+        if (delivered.ok) window.mobius?.signal?.(action.event || 'contribute_agent_handoff', { item_count: Number(action.count || 0), outcome: delivered.outcome })
+        return delivered
+      } finally { agentStartRef.current = false }
+    }
     if (!window.mobius?.chat?.start) {
       return { ok: false, error: 'Agent handoffs are unavailable in this Möbius version.' }
     }
@@ -328,9 +338,7 @@ export default function ContributeApp({ appId, token }) {
         outcome: started.outcome || (started.reused ? 'reused' : 'started'),
       }
     } catch (error) {
-      // The platform's scope codes (cancelled/deleted) are the only verdict
-      // the project cycle acts on; every other failure leaves it to Finish.
-      return { ok: false, ...(typeof error?.code === 'string' ? { code: error.code } : {}), error: 'Could not start the agent. Try again.' }
+      return { ok: false, error: 'Could not start the agent. Try again.' }
     } finally {
       agentStartRef.current = false
     }

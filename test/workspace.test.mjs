@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   collaborationRequest, matchingPulls, prKey, reviewForPull, reviewRunRequest,
 } from '../collaboration.js'
-import { claimProjectCycle, loadCycleState, saveCycleState, settleProjectCycleClaim } from '../storage.js'
+import { beginProjectCycle, loadCycleState, projectCycleScope, recordCycleDelivery, saveCycleState } from '../storage.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
 // Real React SSR through the app's bundler. These tests do not claim browser
@@ -205,7 +205,7 @@ test('durable project conversation shortcuts stay isolated across projects and t
   }
 })
 
-test('fresh project cycle claim keeps the previous conversation and excludes a concurrent start', async t => {
+test('a new project cycle keeps the previous conversation and refuses a pane that observed an older cycle', async t => {
   const previousWindow = globalThis.window
   t.after(() => { globalThis.window = previousWindow })
   let value = { schema: 1, chat_id: 'old-chat', title: 'Old preparation', started_at: '2026-09-10T12:00:00Z' }
@@ -220,21 +220,24 @@ test('fresh project cycle claim keeps the previous conversation and excludes a c
     },
   } } }
   const action = { title: 'New full merge cycle', draft: 'Exact work', event: 'contribution_cycle', merge: true, agent: { provider: 'codex', model: 'chosen' } }
-  assert.equal((await claimProjectCycle('fixture-project', 'old-chat', { title: 'No draft' })).ok, false, 'an incomplete start is never reserved')
-  const first = await claimProjectCycle('fixture-project', 'old-chat', action)
-  assert.equal(first.ok, true)
-  // The reservation carries the exact work and model it will replay.
-  assert.deepEqual(value.pending.action, action)
-  assert.deepEqual((await loadCycleState('fixture-project')).pending.action, action)
-  assert.equal((await claimProjectCycle('fixture-project', 'old-chat', action)).ok, false)
+  assert.equal((await beginProjectCycle('fixture-project', { title: 'No draft' }, 0)).ok, false, 'an incomplete start is never saved')
+  const scope = await projectCycleScope('fixture-project')
+  assert.match(scope, /^contribute-cycle:[0-9a-f]{32}$/, 'one scope per project, no cycle number in it')
+  const first = await beginProjectCycle('fixture-project', action, 0)
+  assert.deepEqual([first.ok, first.k, first.cid, first.scope], [true, 1, scope + ':1', scope])
+  // The saved cycle carries the exact work and model it sends.
+  assert.deepEqual(value.cycle.action, action)
+  assert.deepEqual((await loadCycleState('fixture-project')).cycle.action, action)
+  assert.equal((await beginProjectCycle('fixture-project', action, 0)).ok, false, 'a pane that saw cycle 0 cannot start cycle 1 again')
   assert.equal((await loadCycleState('fixture-project')).chat_id, 'old-chat')
-  assert.equal(await settleProjectCycleClaim('fixture-project', first.id, {
-    chat_id: 'new-chat', title: 'New full merge cycle', started_at: '2026-10-02T16:00:00Z',
-  }), true)
+  assert.equal(await recordCycleDelivery('fixture-project', 1, 'new-chat'), true)
+  assert.equal(await recordCycleDelivery('fixture-project', 7, 'other-chat'), false, 'a stale delivery never rewrites a newer record')
   const saved = await loadCycleState('fixture-project')
   assert.equal(saved.chat_id, 'new-chat')
+  assert.equal(saved.cycle.delivered, true)
   assert.equal(saved.history[0].chat_id, 'old-chat')
-  assert.equal(saved.pending, undefined)
+  const second = await beginProjectCycle('fixture-project', action, 1)
+  assert.equal(second.cid, scope + ':2')
 })
 
 test('a legacy project shortcut still opens when its migration write fails', async t => {

@@ -34,18 +34,6 @@ const STATUS_LABELS = {
   scheduled: 'Waiting to continue', deleted: 'Conversation deleted',
 }
 
-// Why a reserved start cannot be finished here, naming only controls that exist.
-// Finishing replays the owner's already-chosen start under its own scope, so
-// it is never re-gated by today's merge rights: the gate decides whether a
-// *new* cycle may start, and GitHub plus the platform's merge executor still
-// enforce rights at merge time. A start with saved work is always finishable.
-// Abandon is always offered: it first looks the scope up again, so it settles
-// a start that did begin rather than discarding it.
-export function reservedStartBlocker({ action }) {
-  if (action) return ''
-  return 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started; if it never started, abandon it.'
-}
-
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
   const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
@@ -55,7 +43,10 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const [prepareAgent, setPrepareAgent] = useState({ provider: '', model: '', effort: '' })
   const [pullAgent, setPullAgent] = useState({ provider: '', model: '', effort: '' })
   const [cycleAgent, setCycleAgent] = useState({ provider: '', model: '', effort: '' })
-  const checking = ['restoring', 'checking', 'unknown'].includes(cycle.phase)
+  // Only positive platform evidence of work in progress blocks another cycle.
+  // Every cycle is one message in the project's single conversation, so an
+  // unknown status is not a second owner risk.
+  const checking = ['restoring', 'checking'].includes(cycle.phase)
   const active = ['starting', 'running', 'scheduled', 'checking', 'stopping'].includes(cycle.phase)
   const moving = ['starting', 'running'].includes(cycle.phase)
   const waiting = cycle.phase === 'waiting'
@@ -71,32 +62,28 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   // Starting a full merge cycle needs merge rights; seeing existing cycles never does.
   const cycleAction = contributionCycleAction(run, [project])
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
-  // Recovery replays the reserved start exactly; it never substitutes today's
-  // work or model, and is not re-gated by today's merge rights.
-  const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction })
   async function start(action, agent) {
     setError('')
     try {
       const result = await workflow.start({ ...action, agent })
-      if (!result?.ok && !result?.reserved) setError(result?.error || 'Could not start. Try again.')
+      if (!result?.ok && !result?.unsent) setError(result?.error || 'Could not start. Try again.')
     } catch { setError('Could not start. Try again.') }
   }
   const canStart = !loading && !checking && !active && !waiting
-  const blockedReason = cycle.pending ? '' : checking ? 'Checking saved work before another cycle can start.'
+  const blockedReason = checking ? 'Checking saved work before another cycle can start.'
     : active || waiting ? 'Current work must finish or be cancelled before another cycle starts.'
     : loading ? 'Project status is still loading.' : ''
   // Cycle status and history appear once there is work to show; an idle
   // project configures new work from its Prepare action instead.
-  const hasCycle = Boolean(cycle.chatId || cycle.pending || cycle.history?.length || cycle.phase === 'unknown')
-  const pendingRecovery = cycle.pending && cycle.pendingId ? <div className="co-cycle-actions">
-    <button type="button" className="co-btn co-btn-primary" disabled={Boolean(finishBlocker)} onClick={() => workflow.finishStart()}>Finish starting</button>
-    <button type="button" className="co-btn" disabled={['checking', 'starting'].includes(cycle.phase)} onClick={() => workflow.abandonStart()}>Abandon this start</button>
-    {finishBlocker ? <p className="co-task-footnote">{finishBlocker}</p> : null}
+  const hasCycle = Boolean(cycle.chatId || cycle.unsent || cycle.history?.length || cycle.phase === 'unknown')
+  const pendingRecovery = cycle.unsent ? <div className="co-cycle-actions">
+    <button type="button" className="co-btn co-btn-primary" disabled={cycle.phase === 'starting'} onClick={() => workflow.sendAgain()}>Send again</button>
+    <p className="co-task-footnote">Sends the same saved work and model. If it already arrived, it is not sent twice.</p>
   </div> : null
   const progressRow = hasCycle ? <section className="co-cycle-outlet" aria-label="Project work">
     <button type="button" className="co-work-progress-row" onClick={() => task?.open('task:cycle')} aria-expanded={task?.activeId === 'task:cycle'} aria-busy={active}>
       <span className={moving ? 'co-working-icon' : ''}><Icon name={waiting ? 'feedback' : 'prepare'} size={18} /></span>
-      <span><strong>{cycle.pending ? 'A start needs checking' : !cycle.chatId ? 'Project work' : waiting ? 'Your agent has a question' : moving ? 'Agent working' : statusLabel}</strong><small>{cycle.chatId ? cycle.title || 'Current work' : 'Previous cycles and conversations'}</small></span><Icon name="right" size={16} />
+      <span><strong>{cycle.unsent && !moving ? 'A start needs sending' : !cycle.chatId ? 'Project work' : waiting ? 'Your agent has a question' : moving ? 'Agent working' : statusLabel}</strong><small>{cycle.chatId ? cycle.title || 'Current work' : 'Previous cycles and conversations'}</small></span><Icon name="right" size={16} />
     </button>
     <TaskPane id="task:cycle" dock={false}>
       <h3>Project work</h3>
@@ -107,12 +94,12 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
         {['running', 'waiting', 'scheduled', 'paused'].includes(cycle.phase) ? <button type="button" className="co-btn" onClick={workflow.stop}>{cycle.phase === 'paused' ? 'Cancel paused work' : 'Cancel active work'}</button> : null}
       </div>
       {pendingRecovery}
-      {fullCycleAction && !cycle.pending ? <>
+      {fullCycleAction ? <>
         <AgentModelSettings token={token} defaultHint="Your chat default" choice={cycleAgent} onChange={next => { setCycleAgent(next); return true }} />
         <button type="button" className="co-btn co-btn-primary co-task-primary" disabled={!canStart} onClick={() => start(fullCycleAction, cycleAgent)}>Start fresh full merge cycle</button>
       </> : null}
       {blockedReason || cycle.error || error ? <p role="status">{blockedReason || cycle.error || error}</p> : null}
-      {cycle.history?.length ? <details><summary>Previous cycles ({cycle.history.length})</summary><ul className="co-cycle-history">{cycle.history.map(item => <li key={item.chat_id}><button type="button" className="co-quiet-action" onClick={() => workflow.open(item.chat_id)}>{item.title || 'Previous project work'}{item.started_at ? <> · <DateLabel value={item.started_at} prefix="Started " /></> : null}</button></li>)}</ul></details> : null}
+      {cycle.history?.length ? <details><summary>Previous cycles ({cycle.history.length})</summary><ul className="co-cycle-history">{cycle.history.map((item, index) => <li key={`${index}:${item.started_at || item.chat_id}`}><button type="button" className="co-quiet-action" onClick={() => workflow.open(item.chat_id)}>{item.title || 'Previous project work'}{item.started_at ? <> · <DateLabel value={item.started_at} prefix="Started " /></> : null}</button></li>)}</ul></details> : null}
     </TaskPane>
   </section> : null
   const progress = cycle.chatId && (active || waiting || ['paused', 'failed'].includes(cycle.phase)) ? <div className="co-task-progress" role="status">

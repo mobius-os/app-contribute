@@ -260,11 +260,11 @@ export async function cacheSourceSnapshot(snapshot) {
   }
 }
 
-// The exact start the owner chose, frozen with its reservation so recovery
-// replays that work and model unchanged instead of rebuilding today's choice.
+// The exact start the owner chose, frozen with its cycle so Send again
+// resends that work and model unchanged instead of rebuilding today's choice.
 // Bounded to the platform's scoped-start limits (G1 `AppChatStart`: a
 // control-free `scope_label` of at most 120 characters, `model` at most 256,
-// non-empty content), so a reservation is only ever made for a start the
+// non-empty content), so a cycle is only ever saved for a start the
 // platform can accept. Display text is shortened, never refused.
 export const START_LIMITS = { title: 200, scopeLabel: 120, event: 80, model: 256, provider: 64, effort: 32 }
 export function boundedStartText(value, max) {
@@ -290,17 +290,17 @@ export function freezeStartAction(action) {
   return frozen
 }
 
-// A reservation names its deterministic platform scope. Older reservations
-// used a random id whose scope was `contribute-cycle:<id>`.
-function normalizePending(raw) {
-  if (!raw || typeof raw.id !== 'string') return null
+// One cycle of project work: its number k, its deterministic message id and
+// the exact frozen start it delivers. `delivered` is display state only.
+function normalizeCycle(raw) {
+  if (!raw || !Number.isSafeInteger(raw.k) || raw.k < 1 || typeof raw.cid !== 'string' || !raw.cid) return null
   const action = freezeStartAction(raw.action)
-  const scope = typeof raw.scope === 'string' && raw.scope ? raw.scope.slice(0, 160) : `contribute-cycle:${raw.id.slice(0, 80)}`
-  return { id: raw.id.slice(0, 160), scope, ...(Number.isSafeInteger(raw.n) ? { n: raw.n } : {}),
-    previous_chat_id: String(raw.previous_chat_id || '').slice(0, 128),
-    title: String(raw.title || '').slice(0, 240), event: String(raw.event || '').slice(0, 80), ...(action ? { action } : {}) }
+  if (!action) return null
+  return { k: raw.k, cid: raw.cid.slice(0, 200), action, title: action.title, event: action.event || '',
+    started_at: typeof raw.started_at === 'string' ? raw.started_at : '', delivered: raw.delivered === true }
 }
-const cycleSeq = raw => Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
+// Older records counted cycles as `seq`.
+const cycleNumber = raw => Number.isSafeInteger(raw?.k) && raw.k >= 0 ? raw.k : Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
 
 export function normalizeCycleState(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -310,12 +310,21 @@ export function normalizeCycleState(raw) {
     chat_id: chatId.slice(0, 128),
     started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
     scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 160) : '',
-    seq: cycleSeq(raw),
     ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
     ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
-    ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined })).filter(Boolean) } : {}),
-    ...(normalizePending(raw.pending) ? { pending: normalizePending(raw.pending) } : {}),
+    ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined, cycle: undefined })).filter(Boolean) } : {}),
+    ...(cycleNumber(raw) ? { k: cycleNumber(raw) } : {}),
+    ...(normalizeCycle(raw.cycle) ? { cycle: normalizeCycle(raw.cycle) } : {}),
   }
+}
+
+// A project record whose current cycle is not yet confirmed in a
+// conversation still carries that cycle, so it can be sent again.
+function normalizeProjectRecord(raw) {
+  const current = normalizeCycleState(raw)
+  if (current) return current
+  const cycle = normalizeCycle(raw?.cycle)
+  return cycle ? { chat_id: '', k: cycleNumber(raw) || cycle.k, cycle, history: normalizeCycleState({ chat_id: '-', history: raw.history })?.history || [] } : null
 }
 
 async function cycleKey(projectKey) {
@@ -377,8 +386,7 @@ export async function loadCycleState(projectKey) {
   try {
     const key = await cycleKey(projectKey)
     const raw = await window.mobius.storage.get(key)
-    const current = normalizeCycleState(raw)
-    if (!current && normalizePending(raw?.pending)) return { pending: normalizePending(raw.pending), seq: cycleSeq(raw), history: [] }
+    const current = normalizeProjectRecord(raw)
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
@@ -411,86 +419,54 @@ export async function saveCycleState(state, projectKey) {
   }
 }
 
-// A project's cycles are numbered. Cycle n's identity is the deterministic
-// platform scope `contribute-cycle:<project digest>:<n>`. Under a per-(app,
-// scope) lock the platform's scoped start returns that scope's active
-// conversation, retries an empty one in place, or creates one; it ignores
-// deleted conversations. So the CAS reservation, not the platform, decides
-// whether n may still start: every Start and Finish re-reads it first and
-// proceeds only while n is pending. n is consumed by its confirmed started
-// conversation, the platform's cancellation of that scope, or the owner's
-// explicit abandonment after a lookup found it never started.
-export async function claimProjectCycle(projectKey, previousChatId = '', action = {}) {
+// All of a project's agent work runs in ONE app-owned conversation, scoped
+// `contribute-cycle:<project digest>`. The platform keeps at most one active
+// conversation per scope, so a project can never have two owners. Cycle k is
+// one message in it with the deterministic id `<scope>:<k>`; the platform
+// de-duplicates sends by that id, so retries, lost responses and stale panes
+// re-deliver nothing. k comes from this CAS'd record, but correctness does not
+// depend on it: a stale k only re-sends a message that was already delivered.
+export async function projectCycleScope(projectKey) {
+  return `contribute-cycle:${(await cycleKey(projectKey)).replace(/^project-cycles\/|\.json$/g, '').slice(0, 32)}`
+}
+
+// Record cycle k = observed + 1 with its frozen start, before delivering it.
+// A pane that observed an older k is refused, so two panes pressing Start on
+// the same state record (and send) one cycle.
+export async function beginProjectCycle(projectKey, action = {}, observedK = 0) {
   const storage = window.mobius?.storage
   if (!storage?.getWithVersion || !storage?.durableWrite) return { ok: false, error: 'Safe cycle starts are unavailable in this Möbius version.' }
+  const frozen = freezeStartAction(action)
+  if (!frozen) return { ok: false, error: 'This agent handoff is incomplete.' }
   try {
     const key = await cycleKey(projectKey)
+    const scope = await projectCycleScope(projectKey)
     const { value, version, offline } = await storage.getWithVersion(key)
-    if (offline) return { ok: false, error: 'Reconnect before starting a new project cycle.' }
-    const current = normalizeCycleState(value)
-    if ((current?.chat_id || '') !== previousChatId || value?.pending) return { ok: false, error: 'Project work changed in another view. Refresh before starting.' }
-    const frozen = freezeStartAction(action)
-    if (!frozen) return { ok: false, error: 'This agent handoff is incomplete.' }
-    const n = cycleSeq(value) + 1
-    const scope = `contribute-cycle:${key.replace(/^project-cycles\/|\.json$/g, '').slice(0, 32)}:${n}`
-    const next = { ...(value || {}), schema: 3, seq: cycleSeq(value), pending: normalizePending({ id: scope, scope, n, previous_chat_id: previousChatId, title: frozen.title, event: frozen.event, action: frozen }) }
+    if (offline) return { ok: false, error: 'Reconnect before starting new project work.' }
+    const previous = normalizeProjectRecord(value)
+    if (cycleNumber(value) !== observedK) return { ok: false, changed: true, error: 'Project work changed in another view. It is shown now; start again if you still need to.' }
+    const k = observedK + 1
+    const cycle = { k, cid: `${scope}:${k}`, action: frozen, started_at: new Date().toISOString(), delivered: false }
+    const history = [...(previous?.history || [])]
+    if (previous?.chat_id && previous.title) history.unshift({ chat_id: previous.chat_id, title: previous.title, event: previous.event, started_at: previous.started_at })
+    const next = { schema: 4, scope, chat_id: previous?.chat_id || '', title: frozen.title, event: frozen.event || '', started_at: cycle.started_at, k, cycle, history: history.slice(0, 50) }
     const receipt = await storage.durableWrite(key, next, version ? { ifMatch: version } : { ifNoneMatch: true })
-    if (receipt?.durability !== 'synced') return { ok: false, error: 'Cycle reservation was not confirmed online. Refresh before trying again.' }
-    return { ok: true, id: scope, scope }
+    if (receipt?.durability !== 'synced') return { ok: false, error: 'This start was not saved online. Refresh before trying again.' }
+    return { ok: true, scope, k, cid: cycle.cid, action: frozen }
   } catch {
-    return { ok: false, error: 'Could not reserve this project cycle. Refresh and try again.' }
+    return { ok: false, error: 'Project work changed in another view or could not be saved. Refresh and try again.' }
   }
 }
 
-// The authoritative pending reservation, read online immediately before any
-// call to the platform's scoped start. Throws when it cannot be read online,
-// so an unreadable claim is never mistaken for a settled one.
-export async function readProjectCycleClaim(projectKey) {
-  const storage = window.mobius?.storage
-  if (!storage?.getWithVersion) throw new Error('Safe cycle starts are unavailable in this Möbius version.')
-  const { value, offline } = await storage.getWithVersion(await cycleKey(projectKey))
-  if (offline) throw new Error('Reconnect before starting.')
-  return normalizePending(value?.pending)
-}
-
-// The owner abandons reserved cycle n after a fresh lookup found no started
-// conversation for its scope. The CAS record keeps n as abandoned and moves
-// seq past it, so every pane's pre-start re-read refuses to start n again and
-// the next cycle uses scope n+1.
-export async function abandonProjectCycleClaim(projectKey, claimId) {
+// Display state only: the conversation that received cycle k. A record that
+// has already moved on to a later cycle is left alone.
+export async function recordCycleDelivery(projectKey, k, chatId) {
   const storage = window.mobius?.storage
   try {
     const key = await cycleKey(projectKey)
     const { value, version, offline } = await storage.getWithVersion(key)
-    if (offline || value?.pending?.id !== claimId || !version) return false
-    const pending = normalizePending(value.pending)
-    const seq = Number.isSafeInteger(pending.n) ? Math.max(pending.n, cycleSeq(value)) : cycleSeq(value)
-    const abandoned = [{ scope: pending.scope, ...(Number.isSafeInteger(pending.n) ? { n: pending.n } : {}), at: new Date().toISOString() }, ...abandonedCycles(value)].slice(0, 20)
-    const receipt = await storage.durableWrite(key, { ...value, schema: 3, seq, pending: undefined, abandoned }, { ifMatch: version })
-    return receipt?.durability === 'synced'
-  } catch { return false }
-}
-const abandonedCycles = value => Array.isArray(value?.abandoned) ? value.abandoned.filter(item => typeof item?.scope === 'string').slice(0, 20) : []
-
-export async function settleProjectCycleClaim(projectKey, claimId, started = null) {
-  const storage = window.mobius?.storage
-  try {
-    const key = await cycleKey(projectKey)
-    const { value, version, offline } = await storage.getWithVersion(key)
-    if (offline || value?.pending?.id !== claimId || !version) return false
-    const previous = normalizeCycleState(value)
-    const history = [...(previous?.history || [])]
-    if (started && previous?.chat_id && previous.chat_id !== started.chat_id) history.unshift({
-      chat_id: previous.chat_id, title: previous.title, event: previous.event,
-      scope: previous.scope, started_at: previous.started_at,
-    })
-    // The scope is consumed either way: by its confirmed conversation, or by
-    // the platform's own cancellation of that exact scope.
-    const seq = Number.isSafeInteger(value.pending.n) ? value.pending.n : cycleSeq(value)
-    const next = started
-      ? { schema: 3, ...normalizeCycleState(started), seq, history, ...(abandonedCycles(value).length ? { abandoned: abandonedCycles(value) } : {}) }
-      : { ...value, schema: 3, seq, pending: undefined }
-    const receipt = await storage.durableWrite(key, next, { ifMatch: version })
+    if (offline || !version || cycleNumber(value) !== k || !value?.cycle) return false
+    const receipt = await storage.durableWrite(key, { ...value, chat_id: String(chatId), cycle: { ...value.cycle, delivered: true } }, { ifMatch: version })
     return receipt?.durability === 'synced'
   } catch { return false }
 }

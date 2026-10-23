@@ -55,6 +55,7 @@
     "autopilot.js",
     "diff.js",
     "api.js",
+    "cycle-delivery.js",
     "github-connection.js",
     "storage.js",
     "prepared_reconcile.py",
