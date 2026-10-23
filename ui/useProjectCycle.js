@@ -26,11 +26,14 @@ export const TERMINAL_SCOPE_CODES = ['scope_cancelled', 'scope_deleted']
 // local refusal proves only that *this* request did not leave: on a retry of
 // an earlier uncertain start it says nothing about that start, so only the
 // platform's scope-wide verdict (cancelled/deleted) can release it.
-// A request-validation refusal (400/413/422) is decided from the request body
-// before the platform looks up or creates anything. The saved start is replayed
-// byte for byte, so the same refusal certifies that this exact start was never
-// admitted, on the first attempt or any retry. Auth (401/403), conflicts
-// (409), throttling (429), 5xx and lost responses certify nothing.
+// A request refusal (400/413/422) is decided before the platform looks up or
+// creates anything, so on the FIRST attempt of a fresh reservation it proves
+// that start was never admitted. On a retry it proves only that this retry was
+// refused: each request carries fresh transport fields (cid, timezone,
+// viewport) and body-size limits run before the scope lookup, so an earlier
+// uncertain attempt may still own a conversation. Retries therefore never
+// release on it. Auth (401/403), conflicts (409), throttling (429), 5xx and
+// lost responses certify nothing on any attempt.
 const VALIDATION_REFUSALS = [400, 413, 422]
 // The runtime reports the HTTP status on the error, or on older runtimes only
 // in its message ("…scoped start failed (422)").
@@ -41,7 +44,9 @@ export function startFailureStatus(error) {
 export function startOutcome(outcome, { retry = false } = {}) {
   if (outcome?.ok && outcome.chatId) return { state: 'admitted', chatId: String(outcome.chatId) }
   if (VALIDATION_REFUSALS.includes(outcome?.status)) {
-    return { state: 'not_admitted', error: `Möbius refused this start (${outcome.status}), so nothing was started and its reservation is released. Start again.` }
+    return retry
+      ? { state: 'unknown', error: `Möbius refused this retry (${outcome.status}). The earlier attempt may still have started, so the reservation stays.` }
+      : { state: 'not_admitted', error: `Möbius refused this start (${outcome.status}), so nothing was started and its reservation is released. Start again.` }
   }
   if (TERMINAL_SCOPE_CODES.includes(outcome?.code) || outcome?.notStarted && !retry) {
     return { state: 'not_admitted', error: outcome.error || 'Nothing was started.' }

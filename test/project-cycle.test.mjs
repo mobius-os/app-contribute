@@ -440,26 +440,62 @@ test('a start is bounded to the platform limits before it is reserved', async ()
   assert.equal((await refused.render().start({ ...ACTION, agent: { provider: 'codex', model: 'm'.repeat(257) } })).ok, false)
 })
 
-test('a validation refusal of the exact saved start releases it; other failures never do', async () => {
+test('a refusal releases a fresh reservation only on its first attempt; retries never release', async () => {
   const { failureStatus } = fixture()
   assert.equal(failureStatus({ status: 422 }), 422)
   assert.equal(failureStatus(new Error('window.mobius.chat.start: scoped start failed (422)')), 422)
   assert.equal(failureStatus(new Error('network down')), undefined)
-  for (const [response, released] of [[{ ok: false, status: 422 }, true], [{ ok: false, status: 400 }, true],
+  // First attempt: a request refusal certifies the fresh reservation was never admitted.
+  for (const [response, released] of [[{ ok: false, status: 422 }, true], [{ ok: false, status: 413 }, true], [{ ok: false, status: 400 }, true],
       [{ ok: false, status: 500 }, false], [{ ok: false, status: 409 }, false], [{ ok: false, status: 401 }, false], [{ ok: false, error: 'network' }, false]]) {
+    let saved = null
+    const settled = []
+    const f = fixture({ saved: () => saved, runtime: { running: true },
+      claim: async (key, previous, action) => { saved = { pending: { id: 'claim-first', action: freezeStartAction(action) } }; return { ok: true, id: 'claim-first' } },
+      start: async () => response, settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
+    f.render(); await f.restore()
+    await f.render().start(ACTION)
+    if (released) {
+      assert.deepEqual(settled, [null], `first-attempt ${response.status} releases`)
+      assert.match(f.render().cycle.error, /refused this start/)
+    } else {
+      assert.deepEqual(settled, [], `first-attempt ${response.status || 'network'} keeps the reservation`)
+      assert.equal(f.render().cycle.pending, true)
+    }
+  }
+  // Retry (Finish) of an uncertain start: no refusal of any kind releases it.
+  for (const response of [{ ok: false, status: 422 }, { ok: false, status: 413 }, { ok: false, status: 400 }, { ok: false, status: 500 }, { ok: false, error: 'network' }]) {
     let saved = { pending: { id: 'claim-v', title: ACTION.title, event: ACTION.event, action: freezeStartAction(ACTION) } }
     const settled = []
     const f = fixture({ saved: () => saved, runtime: { running: true }, start: async () => response,
       settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
     f.render(); await f.restore()
     await f.render().finishStart()
-    if (released) {
-      assert.deepEqual(settled, [null], `status ${response.status} releases`)
-      assert.equal(Boolean(f.render().cycle.pending), false)
-      assert.match(f.render().cycle.error, /refused this start/)
-    } else {
-      assert.deepEqual(settled, [], `${response.status || 'network'} keeps the reservation`)
-      assert.equal(f.render().cycle.pending, true)
-    }
+    assert.deepEqual(settled, [], `retry ${response.status || 'network'} keeps the reservation`)
+    assert.equal(f.render().cycle.pending, true)
+    if (response.status && response.status < 500) assert.match(f.render().cycle.error, /refused this retry/)
   }
+})
+
+test('an admitted start whose response was lost is not released by a 413 on Finish (no second owner)', async () => {
+  // Reviewer's round-5 probe: the platform admits the first request but the
+  // response is lost; the retry is refused by the body-size limit before any
+  // scope lookup. Releasing on that would let a fresh start create a second owner.
+  let saved = null, claims = 0
+  const liveChats = []
+  const f = fixture({ saved: () => saved, runtime: { running: true },
+    claim: async (key, previous, action) => { saved = { pending: { id: 'claim-' + (++claims), action: freezeStartAction(action) } }; return { ok: true, id: saved.pending.id } },
+    start: async () => {
+      if (!liveChats.length) { liveChats.push('old-admitted'); return { ok: false, error: 'Response lost' } }
+      return { ok: false, status: 413, error: 'Request body too large' }
+    },
+    settle: async (key, id, next) => { saved = next; return true } })
+  f.render(); await f.restore()
+  await f.render().start(ACTION)
+  await f.render().finishStart()
+  assert.equal(saved?.pending?.id, 'claim-1', 'the reservation survives the retry refusal')
+  const reloaded = fixture({ saved: () => saved, runtime: { running: true }, claim: async () => assert.fail('A second scope was reserved') })
+  reloaded.render(); await reloaded.restore()
+  assert.equal((await reloaded.render().start(ACTION)).ok, false)
+  assert.deepEqual(liveChats, ['old-admitted'])
 })
