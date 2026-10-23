@@ -68,6 +68,15 @@ export function observeAttempt(attempt, byId) {
   return failed ? { ...attempt, state: 'failed', note: text(failed.last_submit_error) } : attempt
 }
 
+// The size of the change, from the reviewed diff stat (as the static card shows it).
+const STAT = /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/
+export function changeSize(plan) {
+  const stat = STAT.exec(String(plan?.diff_stat || ''))
+  if (!stat) return ''
+  const files = Number(stat[1])
+  return `${files} ${files === 1 ? 'file' : 'files'} · +${stat[2] || 0} −${stat[3] || 0}`
+}
+
 // ---- The app-sourced identity Confirm shows for each frozen record.
 export function confirmationItem(record) {
   const plan = record.plan || {}
@@ -79,6 +88,7 @@ export function confirmationItem(record) {
     ['Branch', meta ? `${plan.branch || record.branch} → ${meta.baseBranch}` : plan.branch || record.branch],
     ['Version', String(plan.head_sha || '').slice(0, 12)],
     ['Reviewed diff', String(plan.diff_sha256 || '').slice(0, 12)],
+    ...(changeSize(plan) ? [['Change', changeSize(plan)]] : []),
     ['Review', 'All clear for this version'],
   ]
   return { title: text(plan.title || record.title || record.id, 240), facts: facts.map(([label, value]) => ({ label, value: text(value) })) }

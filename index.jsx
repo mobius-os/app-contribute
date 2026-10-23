@@ -76,6 +76,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { cardRecordIds, chatBlockTarget } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
+import { reviewAddressFor } from './send-readiness.js'
 import { readBlockSession } from './block-protocol.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
@@ -164,6 +165,17 @@ function relayFromChatRefusal() {
   }
 }
 
+// Chat sends only with the platform binding the confirmed snapshot. If that
+// binding disappeared between Confirm and the write (for example a refresh
+// against an older Möbius), nothing is sent.
+function bindingLostRefusal() {
+  return {
+    notAttempted: true,
+    error: 'This Möbius no longer confirms the exact version you approved, so nothing was sent. Open Contribute to send it.',
+    failure: { owner: 'owner', code: 'binding_unavailable' },
+  }
+}
+
 // Lets the chat host run this app headless behind a Contribute card.
 export const appBlockSessions = true
 
@@ -182,6 +194,10 @@ export default function ContributeEntry({ appId, token, blockSession = null }) {
 }
 
 function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationRuntime = null }) {
+  // Behind a chat card the app runs only what inline Send needs: the ledger,
+  // the addressed review status, the GitHub connection and the guarded Send
+  // handlers. It renders nothing and skips the workspace's other reads.
+  const sendOnly = Boolean(onPublicationRuntime)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'checking' })
@@ -282,17 +298,18 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     } catch (error) { if (requestId === repositoryRequest.current) setRepositoryAccess(old => ({ ...old, error: error.message })) }
   }, [token])
   useEffect(() => {
+    if (sendOnly) return undefined
     if (conn.state === 'connected') void loadRepositories()
     else { repositoryRequest.current += 1; setRepositoryAccess({ repositories: [], error: '', hasNextPage: false }) }
     return () => { repositoryRequest.current += 1 }
-  }, [conn.state, loadRepositories])
+  }, [conn.state, loadRepositories, sendOnly])
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const submissionMethod = 'github'
   const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
-  useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
+  useEffect(() => { if (!sendOnly) void loadCycleState().then(setEarlierCycle) }, [sendOnly])
   const pageRef = useRef(null)
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
@@ -391,9 +408,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const replaceFeed = useCallback((next) => {
     recordsRef.current = next
     setRecords(next)
-    cacheFeed(next)
+    if (!sendOnly) cacheFeed(next)
     return next
-  }, [])
+  }, [sendOnly])
 
   const applyRecordUpdates = useCallback((updates) => (
     replaceFeed(mergeRecordUpdates(recordsRef.current, updates))
@@ -407,20 +424,28 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // (applyLiveStates passes records through), so a flaky network never blanks
   // or downgrades the feed. Pure fetch: the caller owns setRecords/cacheFeed.
   const fetchRefreshed = useCallback(async (recs) => {
+    if (sendOnly) return recs
     const refresh = buildRefreshQuery(recs)
     if (!refresh) return recs
     const data = await fetchLiveStates(token, refresh.query)
     return applyLiveStates(recs, refresh.aliases, data)
-  }, [token])
+  }, [token, sendOnly])
 
+  // A chat card's status request names its records and, once the ledger is
+  // read, every prepared layer of their stacks.
+  const reviewAddressKey = useMemo(() => addressedRecordIds
+    ? reviewAddressFor(addressedRecordIds, ledgerReady ? records : []).join('\n') : null, [addressedRecordIds, ledgerReady, records])
+  const reviewAddress = useMemo(() => reviewAddressKey === null ? null : reviewAddressKey.split('\n').filter(Boolean), [reviewAddressKey])
   const refreshReviewStatus = useCallback(async () => {
     const requestId = reviewStatusRequestRef.current + 1
     reviewStatusRequestRef.current = requestId
     setReviewStatus((current) => ({ ...current, state: 'loading' }))
-    const outcome = await fetchReviewStatus(token, appId, addressedRecordIds || [])
+    const outcome = await fetchReviewStatus(token, appId, reviewAddress || [])
     if (requestId !== reviewStatusRequestRef.current) return null
     if (outcome.ok) {
-      const indexed = indexReviewStatus(outcome.data)
+      // Tagged with the address it answers, so a status for an older, narrower
+      // address is never mistaken for a check of the card's whole stack.
+      const indexed = { ...indexReviewStatus(outcome.data), address: reviewAddressKey }
       setReviewStatus(indexed)
       return indexed
     }
@@ -428,10 +453,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       state: 'unavailable',
       byId: {},
       checkedAt: '',
+      address: reviewAddressKey,
     }
     setReviewStatus(next)
     return next
-  }, [token, appId, addressedRecordIds])
+  }, [token, appId, reviewAddress, reviewAddressKey])
 
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
@@ -464,6 +490,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [token])
 
   useEffect(() => {
+    if (sendOnly) return undefined
     let cancelled = false
     async function loadSources() {
       const cached = await loadCachedSourceSnapshot()
@@ -480,7 +507,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     }
     loadSources()
     return () => { cancelled = true }
-  }, [refreshSources, signalReady])
+  }, [refreshSources, signalReady, sendOnly])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
   // Proposal coverage depends on which recorded sources source status
   // compared. When the active set changes (feed load, staging, dismissal),
@@ -489,8 +516,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     () => proposalSourceCommits(records).join(','), [records],
   )
   useEffect(() => {
-    if (sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
-  }, [sourceCommitsKey, refreshSources])
+    if (!sendOnly && sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
+  }, [sourceCommitsKey, refreshSources, sendOnly])
 
   // Account reads do not scan the feed; the foreground coordinator owns that.
   const refreshConnection = useCallback(async () => {
@@ -523,8 +550,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [token])
 
   useEffect(() => {
-    refreshIncomingReviews()
-  }, [conn.state, refreshIncomingReviews])
+    if (!sendOnly) refreshIncomingReviews()
+  }, [conn.state, refreshIncomingReviews, sendOnly])
 
   // Mount: the cached first screen, GitHub status, and app preferences are all
   // small independent reads. Publish them without holding those controls
@@ -588,7 +615,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           feedReplaced = true
         }
       }
-      if (!feedReplaced) cacheFeed(toCache)
+      if (!feedReplaced && !sendOnly) cacheFeed(toCache)
     }
     load().catch((err) => {
       if (cancelled) return
@@ -602,7 +629,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       })
     })
     return () => { cancelled = true }
-  }, [token, fetchRefreshed, replaceFeed, signalReady])
+  }, [token, fetchRefreshed, replaceFeed, signalReady, sendOnly])
 
   // Event-driven liveness: refresh when the app becomes actionable again.
   // Focus + visibility can fire together, and an online transition can land
@@ -836,7 +863,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // actions consume one exact reviewed record and remain explicit clicks.
   // `rec` is the exact record the owner confirmed. Where the platform binds
   // it, the server compares it under its publication lock before any write.
-  const onSend = useCallback(async (rec) => {
+  const onSend = useCallback(async (rec, { requireBinding = false } = {}) => {
     let canonical = null
     try {
       canonical = await loadFreshContributionRecord(rec.id)
@@ -876,6 +903,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
+      if (requireBinding && connRef.current.frozenBinding !== true) return bindingLostRefusal()
       outcome = await updateContribution({ appId, token, rec: refreshed, expectedRecord: connRef.current.frozenBinding ? rec : null })
     } else {
       const decision = contributionPathDecision(
@@ -889,6 +917,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         failure: { owner: 'owner' },
       }
       viaMobius = decision.method === 'mobius'
+      if (requireBinding && (viaMobius || connRef.current.frozenBinding !== true)) return bindingLostRefusal()
       outcome = viaMobius
         ? await submitContributionViaMobius({ appId, token, rec: refreshed })
         : await submitContribution({
@@ -1213,7 +1242,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
   // returned ledger record rather than treating the phase as all-or-nothing.
-  const onSendStack = useCallback(async (stackRecords) => {
+  const onSendStack = useCallback(async (stackRecords, { requireBinding = false } = {}) => {
     const approvedPublicationRecords = stackPublicationRecords({
       type: 'stack', records: stackRecords, total: stackRecords.length,
     })
@@ -1274,6 +1303,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         }
       }
     }
+    if (requireBinding && connRef.current.frozenBinding !== true) return bindingLostRefusal()
     const writeStack = updating
       ? updateContributionStack
       : submitContributionStack
@@ -1509,15 +1539,18 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // guarded Send handlers; there is no second publication path.
   useEffect(() => {
     onPublicationRuntime?.({
-      records, ledgerReady: ledgerReady && ledgerCurrentRef.current, reviewStatus,
+      records, ledgerReady: ledgerReady && ledgerCurrentRef.current,
+      reviewStatus: reviewStatus.address === reviewAddressKey ? reviewStatus : { ...reviewStatus, state: 'loading' },
       connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
       // The relay route cannot bind a confirmed snapshot, so chat never uses it.
-      send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec),
-      sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack),
+      // Chat sends require the binding at the moment of the write, too.
+      send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
+      sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
       refresh: () => refreshCoordinatorRef.current(),
     })
-  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, conn, onSend, onSendStack])
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack])
 
+  if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <div className="co-root" data-design-seed="ae1883df">

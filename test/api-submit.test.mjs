@@ -95,7 +95,7 @@ test('every Send carries the exact confirmed snapshot only when asked to', async
 })
 
 test('a changed confirmed snapshot is released only when the server certifies no attempt', async () => {
-  const refusal = notAttempted => json({ detail: { code: 'approval_changed', changed: ['ready-pr'], not_attempted: notAttempted } }, 409)
+  const refusal = notAttempted => json({ detail: { code: 'approval_changed', changed_record_ids: ['ready-pr'], not_attempted: notAttempted } }, 409)
   const certified = await withFetch(refusal(true), () => submitContribution({ appId: 80, token: 't', rec: { id: 'ready-pr' }, expectedRecord: {} }))
   assert.equal(certified.notAttempted, true)
   assert.equal(certified.failure.code, 'approval_changed')

@@ -370,7 +370,7 @@ window.runWorkspaceChecks = async () => {
   async function check(name, run) {
     await run()
     const page=query('.co-page')
-    ensure(!page || page.scrollWidth<=page.clientWidth+1,'Workspace overflows horizontally at '+name+': '+page.scrollWidth+' > '+page.clientWidth)
+    if (page) ensure(page.scrollWidth<=page.clientWidth+1,'Workspace overflows horizontally at '+name+': '+page.scrollWidth+' > '+page.clientWidth)
     checks.push({ name, status: 'pass' })
   }
   try {
@@ -1230,6 +1230,11 @@ window.runWorkspaceChecks = async () => {
         await until(() => card()?.confirming, 'Contribute did not become Confirm: ' + JSON.stringify(card()))
         ensure(card().confirmation?.[0]?.facts?.some(fact => fact.label === 'Version' && fact.value === HEAD.slice(0, 12)), 'Confirm lacked the app-sourced identity')
         ensure(calls.requests.some(call => call.url.includes('/review-status?record_id=card-record')), 'Card did not ask for its addressed review status')
+        // The hidden runtime runs only what inline Send needs and renders nothing.
+        const sinceCard = calls.requests.slice(before)
+        ensure(!sinceCard.some(call => call.url === '/api/github/source-status' || /ContributeRepositories|ContributeIncomingReviews/.test(call.body?.query || '') || (call.body?.query || '').includes('resource(url:')),
+          'The card ran workspace-only reads: ' + JSON.stringify(sinceCard.map(call => call.url + ' ' + String(call.body?.query || '').slice(0, 40))))
+        ensure(!document.querySelector('.co-root'), 'The card rendered the workspace')
         ensure(!submits.length, 'Activation sent')
         fire('confirm', 'card-n2'); fire('confirm', 'card-n3')
         await until(() => card()?.hidden && card().links?.[0]?.url === 'https://github.com/owner/project/pull/9', 'Sent card did not settle to its PR')
@@ -1241,6 +1246,51 @@ window.runWorkspaceChecks = async () => {
       } finally {
         window.postMessage = realPost
         window.fullAppSubmit = null; window.fullAppBinding = false
+        root.render(null)
+      }
+    })
+    await check('a card naming one layer of a stack reaches Confirm, and sends nothing if binding is lost before the write', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      const layer = (id, position, parent) => ({ ...prepared, id, updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, title: 'Layer ' + id, branch: 'stack/s1/0' + position, head_sha: position === 1 ? HEAD : BASE, diff_sha256: 'd'.repeat(64),
+          diff_stat: '2 files changed, 5 insertions(+), 1 deletion(-)', ...(parent ? { base_sha: HEAD } : {}),
+          stack: { id: 's1', name: 'Stack', position, total: 2, base_branch: parent ? 'stack/s1/01' : 'main', ...(parent ? { parent_record_id: parent } : {}) } },
+        quality_review: { state: 'all_clear', reviewed_head_sha: position === 1 ? HEAD : BASE } })
+      const records = [layer('stack-base', 1, ''), layer('stack-top', 2, 'stack-base')]
+      for (const record of records) values.set('contributions/' + record.id + '.json', structuredClone(record))
+      window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: records.map(record => ({ type: 'file', name: record.id + '.json', content: structuredClone(record) })) })
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:stack-base')
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-2', key: 'chat-send:stack-base', event: name, nonce } }))
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: 'chat-send:stack-base', label: 'Contribute' }] }} />)
+        await until(() => card() && !card().disabled && card().badges?.length, 'Stack card state was not published')
+        fire('activate', 'stack-n1')
+        // Wait on timers rather than animation frames: the hidden runtime mounts behind the card.
+        for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 100))
+        await until(() => card()?.confirming, 'A one-layer stack card never reached Confirm: ' + JSON.stringify(card()) + ' requests: ' + JSON.stringify(calls.requests.slice(before).map(call => call.method + ' ' + call.url)))
+        const statusQueries = calls.requests.slice(before).filter(call => call.url.includes('/review-status')).map(call => call.url)
+        ensure(statusQueries.some(url => url.includes('record_id=stack-base') && url.includes('record_id=stack-top')), 'The review check was not addressed to every prepared layer: ' + JSON.stringify(statusQueries))
+        ensure(card().confirmation.length === 2 && card().confirmation.every(item => item.facts.some(fact => fact.label === 'Change' && fact.value === '2 files · +5 −1')), 'Confirm lacked the stack phase or its size')
+        // The platform stops advertising the binding before the write.
+        window.fullAppBinding = false
+        const statusReads = calls.requests.filter(call => call.url === '/api/github/status').length
+        window.dispatchEvent(new Event('focus'))
+        await until(() => calls.requests.filter(call => call.url === '/api/github/status').length > statusReads, 'The connection was not re-read')
+        await frame(); await frame()
+        fire('confirm', 'stack-n2')
+        await until(() => /no longer confirms the exact version/.test(card()?.note || '') || states.some(state => (state.actions || []).some(action => /no longer confirms the exact version/.test(action.note || ''))), 'A lost binding did not refuse: ' + JSON.stringify(card()))
+        ensure(!calls.requests.slice(before).some(call => call.method === 'POST' && /\/(submit|submit-stack|update-stack|update-existing)$/.test(call.url)), 'An unbound send was made')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
         root.render(null)
       }
     })

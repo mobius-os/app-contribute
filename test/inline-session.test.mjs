@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { batchHandle, cardRecordIds, sendTarget } from '../chat-blocks.js'
+import { reviewAddressFor } from '../send-readiness.js'
 import { attemptOutcome, confirmationItem, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
@@ -19,13 +20,19 @@ const published = (record, number = 7) => ({ ...record, status: 'open', number, 
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 
-function harness({ actions, records, checkpoint = null, retain = false, send, sendStack, runtime: extra = {} }) {
+// The review status the real server returns: rows only for the records the app
+// addressed (#1911), which is what the app asks for via reviewAddressFor.
+function serverReviewStatus(addressed, store) {
+  const ids = addressed.filter(id => store.get(id)?.status === 'prepared')
+  return { state: 'ready', addressed, byId: Object.fromEntries(ids.map(id => [id, { state: 'ready' }])) }
+}
+function harness({ actions, records, checkpoint = null, retain = false, send, sendStack, address = null, runtime: extra = {} }) {
   const store = new Map(records.map(record => [record.id, record]))
   const states = [], sends = [], needs = []
   const session = createInlineSession({ sessionId: 'session-1', actions, checkpoint, retain, publish: state => states.push(structuredClone(state)),
     loadExact: async id => store.has(id) ? structuredClone(store.get(id)) : null, onNeedRuntime: () => needs.push(true) })
   const runtime = () => ({ records: [...store.values()], ledgerReady: true, connection: 'connected', frozenBinding: true,
-    reviewStatus: { state: 'ready', addressed: [...store.keys()], byId: Object.fromEntries([...store.keys()].map(id => [id, { state: 'ready' }])) },
+    reviewStatus: serverReviewStatus(address || reviewAddressFor(cardRecordIds(actions.map(item => item.key)), [...store.values()]), store),
     send: async rec => { sends.push({ kind: 'single', ids: [rec.id], records: [structuredClone(rec)] }); return send ? send(rec) : { ok: true } },
     sendStack: async recs => { sends.push({ kind: 'stack', ids: recs.map(rec => rec.id), records: structuredClone(recs) }); return sendStack ? sendStack(recs) : { ok: true } },
     refresh() {}, ...extra })
@@ -57,6 +64,11 @@ test('Contribute becomes Confirm with the complete app-sourced identity of each 
   assert.ok(item.facts.length <= 8)
   for (const fact of item.facts) assert.ok(fact.label && fact.value && fact.value.length <= 512, JSON.stringify(fact))
   assert.deepEqual(item.facts.map(fact => fact.label), ['Repository', 'Action', 'Branch', 'Version', 'Reviewed diff', 'Review'])
+  const sized = confirmationItem(prepared('sized', { plan: { diff_stat: ' 3 files changed, 40 insertions(+), 2 deletions(-)' } }))
+  assert.deepEqual(sized.facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '3 files · +40 −2' }, 'Confirm shows how big the change is')
+  const stacked = confirmationItem({ ...layer('base', 1, ''), plan: { ...layer('base', 1, '').plan, diff_stat: '1 file changed, 1 insertion(+)' } })
+  assert.equal(stacked.facts.length, 8, 'a stack layer with its size stays within the eight-fact limit')
+  assert.equal(stacked.facts.find(fact => fact.label === 'Change').value, '1 file · +1 −0')
   assert.equal(h.sends.length, 0, 'activation is not approval')
 })
 
@@ -165,6 +177,33 @@ test('Contribute all sends independent units in parallel and a stack as one orde
   gates.one.resolve({ error: 'Push rejected', failure: { owner: 'agent' } }); await tick()
   assert.equal(h.action('chat-send:one').status, 'Needs attention')
   assert.equal(h.action('chat-send:two').hidden, true, 'a sibling failure never makes a sent unit pending')
+})
+
+test('a card naming one layer of a new stack reaches Confirm once every prepared layer is addressed', async () => {
+  const records = [layer('base', 1, ''), layer('top', 2, 'base')]
+  records[1].plan.base_sha = records[0].plan.head_sha
+  const actions = [{ key: 'chat-send:base', label: 'Contribute' }]
+  assert.deepEqual(reviewAddressFor(['base'], records), ['base', 'top'], 'the status request covers the whole stack phase')
+  // As the server answers a request addressed only to the card's own id: the other layer has no check.
+  const narrow = harness({ actions, records, address: ['base'] })
+  await openConfirm(narrow, 'chat-send:base')
+  assert.equal(narrow.action('chat-send:base').confirming, false)
+  assert.match(narrow.action('chat-send:base').note, /current source check/)
+  // The app's request covers every prepared layer, so the stack's phase can be confirmed and sent as one.
+  const h = harness({ actions, records })
+  await openConfirm(h, 'chat-send:base')
+  const state = h.action('chat-send:base')
+  assert.equal(state.confirming, true)
+  assert.deepEqual(state.confirmation.map(item => item.title), ['Change base', 'Change top'])
+  h.fire('chat-send:base', 'confirm'); await tick()
+  assert.deepEqual(h.sends.map(call => [call.kind, call.ids.join(',')]), [['stack', 'base,top']])
+})
+
+test('the review-status address is bounded and adds only prepared layers of named stacks', () => {
+  const records = [layer('base', 1, '', 'open'), layer('top', 2, 'base'), prepared('alone')]
+  assert.deepEqual(reviewAddressFor(['top', 'alone', 'top'], records), ['top', 'alone'], 'a published layer needs no check')
+  assert.deepEqual(reviewAddressFor(['missing'], records), ['missing'])
+  assert.equal(reviewAddressFor(Array.from({ length: 60 }, (_, n) => `id${n}`), []).length, 50)
 })
 
 test('chat never sends without server binding of the confirmed snapshot', async () => {
@@ -294,7 +333,7 @@ test('an uncertified approval_changed refusal stays unknown and locked end to en
   const { submitContribution } = await import('../api.js')
   const previousFetch = globalThis.fetch
   const refused = notAttempted => {
-    globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: 'approval_changed', changed: ['one'], not_attempted: notAttempted } }) })
+    globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: 'approval_changed', changed_record_ids: ['one'], not_attempted: notAttempted } }) })
     return submitContribution({ appId: 80, token: 't', rec: { id: 'one' }, expectedRecord: {} })
   }
   try {

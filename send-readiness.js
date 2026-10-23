@@ -62,3 +62,20 @@ export function publicationUnits(ids, records, reviewStatus, options) {
   }
   return [...units.values()]
 }
+
+// The records whose review status a chat card must ask for: the records it
+// names plus every prepared layer of their stacks, because a stack's next
+// phase is checked as a whole and the server answers only addressed records.
+// Bounded by the server's per-request limit.
+export const REVIEW_ADDRESS_LIMIT = 50
+export function reviewAddressFor(ids, records) {
+  const named = [...new Set(ids || [])]
+  const addressed = new Set(named)
+  const byId = new Map((records || []).map(record => [record.id, record]))
+  for (const id of named) {
+    const record = byId.get(id)
+    const unit = record ? publicationStackUnit(record, records) : null
+    for (const member of unit?.records || []) if (member.status === 'prepared') addressed.add(member.id)
+  }
+  return [...addressed].slice(0, REVIEW_ADDRESS_LIMIT)
+}
