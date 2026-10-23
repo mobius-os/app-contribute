@@ -153,6 +153,17 @@ function stalePublicApproval() {
   }
 }
 
+// Chat sends only through routes that bind the confirmed snapshot; the
+// Möbius relay route does not, so relay contributions are sent from
+// Contribute itself.
+function relayFromChatRefusal() {
+  return {
+    notAttempted: true,
+    error: 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.',
+    failure: { owner: 'owner', code: 'relay_not_inline' },
+  }
+}
+
 // Lets the chat host run this app headless behind a Contribute card.
 export const appBlockSessions = true
 
@@ -1500,7 +1511,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     onPublicationRuntime?.({
       records, ledgerReady: ledgerReady && ledgerCurrentRef.current, reviewStatus,
       connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
-      send: onSend, sendStack: onSendStack, refresh: () => refreshCoordinatorRef.current(),
+      // The relay route cannot bind a confirmed snapshot, so chat never uses it.
+      send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec),
+      sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack),
+      refresh: () => refreshCoordinatorRef.current(),
     })
   }, [onPublicationRuntime, records, ledgerReady, reviewStatus, conn, onSend, onSendStack])
 

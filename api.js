@@ -288,7 +288,12 @@ function approvalRefusal(detail) {
     error: detail.not_attempted === true
       ? 'The saved proposal changed. Review its current version and confirm again; nothing was sent.'
       : 'The saved proposal changed after an earlier attempt. Check Contribute before trying again.',
-    failure: { owner: 'agent', code: 'approval_changed' },
+    // Without the certificate the request may already have been attempted:
+    // its outcome is unknown (owned by automatic reconciliation), never an
+    // ordinary refusal that releases the action.
+    failure: detail.not_attempted === true
+      ? { owner: 'agent', code: 'approval_changed' }
+      : { owner: 'automatic', code: 'approval_changed', maybeAttempted: true },
   }
 }
 

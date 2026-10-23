@@ -50,8 +50,10 @@ export function decodeCheckpoint(checkpoint) {
 // unit; a lost, pending or merely accepted response stays unknown until read.
 export function attemptOutcome(outcome = {}) {
   if (outcome.notAttempted) return { state: 'not_attempted', note: text(outcome.error) || 'Nothing was sent.' }
+  // A changed-approval refusal without the server's not_attempted certificate
+  // may already have been attempted: it stays unknown and locked.
   if (outcome.ok || outcome.pending || outcome.uncertain || outcome.alreadyHandled
-    || outcome.failure?.owner === 'automatic') return { state: 'unknown', note: UNKNOWN_NOTE }
+    || outcome.failure?.owner === 'automatic' || outcome.failure?.code === 'approval_changed') return { state: 'unknown', note: UNKNOWN_NOTE }
   return { state: 'failed', note: text(outcome.error) || 'Some changes were not sent. Check Contribute for the rest.' }
 }
 
@@ -81,8 +83,13 @@ export function confirmationItem(record) {
   ]
   return { title: text(plan.title || record.title || record.id, 240), facts: facts.map(([label, value]) => ({ label, value: text(value) })) }
 }
+// A record sent through Möbius's relay (submission_mode 'mobius-bot') uses a
+// relay request that cannot bind the confirmed snapshot on the server, so it
+// is never confirmable from chat; Contribute itself still sends it.
+const relayed = record => record?.submission_mode === 'mobius-bot'
+export const RELAY_NOTE = 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.'
 // A frozen record is confirmable only when its whole identity is present.
-const confirmable = record => confirmationItem(record).facts.every(fact => fact.value)
+const confirmable = record => !relayed(record) && confirmationItem(record).facts.every(fact => fact.value)
 
 const PUBLIC_LABELS = { draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }
 
@@ -142,6 +149,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     if (runtime.frozenBinding !== true || !idsFor(key).every(id => runtime.reviewStatus?.addressed?.includes(id))) {
       return 'Sending from chat needs a newer Möbius. Open Contribute to send.'
     }
+    if (idsFor(key).some(id => relayed(current().get(id)))) return RELAY_NOTE
     if (readyUnits(key).length) return ''
     const all = units(key)
     return all.map(unit => unit.reason).find(Boolean) || (all.some(locked) ? UNKNOWN_NOTE : '')
@@ -255,7 +263,8 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     const { send, sendStack } = runtime
     await Promise.all(approval.units.map(async (unit, index) => {
       let outcome
-      try { outcome = (unit.stack ? await sendStack(unit.records) : await send(unit.ready[0])) || {} } catch { outcome = { uncertain: true } }
+      if ([...unit.records, ...unit.ready].some(relayed)) outcome = { notAttempted: true, error: RELAY_NOTE }
+      else try { outcome = (unit.stack ? await sendStack(unit.records) : await send(unit.ready[0])) || {} } catch { outcome = { uncertain: true } }
       if (!alive) return
       attempts = attempts.map(attempt => attempt.id === started[index].id ? { ...attempt, ...attemptOutcome(outcome) } : attempt)
       await read(started[index].ids) // each unit settles independently of slower siblings

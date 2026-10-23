@@ -266,3 +266,51 @@ test('a card never reports more than one confirming action, so the B2 host keeps
   assert.ok(confirming[0].confirmation?.length === 1 && !confirming[0].disabled, 'the host shows the app-sourced list and an enabled Confirm')
   assert.notEqual(confirming[0].note, b2.AMBIGUOUS_CONFIRMATION)
 })
+
+test('a relay (mobius-bot) contribution is never confirmable from chat and is never sent', async () => {
+  const relay = prepared('one', { record: { submission_mode: 'mobius-bot' } })
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [relay] })
+  await openConfirm(h, 'chat-send:one')
+  const state = h.action('chat-send:one')
+  assert.equal(state.confirming, false)
+  assert.equal(state.disabled, true)
+  assert.match(state.note, /Möbius relay.*Open Contribute to send it/)
+  h.fire('chat-send:one', 'confirm'); await tick()
+  assert.equal(h.sends.length, 0)
+})
+
+test('an uncertified approval_changed refusal stays unknown and locked end to end; only not_attempted releases Confirm', async () => {
+  const { submitContribution } = await import('../api.js')
+  const previousFetch = globalThis.fetch
+  const refused = notAttempted => {
+    globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: 'approval_changed', changed: ['one'], not_attempted: notAttempted } }) })
+    return submitContribution({ appId: 80, token: 't', rec: { id: 'one' }, expectedRecord: {} })
+  }
+  try {
+    for (const notAttempted of [false, undefined]) {
+      const outcome = await refused(notAttempted)
+      assert.equal(outcome.failure.owner, 'automatic', 'a maybe-attempted refusal is owned by reconciliation')
+      const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], send: () => outcome })
+      await openConfirm(h, 'chat-send:one')
+      h.fire('chat-send:one', 'confirm'); await tick()
+      const state = h.action('chat-send:one')
+      assert.ok(h.last().checkpoint, 'the unresolved attempt stays in the checkpoint')
+      assert.equal(h.last().retain, true)
+      assert.match(state.note, /not confirmed yet/)
+      h.fire('chat-send:one', 'activate'); await tick()
+      assert.equal(h.action('chat-send:one').confirming, false, 'Confirm is not offered again')
+      h.fire('chat-send:one', 'confirm'); await tick()
+      assert.equal(h.sends.length, 1, 'no second send while the outcome is unknown')
+    }
+    const certified = await refused(true)
+    const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], send: () => certified })
+    await openConfirm(h, 'chat-send:one')
+    h.fire('chat-send:one', 'confirm'); await tick()
+    assert.equal(h.last().checkpoint, null, 'a certified non-attempt releases the checkpoint')
+    h.fire('chat-send:one', 'activate'); await tick()
+    assert.equal(h.action('chat-send:one').confirming, true, 'only not_attempted re-enables Confirm')
+  } finally { globalThis.fetch = previousFetch }
+  // The rule also holds for a host that forwards the code without the owner fix.
+  assert.equal(attemptOutcome({ error: 'changed', failure: { owner: 'agent', code: 'approval_changed' } }).state, 'unknown')
+  assert.equal(attemptOutcome({ notAttempted: true, failure: { owner: 'agent', code: 'approval_changed' } }).state, 'not_attempted')
+})
