@@ -71,6 +71,9 @@ class AdapterTests(unittest.TestCase):
       ("review", {"autopilot": False}, "autopilot is not supported"),
       ("review_fix_merge", {"autopilot": True}, "autopilot is not supported"),
       ("review_fix_merge", {"max_rounds": 0}, "max_rounds must be a whole number"),
+      ("review_fix_merge", {"max_rounds": 2 ** 53}, "max_rounds must be a whole number from 1 to 9007199254740991"),
+      ("review_fix_merge", {"max_rounds": 2.0}, "max_rounds must be a whole number"),
+      ("review_fix_merge", {"max_rounds": True}, "max_rounds must be a whole number"),
       ("review", {"post_review": False}, "post_review may only be true"),
       ("review", {"review_prompt": " "}, "review_prompt must be non-empty text"),
       ("review", {"surprise": 1}, "Unknown review option: surprise"),
@@ -86,7 +89,8 @@ class AdapterTests(unittest.TestCase):
   def test_options_a_mode_accepts_are_frozen_unchanged(self):
     for mode, options in [("review", {"review_prompt": "R", "merge_prompt": "M", "post_review": True}),
                           ("review_merge", {"review_prompt": "R", "merge_prompt": "M"}),
-                          ("review_fix_merge", {"review_prompt": "R", "fix_prompt": "F", "max_rounds": 3})]:
+                          ("review_fix_merge", {"review_prompt": "R", "fix_prompt": "F", "max_rounds": 3}),
+                          ("review_fix_merge", {"max_rounds": 2 ** 53 - 1})]:
       with self.subTest(mode=mode):
         core = FakeCore({"review_fix_merge": True})
         run(core, "--mode", mode, "--options", self.options_file(options), "example/project#7")

@@ -79,6 +79,9 @@ def capabilities(core, app_id):
 # The options each mode accepts, matching the app's own per-mode projection, so
 # a prepared link always re-previews to the same snapshot when it is opened.
 PROMPT_OPTIONS = {"review_prompt", "merge_prompt"}
+# The core accepts any positive integer; the app keeps a round cap only while
+# it is a safe JavaScript integer, so a larger one would leave a dead link.
+MAX_ROUNDS_LIMIT = 2 ** 53 - 1
 MODE_OPTIONS = {"review": PROMPT_OPTIONS | {"post_review"}, "review_merge": PROMPT_OPTIONS,
                 "review_fix_merge": PROMPT_OPTIONS | {"fix_prompt", "max_rounds"}}
 
@@ -101,8 +104,9 @@ def validate_options(options, mode):
   for key in PROMPT_OPTIONS | {"fix_prompt"}:
     if key in options and (not isinstance(options[key], str) or not options[key].strip()):
       raise ValueError(f"{key} must be non-empty text.")
-  if "max_rounds" in options and (not isinstance(options["max_rounds"], int) or isinstance(options["max_rounds"], bool) or options["max_rounds"] < 1):
-    raise ValueError("max_rounds must be a whole number of at least 1.")
+  if "max_rounds" in options and (not isinstance(options["max_rounds"], int) or isinstance(options["max_rounds"], bool)
+                                  or not 1 <= options["max_rounds"] <= MAX_ROUNDS_LIMIT):
+    raise ValueError(f"max_rounds must be a whole number from 1 to {MAX_ROUNDS_LIMIT}.")
   if "post_review" in options and options["post_review"] is not True:
     raise ValueError("post_review may only be true; leave it out for a private review.")
   return options
