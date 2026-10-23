@@ -57,6 +57,41 @@ def run(core, *args, chat="owning-chat"):
 
 
 class AdapterTests(unittest.TestCase):
+  def options_file(self, value):
+    handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump(value, handle); handle.close()
+    self.addCleanup(os.unlink, handle.name)
+    return handle.name
+
+  def test_options_a_mode_cannot_freeze_are_refused_before_any_preview(self):
+    refusals = [
+      ("review", {"fix_prompt": "Fix it"}, "fix_prompt is only accepted with --mode review_fix_merge"),
+      ("review", {"max_rounds": 2}, "max_rounds is only accepted with --mode review_fix_merge"),
+      ("review_merge", {"post_review": True}, "post_review is only accepted with --mode review"),
+      ("review", {"autopilot": False}, "autopilot is not supported"),
+      ("review_fix_merge", {"autopilot": True}, "autopilot is not supported"),
+      ("review_fix_merge", {"max_rounds": 0}, "max_rounds must be a whole number"),
+      ("review", {"post_review": False}, "post_review may only be true"),
+      ("review", {"review_prompt": " "}, "review_prompt must be non-empty text"),
+      ("review", {"surprise": 1}, "Unknown review option: surprise"),
+    ]
+    for mode, options, message in refusals:
+      with self.subTest(mode=mode, options=options):
+        core = FakeCore({"review_fix_merge": True})
+        with self.assertRaises(ValueError) as raised:
+          run(core, "--mode", mode, "--options", self.options_file(options), "example/project#7")
+        self.assertIn(message, str(raised.exception))
+        self.assertFalse(any(call[0] == "freeze" for call in core.calls), "nothing was previewed or frozen")
+
+  def test_options_a_mode_accepts_are_frozen_unchanged(self):
+    for mode, options in [("review", {"review_prompt": "R", "merge_prompt": "M", "post_review": True}),
+                          ("review_merge", {"review_prompt": "R", "merge_prompt": "M"}),
+                          ("review_fix_merge", {"review_prompt": "R", "fix_prompt": "F", "max_rounds": 3})]:
+      with self.subTest(mode=mode):
+        core = FakeCore({"review_fix_merge": True})
+        run(core, "--mode", mode, "--options", self.options_file(options), "example/project#7")
+        self.assertIn(("freeze", mode, options, None), core.calls)
+
   def test_preparation_delegates_to_the_core_with_app_context_and_saves_only_the_link(self):
     core = FakeCore()
     result = run(core, "--mode", "review_merge", "example/project#7")
@@ -176,6 +211,12 @@ class AdapterTests(unittest.TestCase):
         adapter.load_core()
 
 
+def mode_aware(core):
+  """Whether this core's freeze_preview sends the selection mode (G3 and later)."""
+  import inspect
+  return '"mode"' in inspect.getsource(core.freeze_preview)
+
+
 @unittest.skipUnless(os.environ.get("MOBIUS_PLATFORM_SCRIPTS"), "set MOBIUS_PLATFORM_SCRIPTS to the platform's backend/scripts")
 class RealCoreTests(unittest.TestCase):
   """The adapter's old invocations against the platform's exact request bodies."""
@@ -197,10 +238,13 @@ class RealCoreTests(unittest.TestCase):
     prepared = run(core, "--mode", "review_merge", "example/project#7")
     preview = [call for call in calls if call[0].endswith("/review-preview")][0]
     self.assertEqual(preview[0], "/api/github/contributions/80/review-preview")
-    # The core owns the preview body. A mode-aware core (G3+) names the selected
-    # mode; the adapter passes it through and never adds or changes one.
-    self.assertEqual(preview[2].get("mode", "review_merge"), "review_merge")
-    self.assertEqual(set(preview[2]) - {"mode"}, {"options", "agent"})
+    # The core owns the preview body. A mode-aware core (G3+, whose
+    # freeze_preview sends the mode) must send exactly the selected mode; an
+    # earlier core sends none. The adapter never adds or changes it.
+    if mode_aware(core):
+      self.assertEqual(preview[2], {"mode": "review_merge", "options": None, "agent": None})
+    else:
+      self.assertEqual(preview[2], {"options": None, "agent": None})
     started = run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
     post = [call for call in calls if call[1] == "POST" and call[0].endswith("/review-runs")][0]
     self.assertEqual(post[2], {**core.start_body(prepared["selection"]), "chat_approval": {"context": "Owner asked"}})
@@ -231,7 +275,8 @@ class RealCoreTests(unittest.TestCase):
     core.api = recording
     prepared = run(core, "--mode", "review_fix_merge", "--allow-mark-ready", "example/project#7")
     self.assertEqual(prepared["selection"]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
-    self.assertEqual(previews[0].get("mode", "review_fix_merge"), "review_fix_merge", "a repair preview is frozen for the repair mode")
+    self.assertTrue(mode_aware(core), "draft takeover cores preview by mode")
+    self.assertEqual(previews[0]["mode"], "review_fix_merge", "a repair preview is frozen for the repair mode")
     run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
     self.assertEqual(posts[0]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
 

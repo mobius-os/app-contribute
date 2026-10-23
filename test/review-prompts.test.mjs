@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { loadWorkflowOptions, previewWorkflow, promptOverrides, reviewOptions, saveWorkflowOptions, workflowAgent, workflowSettings } from '../review-prompts.js'
+import { loadWorkflowOptions, oversizedPrompt, previewWorkflow, PROMPT_BYTE_LIMIT, promptBytes, promptOverrides, reviewOptions, saveWorkflowOptions, workflowAgent, workflowSettings } from '../review-prompts.js'
 import { reviewRunRequest } from '../collaboration.js'
 
 const defaults = {review_prompt:'Review the full diff',fix_prompt:'Fix findings',merge_prompt:'Merge only when safe',max_rounds:null,autopilot:false,mandatory_instructions:'No unrelated scope'}
@@ -79,4 +79,19 @@ test('served readiness capability is discovery metadata, never a prompt or saved
   assert.equal(loaded.capabilities.draft_takeover,true)
   assert.equal(reviewOptions(loaded.options).draft_takeover,undefined)
   assert.equal(reviewOptions({...loaded.options,capabilities:loaded.capabilities}).capabilities,undefined)
+})
+
+test('prompts are limited in UTF-8 bytes like the platform, so non-ASCII text is counted fully',async t=>{
+  assert.equal(PROMPT_BYTE_LIMIT,16384)
+  assert.equal(promptBytes('é'),2); assert.equal(promptBytes('漢'),3); assert.equal(promptBytes('🚀'),4)
+  const fits='漢'.repeat(5461), over='漢'.repeat(5462)
+  assert.ok(fits.length < 16000 && over.length < 16000, 'both are under the old 16,000-character limit')
+  assert.equal(oversizedPrompt({review_prompt:fits}),'')
+  assert.equal(oversizedPrompt({fix_prompt:over}),'fix_prompt')
+  const writes=[]
+  storage(t,null,null,{durableWrite:async(...args)=>{writes.push(args);return {durability:'synced',version:'v2'}}})
+  await assert.rejects(saveWorkflowOptions({review_prompt:over},'v1',{}),/longer than 16,384 bytes/)
+  assert.equal(writes.length,0,'an oversized prompt is never saved')
+  await saveWorkflowOptions({review_prompt:fits},'v1',{})
+  assert.equal(writes.length,1)
 })

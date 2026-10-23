@@ -76,13 +76,45 @@ def capabilities(core, app_id):
   return presets.get("capabilities") or {}
 
 
+# The options each mode accepts, matching the app's own per-mode projection, so
+# a prepared link always re-previews to the same snapshot when it is opened.
+PROMPT_OPTIONS = {"review_prompt", "merge_prompt"}
+MODE_OPTIONS = {"review": PROMPT_OPTIONS | {"post_review"}, "review_merge": PROMPT_OPTIONS,
+                "review_fix_merge": PROMPT_OPTIONS | {"fix_prompt", "max_rounds"}}
+
+
+def validate_options(options, mode):
+  """Refuse options the selected mode cannot freeze, before any preview."""
+  if options is None:
+    return None
+  if "autopilot" in options:
+    raise ValueError("autopilot is not supported: Möbius has no automatic continuation for review workflows.")
+  allowed = MODE_OPTIONS[mode]
+  for key in options:
+    if key in allowed:
+      continue
+    if key in ("fix_prompt", "max_rounds"):
+      raise ValueError(f"{key} is only accepted with --mode review_fix_merge.")
+    if key == "post_review":
+      raise ValueError("post_review is only accepted with --mode review.")
+    raise ValueError(f"Unknown review option: {key}.")
+  for key in PROMPT_OPTIONS | {"fix_prompt"}:
+    if key in options and (not isinstance(options[key], str) or not options[key].strip()):
+      raise ValueError(f"{key} must be non-empty text.")
+  if "max_rounds" in options and (not isinstance(options["max_rounds"], int) or isinstance(options["max_rounds"], bool) or options["max_rounds"] < 1):
+    raise ValueError("max_rounds must be a whole number of at least 1.")
+  if "post_review" in options and options["post_review"] is not True:
+    raise ValueError("post_review may only be true; leave it out for a private review.")
+  return options
+
+
 def prepare(core, app_id, chat_id, args):
   served = capabilities(core, app_id)
   if args.mode == "review_fix_merge" and served.get("review_fix_merge") is not True:
     raise ValueError("This Möbius does not offer Review, fix & merge yet. Use review or review_merge.")
   if args.allow_mark_ready and (args.mode != "review_fix_merge" or served.get("draft_takeover") is not True):
     raise ValueError("Marking drafts ready needs review_fix_merge on a Möbius that offers draft takeover.")
-  options = read_object(args.options) if args.options else None
+  options = validate_options(read_object(args.options) if args.options else None, args.mode)
   agent = read_object(args.agent) if args.agent else None
   extra = {"allow_mark_ready": True} if args.allow_mark_ready else {}
   if extra and "allow_mark_ready" not in inspect.signature(core.freeze_preview).parameters:

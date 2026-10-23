@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { loadWorkflowOptions, previewWorkflow, saveWorkflowOptions, reviewOptions, workflowAgent } from '../review-prompts.js'
+import { loadWorkflowOptions, oversizedPrompt, previewWorkflow, promptBytes, PROMPT_BYTE_LIMIT, saveWorkflowOptions, reviewOptions, workflowAgent } from '../review-prompts.js'
 import { requestOptions } from '../collaboration.js'
 
 const PROMPTS = [['review_prompt','Review'],['fix_prompt','Fix'],['merge_prompt','Merge decision']]
@@ -32,20 +32,57 @@ function PromptChoices({ active, onChange }) {
 }
 
 export function ReviewPromptSettings({ token, appId }) {
-  const [data,setData]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false)
-  const [retry,setRetry]=useState(0),[active,setActive]=useState('review_prompt')
-  useEffect(() => { let alive=true; setData(null);setError('');loadWorkflowOptions(token,appId).then(value=>{if(alive)setData(value)}).catch(error=>{if(alive)setError(error.message)});return()=>{alive=false} },[token,appId,retry])
-  function change(key,value) { setData(old=>({...old,options:{...old.options,[key]:value}}));setNotice('') }
-  async function save() { setBusy(true);setError('');setNotice('');try { const receipt=await saveWorkflowOptions(data.options,data.version,data.defaults);setData(old=>({...old,version:receipt.version}));setNotice('Saved for new review workflows. Existing runs are unchanged.') } catch(error) { setError(error.status===412 ? 'These settings changed elsewhere. Reload before saving; your edits have not replaced them.' : error.message) } finally {setBusy(false)} }
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const [active, setActive] = useState('review_prompt')
+  useEffect(() => {
+    let alive = true
+    setData(null)
+    setError('')
+    loadWorkflowOptions(token, appId)
+      .then(value => { if (alive) setData(value) })
+      .catch(failure => { if (alive) setError(failure.message) })
+    return () => { alive = false }
+  }, [token, appId, retry])
+  function change(key, value) {
+    setData(old => ({ ...old, options: { ...old.options, [key]: value } }))
+    setNotice('')
+  }
+  async function save() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const receipt = await saveWorkflowOptions(data.options, data.version, data.defaults)
+      setData(old => ({ ...old, version: receipt.version }))
+      setNotice('Saved for new review workflows. Existing runs are unchanged.')
+    } catch (failure) {
+      setError(failure.status === 412 ? 'These settings changed elsewhere. Reload before saving; your edits have not replaced them.' : failure.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  // The platform limit is in UTF-8 bytes, so non-ASCII text fills it sooner.
+  const bytes = data ? promptBytes(data.options[active]) : 0
+  const tooLong = data ? oversizedPrompt(data.options) : ''
   return <section className="co-prompt-settings" aria-label="Review workflow settings"><style>{PROMPT_CSS}</style>
     {!data && !error ? <div className="co-settings-skeleton" role="status">Loading settings…</div> : null}
     {data ? <>
       <p>Edit guidance for new runs. Existing runs stay unchanged.</p>
       <PromptChoices active={active} onChange={setActive} />
-      <div className="co-prompt-editor-group"><label className="co-visually-hidden" htmlFor={`co-${active}`}>{PROMPTS.find(([key])=>key===active)[1]} prompt</label><textarea id={`co-${active}`} value={data.options[active] || ''} maxLength={16000} onChange={e=>change(active,e.target.value)} /><button type="button" className="co-quiet-action" onClick={()=>change(active,data.defaults[active])}>Restore this prompt</button></div>
-      <div className="co-board-actions"><button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={save}>Save defaults</button></div>
+      <div className="co-prompt-editor-group">
+        <label className="co-visually-hidden" htmlFor={`co-${active}`}>{PROMPTS.find(([key]) => key === active)[1]} prompt</label>
+        <textarea id={`co-${active}`} value={data.options[active] || ''} aria-describedby={`co-${active}-size`} onChange={event => change(active, event.target.value)} />
+        <p id={`co-${active}-size`} className={bytes > PROMPT_BYTE_LIMIT ? 'co-task-footnote is-failed' : 'co-task-footnote'}>{bytes.toLocaleString('en-US')} of {PROMPT_BYTE_LIMIT.toLocaleString('en-US')} bytes{bytes > PROMPT_BYTE_LIMIT ? ': too long to save' : ''}</p>
+        <button type="button" className="co-quiet-action" onClick={() => change(active, data.defaults[active])}>Restore this prompt</button>
+      </div>
+      <div className="co-board-actions"><button type="button" className="co-btn co-btn-primary" disabled={busy || Boolean(tooLong)} onClick={save}>Save defaults</button></div>
+      {tooLong ? <p role="status">The {PROMPTS.find(([key]) => key === tooLong)[1]} prompt is too long to save.</p> : null}
     </> : null}
-    {error ? <p role="alert">{error} <button className="co-quiet-action" disabled={busy} onClick={()=>setRetry(x=>x+1)}>{data ? 'Reload settings' : 'Retry'}</button></p> : null}
+    {error ? <p role="alert">{error} <button className="co-quiet-action" disabled={busy} onClick={() => setRetry(x => x + 1)}>{data ? 'Reload settings' : 'Retry'}</button></p> : null}
     {notice ? <p role="status">{notice}</p> : null}
   </section>
 }

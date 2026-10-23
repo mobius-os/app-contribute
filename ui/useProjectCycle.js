@@ -92,7 +92,7 @@ export function useProjectCycle(projectKey, deliver) {
   }, [cycle.chatId, cycle.phase, refresh])
   // No conversation holds the cycle: its first request never reached Möbius
   // (the usual case), or the owner deleted the conversation it created.
-  const NEVER_REACHED = 'This start never reached Möbius. Start it again.'
+  const NEVER_REACHED = 'This start isn’t in any conversation. Start it again.'
   const CONVERSATION_DELETED = 'Its conversation was deleted, so this start was not sent again. Start it again.'
   // Deliver cycle k, only while the project record names k as its current,
   // unconfirmed cycle. Everything else (a superseded or delivered cycle, an

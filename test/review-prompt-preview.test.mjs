@@ -25,7 +25,7 @@ async function load() {
       resolveId(id) { if(id === 'react') return '\0preview-hooks'; if(id === '../review-prompts.js') return '\0preview-dependencies' },
       load(id) {
         if(id === '\0preview-hooks') return `export const useState = value => {const fixture=globalThis.previewEffectFixture;return [value,next=>fixture.states.push(next)]}; export const useEffect = effect => {globalThis.previewEffectFixture.cleanup=effect()}`
-        if(id === '\0preview-dependencies') return `export const reviewOptions=(...args)=>globalThis.previewEffectFixture.reviewOptions(...args), workflowAgent=(...args)=>globalThis.previewEffectFixture.workflowAgent(...args), loadWorkflowOptions=(...args)=>globalThis.previewEffectFixture.loadWorkflowOptions(...args), previewWorkflow=(...args)=>globalThis.previewEffectFixture.previewWorkflow(...args), saveWorkflowOptions=()=>{throw new Error('Preview cannot save settings')}`
+        if(id === '\0preview-dependencies') return `export const reviewOptions=(...args)=>globalThis.previewEffectFixture.reviewOptions(...args), workflowAgent=(...args)=>globalThis.previewEffectFixture.workflowAgent(...args), loadWorkflowOptions=(...args)=>globalThis.previewEffectFixture.loadWorkflowOptions(...args), previewWorkflow=(...args)=>globalThis.previewEffectFixture.previewWorkflow(...args), saveWorkflowOptions=()=>{throw new Error('Preview cannot save settings')}, oversizedPrompt=()=>'', promptBytes=()=>0, PROMPT_BYTE_LIMIT=16384`
       },
     }],
   })

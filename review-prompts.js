@@ -23,6 +23,13 @@ export async function workflowSettings() {
     }
   }
 }
+// The platform refuses a prompt over 16,384 UTF-8 bytes (not characters).
+export const PROMPT_BYTE_LIMIT = 16384
+export const promptBytes = text => new TextEncoder().encode(String(text ?? '')).length
+export function oversizedPrompt(options) {
+  return ['review_prompt', 'fix_prompt', 'merge_prompt'].find(key => promptBytes(options?.[key]) > PROMPT_BYTE_LIMIT) || ''
+}
+
 // Only prompts the owner actually changed are saved, so later improvements to
 // the platform's presets still reach every prompt left at its default, and
 // restoring a prompt removes its override.
@@ -33,6 +40,7 @@ export function promptOverrides(value, defaults) {
   return Object.fromEntries(Object.entries(options).filter(([key, text]) => !PROMPT_KEYS.includes(key) || text !== defaults[key]))
 }
 export async function saveWorkflowOptions(value, version, defaults = null) {
+  if (oversizedPrompt(value)) throw new Error(`A prompt is longer than ${PROMPT_BYTE_LIMIT.toLocaleString('en-US')} bytes. Shorten it before saving.`)
   const receipt = await window.mobius.storage.durableWrite('review-workflow.json', promptOverrides(value, defaults), version ? { ifMatch:version } : { ifNoneMatch:true })
   if (receipt.durability !== 'synced') throw new Error('Settings are not confirmed saved. Go online and try again.')
   return receipt
