@@ -1051,6 +1051,33 @@ window.runWorkspaceChecks = async () => {
       await until(() => !pane(), 'Race run did not close')
       window.oldRuns = null
     })
+    await check('a linked later-page PR keeps its row while its review or assignment pane is open', async () => {
+      window.fixturePaging = true
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => prRow(7) && !prRow(8), 'Paged inventory did not load')
+      window.focusPullFixture({ repo: 'owner/project', number: 8, nonce: 'later-action' })
+      await until(() => focusedDetail(8), 'Later-page link did not open its exact PR')
+      await click(button('Take on with agent', focusedDetail(8)))
+      await until(() => query('.co-pr-confirm'), 'The review pane did not open')
+      await frame(); await frame()
+      ensure(prRow(8) && prRow(8).querySelector('.co-pr-confirm'), 'The linked row or its anchored review pane disappeared')
+      ensure(!calls.releases.includes('later-action'), 'Opening the review pane released the link')
+      await click(button('Cancel', query('.co-pr-confirm')))
+      await until(() => !prRow(8), 'Closing the pane kept the linked row pinned')
+      ensure(calls.releases.includes('later-action'), 'Closing the pane did not release the link')
+      window.focusPullFixture({ repo: 'owner/project', number: 8, nonce: 'later-assign' })
+      await until(() => focusedDetail(8), 'Later-page link did not reopen its exact PR')
+      await click(button('Assign', focusedDetail(8)))
+      await until(() => query('.co-pr-assignment'), 'The assignment pane did not open')
+      await frame(); await frame()
+      ensure(prRow(8) && prRow(8).querySelector('.co-pr-assignment'), 'The linked row or its anchored assignment pane disappeared')
+      ensure(!calls.releases.includes('later-assign'), 'Opening the assignment pane released the link')
+      await click(button('Cancel', query('.co-pr-assignment')))
+      await until(() => !prRow(8) && calls.releases.includes('later-assign'), 'Closing the assignment pane kept the link')
+      window.fixturePaging = false
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => prRow(8), 'Inventory did not recover')
+    })
     await check('switching project releases a chat PR link instead of pinning it on return', async () => {
       window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'switch' })
       await until(() => focusedDetail(11), 'Link did not open its PR')
