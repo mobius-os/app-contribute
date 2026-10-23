@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { batchHandle, cardRecordIds, sendTarget } from '../chat-blocks.js'
 import { reviewAddressFor } from '../send-readiness.js'
-import { attemptOutcome, confirmationItem, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
+import { attemptOutcome, confirmationItem, descriptionExcerpt, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
 function prepared(id, extra = {}) {
@@ -26,11 +26,11 @@ function serverReviewStatus(addressed, store) {
   const ids = addressed.filter(id => store.get(id)?.status === 'prepared')
   return { state: 'ready', addressed, byId: Object.fromEntries(ids.map(id => [id, { state: 'ready' }])) }
 }
-function harness({ actions, records, checkpoint = null, retain = false, send, sendStack, address = null, runtime: extra = {} }) {
+function harness({ actions, records, checkpoint = null, retain = false, send, sendStack, address = null, loadExact = null, runtime: extra = {} }) {
   const store = new Map(records.map(record => [record.id, record]))
   const states = [], sends = [], needs = []
   const session = createInlineSession({ sessionId: 'session-1', actions, checkpoint, retain, publish: state => states.push(structuredClone(state)),
-    loadExact: async id => store.has(id) ? structuredClone(store.get(id)) : null, onNeedRuntime: () => needs.push(true) })
+    loadExact: loadExact ? id => loadExact(id, store) : async id => store.has(id) ? structuredClone(store.get(id)) : null, onNeedRuntime: () => needs.push(true) })
   const runtime = () => ({ records: [...store.values()], ledgerReady: true, connection: 'connected', frozenBinding: true,
     reviewStatus: serverReviewStatus(address || reviewAddressFor(cardRecordIds(actions.map(item => item.key)), [...store.values()]), store),
     send: async rec => { sends.push({ kind: 'single', ids: [rec.id], records: [structuredClone(rec)] }); return send ? send(rec) : { ok: true } },
@@ -363,4 +363,57 @@ test('an uncertified approval_changed refusal stays unknown and locked end to en
   // The rule also holds for a host that forwards the code without the owner fix.
   assert.equal(attemptOutcome({ error: 'changed', failure: { owner: 'agent', code: 'approval_changed' } }).state, 'unknown')
   assert.equal(attemptOutcome({ notAttempted: true, failure: { owner: 'agent', code: 'approval_changed' } }).state, 'not_attempted')
+})
+
+test('a failed exact read ends the check with an enabled Try again that can then reach Confirm', async () => {
+  let failing = true
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')],
+    loadExact: async (id, store) => { if (failing) throw new Error('offline'); return structuredClone(store.get(id)) } })
+  h.session.start(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  h.provide(); await tick()
+  let state = h.action('chat-send:one')
+  assert.equal(state.confirming, false)
+  assert.equal(state.disabled, false, 'the card is not stuck on a disabled Checking…')
+  assert.equal(state.label, 'Try again')
+  failing = false
+  h.fire('chat-send:one', 'activate'); await tick()
+  state = h.action('chat-send:one')
+  assert.equal(state.confirming, true, 'the retry reaches Confirm')
+  assert.equal(h.sends.length, 0)
+})
+
+test('an unavailable review check ends the check with an enabled Try again that can then reach Confirm', async () => {
+  const refreshes = []
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')], runtime: { refresh() { refreshes.push(true) } } })
+  const unavailable = () => h.session.updateRuntime({ ...h.runtime(), reviewStatus: { state: 'unavailable', byId: {} } })
+  h.session.start(); await tick()
+  unavailable(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(refreshes.length, 1, 'activation asks for a fresh check')
+  assert.equal(h.action('chat-send:one').label, 'Checking…', 'still checking while that refresh is pending')
+  unavailable(); await tick() // the refreshed check is unavailable too
+  let state = h.action('chat-send:one')
+  assert.equal(state.confirming, false)
+  assert.equal(state.disabled, false, 'the card is not stuck on a disabled Checking…')
+  assert.equal(state.label, 'Try again')
+  h.provide(); await tick() // the check recovers
+  h.fire('chat-send:one', 'activate'); await tick()
+  state = h.action('chat-send:one')
+  assert.equal(state.confirming, true, 'the retry reaches Confirm')
+  assert.equal(h.sends.length, 0)
+})
+
+test('Confirm shows the public PR title and the first line of its description within the fact limit', () => {
+  const item = confirmationItem(prepared('pub', { plan: { title: 'Fix the flaky upload retry', body_draft: '## Summary\n\nRetries uploads once on a reset connection.\n\nMore detail.' } }))
+  assert.equal(item.title, 'Fix the flaky upload retry', 'the PR title is the item heading')
+  assert.deepEqual(item.facts.find(fact => fact.label === 'Description'), { label: 'Description', value: 'Retries uploads once on a reset connection.' }, 'headings are skipped')
+  assert.equal(descriptionExcerpt('\n\n- First point\nSecond'), 'First point')
+  const long = descriptionExcerpt('x'.repeat(400))
+  assert.equal(long.length, 160); assert.ok(long.endsWith('…'))
+  assert.ok(item.facts.length <= 8)
+  // A stack layer with its size already uses all eight facts: the description is left out, never a ninth fact.
+  const full = confirmationItem({ ...layer('base', 1, ''), plan: { ...layer('base', 1, '').plan, diff_stat: '1 file changed, 1 insertion(+)', body_draft: 'Body' } })
+  assert.equal(full.facts.length, 8)
+  assert.equal(full.facts.some(fact => fact.label === 'Description'), false)
 })

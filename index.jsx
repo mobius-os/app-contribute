@@ -76,7 +76,7 @@ import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { cardRecordIds, chatBlockTarget } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
-import { reviewAddressFor } from './send-readiness.js'
+import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
 import { readBlockSession } from './block-protocol.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
@@ -162,17 +162,6 @@ function relayFromChatRefusal() {
     notAttempted: true,
     error: 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.',
     failure: { owner: 'owner', code: 'relay_not_inline' },
-  }
-}
-
-// Chat sends only with the platform binding the confirmed snapshot. If that
-// binding disappeared between Confirm and the write (for example a refresh
-// against an older Möbius), nothing is sent.
-function bindingLostRefusal() {
-  return {
-    notAttempted: true,
-    error: 'This Möbius no longer confirms the exact version you approved, so nothing was sent. Open Contribute to send it.',
-    failure: { owner: 'owner', code: 'binding_unavailable' },
   }
 }
 
@@ -903,7 +892,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
-      if (requireBinding && connRef.current.frozenBinding !== true) return bindingLostRefusal()
+      const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding })
+      if (unbound) return unbound
       outcome = await updateContribution({ appId, token, rec: refreshed, expectedRecord: connRef.current.frozenBinding ? rec : null })
     } else {
       const decision = contributionPathDecision(
@@ -917,7 +907,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         failure: { owner: 'owner' },
       }
       viaMobius = decision.method === 'mobius'
-      if (requireBinding && (viaMobius || connRef.current.frozenBinding !== true)) return bindingLostRefusal()
+      const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding, relay: viaMobius })
+      if (unbound) return unbound
       outcome = viaMobius
         ? await submitContributionViaMobius({ appId, token, rec: refreshed })
         : await submitContribution({
@@ -1303,7 +1294,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         }
       }
     }
-    if (requireBinding && connRef.current.frozenBinding !== true) return bindingLostRefusal()
+    const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding })
+    if (unbound) return unbound
     const writeStack = updating
       ? updateContributionStack
       : submitContributionStack

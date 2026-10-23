@@ -34,3 +34,25 @@ test('published means an exact PR receipt, not just a public-looking status', ()
   assert.equal(isPublished({ status: 'open', repo: 'o/r', number: 3, url: 'https://github.com/o/other/pull/3' }), false)
   assert.equal(isPublished({ status: 'submitting', repo: 'o/r', number: 3, url: 'https://github.com/o/r/pull/3' }), false)
 })
+
+test('a chat send is refused at write time when the binding is gone or the relay would be used', async () => {
+  const { writeBindingRefusal } = await import('../send-readiness.js')
+  assert.equal(writeBindingRefusal({ requireBinding: true, frozenBinding: true }), null)
+  for (const lost of [{ frozenBinding: false }, { frozenBinding: undefined }, { frozenBinding: true, relay: true }]) {
+    const refusal = writeBindingRefusal({ requireBinding: true, ...lost })
+    assert.equal(refusal.notAttempted, true, JSON.stringify(lost))
+    assert.equal(refusal.failure.code, 'binding_unavailable')
+    assert.match(refusal.error, /nothing was sent/)
+  }
+  assert.equal(writeBindingRefusal({ requireBinding: false, frozenBinding: false }), null, 'the full-app Send is unchanged')
+  // Each write path checks it immediately before its request, and chat sends require it.
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  for (const write of [/outcome = await updateContribution\(/, /outcome = viaMobius/, /const writeStack = updating/]) {
+    const at = app.search(write)
+    assert.ok(at > 0, String(write))
+    assert.match(app.slice(Math.max(0, at - 220), at), /const unbound = writeBindingRefusal\(\{ requireBinding, frozenBinding: connRef\.current\.frozenBinding[^)]*\}\)\s+if \(unbound\) return unbound\s+$/, 'checked right before ' + write)
+  }
+  assert.match(app, /onSend\(rec, \{ requireBinding: true \}\)/)
+  assert.match(app, /onSendStack\(stack, \{ requireBinding: true \}\)/)
+})

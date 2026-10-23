@@ -77,6 +77,15 @@ export function changeSize(plan) {
   return `${files} ${files === 1 ? 'file' : 'files'} · +${stat[2] || 0} −${stat[3] || 0}`
 }
 
+// The first line of prose in a PR description (headings skipped), as plain
+// bounded text.
+export function descriptionExcerpt(body, max = 160) {
+  const lines = String(body || '').split('\n').map(value => value.trim()).filter(Boolean)
+  const prose = lines.find(value => !value.startsWith('#')) || lines[0] || ''
+  const line = prose.replace(/^(#+|[-*>]|\d+\.)\s*/, '').trim()
+  return line.length <= max ? line : line.slice(0, max - 1).trimEnd() + '…'
+}
+
 // ---- The app-sourced identity Confirm shows for each frozen record.
 export function confirmationItem(record) {
   const plan = record.plan || {}
@@ -91,6 +100,10 @@ export function confirmationItem(record) {
     ...(changeSize(plan) ? [['Change', changeSize(plan)]] : []),
     ['Review', 'All clear for this version'],
   ]
+  // The public text the owner publishes: the PR title is the item's heading,
+  // and the description's first line is shown when the 8-fact limit allows.
+  const excerpt = descriptionExcerpt(plan.body_draft)
+  if (excerpt && facts.length < 8) facts.splice(facts.length - 1, 0, ['Description', excerpt])
   return { title: text(plan.title || record.title || record.id, 240), facts: facts.map(([label, value]) => ({ label, value: text(value) })) }
 }
 // A record sent through Möbius's relay (submission_mode 'mobius-bot') uses a
@@ -123,6 +136,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   const unreadable = new Set()
   let runtime = null
   let activating = ''
+  let refreshing = null // the unavailable review status an activation asked to refresh
   let frozen = null // { key, units } — the exact snapshot the owner confirms
   let ackNonce = null
   let alive = true
@@ -225,10 +239,23 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     })
   }
 
+  // A preflight that finished without authority: every read for the card is
+  // done, but a named record could not be read or the review check is
+  // unavailable. It ends the activation so the card offers Try again.
+  // An unavailable status counts only once it is a new answer, not the one
+  // that activation itself asked to refresh.
+  const preflightFailed = key => Boolean(runtime) && !reading.size
+    && (idsFor(key).some(id => unreadable.has(id))
+      || (runtime.reviewStatus?.state === 'unavailable' && runtime.reviewStatus !== refreshing))
+
   function settle() {
     const now = current()
     attempts = attempts.map(attempt => observeAttempt(attempt, now))
-    if (!activating || !authoritative(activating)) return
+    if (!activating) return
+    if (!authoritative(activating)) {
+      if (preflightFailed(activating)) activating = ''
+      return
+    }
     const key = activating
     activating = ''
     const ready = blockedReason(key) ? [] : readyUnits(key)
@@ -251,8 +278,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   function activate(key) {
     if (fault || sending() || frozen) return
     activating = key
+    refreshing = null
     if (!runtime) onNeedRuntime?.()
-    else if (runtime.reviewStatus?.state === 'unavailable') runtime.refresh?.()
+    else if (runtime.reviewStatus?.state === 'unavailable') { refreshing = runtime.reviewStatus; runtime.refresh?.() }
     void read(allIds())
   }
 

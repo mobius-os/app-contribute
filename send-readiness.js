@@ -79,3 +79,16 @@ export function reviewAddressFor(ids, records) {
   }
   return [...addressed].slice(0, REVIEW_ADDRESS_LIMIT)
 }
+
+// Chat sends only with the platform binding the confirmed snapshot, checked at
+// the moment of the write: if the binding disappeared after Confirm (for
+// example a connection refresh against an older Möbius), or the record would
+// go through the relay, which cannot bind it, nothing is sent.
+export function writeBindingRefusal({ requireBinding = false, frozenBinding = false, relay = false } = {}) {
+  if (!requireBinding || (frozenBinding === true && !relay)) return null
+  return {
+    notAttempted: true,
+    error: 'This Möbius no longer confirms the exact version you approved, so nothing was sent. Open Contribute to send it.',
+    failure: { owner: 'owner', code: 'binding_unavailable' },
+  }
+}
