@@ -53,6 +53,26 @@ class PullBlockTests(unittest.TestCase):
     self.assertTrue(block['title'].endswith('…'))
     self.assertTrue(all(len(fact['value']) <= 240 for fact in block['facts']))
 
+  def test_titles_are_bounded_in_utf16_units_like_the_renderer(self):
+    block = module.pull_block('owner/repo#7', lambda _: {**BASE, 'title': '\U0001F680' * 250})
+    self.assertLessEqual(module.utf16_length(block['title']), 240)
+    self.assertTrue(block['title'].endswith('…'))
+    self.assertEqual(module.bounded('\U0001F680' * 120), '\U0001F680' * 120, 'exactly 240 units fits unchanged')
+
+  def test_unreadable_pr_is_one_line_not_a_traceback(self):
+    import subprocess, io, contextlib
+    from unittest import mock
+    failure = subprocess.CalledProcessError(1, ['gh'], stderr='gh: Not Found (HTTP 404)\n')
+    stderr = io.StringIO()
+    with mock.patch.object(module, 'gh_read', side_effect=failure), mock.patch('sys.argv', ['pr_block.py', 'owner/repo#7']), \
+         contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+      module.main()
+    self.assertIn('could not read that pull request (gh: Not Found (HTTP 404))', str(raised.exception.code))
+    self.assertNotIn('Traceback', stderr.getvalue())
+    with mock.patch('sys.argv', ['pr_block.py', 'not a pr']), self.assertRaises(SystemExit) as invalid:
+      module.main()
+    self.assertIn('Use owner/repository#123', str(invalid.exception.code))
+
   def test_one_changed_file_is_readable(self):
     block = module.pull_block('owner/repo#7', lambda _: {**BASE, 'changed_files': 1})
     self.assertIn({'label': 'Change', 'value': '1 file · +0 −0'}, block['facts'])
