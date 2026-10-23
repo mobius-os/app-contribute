@@ -7,6 +7,7 @@ import {
   cacheSourceSnapshot,
   loadFreshContributionRecord,
   loadFreshContributionRecords,
+  loadAppSettings,
   loadLedger,
   normalizeAppSettings,
   normalizeCycleState,
@@ -94,6 +95,20 @@ test('follow sent PRs defaults on without overriding a saved choice', () => {
   assert.equal(normalizeAppSettings(null).autopilot_default, true)
   assert.equal(normalizeAppSettings({}).autopilot_default, true)
   assert.equal(normalizeAppSettings({ autopilot_default: false }).autopilot_default, false)
+})
+
+test('the retired app-wide agent model keys are dropped and cleared once', async (t) => {
+  assert.deepEqual(normalizeAppSettings({ autopilot_default: false, agent_provider: 'codex', agent_model: 'm', agent_effort: 'high' }),
+    { autopilot_default: false, submission_method: 'github' })
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const writes = []
+  let saved = { autopilot_default: false, agent_provider: 'codex', agent_model: 'm' }
+  globalThis.window = { mobius: { storage: { get: async () => saved, set: async (path, value) => { writes.push([path, value]); saved = value } } } }
+  assert.deepEqual(await loadAppSettings(), { autopilot_default: false, submission_method: 'github' })
+  assert.deepEqual(writes, [['settings.json', { autopilot_default: false, submission_method: 'github' }]])
+  await loadAppSettings()
+  assert.equal(writes.length, 1, 'a clean copy is not rewritten')
 })
 
 test('ledger uses JSON content batched into the storage listing', async () => {

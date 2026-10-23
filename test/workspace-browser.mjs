@@ -74,6 +74,7 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['none','minimal','low','medium','high','xhigh'],default_effort:'low'}]}})
   if (call.url === '/api/owner/model-prefs') return response({hidden_ids:[]})
   if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'}})
+  if (window.presetsMissing && call.url === '/api/github/contributions/fixture-app/review-presets') return new Response(JSON.stringify({detail:'Not Found'}), {status:404})
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
   if (window.fullAppFixture) {
@@ -455,10 +456,15 @@ window.runWorkspaceChecks = async () => {
       await click(button('Unassigned',filters)); await fill(search,'Contribution')
       ensure(!query('input[aria-label="Select owner/project #8"]'),'Fixture filter did not hide selected PR')
       ensure(text(query('.co-pr-box-head')).includes('2 selected'),'Filtering discarded hidden selection')
+      // A Möbius without the core review routes: optional workflows say so, never "Checking…" forever.
+      window.presetsMissing=true
       await click(button('Take on with agent',query('.co-pr-box-head')))
       await until(()=>query('.co-pr-confirm'),'Filtered batch preview missing')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Hidden selected identity omitted from confirmation')
+      await until(()=>text(query('.co-pr-confirm')).includes('Needs a newer Möbius'),'A missing review-presets route kept checking')
+      ensure(!text(query('.co-pr-confirm')).includes('Checking what this Möbius supports'),'Unsupported workflows still read as a pending check')
       await click(button('Cancel',query('.co-pr-confirm')))
+      window.presetsMissing=false
       const trigger=query('.co-pr-open'), listBefore=query('.co-pr-list')
       trigger.focus(); await click(trigger)
       await until(() => text(query('.co-pr-detail')).includes('Fixture PR description 7'),'Inline detail did not load')
@@ -805,7 +811,7 @@ window.runWorkspaceChecks = async () => {
       ensure(button('Send again', query('[data-task="task:update"]')), 'A failed start offered no way to send it again')
       window.failStart=false
       const finish=button('Send again', query('[data-task="task:update"]')); finish.click(); finish.click()
-      await until(()=>text(query('[data-task="task:update"]')).includes('not sent again') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
+      await until(()=>text(query('[data-task="task:update"]')).includes('This start never reached Möbius. Start it again.') && !button('Send again', query('[data-task="task:update"]')),'An unheld start was resent or kept offered')
       ensure(calls.starts.length===starts,'Send again created a conversation for an unheld start')
       await click(button('Start pull'))
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')

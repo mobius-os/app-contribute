@@ -35,7 +35,7 @@ export function ReviewPromptSettings({ token, appId }) {
   const [retry,setRetry]=useState(0),[active,setActive]=useState('review_prompt')
   useEffect(() => { let alive=true; setData(null);setError('');loadWorkflowOptions(token,appId).then(value=>{if(alive)setData(value)}).catch(error=>{if(alive)setError(error.message)});return()=>{alive=false} },[token,appId,retry])
   function change(key,value) { setData(old=>({...old,options:{...old.options,[key]:value}}));setNotice('') }
-  async function save() { setBusy(true);setError('');setNotice('');try { const receipt=await saveWorkflowOptions(data.options,data.version);setData(old=>({...old,version:receipt.version}));setNotice('Saved for new review workflows. Existing runs are unchanged.') } catch(error) { setError(error.status===412 ? 'These settings changed elsewhere. Reload before saving; your edits have not replaced them.' : error.message) } finally {setBusy(false)} }
+  async function save() { setBusy(true);setError('');setNotice('');try { const receipt=await saveWorkflowOptions(data.options,data.version,data.defaults);setData(old=>({...old,version:receipt.version}));setNotice('Saved for new review workflows. Existing runs are unchanged.') } catch(error) { setError(error.status===412 ? 'These settings changed elsewhere. Reload before saving; your edits have not replaced them.' : error.message) } finally {setBusy(false)} }
   return <section className="co-prompt-settings" aria-label="Review workflow settings"><style>{PROMPT_CSS}</style>
     {!data && !error ? <div className="co-settings-skeleton" role="status">Loading settings…</div> : null}
     {data ? <>
@@ -49,7 +49,7 @@ export function ReviewPromptSettings({ token, appId }) {
   </section>
 }
 
-export function ReviewPromptPreview({ token, appId, choice, onResolved }) {
+export function ReviewPromptPreview({ token, appId, choice, onResolved, onUnsupported }) {
   const [state,setState]=useState({loading:true})
   const [retry,setRetry]=useState(0)
   const optionKey = JSON.stringify(choice?.options || null)
@@ -68,7 +68,9 @@ export function ReviewPromptPreview({ token, appId, choice, onResolved }) {
       if(choice.preview_sha256 && choice.preview_sha256!==preview.preview_sha256) throw new Error('The saved instructions or model changed. Ask the agent to prepare a fresh review link; nothing was started.')
       return {options,agent,preview,capabilities:data.capabilities}
     }
-    resolve().then(value=>{if(alive){setState(value);onResolved?.(value)}}).catch(error=>{if(alive)setState({error:error.message})})
+    // A Möbius without the core review routes answers 404: it supports none of
+    // the optional workflows, which is not a check still in progress.
+    resolve().then(value=>{if(alive){setState(value);onResolved?.(value)}}).catch(error=>{if(alive){setState({error:error.message});if(error?.status===404)onUnsupported?.()}})
     return()=>{alive=false}
   },[token,appId,choice?.request_id,choice?.mode,choice?.preview_sha256,optionKey,agentKey,retry])
   return state.error ? <p role="alert">Could not check this run: {state.error} <button className="co-quiet-action" onClick={()=>setRetry(x=>x+1)}>Retry</button></p> : null

@@ -8,14 +8,25 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 
 REFERENCE = re.compile(r'(?:https://github\.com/)?([A-Za-z0-9_.-]{1,100})/([A-Za-z0-9_.-]{1,100})(?:#|/pull/)([1-9][0-9]{0,9})/?')
 TEXT_LIMIT = 240
 
 
+def utf16_length(text):
+  return len(text.encode('utf-16-le')) // 2
+
+
+# The chat renderer counts JavaScript string length (UTF-16 units), so an
+# astral character such as an emoji counts twice.
 def bounded(text, limit=TEXT_LIMIT):
   text = ' '.join(str(text).split())
-  return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+  if utf16_length(text) <= limit:
+    return text
+  while utf16_length(text) > limit - 1:
+    text = text[:-1]
+  return text.rstrip() + '…'
 
 
 def gh_read(path):
@@ -54,7 +65,15 @@ def pull_block(reference, read=gh_read):
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('pr', help='owner/repository#123 or a GitHub pull-request URL')
-  block = pull_block(parser.parse_args().pr)
+  try:
+    block = pull_block(parser.parse_args().pr)
+  except ValueError as error:
+    sys.exit(f'pr_block.py: {error}')
+  except subprocess.CalledProcessError as error:
+    detail = ' '.join((error.stderr or '').split())[:240] or 'gh could not read it'
+    sys.exit(f'pr_block.py: could not read that pull request ({detail}). Check the number and that you can access the repository.')
+  except subprocess.TimeoutExpired:
+    sys.exit('pr_block.py: GitHub did not answer in time. Try again.')
   print('```mobius-app\n' + json.dumps(block, ensure_ascii=False) + '\n```')
 
 

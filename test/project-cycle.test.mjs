@@ -460,7 +460,7 @@ test('Send again after a confirmed delivery is a no-op', async t => {
   assert.equal(Boolean(p.render().cycle.unsent), false, 'the pane shows the current state')
 })
 
-test('R8-1: a delivered cycle is not replayed into the conversation that replaced its deleted one', async t => {
+test('a delivered cycle is not replayed into the conversation that replaced its deleted one', async t => {
   const { storage, platform, pane, ready } = await realCycles(t)
   const stale = pane(); await ready(stale)
   await stale.render().start(ACTION)
@@ -477,7 +477,7 @@ test('R8-1: a delivered cycle is not replayed into the conversation that replace
   assert.deepEqual(platform.chats.map(chat => chat.messages), [[scope + ':1'], [scope + ':2']], 'cycle 1 was admitted exactly once')
 })
 
-test('R8-1: an unconfirmed cycle whose conversation was deleted is not sent again into a new one', async t => {
+test('an unconfirmed cycle whose conversation was deleted is not sent again into a new one', async t => {
   const { storage, platform, pane, ready } = await realCycles(t)
   const p = pane(); await ready(p)
   platform.lose = 1
@@ -490,7 +490,7 @@ test('R8-1: an unconfirmed cycle whose conversation was deleted is not sent agai
   const before = platform.requests.length
   const again = await reloaded.render().sendAgain()
   assert.equal(again.closed, true)
-  assert.match(reloaded.render().cycle.error, /not sent again/)
+  assert.match(reloaded.render().cycle.error, /Start it again/)
   assert.equal(platform.requests.length, before, 'no start or send was made')
   assert.deepEqual(platform.messages(), [scope + ':1'], 'cycle 1 was admitted exactly once')
   // After a reload it is not offered again; new work is an explicit new cycle.
@@ -500,7 +500,7 @@ test('R8-1: an unconfirmed cycle whose conversation was deleted is not sent agai
   assert.deepEqual(platform.active().map(chat => chat.messages), [[scope + ':2']])
 })
 
-test('R8-2: a stale retry never rolls back a newer cycle\'s model, and a retry does not re-apply one', async t => {
+test('a stale retry never rolls back a newer cycle\'s model, and a retry does not re-apply one', async t => {
   const { platform, until, pane, ready } = await realCycles(t)
   const a = pane(); await ready(a)
   await a.render().start(ACTION)
@@ -536,7 +536,7 @@ test('R8-2: a stale retry never rolls back a newer cycle\'s model, and a retry d
   assert.equal(platform.messages().filter(cid => cid === scope + ':4').length, 1)
 })
 
-test('R9: a retry that finds its rejected conversation deleted settles this mount so Start works without a reload', async t => {
+test('a retry that finds its rejected conversation deleted settles this mount so Start works without a reload', async t => {
   const { storage, platform, until, pane, ready } = await realCycles(t)
   const p = pane(); await ready(p)
   platform.rejectFirstTurn = 1
@@ -560,4 +560,20 @@ test('R9: a retry that finds its rejected conversation deleted settles this moun
   assert.equal(next.ok, true, JSON.stringify(next))
   assert.equal(reloaded.render().cycle.chatId, 'chat-2')
   assert.deepEqual(platform.active().map(chat => chat.messages), [[saved.cycle.cid.replace(/:1$/, ':2')]])
+})
+
+test('a first start that never reached Möbius says so, not that a conversation was lost', async t => {
+  const { platform, until, pane, ready } = await realCycles(t)
+  const p = pane(); await ready(p)
+  // fetch throws before the request reaches the server: nothing is created.
+  const original = platform.fetch
+  platform.fetch = async () => { throw new TypeError('Failed to fetch') }
+  assert.equal((await p.render().start(ACTION)).ok, false)
+  platform.fetch = original
+  assert.equal(platform.chats.length, 0)
+  const again = await p.render().sendAgain()
+  assert.equal(again.closed, true)
+  await until(() => p.render().cycle.phase === 'idle')
+  assert.equal(p.render().cycle.error, 'This start never reached Möbius. Start it again.')
+  assert.equal(platform.chats.length, 0, 'nothing was created by the retry')
 })

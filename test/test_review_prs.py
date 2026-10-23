@@ -146,6 +146,20 @@ class AdapterTests(unittest.TestCase):
     self.assertEqual(adapter.run_block({**base, "options": {"post_review": True}})["title"], "GitHub review")
     self.assertEqual(adapter.run_block({**base, "mode": "review_fix_merge", "options": {"post_review": True}})["title"], "Review, fix & merge")
 
+  def test_run_block_names_a_minimized_core_run_by_its_top_level_flag(self):
+    # The platform's minimized view of a core run Contribute did not start.
+    minimized = {"id": "run-12345678", "chat_id": "owner-chat", "state": "reviewing", "mode": "review", "created_at": "2026-10-23T09:00:00Z",
+                 "app_id": None, "can_stop": False, "post_review": True, "details_in_owning_chat": True,
+                 "items": [{"repo": "owner/repo", "number": 7, "head_sha": "a" * 40, "base_ref": "main", "base_sha": "b" * 40, "state": "reviewing"}]}
+    self.assertEqual(adapter.run_block(minimized)["title"], "GitHub review")
+    self.assertEqual(adapter.run_block({**minimized, "post_review": False})["title"], "Private review")
+    self.assertEqual(adapter.run_block({**minimized, "post_review": False, "options": {"post_review": True}})["title"], "Private review",
+                     "a minimized run is named only by its top-level flag")
+    self.assertEqual(adapter.run_block({**minimized, "mode": "review_merge"})["title"], "Review & merge")
+    no_mode = {key: value for key, value in minimized.items() if key != "mode"}
+    self.assertEqual(adapter.run_block({**no_mode, "post_review": False})["title"], "Review run", "an unreported mode is not called private")
+    self.assertEqual(adapter.run_block({"id": "run-12345678", "items": []})["title"], "Review run")
+
   def test_selection_id_cannot_escape_app_data(self):
     with self.assertRaisesRegex(ValueError, "Invalid saved selection id"):
       adapter.selection_path(80, "../../secret")
