@@ -216,3 +216,8 @@ test('pull-request records are staged and reviewed through Contribute, never han
   assert.match(prose, /never recompute or hand-write those fields/)
   assert.doesNotMatch(prose, /CAS-(store|mark|update) `?quality_review/)
 })
+
+test('the retired-flow stub ships with the app for its one release window', () => {
+  const manifest = JSON.parse(read('mobius.json'))
+  assert.ok(manifest.source_files.includes('attached-work.md'))
+})
