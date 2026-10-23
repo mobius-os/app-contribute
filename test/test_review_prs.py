@@ -179,6 +179,28 @@ class RealCoreTests(unittest.TestCase):
     self.assertEqual(post[2], {**core.start_body(prepared["selection"]), "chat_approval": {"context": "Owner asked"}})
     self.assertTrue(started["approved"])
 
+  def test_takeover_with_readiness_is_frozen_by_the_platform_when_advertised(self):
+    core = adapter.load_core(os.environ["MOBIUS_PLATFORM_SCRIPTS"])
+    import inspect
+    if "allow_mark_ready" not in inspect.signature(core.freeze_preview).parameters:
+      self.skipTest("this platform has no draft takeover yet")
+    snapshot = {"review_prompt": "r", "fix_prompt": "f", "merge_prompt": "m", "max_rounds": None, "autopilot": True,
+                "provider": "codex", "model": "test-model", "reasoning_effort": "high"}
+    digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    store, posts = {}, []
+    def api(path, method="GET", data=None, headers=None):
+      if path.endswith("/review-presets"): return {"capabilities": {"review_fix_merge": True, "draft_takeover": True}}
+      if path.endswith("/review-preview"): return {"options": snapshot, "preview_sha256": digest}
+      if method == "PUT": store[path] = data; return None
+      if method == "GET" and path in store: return store[path]
+      if method == "POST": posts.append(data); return {"run": {"id": "run-takeover1", "items": [ITEM]}}
+    core.api = api
+    core.inspect_pr = lambda reference: {**ITEM, "title": "A change", "url": "https://github.com/example/project/pull/7", "is_draft": True}
+    prepared = run(core, "--mode", "review_fix_merge", "--allow-mark-ready", "example/project#7")
+    self.assertEqual(prepared["selection"]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
+    run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
+    self.assertEqual(posts[0]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
+
 
 if __name__ == "__main__":
   unittest.main()
