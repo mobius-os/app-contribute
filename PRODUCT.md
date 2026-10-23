@@ -21,10 +21,11 @@ shared for review, and whether shared updates have been checked. Choose one proj
 
 ## Operating Context
 
-Changes still begin in their source chats; a chat's Changes view only lists its
-edits. Preparing them is a request to the conversation that owns them, or a
-project-wide preparation in Contribute, which is the cross-chat project overview. Current code establishes
-what needs preparation; chat diffs are provenance, not a second source tree.
+Changes still begin in their source chats, and a chat's Changes view only lists
+its edits. To prepare them, ask the conversation that owns them, or prepare the
+whole project in Contribute, the cross-chat project overview. Current code
+establishes what needs preparation; chat diffs are provenance, not a second
+source tree.
 
 The landing view is a searchable project index, without global mutation controls. Each project shows
 local/private/public work and its last-known shared-version relationship.

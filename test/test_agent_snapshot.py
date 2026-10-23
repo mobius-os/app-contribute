@@ -131,10 +131,6 @@ class AgentSnapshotTests(unittest.TestCase):
     run.assert_not_called()
 
 
-if __name__ == "__main__":
-  unittest.main()
-
-
 class RetiredWorkJsonTests(unittest.TestCase):
   def test_work_json_is_accepted_and_ignored_for_one_release_window(self):
     import io, contextlib, sys
@@ -146,3 +142,7 @@ class RetiredWorkJsonTests(unittest.TestCase):
       self.assertEqual(json.loads(out.getvalue())["active"], 0)
       self.assertNotIn("records", json.loads(out.getvalue()), "no attached-work view is produced")
       self.assertIn("--work-json is retired and ignored", err.getvalue())
+
+
+if __name__ == "__main__":
+  unittest.main()

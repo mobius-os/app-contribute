@@ -121,7 +121,10 @@ test('product docs describe Changes as informational, not as a preparation flow'
   assert.doesNotMatch(docs, /continue in its existing \*\*Changes\*\* view|settled work belongs in the chat's persistent Changes view|Recorded edits may prompt one lightweight preparation card|Changes preserve that lifecycle|Changes view settle/)
   const ui = read('ui/SourceConversations.jsx')
   assert.doesNotMatch(ui, /view: 'changes'|Open Changes|choose Changes/)
-  assert.match(ui, /ask it to prepare its changes/)
+  assert.match(ui, /ask it to prepare its changes/, 'the error fallback still explains it')
+  // One tap: the request is drafted in the conversation's composer, never sent.
+  assert.match(ui, /type: 'moebius:open-chat', chatId: chat\.chat_id, draft: PREPARE_DRAFT \}/)
+  assert.match(ui, /PREPARE_DRAFT = 'Prepare this conversation’s changes for review\.'/)
 })
 
 test('linked private reviews are locked until verified terminal cleanup', () => {
