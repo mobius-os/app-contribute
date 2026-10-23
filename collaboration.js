@@ -201,12 +201,30 @@ export async function loadReviewRuns(token, appId, { onList, now = Date.now() } 
   return settled.some(result => result.status === 'fulfilled') ? collaborationRequest(token, appId, 'review-runs') : list
 }
 
+// What the platform accepts for each mode, and nothing else (unknown or
+// unenforced options are refused): editable review and merge prompts for every
+// mode; fix guidance and a round cap only for Review, fix & merge, where
+// takeover enforces them; the post-review grant only for Review, and only when
+// chosen. Automatic continuation is not supported, so it is never sent.
+export function requestOptions(options, mode) {
+  const value = options || {}
+  const prompt = key => typeof value[key] === 'string' && value[key].trim() ? { [key]: value[key] } : {}
+  return {
+    ...prompt('review_prompt'), ...prompt('merge_prompt'),
+    ...(mode === 'review_fix_merge' ? {
+      ...prompt('fix_prompt'),
+      ...(Number.isSafeInteger(value.max_rounds) && value.max_rounds >= 1 ? { max_rounds: value.max_rounds } : {}),
+    } : {}),
+    ...(mode === 'review' && value.post_review === true ? { post_review: true } : {}),
+  }
+}
+
 export function reviewRunRequest(choice) {
   return {
     request_id: choice.request_id, mode: choice.mode,
     // A legacy selection without a scope never acquires draft readiness.
     ...(choice.mode === 'review_fix_merge' ? { confirmation_scope:choice.confirmation_scope || TAKEOVER_SCOPE } : {}),
-    ...(choice.options ? { options:choice.options } : {}),
+    ...(choice.options ? { options:requestOptions(choice.options, choice.mode) } : {}),
     ...(choice.preview_sha256 ? { preview_sha256:choice.preview_sha256 } : {}),
     ...(choice.agent ? { agent:choice.agent } : {}),
     items: choice.pulls.map(pr => {

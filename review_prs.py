@@ -144,7 +144,7 @@ def main(argv=None, core=None):
   parser.add_argument("prs", nargs="*", help="owner/repository#123 or full PR URL")
   parser.add_argument("--app-id", type=int)
   parser.add_argument("--mode", choices=("review", "review_merge", "review_fix_merge"), help="New selection mode; default: review")
-  parser.add_argument("--options", help="JSON file: review_prompt/fix_prompt/merge_prompt/max_rounds/autopilot")
+  parser.add_argument("--options", help="JSON file: review_prompt/merge_prompt; fix_prompt/max_rounds only with --mode review_fix_merge; post_review only for review")
   parser.add_argument("--agent", help="JSON file: provider/model/effort; frozen by the platform preview")
   parser.add_argument("--allow-mark-ready", action="store_true", help="Takeover preview includes marking drafts ready after review/checks; not consent itself")
   parser.add_argument("--selection", help="Use an already prepared exact selection; never refresh its versions")

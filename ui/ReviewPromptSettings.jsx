@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadWorkflowOptions, previewWorkflow, saveWorkflowOptions, reviewOptions, workflowAgent } from '../review-prompts.js'
+import { requestOptions } from '../collaboration.js'
 
 const PROMPTS = [['review_prompt','Review'],['fix_prompt','Fix'],['merge_prompt','Merge decision']]
 export const PROMPT_CSS = `
@@ -60,11 +61,12 @@ export function ReviewPromptPreview({ token, appId, choice, onResolved, onUnsupp
     async function resolve() {
       const data=await loadWorkflowOptions(token,appId)
       // Frozen selections keep their exact options; defaults apply only to new work.
-      const options=reviewOptions(choice.options,choice.preview_sha256 ? undefined : data.options)
-      if(choice.mode === 'review_fix_merge' && !choice.preview_sha256) options.autopilot=true
-      if(choice.mode !== 'review' && !choice.preview_sha256) delete options.post_review
+      // A saved selection keeps its exact frozen options; new work starts from the settings.
+      const options=requestOptions(choice.preview_sha256 ? choice.options : reviewOptions(choice.options,data.options),choice.mode)
+      // A Möbius without posted review does not accept the grant at all.
+      if(!choice.preview_sha256 && data.capabilities?.post_review !== true) delete options.post_review
       const agent=workflowAgent(choice.agent)
-      const preview=await previewWorkflow(token,appId,options,agent)
+      const preview=await previewWorkflow(token,appId,options,agent,choice.mode)
       if(choice.preview_sha256 && choice.preview_sha256!==preview.preview_sha256) throw new Error('The saved instructions or model changed. Ask the agent to prepare a fresh review link; nothing was started.')
       return {options,agent,preview,capabilities:data.capabilities}
     }

@@ -272,18 +272,21 @@ agent execution and settled history remain separate. Named paused work stays
 visible as unfinished; this iteration does not resume old cycles automatically.
 
 Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
-private review or review/fix/merge, plus model and effort. The private-review
-choice contains its autopilot checkbox; scoped takeover continues automatically.
-New takeovers have no configured repair-round limit.
-`review-preview` freezes the exact instructions and agent choice; start passes
-its `preview_sha256` and rejects drift. Mandatory safety instructions are
-platform-owned. New UI autopilot can explicitly be on, but missing/older grants
-remain off and never acquire repair authority.
+Review, Review & merge or Review, fix & merge, plus model and effort. There is
+no automatic-continuation option: the platform does not support it. Each launch
+sends only the options its mode accepts: review and merge prompts always, the
+fix prompt only for Review, fix & merge (new takeovers have no repair-round
+limit), and the post-review grant only for Review. The mode-aware
+`review-preview` freezes the exact instructions and agent choice for that mode;
+start passes its `preview_sha256` and rejects drift. Mandatory safety
+instructions are platform-owned. With the post-review grant, the agent may post
+one comment review per PR, and only for a verdict it explicitly marks public;
+questions to the owner stay private.
 
 A run publishes necessary takeover repairs only through a dedicated
 server-owned checkout and guarded receipts, then requires new independent
 full-diff review and passing evidence before merging a successor. It does not
-post comments or GitHub reviews. Unclear public outcomes reconcile read-only;
+post comments or GitHub reviews itself. Unclear public outcomes reconcile read-only;
 queued is not merged. Stop prevents new execution and does not prevent observing
 an existing receipt, but observation never restarts the cycle.
 

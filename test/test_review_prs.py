@@ -197,7 +197,10 @@ class RealCoreTests(unittest.TestCase):
     prepared = run(core, "--mode", "review_merge", "example/project#7")
     preview = [call for call in calls if call[0].endswith("/review-preview")][0]
     self.assertEqual(preview[0], "/api/github/contributions/80/review-preview")
-    self.assertNotIn("mode", preview[2])
+    # The core owns the preview body. A mode-aware core (G3+) names the selected
+    # mode; the adapter passes it through and never adds or changes one.
+    self.assertEqual(preview[2].get("mode", "review_merge"), "review_merge")
+    self.assertEqual(set(preview[2]) - {"mode"}, {"options", "agent"})
     started = run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
     post = [call for call in calls if call[1] == "POST" and call[0].endswith("/review-runs")][0]
     self.assertEqual(post[2], {**core.start_body(prepared["selection"]), "chat_approval": {"context": "Owner asked"}})
@@ -220,8 +223,15 @@ class RealCoreTests(unittest.TestCase):
       if method == "POST": posts.append(data); return {"run": {"id": "run-takeover1", "items": [ITEM]}}
     core.api = api
     core.inspect_pr = lambda reference: {**ITEM, "title": "A change", "url": "https://github.com/example/project/pull/7", "is_draft": True}
+    previews = []
+    original = api
+    def recording(path, method="GET", data=None, headers=None):
+      if path.endswith("/review-preview"): previews.append(data)
+      return original(path, method, data, headers)
+    core.api = recording
     prepared = run(core, "--mode", "review_fix_merge", "--allow-mark-ready", "example/project#7")
     self.assertEqual(prepared["selection"]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
+    self.assertEqual(previews[0].get("mode", "review_fix_merge"), "review_fix_merge", "a repair preview is frozen for the repair mode")
     run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
     self.assertEqual(posts[0]["confirmation_scope"], "named_pr_repairs_ready_and_reviewed_successors")
 

@@ -1,10 +1,11 @@
-import { collaborationRequest } from './collaboration.js'
+import { collaborationRequest, requestOptions } from './collaboration.js'
 
-const KEYS = ['review_prompt', 'fix_prompt', 'merge_prompt', 'max_rounds', 'autopilot', 'post_review']
+// The owner's editable workflow settings. Older builds also saved
+// `max_rounds` and `autopilot`; neither is offered any more (automatic
+// continuation is unsupported, and a round cap belongs to one takeover launch).
+const KEYS = ['review_prompt', 'fix_prompt', 'merge_prompt', 'post_review']
 export function reviewOptions(value, defaults) {
-  return Object.fromEntries(KEYS.map(key => [key,
-    key === 'max_rounds' && value?.[key] === null ? null : value?.[key] ?? defaults?.[key],
-  ]).filter(([,value]) => value !== undefined))
+  return Object.fromEntries(KEYS.map(key => [key, value?.[key] ?? defaults?.[key]]).filter(([,value]) => value !== undefined))
 }
 // The exact saved prompts must back every launch, so this never falls back to
 // defaults. The runtime bounds each read to a few seconds; a slow but healthy
@@ -41,16 +42,15 @@ export async function loadWorkflowOptions(token, appId) {
     collaborationRequest(token, appId, 'review-presets'), workflowSettings(),
   ])
   const defaults = presets.presets || presets
-  // Settings apply to new work. A legacy budget must not silently cap a new run;
-  // saved selections still pass their exact frozen options through reviewOptions.
-  return { defaults, capabilities:presets.capabilities || {}, version:saved.version, options:reviewOptions({ ...saved.value, max_rounds:null }, { ...defaults, autopilot:true }) }
+  // Settings apply to new work; retired keys in an older saved copy are ignored.
+  return { defaults, capabilities:presets.capabilities || {}, version:saved.version, options:reviewOptions(saved.value, defaults) }
 }
 export function workflowAgent(choice) {
   if (!choice?.provider || !choice?.model) return undefined
   return { provider:choice.provider, model:choice.model, ...(choice.effort ? { effort:choice.effort } : {}) }
 }
-// The server resolves prompts and model for every mode alike; the mode is
-// part of the selection's admission, never of this preview.
-export function previewWorkflow(token, appId, options, agent) {
-  return collaborationRequest(token, appId, 'review-preview', { options:reviewOptions(options), ...(agent ? {agent} : {}) })
+// The preview is mode-aware: repair options are frozen only for Review, fix
+// & merge, so the request names the mode and carries only that mode's options.
+export function previewWorkflow(token, appId, options, agent, mode = 'review') {
+  return collaborationRequest(token, appId, 'review-preview', { mode, options:requestOptions(options, mode), ...(agent ? {agent} : {}) })
 }
