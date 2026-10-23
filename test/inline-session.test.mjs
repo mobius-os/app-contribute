@@ -241,10 +241,8 @@ test('checkpoint and outcome rules are bounded and conservative', () => {
   assert.equal(update.facts.find(fact => fact.label === 'Action').value, 'Update pull request #12')
 })
 
-test('a card never reports more than one confirming action, so the B2 host keeps Confirm available', async t => {
-  const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || '/data/workplans/contribute-stack-reviews/work/blocks/mobius/frontend'
-  let b2 = null
-  try { b2 = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`) } catch { /* checked locally below */ }
+// One card with a Contribute all action, opened to Confirm on that action.
+async function confirmingCard() {
   const ids = ['one', 'two']
   const actions = [...ids.map(id => ({ key: `chat-send:${id}`, label: 'Contribute' })), { key: `chat-send-batch:${batchHandle(ids)}`, label: 'Contribute all' }]
   const h = harness({ actions, records: ids.map(id => prepared(id)) })
@@ -259,7 +257,20 @@ test('a card never reports more than one confirming action, so the B2 host keeps
   h.fire('chat-send:one', 'activate'); await tick()
   assert.deepEqual(confirmingKeys(), ['chat-send:one'])
   for (const state of h.states) assert.ok(state.actions.filter(action => action.confirming).length <= 1, 'never two confirming actions')
-  if (!b2) return t.diagnostic('B2 host module unavailable; checked the one-confirmation rule locally')
+  return { h, actions }
+}
+
+test('a card never reports more than one confirming action', async () => {
+  await confirmingCard()
+})
+
+// The real B2 host parser, only when MOBIUS_BLOCKS_FRONTEND names a Möbius
+// frontend checkout that has it; the test above covers the rule everywhere.
+test('the B2 host keeps Confirm available for that one confirming action', async t => {
+  const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || ''
+  if (!BLOCKS) return t.skip('set MOBIUS_BLOCKS_FRONTEND to a Möbius frontend with the passive block host to run this check')
+  const b2 = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`)
+  const { h, actions } = await confirmingCard()
   const parsed = b2.sessionState({ type: 'moebius:app-block-state', ...h.last() }, 'session-1', new Set(actions.map(action => action.key)))
   const confirming = parsed.actions.filter(action => action.confirming)
   assert.equal(confirming.length, 1)

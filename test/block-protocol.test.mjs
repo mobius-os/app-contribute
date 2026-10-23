@@ -50,15 +50,16 @@ test('state goes through the host handle, or is posted with the document generat
     { sessionId: 's', generation: null, actions: [], checkpoint: { id: 'c', data: '{}' }, retain: false, recoveryError: false })
 })
 
-// The real B2 host modules, when the platform's blocks clone is present.
-const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || '/data/workplans/contribute-stack-reviews/work/blocks/mobius/frontend'
+// The real B2 host modules, only when MOBIUS_BLOCKS_FRONTEND names a Möbius
+// frontend checkout that has them. The tests above cover the same contract
+// everywhere.
+const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || ''
 async function b2(t) {
-  try {
-    return {
-      host: await import(`${BLOCKS}/src/components/AppCanvas/appBlockSessionHost.js`),
-      state: await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`),
-    }
-  } catch { t.skip('B2 host modules are not available (set MOBIUS_BLOCKS_FRONTEND)'); return null }
+  if (!BLOCKS) { t.skip('set MOBIUS_BLOCKS_FRONTEND to a Möbius frontend with the passive block host to run this check'); return null }
+  return {
+    host: await import(`${BLOCKS}/src/components/AppCanvas/appBlockSessionHost.js`),
+    state: await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`),
+  }
 }
 
 test('the B2 host accepts exactly the reports this adapter posts for its document', async t => {
