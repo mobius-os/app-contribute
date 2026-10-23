@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle } from '../collaboration.js'
+import { discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, normalizeRunView } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -205,4 +205,61 @@ test('an exact PR read rejects a response for another repository or number', asy
   }
   await assert.rejects(discoverPull('test', 'not a repository', 7), /valid pull request/)
   await assert.rejects(discoverPull('test', 'team/repo', 0), /valid pull request/)
+})
+
+// G1's minimized projection of a core review run Contribute did not start:
+// today `{id, chat_id, state, execution_state, app_id: null, can_stop: false,
+// items: [{repo, number, head_sha, state}]}`, plus (newer G1) mode,
+// created_at, a post-review flag, base ref/sha, public review state/URL and
+// `details_in_owning_chat: true`.
+const minimized = (extra = {}, item = {}) => ({ id: 'core-run', chat_id: 'owner-chat', state: 'reviewing', execution_state: 'running', app_id: null, can_stop: false,
+  items: [{ repo: 'team/repo', number: 7, head_sha: 'a'.repeat(40), state: 'reviewing', ...item }], ...extra })
+
+test('a minimized core run is titled by its reported mode, never assumed private', () => {
+  assert.equal(runDetailsElsewhere(minimized()), true, 'app_id null marks a run this app did not start')
+  assert.equal(runDetailsElsewhere({ ...minimized(), app_id: undefined, details_in_owning_chat: true }), true)
+  assert.equal(runDetailsElsewhere({ id: 'own', app_id: 80, mode: 'review', items: [] }), false)
+  assert.equal(reviewRunTitle(minimized()), 'Review run', 'no mode reported: not called private')
+  assert.equal(reviewRunTitle(minimized({ mode: 'review_merge' })), 'Review & merge')
+  assert.equal(reviewRunTitle(minimized({ mode: 'review_fix_merge' })), 'Review, fix & merge')
+  assert.equal(reviewRunTitle(minimized({ mode: 'review', post_review: true })), 'GitHub review', 'the flat post-review flag')
+  assert.equal(reviewRunTitle(minimized({ mode: 'review' })), 'Private review')
+})
+
+test('a minimized core run attaches to its PR row by repository, number and head', () => {
+  const run = minimized()
+  assert.equal(reviewForPull([run], pull(7))?.run, run, 'no base reported: the exact code still matches')
+  assert.equal(reviewForPull([run], pull(7, { headRefOid: 'c'.repeat(40) })), null, 'a different head never matches')
+  assert.equal(reviewForPull([run], pull(8)), null)
+  const withBase = minimized({}, { base_ref: 'release', base_sha: 'b'.repeat(40) })
+  assert.equal(reviewForPull([withBase], pull(7)), null, 'a reported base must still match')
+  assert.equal(reviewForPull([minimized({}, { base_ref: 'main', base_sha: 'b'.repeat(40) })], pull(7)).exactBase, true)
+  // Contribute's own runs keep the full identity rule.
+  assert.equal(reviewForPull([{ ...run, app_id: 80 }], pull(7)), null)
+})
+
+test('a minimized core run is never observed through this app; its public review is read from the flat fields', async t => {
+  const core = minimized({ mode: 'review_merge' }, { state: 'queued', public_review_state: 'posted', public_review_url: 'https://github.com/team/repo/pull/7#pullrequestreview-1' })
+  const calls = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => { calls.push(`${init.method} ${url}`); return new Response(JSON.stringify({ runs: [core] })) })
+  const list = await loadReviewRuns('test', 80, { now: 9_000_000 })
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs'], 'no /observe for a run the app does not own')
+  assert.deepEqual(list.runs[0].items[0].public_review, { state: 'posted', url: 'https://github.com/team/repo/pull/7#pullrequestreview-1' })
+  const own = { id: 'own', app_id: 80, items: [{ public_review_state: 'posted' }] }
+  assert.equal(normalizeRunView(own), own, 'own runs pass through unchanged')
+})
+
+test('a minimized run detail points to the owning conversation instead of prompt or version warnings', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { render } = await renderModule(`import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {RunDetail} from './ui/RunDetail.jsx'; export const render = (run, pulls) => renderToStaticMarkup(React.createElement(RunDetail, {run, pulls, listState: {}}));`)
+  const html = render(minimized({ mode: 'review' }), [pull(7)])
+  assert.match(html, /Its instructions and findings are in the owning conversation/)
+  assert.match(html, /Open the owning conversation for details/)
+  assert.match(html, /Matches loaded PR code/)
+  assert.doesNotMatch(html, /prompt snapshot|Older PR version|Instructions used by this run|findings will appear here|not a new approval|→ unknown/)
+  const posted = render(normalizeRunView(minimized({ mode: 'review', post_review: true }, { base_ref: 'main', base_sha: 'b'.repeat(40), public_review_state: 'posted', public_review_url: 'https://github.com/team/repo/pull/7#r' })), [pull(7)])
+  assert.match(posted, /<h3>GitHub review<\/h3>/)
+  assert.match(posted, /View the posted review on GitHub/)
+  // Contribute's own run keeps its prompt disclosure.
+  assert.match(render({ id: 'own', app_id: 80, mode: 'review', state: 'reviewing', items: [] }, []), /This older run did not save a prompt snapshot/)
 })

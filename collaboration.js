@@ -141,8 +141,27 @@ export async function collaborationRequest(token, appId, path, body) {
   return data
 }
 
+// A core review run Contribute did not start is read through a minimized
+// projection (G1): its mode, timing, PR identity and public outcome only.
+// Prompts, findings and approval wording stay in the conversation that owns
+// it. Older G1 builds marked it only by `app_id: null`; newer ones say
+// `details_in_owning_chat: true`. The post-review flag may arrive top-level
+// or under the full view's options.
+export const runDetailsElsewhere = run => run?.details_in_owning_chat === true || run?.app_id === null
+export const runPostsReview = run => run?.post_review === true || run?.options?.post_review === true
+// The one adapter for the minimized shape: a flat public-review state/URL is
+// read as the full view's `public_review`. Own runs pass through unchanged.
+export function normalizeRunView(run) {
+  if (!runDetailsElsewhere(run) || !Array.isArray(run.items)) return run
+  return { ...run, items: run.items.map(item => item.public_review || !item.public_review_state ? item
+    : { ...item, public_review: { state: item.public_review_state, ...(item.public_review_url ? { url: item.public_review_url } : {}) } }) }
+}
+const normalizeList = list => ({ ...list, runs: (list?.runs || []).map(normalizeRunView) })
+
 // A Review only run that posts on GitHub is not private, so its name says so.
-export const reviewRunTitle = run => run.mode === 'review_fix_merge' ? 'Review, fix & merge' : run.mode === 'review_merge' ? 'Review & merge' : run.options?.post_review === true ? 'GitHub review' : 'Private review'
+// A run whose mode is not reported is not assumed to be private.
+export const reviewRunTitle = run => run.mode === 'review_fix_merge' ? 'Review, fix & merge' : run.mode === 'review_merge' ? 'Review & merge'
+  : runPostsReview(run) ? 'GitHub review' : run.mode === 'review' ? 'Private review' : 'Review run'
 
 export const REVIEW_STATE_NAMES = { reviewing: 'Reviewing', repairing:'Fixing review findings', pushing:'Sending scoped fix', marking_ready:'Marking ready for review', ready_unknown:'Readiness outcome needs checking', push_unknown:'Fix outcome needs checking', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Failed', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', complete: 'Complete', stopped: 'Stopped', interrupted:'Interrupted', paused: 'Paused', awaiting_owner: 'Waiting for your answer' }
 
@@ -170,13 +189,15 @@ const observedAt = new Map()
 // Shows the saved list at once (onList), then re-reads it after any due
 // GitHub reconciliation so a settled merge replaces "In merge queue".
 export async function loadReviewRuns(token, appId, { onList, now = Date.now() } = {}) {
-  const list = await collaborationRequest(token, appId, 'review-runs')
+  const list = normalizeList(await collaborationRequest(token, appId, 'review-runs'))
   onList?.(list)
-  const due = (list.runs || []).filter(run => awaitsGithub(run) && now - (observedAt.get(run.id) ?? -Infinity) >= OBSERVE_EVERY_MS)
+  // Only Contribute's own runs can be observed through its app route; a
+  // minimized run is reconciled by its owning conversation.
+  const due = (list.runs || []).filter(run => !runDetailsElsewhere(run) && awaitsGithub(run) && now - (observedAt.get(run.id) ?? -Infinity) >= OBSERVE_EVERY_MS)
   if (!due.length) return list
   due.forEach(run => observedAt.set(run.id, now))
   const settled = await Promise.allSettled(due.map(run => collaborationRequest(token, appId, `review-runs/${encodeURIComponent(run.id)}/observe`, {})))
-  return settled.some(result => result.status === 'fulfilled') ? collaborationRequest(token, appId, 'review-runs') : list
+  return settled.some(result => result.status === 'fulfilled') ? normalizeList(await collaborationRequest(token, appId, 'review-runs')) : list
 }
 
 export function reviewRunRequest(choice) {
@@ -214,11 +235,14 @@ export async function assignPulls(token, appId, pulls, login) {
 // A run belongs to the PR's exact code (repo, number, head) and target branch,
 // never a lookalike PR. The branch tip keeps moving as other work merges, so
 // `exactBase` says whether the run saw the current tip instead of hiding it.
+// A minimized run that does not report its target branch is matched by its
+// exact code alone.
 export function reviewForPull(runs, pr) {
   if (!pr.headRefOid || !pr.baseRefName) return null
   const matches = runs.flatMap(run => {
     const item = run.items?.find(item => item.repo.toLowerCase() === pr.repository.nameWithOwner.toLowerCase()
-      && item.number === pr.number && item.head_sha === pr.headRefOid && item.base_ref === pr.baseRefName)
+      && item.number === pr.number && item.head_sha === pr.headRefOid
+      && (item.base_ref === pr.baseRefName || (runDetailsElsewhere(run) && !item.base_ref)))
     return item ? [{ run, item, exactBase: !!baseTip(pr) && item.base_sha === baseTip(pr) }] : []
   })
   // Prefer the run on the current branch tip; otherwise the newest for this code.

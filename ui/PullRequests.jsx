@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, baseTip, collaborationRequest, DRAFT_TAKEOVER_SCOPE, discoverPull, discoverPulls, liveSelection, loadReviewRuns, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, assignPulls, takeoverBlocker, takeoverScope } from '../collaboration.js'
+import { awaitsGithub, baseTip, collaborationRequest, DRAFT_TAKEOVER_SCOPE, discoverPull, discoverPulls, liveSelection, loadReviewRuns, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, normalizeRunView, assignPulls, takeoverBlocker, takeoverScope } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, observePulls, pullsInView } from '../pull-view.js'
 import { pullConversations, recordsForPull } from '../provenance.js'
 import { RunDetail, savedVersion } from './RunDetail.jsx'
@@ -282,8 +282,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     if (!current() || !focus || (list.runs || []).some(run => run.id === focus.runId)) return
     const path = `review-runs/${encodeURIComponent(focus.runId)}`
     try {
-      if (linkedRef.current && awaitsGithub(linkedRef.current)) await collaborationRequest(token, appId, `${path}/observe`, {})
-      const exact = (await collaborationRequest(token, appId, path)).run
+      if (linkedRef.current && !runDetailsElsewhere(linkedRef.current) && awaitsGithub(linkedRef.current)) await collaborationRequest(token, appId, `${path}/observe`, {})
+      const exact = normalizeRunView((await collaborationRequest(token, appId, path)).run)
       if (current() && runFocusRef.current?.nonce === focus.nonce && exact) setLinked(exact)
     } catch (error) { if (current()) setRunError(`This run's latest status is unavailable: ${error.message}`) }
   }, [token, appId])
