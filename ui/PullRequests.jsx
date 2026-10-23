@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { baseTip, collaborationRequest, liveSelection, discoverPull, discoverPulls, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewRunRequest, assignPulls, reviewForPull } from '../collaboration.js'
+import { baseTip, collaborationRequest, DRAFT_TAKEOVER_SCOPE, discoverPull, discoverPulls, liveSelection, loadReviewRuns, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, assignPulls, takeoverBlocker, takeoverScope } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, observePulls, pullsInView } from '../pull-view.js'
 import { pullConversations, recordsForPull } from '../provenance.js'
+import { RunDetail, savedVersion } from './RunDetail.jsx'
 import { PullRequestDetail } from './PullRequestDetail.jsx'
 import { Avatar, ChecksBadge, GithubLabel, PullStateIcon, REVIEW_DECISION, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
-import { openAgentConversation } from './BatchAction.jsx'
-import { MarkdownView } from './MarkdownView.jsx'
+import { ReviewPromptPreview } from './ReviewPromptSettings.jsx'
+import { AgentModelSettings } from './AgentModelSettings.jsx'
+
+// One draft-scope decision for the chooser, its copy and the start body.
+const scopeFor = (mode, pulls) => mode === 'review_fix_merge' ? { confirmation_scope: takeoverScope(pulls) } : {}
 
 const FILTERS = [['all', 'All'], ['unassigned', 'Unassigned'], ['assigned', 'Assigned'], ['authored', 'Mine']]
-const STATE_NAMES = { reviewing: 'Reviewing', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Needs you', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', complete: 'Complete', stopped: 'Stopped', paused: 'Paused' }
 
 // GitHub-style list header: the count when nothing is selected, bulk actions
 // once something is. Selection never moves focus or interrupts browsing.
@@ -81,29 +84,80 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onCancel })
   </div>
 }
 
-export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange, bindCurrentTarget = false }) {
+// A saved (frozen) selection keeps its own scope; only fresh launches consult
+// the served capability. Unresolved capabilities are a pending check.
+export function draftCapabilityBlocker({ drafts, capabilities, saved, allowDraft }) {
+  if (!drafts || allowDraft || saved) return ''
+  if (!capabilities) return 'Checking draft support…'
+  return 'Draft takeover needs the Möbius update to be activated.'
+}
+
+// A fresh launch offers only the workflows this Möbius advertises.
+export function takeoverCapabilityBlocker({ capabilities, saved }) {
+  if (saved) return ''
+  if (!capabilities) return 'Checking what this Möbius supports…'
+  return capabilities.review_fix_merge === true ? '' : 'Needs a newer Möbius.'
+}
+
+export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange, appId, token, onResolved, onOptionsChange, onAgentChange, bindCurrentTarget = false, capabilities: served = null }) {
   const confirmation = useRef(null)
+  const [promptOptions,setPromptOptions] = useState(null)
+  // null until the server preset resolves: loading is not the same as an
+  // inactive capability, so the launch must not claim an update is missing.
+  const [resolvedCapabilities,setCapabilities] = useState(null)
+  const capabilities = resolvedCapabilities || served
+  // The preview resolves what "default" means right now (owner background
+  // agent setting and its quota fallback); keep that answer for the picker.
+  const [defaultChoice,setDefaultChoice] = useState(null)
+  const resolve = useCallback(value => {
+    setPromptOptions(value?.options || null); setCapabilities(value ? (value.capabilities || {}) : null)
+    if (value && !value.agent) setDefaultChoice(value.preview?.options?.choice || null)
+    onResolved?.(value)
+  },[onResolved])
   useEffect(() => {
     if (choice) {
       focusActionRegion(confirmation.current)
     }
   }, [choice])
   if (!choice) return null
+  const takeover = choice.mode === 'review_fix_merge'
   const merge = choice.mode === 'review_merge'
+  const saved = !!choice.preview_sha256
+  const drafts = choice.pulls.some(pr => pr.isDraft)
+  const draftScope = choice.confirmation_scope === DRAFT_TAKEOVER_SCOPE
+  const allowDraft = capabilities?.draft_takeover === true && (!saved || draftScope)
+  const mergeAllowed = choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft)
+  // Rights do not depend on the capability read, so they explain first.
+  const blocker = takeoverBlocker(choice.pulls, { allowDraft: true })
+    || takeoverCapabilityBlocker({ capabilities, saved })
+    || draftCapabilityBlocker({ drafts, capabilities, saved, allowDraft })
+    || takeoverBlocker(choice.pulls, { allowDraft })
+  const takeoverAvailable = !blocker
+  // Posting makes Review only public, so its labels must stop saying private.
+  const posting = choice.mode === 'review' && (choice.options?.post_review ?? promptOptions?.post_review) === true
   return <section ref={confirmation} tabIndex={-1} className="co-pr-confirm" aria-label="Confirm review workflow">
 
-    <h3>{merge ? 'Review & merge if safe' : 'Review privately'}</h3>
-    <p>{merge
-      ? bindCurrentTarget
+    <h3>{choice.pulls.length === 1 ? `Take on #${choice.pulls[0].number} with an agent` : `Take on ${choice.pulls.length} PRs with an agent`}</h3>
+    <div className="co-pr-modes" role="group" aria-label="Agent workflow">
+      <div className="co-pr-mode-group"><button type="button" className="co-pr-mode" aria-pressed={!takeover} disabled={busy} onClick={() => onModeChange?.('review')}><strong>Review</strong><small>{merge ? 'Merges or queues after review and required checks. No code changes.' : posting ? 'Findings posted on GitHub. No code changes.' : 'Private findings, no public changes.'}</small></button>
+        {choice.mode === 'review' && onOptionsChange ? <label className="co-workflow-option"><input type="checkbox" checked={(promptOptions?.autopilot ?? choice.options?.autopilot) === true} disabled={busy || !promptOptions} onChange={event => onOptionsChange({ ...promptOptions, ...choice.options, autopilot:event.target.checked })} /> Continue private review automatically</label> : null}
+        {choice.mode === 'review' && onOptionsChange && capabilities?.post_review === true ? <label className="co-workflow-option"><input type="checkbox" checked={(choice.options?.post_review ?? promptOptions?.post_review) === true} disabled={busy || !promptOptions} onChange={event => onOptionsChange({ ...promptOptions, ...choice.options, post_review:event.target.checked })} /><span>Post the review on GitHub<small>Adds one comment review with the verdict and findings. Never approves or requests changes.</small></span></label> : null}
+        {!takeover && onModeChange && mergeAllowed ? <label className="co-workflow-option"><input type="checkbox" checked={merge} disabled={busy} onChange={event => onModeChange(event.target.checked ? 'review_merge' : 'review')} /> Merge when safe</label> : null}</div>
+      {onModeChange ? <div className="co-pr-mode-group"><button type="button" className="co-pr-mode" aria-pressed={takeover} disabled={busy || !takeoverAvailable} onClick={() => onModeChange('review_fix_merge')}><strong>Review, fix &amp; merge</strong><small>{blocker || (drafts ? 'Reviews and fixes drafts, then marks ready and merges.' : 'Continues through scoped fixes and fresh review.')}</small></button></div> : null}
+    </div>
+    {/* Consent always names its exact PRs, even when it opened beside one. */}
+    <ul className="co-pr-confirm-list">{choice.pulls.map(pr => <li key={prKey(pr)}><strong>#{pr.number} {pr.title}</strong><span>{pr.repository.nameWithOwner}</span></li>)}</ul>
+    {takeover ? <p>Public effects: scoped fixes may be pushed{draftScope ? ', drafts marked ready' : ''}, then these PRs merged or queued after independent review and required checks. {draftScope ? 'Marking ready may notify reviewers. ' : ''}No public comments or unrelated edits. Stop prevents new actions; one already underway may finish.</p>
+      : merge ? <p>{bindCurrentTarget
         ? 'Allow the agent to merge or queue these PR heads into their named target branches after a fresh review of the combined code and required checks. Questions come back to you. No branch edits or public review comments.'
-        : 'Allow the agent to merge or queue these exact versions after a thorough review and required checks. Changed versions and questions come back to you. No branch edits or public review comments.'
-      : 'Review privately, in parallel where independent. Nothing is posted or merged.'}</p>
-    <ul>{choice.pulls.map(pr => <li key={prKey(pr)}><strong>#{pr.number} {pr.title}</strong><span>{pr.repository.nameWithOwner}</span></li>)}</ul>
+        : 'Allow the agent to merge or queue these exact versions after a thorough review and required checks. Changed versions and questions come back to you. No branch edits or public review comments.'}</p>
+      : posting ? <p>Public effect: one comment review with the verdict and findings is posted on {choice.pulls.length === 1 ? 'this PR' : 'each PR'} from your connected GitHub account. It never approves, requests changes, edits code or merges.</p> : null}
     {bindCurrentTarget ? <p>On confirmation, unchanged PR heads are bound to the current tip of the same target branch, which may be newer than the snapshot below. Changed heads, target branches or draft status require a fresh confirmation.</p> : null}
     <details className="co-task-details"><summary>{bindCurrentTarget ? 'PR heads and target branches' : 'Exact versions covered by this approval'}</summary>{choice.pulls.map(pr => <p key={prKey(pr)}>#{pr.number}: version <code>{pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({bindCurrentTarget ? 'last seen ' : ''}{baseTip(pr)?.slice(0, 7)})</code></p>)}{!bindCurrentTarget ? <p>Changed code requires a fresh approval.</p> : null}</details>
-    {onModeChange && choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission) && !pr.isDraft) ? <label className="co-workflow-option"><input type="checkbox" checked={merge} disabled={busy} onChange={event => onModeChange(event.target.checked ? 'review_merge' : 'review')} /> Merge when safe</label> : null}
+    {onAgentChange ? <AgentModelSettings token={token} choice={choice.agent} defaultChoice={defaultChoice} defaultHint="Your background agent setting" onChange={next => { onAgentChange(next); return true }} /> : null}
+    {appId && token ? <ReviewPromptPreview token={token} appId={appId} choice={choice} onResolved={resolve} /> : null}
     <div className="co-board-actions">
-      <button className="co-btn co-btn-primary" disabled={busy || disabled} onClick={onConfirm}>{busy ? 'Starting…' : merge ? 'Allow review & merge' : 'Start private review'}</button>
+      <button className="co-btn co-btn-primary" disabled={busy || disabled || (takeover && !takeoverAvailable)} onClick={onConfirm}>{busy ? 'Starting…' : takeover ? 'Allow scoped takeover' : merge ? 'Allow review & merge' : posting ? 'Review and post on GitHub' : 'Start private review'}</button>
       <button className="co-btn" disabled={busy} onClick={onCancel}>Cancel</button>
     </div>
     {error ? <p className="co-run-error" role="alert">{error}</p> : null}
@@ -113,7 +167,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
 // `focusPull` is a navigation lease from a chat link: while it is held, that
 // exact PR stays in view (even when closed or on a later page) and its detail
 // is open. Leaving the detail or the project hands the lease back.
-export function PullRequests({ appId, token, project, conn, onChanged, records = [], onRecord, refreshKey, focusPull, onFocusRelease }) {
+export function PullRequests({ appId, token, project, conn, onChanged, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease }) {
   const repo = project?.canonical_repo || ''
   const task = useProjectTask()
   const [data, setData] = useState({ loading: true, error: '' })
@@ -142,6 +196,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const pulls = pullsInView(view, focusKey)
   const [assigning, setAssigning] = useState(null)
   const [choice, setChoice] = useState(null)
+  const [resolved, setResolved] = useState(null)
+  // The platform's advertised workflows, remembered across launches.
+  const [capabilities, setCapabilities] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const request = useRef(0)
@@ -202,8 +259,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   }, [token, repo, publish, readFocus])
   const loadRuns = useCallback(async () => {
     try {
-      const next = await collaborationRequest(token, appId, 'review-runs')
-      if (alive.current) { setRuns(next.runs || []); setRunError('') }
+      const show = next => { if (alive.current) { setRuns(next.runs || []); setRunError('') } }
+      show(await loadReviewRuns(token, appId, { onList: show }))
     } catch (error) { if (alive.current) setRunError(error.message) }
   }, [token, appId])
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
@@ -237,14 +294,29 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     task?.open('task:detail')
   }, [focusRow, focusKey, focusPull?.nonce])
   const focusDetailOpen = !!focusKey && focusOpened.current === focusPull?.nonce && task?.activeId === 'task:detail' && opened === focusKey
+  // A run link opens that run's detail once runs are read, under the same lease.
+  const runFocusId = focusRun?.runId && conn.state === 'connected' && focusRun.repo?.toLowerCase() === repo.toLowerCase() ? focusRun.runId : ''
+  const runFocusRef = useRef(null)
+  runFocusRef.current = runFocusId ? focusRun : null
+  const runOpened = useRef('')
+  const runPresent = !!runFocusId && runs.some(run => run.id === runFocusId)
+  useEffect(() => {
+    if (!runPresent || runOpened.current === focusRun.nonce) return
+    runOpened.current = focusRun.nonce
+    task?.open(`task:run:${runFocusId}`)
+  }, [runPresent, runFocusId, focusRun?.nonce])
+  const runDetailOpen = !!runFocusId && runOpened.current === focusRun?.nonce && task?.activeId === `task:run:${runFocusId}`
+  const leaseNonce = focusDetailOpen ? focusPull.nonce : runDetailOpen ? focusRun.nonce : ''
   const leaseShown = useRef('')
   useEffect(() => {
-    if (focusDetailOpen) { leaseShown.current = focusPull.nonce; return }
+    if (leaseNonce) { leaseShown.current = leaseNonce; return }
     const shown = leaseShown.current
     leaseShown.current = ''
     if (shown) releaseRef.current?.(shown)
-  }, [focusDetailOpen, focusPull?.nonce])
-  useEffect(() => () => { if (focusRef.current) releaseRef.current?.(focusRef.current.nonce) }, [])
+  }, [leaseNonce])
+  useEffect(() => () => {
+    for (const lease of [focusRef.current, runFocusRef.current]) if (lease) releaseRef.current?.(lease.nonce)
+  }, [])
   const visible = matchingPulls(pulls, filter, conn.login).filter(pr => !query.trim() || `${pr.number} ${pr.title} ${pr.author?.login || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   const selectableVisible = visible.filter(isOpenPull)
   const selection = pulls.filter(pr => isOpenPull(pr) && selected.has(prKey(pr)))
@@ -268,16 +340,18 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   // A launch or assignment opened from one PR stays beside that PR; a batch
   // opens under the list header. `anchor` is only placement, never scope.
   function choose(pulls, mode, anchor = '') {
+    setResolved(null)
     task?.open('task:review')
     setAssigning(null)
-    setChoice({ pulls: pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), mode, anchor, request_id: crypto.randomUUID() })
+    setChoice({ pulls: pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), mode, anchor, ...scopeFor(mode, pulls), request_id: crypto.randomUUID() })
     setError('')
   }
   async function start() {
     setBusy(true); setError('')
     try {
+      if (!resolved) throw new Error('The selected workflow is still being checked. Try again shortly.')
       const pulls = await liveSelection(token, choice.pulls)
-      const result = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice, pulls }))
+      const result = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }))
       setRuns(old => [result.run, ...old.filter(run => run.id !== result.run.id)])
       setChoice(null); setSelected(new Set())
       task?.open(`task:run:${result.run.id}`)
@@ -286,6 +360,15 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       if (error.code === 'changed') void load()
     }
     finally { setBusy(false) }
+  }
+  async function stopRun(run) {
+    if (busy) return
+    setBusy(true); setRunError('')
+    try {
+      const result=await collaborationRequest(token,appId,`review-runs/${encodeURIComponent(run.id)}/stop`,{})
+      setRuns(old=>old.map(item=>item.id===run.id ? result.run : item))
+    } catch(error) {setRunError(error.message)}
+    finally {setBusy(false)}
   }
   function toggle(pr) {
     setSelected(old => { const next = new Set(old); const key = prKey(pr); next.has(key) ? next.delete(key) : next.add(key); return next })
@@ -297,26 +380,15 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   }
   // A run opens beside its PR when it covers one; batches open under the header.
   const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerCase()}#${run.items[0].number}` : ''
-  const runTitle = run => run.mode === 'review_merge' ? 'Review & merge' : 'Private review'
-  // Saved conversations outlive the open-PR inventory. Its current snapshot
-  // provides context, never new approval or a fresh verdict for old findings.
-  function savedVersion(item) {
-    if (data.loading || data.error) return 'Current version not checked'
-    const pr = pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)
-    if (!pr) return 'Not in the loaded open PRs'
-    if (item.head_sha !== pr.headRefOid || item.base_ref !== pr.baseRefName) return 'Older PR version'
-    if (!item.base_sha || !baseTip(pr)) return 'Current base not checked'
-    return item.base_sha === baseTip(pr) ? 'Matches loaded PR version' : 'Older base version'
-  }
+  // A stopped or failed run can be started again on the PRs' current versions;
+  // the new launch is a fresh consent with its own model choice.
+  const retryPulls = run => (run.items || []).map(item => pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)).filter(pr => pr && isOpenPull(pr))
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>
-      <Icon name="review" size={23} /><h3>{runTitle(run)}</h3>
-      <p>Recorded status: {STATE_NAMES[run.state] || run.state}</p>{run.summary ? <p>{run.summary}</p> : null}
-      <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}><strong>#{item.number} · {STATE_NAMES[item.state] || item.state}</strong><p className="co-pr-note">{savedVersion(item)} · Recorded version <code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code>. Saved findings are not a new approval.</p>{item.summary ? <MarkdownView markdown={item.summary} /> : <p>The agent’s findings will appear here.</p>}</div>)}</div>
-      {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{run.items?.some(item => ['needs_you', 'failed', 'merge_unknown'].includes(item.state)) ? 'Answer in review conversation' : 'Open review conversation'}</button> : null}
-      {run.items?.some(item => item.state === 'merged') && project.available && project.kind !== 'external' ? <button className="co-btn co-task-secondary" onClick={() => task?.open('task:update')}>Pull updates</button> : null}
-      {run.items?.some(item => item.state === 'queued') ? <p>In the merge queue, not merged yet. The review conversation follows its outcome.</p> : null}
+      <RunDetail run={run} pulls={pulls} listState={data} busy={busy} error={runError}
+        onStop={() => stopRun(run)} retryPulls={retryPulls(run)} onRetry={retry => choose(retry, run.mode === 'review_merge' ? 'review' : run.mode, runAnchor(run))}
+        onPullUpdates={project.available && project.kind !== 'external' ? () => task?.open('task:update') : null} />
     </TaskPane>
-  const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation choice={choice} bindCurrentTarget busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setChoice(old => ({ ...old, mode, request_id: crypto.randomUUID() })) }} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
+  const reviewPane = <TaskPane id="task:review" dock={false}><ReviewConfirmation appId={appId} token={token} bindCurrentTarget onResolved={value => { setResolved(value); if (value?.capabilities) setCapabilities(value.capabilities) }} disabled={!resolved} onOptionsChange={options => { setResolved(null); setChoice(old => ({ ...old, options, request_id:crypto.randomUUID() })) }} onAgentChange={agent => { setResolved(null); setChoice(old => ({ ...old, agent, request_id:crypto.randomUUID() })) }} choice={choice} busy={busy} error={error} onConfirm={start} onCancel={() => { setChoice(null); task?.close() }} onModeChange={mode => { setError(''); setResolved(null); setChoice(old => ({ ...old, mode, confirmation_scope: undefined, ...scopeFor(mode, old.pulls), request_id: crypto.randomUUID() })) }} capabilities={capabilities} />{!choice ? <p>This selection has finished. Choose the current PRs to start another review.</p> : null}</TaskPane>
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onCancel={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)
@@ -345,7 +417,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     <div className="co-pr-list">{visible.map(pr => {
       const key = prKey(pr)
       const status = statusFor(pr)
-      const attention = status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown'].includes(status.item.state)
+      // A run whose conversation stopped or failed is not still reviewing.
+      const progress = status ? reviewItemProgress(status.run, status.item) : null
+      const halted = progress?.halted
+      const attention = halted || progress?.waiting || (status?.run.chat_id && ['needs_you', 'failed', 'merge_unknown', 'ready_unknown'].includes(status.item.state))
       const assignees = pr.assignees?.nodes || []
       const comments = pr.comments?.totalCount || 0
       const open = isOpenPull(pr)
@@ -366,7 +441,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
             {REVIEW_DECISION[pr.reviewDecision] && pr.reviewDecision !== 'REVIEW_REQUIRED' ? <span>{REVIEW_DECISION[pr.reviewDecision]}</span> : null}
             <ChecksBadge pr={pr} />
             {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
-            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{attention ? (status.item.state === 'merge_unknown' ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : (STATE_NAMES[status.item.state] || status.item.state)}</button> : null}
+            {status ? <button className={'co-pr-agent-state' + (attention ? ' needs-you' : '')} onClick={() => task?.open(`task:run:${status.run.id}`)}><Icon name="prepare" size={13} />{halted ? 'Run stopped' : attention ? (['merge_unknown','ready_unknown'].includes(status.item.state) ? 'Check outcome' : 'Needs you') : status.item.state === 'all_clear' && !status.exactBase ? `Reviewed on an older ${pr.baseRefName}` : progress.label}</button> : null}
           </div>
         </div>
         <div className="co-pr-aside">
@@ -388,8 +463,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       <summary><span>Review conversations</span><b>{relevantRuns.length}</b><Icon name="chevron" size={14} /></summary>
       <p className="co-pr-note">Saved findings apply only to their recorded versions. Open a conversation to answer questions or check an unresolved outcome.</p>
       <div>{relevantRuns.map(run => <button key={run.id} type="button" className="co-review-history-entry" data-review-run={run.id} onClick={() => task?.open(`task:run:${run.id}`)}>
-        <strong>{runTitle(run)}</strong>
-        {run.items?.map(item => <span key={`${item.repo}:${item.number}`}>{item.repo} #{item.number} · Recorded: {STATE_NAMES[item.state] || item.state}<small>{savedVersion(item)}</small></span>)}
+        <strong>{reviewRunTitle(run)}</strong>
+        {run.items?.map(item => <span key={`${item.repo}:${item.number}`}>{item.repo} #{item.number} · Recorded: {reviewItemProgress(run, item).label}<small>{savedVersion(item, pulls, data)}</small></span>)}
       </button>)}</div>
     </details> : null}
 

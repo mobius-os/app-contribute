@@ -1,5 +1,6 @@
 import { fetchLiveStates } from './api.js'
-import { mayMerge } from './collaboration.js'
+import { mayMerge, takeoverBlocker, TAKEOVER_SCOPE, DRAFT_TAKEOVER_SCOPE } from './collaboration.js'
+import { reviewOptions, workflowAgent } from './review-prompts.js'
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/
 const SHA = /^[a-f0-9]{40}$/
@@ -10,7 +11,7 @@ export function reviewSelectionIdFromIntent(intent) {
 
 // Saved selection data is a proposal. It contains neither consent nor a grant.
 export function selectedReviewRequest(value, id) {
-  if (!ID.test(id) || value?.request_id !== id || !['review', 'review_merge'].includes(value?.mode)
+  if (!ID.test(id) || value?.request_id !== id || !['review', 'review_merge', 'review_fix_merge'].includes(value?.mode)
       || !Array.isArray(value.items) || !value.items.length || value.items.length > 20) throw new Error('This review link is invalid. Ask the agent to prepare it again.')
   const items = value.items.map(item => {
     if (!/^[\w.-]+\/[\w.-]+$/.test(item.repo) || !Number.isInteger(item.number) || item.number < 1
@@ -18,7 +19,18 @@ export function selectedReviewRequest(value, id) {
     return { repo: item.repo.toLowerCase(), number: item.number, head_sha: item.head_sha, base_ref: item.base_ref, base_sha: item.base_sha }
   }).sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number)
   if (new Set(items.map(item => `${item.repo}#${item.number}`)).size !== items.length) throw new Error('This review link repeats a pull request.')
-  return { request_id: id, mode: value.mode, items }
+  const proposed = { request_id: id, mode: value.mode, items }
+  if (value.confirmation_scope) {
+    if (value.mode !== 'review_fix_merge' || ![TAKEOVER_SCOPE,DRAFT_TAKEOVER_SCOPE].includes(value.confirmation_scope)) throw new Error('This review link has an invalid permission scope.')
+    proposed.confirmation_scope = value.confirmation_scope
+  }
+  if (value.options) proposed.options = reviewOptions(value.options)
+  if (value.agent) proposed.agent = workflowAgent(value.agent)
+  if (value.preview_sha256) {
+    if (!/^[a-f0-9]{64}$/.test(value.preview_sha256)) throw new Error('This review link has an incomplete prompt snapshot. Ask the agent to prepare it again.')
+    proposed.preview_sha256 = value.preview_sha256
+  }
+  return proposed
 }
 
 export async function loadReviewSelection(id) {
@@ -30,7 +42,7 @@ export async function loadReviewSelection(id) {
 export async function inspectReviewSelection(token, request) {
   const fields = request.items.map((item, index) => {
     const [owner, name] = item.repo.split('/')
-    return `p${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}) { nameWithOwner viewerPermission isArchived pullRequest(number:${item.number}) { number title url state isDraft headRefOid baseRefName baseRefOid baseRef { target { oid } } } }`
+    return `p${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}) { nameWithOwner viewerPermission isArchived pullRequest(number:${item.number}) { number title url state isDraft headRefOid baseRefName baseRefOid baseRef { target { oid } } headRepository { nameWithOwner viewerPermission isArchived } } }`
   }).join('\n')
   const data = await fetchLiveStates(token, `query ContributeReviewSelection { ${fields} }`)
   if (!data) throw new Error('Could not check these contributions. Retry when GitHub is available.')
@@ -41,5 +53,5 @@ export async function inspectReviewSelection(token, request) {
         || pr.state !== 'OPEN' || pr.headRefOid !== item.head_sha || pr.baseRef?.target?.oid !== item.base_sha || pr.baseRefName !== item.base_ref) throw new Error('A selected contribution changed or closed. Ask the agent for a fresh review link; nothing was approved.')
     return { ...pr, repository: { nameWithOwner: repository.nameWithOwner, viewerPermission: repository.isArchived ? null : repository.viewerPermission } }
   })
-  return { ...request, pulls, canMerge: pulls.every(pr => !pr.isDraft && mayMerge(pr.repository.viewerPermission)) }
+  return { ...request, pulls, canMerge: request.mode === 'review_fix_merge' ? !takeoverBlocker(pulls, {allowDraft:request.confirmation_scope === DRAFT_TAKEOVER_SCOPE}) : pulls.every(pr => !pr.isDraft && mayMerge(pr.repository.viewerPermission)) }
 }

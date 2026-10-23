@@ -56,19 +56,26 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], githubRetries: 0 }
-const values = new Map(), navigation = [], reviewRuns = []
+const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], githubRetries: 0 }
+const values = new Map(), versions = new Map(), navigation = [], reviewRuns = []
+let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 // Reachable only by exact read, as a closed PR is absent from open search.
 const closedPulls = [pull(11, { title: 'Closed contribution', state: 'CLOSED' })]
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
-const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql')
+// A prompt preview resolves settings; it is a read, not a public action.
+const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql' && !call.url.endsWith('/review-preview'))
 function forbidden(kind) {
   return (...args) => { calls.forbidden.push({ kind, args: args.map(String) }); throw new Error('Forbidden fixture transport: ' + kind) }
 }
 window.fetch = async (url, options = {}) => {
   const call = { url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null }
   calls.requests.push(call)
+  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['low','high'],default_effort:'low'}]}})
+  if (call.url === '/api/owner/model-prefs') return response({hidden_ids:[]})
+  if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'}})
+  if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
+  if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '' })
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
@@ -169,8 +176,15 @@ window.mobius = {
     set: async (key, value) => { values.set(key, structuredClone(value)) },
     remove: async key => { values.delete(key) },
     subscribe: () => () => {},
-    getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? 'fixture-version' : null}),
-    durableWrite: async (key, value) => values.set(key,structuredClone(value)),
+    getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? versions.get(key) || 'fixture-version' : null}),
+    // Compare-and-set like the platform: a stale version or create conflict fails.
+    durableWrite: async (key, value, condition = {}) => {
+      const version = values.has(key) ? versions.get(key) || 'fixture-version' : null
+      if ((condition.ifNoneMatch && version) || (condition.ifMatch && condition.ifMatch !== version)) throw Object.assign(new Error('CAS conflict'), {code:'conflict',status:412})
+      const next = 'fixture-version-' + (++versionCounter)
+      values.set(key,structuredClone(value)); versions.set(key,next)
+      return {durability:'synced',version:next}
+    },
   },
   nav: {
     open(name, callbacks) {
@@ -184,7 +198,7 @@ window.mobius = {
   chat: {
     start: async action => { calls.starts.push(structuredClone(action)); return { chatId: 'prepare-' + calls.starts.length } },
     status: async id => { calls.status.push(id); return { running: true } },
-    stop: forbidden('unexpected chat stop'),
+    stop: async id => { calls.stops.push(id); return {stopped:true} },
     open: id => calls.opened.push(id),
   },
 }
@@ -210,11 +224,14 @@ function Fixture() {
   const [allProjects, setAllProjects] = useState(projects)
   const [focusPull, setFocusPull] = useState(null)
   window.focusPullFixture = setFocusPull
+  const [focusRun, setFocusRun] = useState(null)
+  window.focusRunFixture = setFocusRun
   const [projectFocus, setProjectFocus] = useState(null)
   window.focusProjectFixture = setProjectFocus
   window.setRecordsFixture = setRecords
-  function releaseFocus(nonce) { calls.releases.push(nonce); setFocusPull(old => old?.nonce === nonce ? null : old) }
+  function releaseFocus(nonce) { calls.releases.push(nonce); setFocusPull(old => old?.nonce === nonce ? null : old); setFocusRun(old => old?.nonce === nonce ? null : old) }
   window.openSelectionFixture = setSelectionId
+  window.setProjectsFixture = setAllProjects
   function repositoryAdded(repo) { setAllProjects(old => [...old, {key:'external:' + repo.nameWithOwner,kind:'external',name:repo.nameWithOwner,canonical_repo:repo.nameWithOwner,contributions:[]}]) }
 
   function runFor(project) {
@@ -240,7 +257,8 @@ function Fixture() {
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
     return { ok: true, record: shared }
   }
-  async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
+  // A refusal before the request leaves is certified: nothing started.
+  async function start(action) { if(window.failStart) return {ok:false,notStarted:true,error:'Fixture agent unavailable'}; return { ok: true, ...await window.mobius.chat.start(action) } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
@@ -251,7 +269,7 @@ function Fixture() {
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={() => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project}
-          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
+          conn={conn} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} focusRun={focusRun} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
       />}</ProjectControls></> : null} />}
   </main></div>
 }
@@ -292,6 +310,11 @@ async function fill(node, value) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,value)
   node.dispatchEvent(new Event('input',{bubbles:true}))
   await frame(); await frame()
+}
+// A launch resolves its frozen prompts/model before its approval is enabled.
+async function enabled(name) {
+  await until(() => button(name) && !button(name).disabled, name + ' did not become available')
+  await click(button(name))
 }
 async function inventory() {
   const close=query('.co-inline-close')
@@ -502,7 +525,8 @@ window.runWorkspaceChecks = async () => {
       await click(button('Take on with agent',query('.co-task-content')))
       await until(() => query('.co-pr-confirm'),'Individual review confirmation did not open')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 8') && text(query('.co-pr-confirm')).includes('ccccccc') && !text(query('.co-pr-confirm')).includes('Contribution 7'),'Individual review changed PR scope or version')
-      const mergeOption=query('.co-pr-confirm input[type="checkbox"]')
+      const optionInput=name=>[...query('.co-pr-confirm').querySelectorAll('label')].find(node=>text(node).includes(name))?.querySelector('input')
+      const mergeOption=optionInput('Merge when safe')
       ensure(mergeOption && !mergeOption.checked && button('Start private review'),'Individual review granted merge by default')
       await click(mergeOption)
       ensure(button('Allow review & merge'),'Individual merge choice did not require guarded approval')
@@ -537,16 +561,17 @@ window.runWorkspaceChecks = async () => {
       ensure(query('.co-pr-confirm').closest('.co-task-content')?.getAttribute('role')==='region','Batch review did not use an inline nonmodal region')
       ensure(text(query('.co-pr-confirm')).includes('Contribution 7') && text(query('.co-pr-confirm')).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(query('.co-pr-confirm')).includes('aaaaaaa') && text(query('.co-pr-confirm')).includes('ccccccc'),'Exact heads absent')
-      ensure(!query('.co-pr-confirm input').checked && reviewRuns.length === 0,'Private review granted merge')
+      const mergeToggle=[...query('.co-pr-confirm').querySelectorAll('label')].find(node=>text(node).includes('Merge when safe'))?.querySelector('input')
+      ensure(mergeToggle && !mergeToggle.checked && reviewRuns.length === 0,'Private review granted merge')
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
       const region=query('.co-pr-confirm'), rect=region.getBoundingClientRect()
       ensure(rect.top >= 0 && rect.top < innerHeight && document.activeElement === region,'Review not visible/focused')
-      await click(query('.co-pr-confirm input'))
+      await click(mergeToggle)
       ensure(reviewRuns.length === 0,'Mode toggle counted as approval')
       ensure(text(query('.co-pr-confirm')).includes('current tip of the same target branch'),'Approval falsely pins the displayed base')
       ensure(text(query('.co-pr-confirm')).includes('fresh review of the combined code'),'Combined-code review missing from approval')
       window.liveBase='d'.repeat(40)
-      await click(button('Allow review & merge'))
+      await enabled('Allow review & merge')
       await until(() => reviewRuns.length === 1 && button('Open review conversation'),'Review did not start')
       const write=mutationRequests().at(-1)
       ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
@@ -559,7 +584,7 @@ window.runWorkspaceChecks = async () => {
     await check('review errors preserve exact selection for an explicit retry', async () => {
       await inventory(); await click(firstCheckbox); await click(button('Take on with agent'))
       window.failReview = true
-      await click(button('Start private review'))
+      await enabled('Start private review')
       await until(() => text(query('.co-pr-confirm')).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
       window.failReview=false; await click(button('Cancel')); await click(query('[aria-label="Clear selection"]'))
@@ -568,7 +593,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length
       await click(firstCheckbox); await click(button('Take on with agent',query('.co-pr-box-head')))
       window.exactHeadChanged=true
-      await click(button('Start private review'))
+      await enabled('Start private review')
       await until(()=>text(query('.co-pr-confirm')).includes('changed since this list loaded'),'Changed code did not stop exact launch')
       ensure(mutationRequests().length===before && reviewRuns.length===1,'Changed code was approved')
       window.exactHeadChanged=false
@@ -676,8 +701,20 @@ window.runWorkspaceChecks = async () => {
       await chooseProject('Fixture project')
       await until(() => text(query('.co-work-progress-row')).includes('Agent working'),'Saved task did not restore')
       await click(query('.co-work-progress-row'))
-      await until(() => button('Open conversation'),'Saved conversation unavailable')
+      await until(() => button('Open current conversation',query('[data-task="task:cycle"]')),'Saved conversation unavailable')
       ensure(calls.status.includes('prepare-1') && calls.starts.length===1,'Restore restarted work')
+    })
+    await check('losing merge rights hides new cycle starts but keeps current work and history visible', async () => {
+      window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'READ' } : project))
+      await chooseProject('Other project'); await chooseProject('Fixture project')
+      await until(() => text(query('.co-work-progress-row')).includes('Agent working'), 'Current work hidden without merge rights')
+      await click(query('.co-work-progress-row'))
+      const pane = () => query('[data-task="task:cycle"]')
+      await until(() => pane() && button('Open current conversation', pane()), 'Cycle status hidden without merge rights')
+      ensure(!button('Start fresh full merge cycle', pane()), 'A read-only project offered a new merge cycle')
+      await click(button('Prepare changes'))
+      ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
+      window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
     })
     await check('pulling accepted changes requires one explicit scoped agent handoff and preserves failures', async () => {
       await chooseProject('Other project')
@@ -848,6 +885,23 @@ window.runWorkspaceChecks = async () => {
       await click(query('[aria-label="Refresh project status"]'))
       await until(() => prRow(8), 'Inventory did not recover')
     })
+    await check('a chat run link opens that run in its project and starts nothing', async () => {
+      const run = { id: 'chat-run-12345678', mode: 'review', state: 'complete', chat_id: 'chat-run-chat', options: { review_prompt: 'Review fixture' },
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'all_clear', summary: 'Linked run findings',
+          public_review: { state: 'posted', url: 'https://github.com/owner/project/pull/7#pullrequestreview-1' } }] }
+      reviewRuns.unshift(run)
+      const before = mutationRequests().length, starts = calls.starts.length
+      await click(query('[aria-label="Refresh project status"]'))
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', nonce: 'run-link' })
+      const pane = () => query('[data-task="task:run:chat-run-12345678"]')
+      await until(() => pane() && text(pane()).includes('Linked run findings'), 'Run link did not open its run')
+      ensure(text(pane()).includes('Recorded version') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open review conversation', pane()), 'Shared run detail lost its version note, posted review or owning chat')
+      ensure(mutationRequests().length === before && calls.starts.length === starts, 'Opening a run link started or changed work')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Run detail did not close')
+      ensure(calls.releases.includes('run-link'), 'Leaving the run did not release its link')
+      reviewRuns.splice(reviewRuns.indexOf(run), 1)
+    })
     await check('switching project releases a chat PR link instead of pinning it on return', async () => {
       window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'switch' })
       await until(() => focusedDetail(11), 'Link did not open its PR')
@@ -920,7 +974,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => button('Allow review & merge'), 'Proposal not ready')
       const changed = savedSelection('selection-replaced'); changed.items[0].number = 8
       values.set('review-selections/selection-replaced.json', changed)
-      await click(button('Allow review & merge'))
+      await enabled('Allow review & merge')
       await until(() => text(query('.co-selection-page')).includes('changed while you were reading'), 'Proposal replacement was not detected')
       ensure(mutationRequests().length === beforeLink + 1, 'Replaced proposal was approved')
     })
@@ -970,7 +1024,7 @@ window.runWorkspaceChecks = async () => {
       // One authentic parent-window message represents returning from Settings.
       // No focus/click retries manufacture success or conceal duplicate work.
       window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
-      await until(() => text(query('.co-settings summary')).includes('reconnected-owner'), 'Foreground did not display the new account')
+      await until(() => query('.co-settings summary')?.getAttribute('aria-label')?.includes('reconnected-owner'), 'Foreground did not display the new account')
       const returning = calls.requests.slice(previous)
       ensure(returning.filter(call => call.url === '/api/github/status').length === 1, 'Foreground checked the account more than once')
       const overlays = returning.filter(call => call.url === '/api/github/graphql' && call.body.query.includes('resource(url:'))
@@ -978,6 +1032,14 @@ window.runWorkspaceChecks = async () => {
       await until(() => values.get('feed-cache.json')?.records?.[0]?.status === 'merged', 'Foreground live state was not reconciled and cached')
       ensure(ledgerReads === 2, 'Foreground did not own exactly one fresh ledger scan')
       ensure(returning.every(call => call.method === 'GET' || call.url === '/api/github/graphql'), 'Foreground mutated public work')
+    })
+    await check('settings leads with the GitHub account then one prompt editor and a precise destination', async () => {
+      await click(query('.co-settings summary'))
+      await until(()=>query('.co-prompt-settings textarea'), 'Prompt editor did not settle')
+      const panel=query('.co-settings-panel'), headings=[...panel.querySelectorAll('h3')]
+      ensure(headings.map(h=>text(h)).join('|')==='GitHub account|Agent prompts', 'Settings section order or headings differ')
+      ensure(button('GitHub account settings',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
+      await click(button('Done',panel))
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,

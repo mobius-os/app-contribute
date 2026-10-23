@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-08T02:32:37.803202Z",
+  "generatedAt": "2026-10-02T16:33:45.259139+00:00",
   "title": "Design System: Contribute",
   "extensions": {
     "colorMeta": {
@@ -69,7 +69,7 @@
       },
       "row-title": {
         "displayName": "Contribution title",
-        "purpose": "Keeps work titles prominent inside the inventory."
+        "purpose": "PR titles in the current list; live PR rows use 16px/650."
       },
       "body": {
         "displayName": "Reading copy",
@@ -82,14 +82,9 @@
     },
     "shadows": [
       {
-        "name": "bottom-work-surface",
-        "value": "0 8px 40px color-mix(in srgb, var(--text) 14%, transparent)",
-        "purpose": "Ambient separation for the temporary selection tray and review/assignment dock."
-      },
-      {
         "name": "active-detail-tab",
         "value": "0 1px 4px color-mix(in srgb, var(--text) 10%, transparent)",
-        "purpose": "Small lift for the selected Description, Files, or Activity tab."
+        "purpose": "Small lift for the selected detail tab."
       }
     ],
     "motion": [
@@ -111,8 +106,16 @@
     ],
     "breakpoints": [
       {
-        "name": "phone-workspace",
+        "name": "workspace-phone",
         "value": "680px"
+      },
+      {
+        "name": "settings-stack",
+        "value": "650px"
+      },
+      {
+        "name": "workspace-gutter",
+        "value": "640px"
       }
     ]
   },
@@ -121,138 +124,139 @@
       "name": "Primary action",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The current workflow’s main action, including Prepare and Start private review.",
-      "html": "<button type=\"button\" class=\"ds-primary\">Start private review</button>",
+      "description": "The current workflow’s agent handoff or exact confirmation.",
+      "html": "<button type=\"button\" class=\"ds-primary\">Take on with agent</button>",
       "css": ".ds-primary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--accent-hover,var(--accent)); border-radius:10px; background:var(--accent-hover,var(--accent)); color:var(--accent-fg); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-primary:hover { background:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); border-color:color-mix(in srgb,var(--accent-hover,var(--accent)) 90%,var(--text)); } .ds-primary:active { transform:scale(.97); } .ds-primary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } .ds-primary:disabled { opacity:.5; cursor:default; }"
     },
     {
       "name": "Secondary action",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "A visible alternative inside a review, assignment, or detail action group.",
-      "html": "<button type=\"button\" class=\"ds-secondary\">Review &amp; merge</button>",
+      "description": "A visible alternative for assignment, cancel, or detail actions.",
+      "html": "<button type=\"button\" class=\"ds-secondary\">Assign person</button>",
       "css": ".ds-secondary { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); cursor:pointer; transition:background .14s ease,border-color .14s ease,transform .1s ease; } .ds-secondary:hover { background:var(--surface-2,var(--surface)); border-color:color-mix(in srgb,var(--accent) 35%,var(--border)); } .ds-secondary:active { transform:scale(.97); } .ds-secondary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
       "name": "Quiet action",
       "kind": "button",
       "refersTo": "button-quiet",
-      "description": "Back, refresh, close-adjacent, and secondary navigation remain directly visible.",
+      "description": "Back, refresh, close, and secondary navigation remain directly visible.",
       "html": "<button type=\"button\" class=\"ds-quiet\">All projects</button>",
       "css": ".ds-quiet { min-height:44px; display:inline-flex; align-items:center; gap:6px; padding:8px 2px; border:0; background:transparent; color:var(--muted); font:650 14px var(--font); cursor:pointer; } .ds-quiet:hover { color:var(--text); } .ds-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
-      "name": "Project directory filters",
+      "name": "Compact project position",
       "kind": "custom",
-      "refersTo": "directory-field",
-      "description": "Search plus a native factual filter; the pair stacks below 680px.",
-      "html": "<div class=\"ds-directory\"><input type=\"search\" aria-label=\"Find a project\" placeholder=\"Find a project\"><label>Filter<select><option>All projects</option><option>Local changes</option><option>Updates</option></select></label></div>",
-      "css": ".ds-directory { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:16px; color:var(--muted); font:400 14px var(--font); } .ds-directory input,.ds-directory select { min-height:44px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font:400 16px var(--font); } .ds-directory input { width:100%; min-height:46px; padding:10px 13px; border-radius:12px; caret-color:var(--accent); } .ds-directory label { display:flex; align-items:center; gap:10px; } .ds-directory :is(input,select):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-directory { grid-template-columns:1fr; } }"
+      "refersTo": "compact-position",
+      "description": "Two scannable local/upstream lines precede the PR inventory.",
+      "html": "<section class=\"ds-position\"><div><span>Local</span><strong>6 changed files</strong><button>Prepare changes</button></div><div><span>Upstream</span><strong>2 incoming changes</strong><button>Pull updates</button></div></section>",
+      "css": ".ds-position { border-block:1px solid var(--border); color:var(--text); font-family:var(--font); } .ds-position div { display:flex; align-items:center; gap:12px; min-height:52px; } .ds-position div + div { border-top:1px solid var(--border); } .ds-position span { min-width:68px; color:var(--muted); font-size:14px; } .ds-position strong { flex:1; font-size:14px; font-weight:500; } .ds-position button { min-height:44px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-position button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-position div { gap:8px; min-height:44px; } .ds-position span { min-width:0; } .ds-position button { padding-inline:10px; } }"
     },
     {
-      "name": "Local work summary",
-      "kind": "card",
-      "refersTo": "local-work-summary",
-      "description": "One readable project summary leading to the private preparation workflow.",
-      "html": "<section class=\"ds-local\"><div><strong>Changes only you have</strong><p>6 changed files · 2 being edited. Prepare a clear proposal before sharing.</p></div><button type=\"button\">Prepare changes</button></section>",
-      "css": ".ds-local { display:flex; justify-content:space-between; align-items:center; gap:24px; padding:22px; border:1px solid var(--border); border-radius:12px; background:transparent; color:var(--text); font-family:var(--font); } .ds-local strong { display:block; font-size:19px; font-weight:600; } .ds-local p { margin:6px 0 0; color:var(--muted); font-size:15px; } .ds-local button { flex-shrink:0; min-height:44px; padding:10px 16px; border:1px solid var(--accent-hover,var(--accent)); border-radius:10px; background:var(--accent-hover,var(--accent)); color:var(--accent-fg); font:500 14px var(--font); } @media(max-width:680px) { .ds-local { align-items:flex-start; flex-direction:column; gap:18px; padding:20px; } .ds-local button { width:100%; } }"
+      "name": "PR list box header",
+      "kind": "custom",
+      "refersTo": "pr-action-toolbar",
+      "description": "GitHub-style list header: select-all and “N open”; Assign and Take on with agent appear only once PRs are selected.",
+      "html": "<div class=\"ds-pr-head\"><label><input type=\"checkbox\" aria-label=\"Select all visible pull requests\"></label><strong>2 selected</strong><button>Assign</button><button class=\"ds-pr-agent\">Take on with agent</button></div>",
+      "css": ".ds-pr-head { display:flex; align-items:center; gap:6px; min-height:52px; padding:4px 12px 4px 4px; border:1px solid var(--border); border-radius:8px 8px 0 0; background:var(--surface); color:var(--text); font-family:var(--font); } .ds-pr-head label { display:grid; place-items:center; width:40px; min-height:40px; } .ds-pr-head input { width:16px; height:16px; accent-color:var(--accent); } .ds-pr-head strong { flex:1; font-size:14px; } .ds-pr-head button { min-height:36px; padding:6px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-pr-head .ds-pr-agent { border-color:var(--accent); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-pr-head :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
-      "name": "Selectable contribution row",
+      "name": "Pull request row",
       "kind": "custom",
-      "description": "Native selection and detail opening remain separate controls.",
-      "html": "<article class=\"ds-pr is-selected\"><label class=\"ds-pr-select\"><input type=\"checkbox\" checked aria-label=\"Select contribution\"></label><button type=\"button\" class=\"ds-pr-open\"><strong>Prevent unfinished Goals from settling without an owner</strong><span>#1047 · You · 3 files · +637 −4</span></button><div class=\"ds-pr-side\"><span>Ready for review</span><b>Unassigned</b></div></article>",
-      "css": ".ds-pr { display:flex; flex-wrap:wrap; gap:8px; padding:18px 10px; border-bottom:1px solid var(--border); border-radius:10px; background:none; color:var(--text); font-family:var(--font); transition:background .14s ease; } .ds-pr.is-selected { background:var(--accent-dim); } .ds-pr-select { display:flex; align-items:flex-start; justify-content:center; min-width:44px; min-height:44px; padding-top:5px; } .ds-pr-select input { width:18px; height:18px; accent-color:var(--accent); } .ds-pr-open { flex:1; min-width:180px; min-height:44px; padding:0; border:0; background:none; color:var(--text); text-align:left; } .ds-pr-open strong { display:block; font:600 17px/1.45 var(--font); } .ds-pr-open span { display:block; margin-top:6px; color:var(--muted); font:400 14px/1.5 var(--font); } .ds-pr-side { display:flex; align-items:center; gap:10px; padding-left:44px; width:100%; } .ds-pr-side span { padding:3px 8px; border-radius:5px; background:var(--surface); color:var(--muted); font:400 14px var(--font); } .ds-pr-side b { color:var(--muted); font:650 14px var(--font); } .ds-pr :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "refersTo": "pr-row",
+      "description": "GitHub-style row: checkbox, state icon, title with colored labels, “#N · author opened … · ✓ n/m · +a −d” meta, quiet assign and small purple agent action on the right.",
+      "html": "<article class=\"ds-pr-row\"><label><input type=\"checkbox\" aria-label=\"Select PR 1047\"></label><span class=\"ds-pr-state\">⑂</span><div><button class=\"ds-pr-open\"><strong>Prevent unfinished Goals from settling without an owner</strong><span class=\"ds-label\" style=\"--bg:rgba(215,58,74,.18);--fg:hsl(354,66%,66%)\">bug</span></button><p>#1047 · contributor opened 2 days ago · ✓ 18/18 · <b>+42</b> <em>−3</em></p></div><aside><button aria-label=\"Assign PR 1047\">👤</button><button class=\"ds-pr-agent\" aria-label=\"Take PR 1047 on with an agent\">✦</button></aside></article>",
+      "css": ".ds-pr-row { display:grid; grid-template-columns:40px 20px minmax(0,1fr) auto; column-gap:6px; align-items:start; padding:8px 12px 8px 4px; border:1px solid var(--border); border-top:0; color:var(--text); font-family:var(--font); } .ds-pr-row label { display:grid; place-items:center; width:40px; min-height:40px; } .ds-pr-row input { width:16px; height:16px; accent-color:var(--accent); } .ds-pr-state { padding-top:11px; color:var(--green); } .ds-pr-open { display:block; padding:7px 0 0; border:0; background:none; color:var(--text); text-align:left; line-height:1.5; } .ds-pr-open strong { font:600 16px var(--font); } .ds-label { margin-left:4px; padding:0 8px; border-radius:2em; background:var(--bg); color:var(--fg); font:500 14px/20px var(--font); } .ds-pr-row p { margin:2px 0 0; color:var(--muted); font-size:14px; } .ds-pr-row b { color:var(--green); } .ds-pr-row em { color:var(--danger); font-style:normal; } .ds-pr-row aside { display:flex; gap:2px; } .ds-pr-row aside button { width:40px; height:40px; border:0; border-radius:8px; background:none; color:var(--muted); } .ds-pr-row .ds-pr-agent { background:var(--accent); color:var(--accent-fg); } .ds-pr-row :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
-      "name": "Selected contributions tray",
+      "name": "Inline review confirmation",
       "kind": "custom",
-      "refersTo": "selection-tray",
-      "description": "The fixed, nonmodal bottom stack for inspecting, removing, and acting on selected contributions.",
-      "html": "<section class=\"ds-tray\" aria-label=\"Selected contributions\"><header><button class=\"ds-tray-toggle\"><span class=\"ds-stack\">✓</span><strong>2 selected</strong><span>⌄</span></button><button class=\"ds-clear\" aria-label=\"Clear selection\">×</button></header><div class=\"ds-cards\"><article><button>#1077 <strong>Bump the frontend…</strong></button><button aria-label=\"Remove PR 1077\">×</button></article><article><button>#1047 <strong>Prevent unfinished…</strong></button><button aria-label=\"Remove PR 1047\">×</button></article></div><footer><button class=\"ds-review\">Review 2</button><button>Review &amp; merge</button><button>Assign…</button></footer></section>",
-      "css": ".ds-tray { width:min(920px,calc(100% - 48px)); padding:12px; border:1px solid var(--border); border-radius:18px; background:var(--surface); color:var(--text); box-shadow:0 8px 40px color-mix(in srgb,var(--text) 14%,transparent); font-family:var(--font); } .ds-tray header,.ds-tray footer { display:flex; align-items:center; gap:8px; } .ds-tray header { justify-content:space-between; } .ds-tray-toggle { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 8px; border:0; background:none; color:var(--text); } .ds-stack { display:grid; place-items:center; width:28px; height:28px; border:1px solid var(--border); border-radius:7px; background:var(--accent-dim); color:var(--accent); box-shadow:-3px -3px 0 var(--surface),-4px -4px 0 var(--border); } .ds-tray-toggle strong { font-size:15px; } .ds-clear { width:44px; min-height:44px; border:0; background:none; color:var(--muted); font-size:22px; } .ds-cards { display:flex; gap:8px; overflow:auto; padding:4px 2px 12px; } .ds-cards article { display:flex; align-items:center; flex:0 0 248px; border:1px solid var(--border); border-radius:10px; background:var(--bg); } .ds-cards button { min-height:48px; padding:8px 12px; border:0; background:none; color:var(--muted); font:400 14px var(--font); text-align:left; } .ds-cards button:first-child { flex:1; min-width:0; } .ds-cards strong { color:var(--text); font-weight:500; } .ds-tray footer { padding-top:10px; border-top:1px solid var(--border); } .ds-tray footer button { flex:1; min-height:44px; padding:9px 8px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-tray footer .ds-review { flex:1.4; border-color:var(--accent-hover,var(--accent)); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-tray :is(button):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-tray { width:calc(100% - 16px); border-radius:16px; } .ds-cards article { flex-basis:228px; } }"
-    },
-    {
-      "name": "Review task dock",
-      "kind": "custom",
-      "refersTo": "task-dock",
-      "description": "A scrollable bottom action surface that preserves project scroll and exact selected versions.",
-      "html": "<section class=\"ds-dock\" tabindex=\"-1\"><button class=\"ds-close\" aria-label=\"Close action\">×</button><h3>Review privately</h3><p>Review privately, in parallel where independent. Nothing is posted or merged.</p><ul><li><strong>Bump the frontend-minor-patch group</strong><span>mobius-os/mobius #1077</span></li><li><strong>Prevent unfinished Goals from settling without an owner</strong><span>mobius-os/mobius #1047</span></li></ul><details><summary>Exact versions covered by this approval</summary><p>#1077: version abc1234 → main (def5678)</p></details><label><input type=\"checkbox\"> Merge when safe</label><footer><button>Start private review</button><button>Cancel</button></footer></section>",
-      "css": ".ds-dock { position:relative; width:min(920px,calc(100% - 48px)); max-height:72dvh; overflow:auto; padding:24px; border:1px solid var(--border); border-radius:18px; background:var(--surface); color:var(--text); box-shadow:0 8px 40px color-mix(in srgb,var(--text) 14%,transparent); font-family:var(--font); } .ds-close { position:sticky; top:0; float:right; width:44px; min-height:44px; margin:-12px -10px 0 12px; border:0; background:var(--surface); color:var(--muted); font-size:22px; } .ds-dock h3 { margin:0 0 14px; padding-right:32px; font:650 22px/1.3 var(--font); letter-spacing:-.02em; } .ds-dock p { max-width:72ch; margin:10px 0 18px; color:var(--muted); font:400 16px/1.6 var(--font); } .ds-dock ul { padding:0; list-style:none; } .ds-dock li { padding:10px 0; } .ds-dock li span { display:block; color:var(--muted); font-size:14px; } .ds-dock details { margin-top:20px; padding-top:10px; border-top:1px solid var(--border); } .ds-dock summary,.ds-dock label { min-height:44px; color:var(--muted); font-size:14px; cursor:pointer; } .ds-dock label { display:flex; align-items:center; gap:12px; } .ds-dock label input { width:18px; height:18px; accent-color:var(--accent); } .ds-dock footer { display:flex; flex-wrap:wrap; gap:10px; margin-top:20px; } .ds-dock footer button { min-height:44px; padding:10px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-dock footer button:first-child { border-color:var(--accent-hover,var(--accent)); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-dock :is(button,input,summary):focus-visible { outline:2px solid var(--accent); outline-offset:2px; } @media(max-width:680px) { .ds-dock { width:calc(100% - 16px); max-height:76dvh; padding:20px; border-radius:16px; } }"
+      "refersTo": "inline-confirmation",
+      "description": "Private review or scoped repair-and-merge, model/effort at launch, review-only autopilot inside its choice.",
+      "html": "<section class=\"ds-confirm\"><h3>Review selected PRs</h3><p>Choose what the agent may do. Selection alone authorizes nothing.</p><div><button aria-pressed=\"true\">Review only</button><button aria-pressed=\"false\">Review, fix &amp; merge</button></div><label>Model <select><option>Use chat default</option></select></label><button class=\"ds-confirm-primary\">Start private review</button></section>",
+      "css": ".ds-confirm { padding:18px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--text); font-family:var(--font); } .ds-confirm h3 { margin:0 0 8px; font-size:18px; } .ds-confirm p { font-size:16px; line-height:1.5; } .ds-confirm > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:16px 0; } .ds-confirm button { min-height:44px; padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text); font:500 14px var(--font); } .ds-confirm button[aria-pressed=true] { border-color:var(--accent); background:var(--accent-dim); } .ds-confirm summary { min-height:44px; cursor:pointer; font-size:14px; } .ds-confirm .ds-confirm-primary { margin-top:16px; border-color:var(--accent); background:var(--accent-hover,var(--accent)); color:var(--accent-fg); } .ds-confirm :is(button,summary):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     },
     {
       "name": "Contribution detail tabs",
       "kind": "nav",
-      "description": "Description-first detail with lazy Files and Activity views.",
-      "html": "<nav class=\"ds-detail-tabs\" aria-label=\"Contribution details\"><button aria-pressed=\"true\">Description</button><button aria-pressed=\"false\">Files 2</button><button aria-pressed=\"false\">Activity</button></nav>",
-      "css": ".ds-detail-tabs { display:flex; width:fit-content; max-width:100%; gap:4px; padding:4px; border-radius:10px; background:var(--bg); font-family:var(--font); } .ds-detail-tabs button { min-height:48px; padding:8px 14px; border:0; border-radius:7px; background:none; color:var(--muted); font:400 16px var(--font); cursor:pointer; } .ds-detail-tabs button[aria-pressed=true] { background:var(--surface); color:var(--text); box-shadow:0 1px 4px color-mix(in srgb,var(--text) 10%,transparent); } .ds-detail-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+      "description": "GitHub PR page tabs (Conversation, Files changed with count and +/−, Checks with ✓ n/m) above a bounded scroll body.",
+      "html": "<section class=\"ds-detail\"><nav aria-label=\"Pull request details\"><button aria-pressed=\"true\">Conversation</button><button>Files changed <span>4</span></button><button>Checks ✓ 18/18</button></nav><div>Description and comments scroll here.</div></section>",
+      "css": ".ds-detail { color:var(--text); font-family:var(--font); } .ds-detail nav { display:flex; flex-wrap:nowrap; gap:18px; overflow-x:auto; border-bottom:1px solid var(--border); } .ds-detail button { flex:none; min-height:44px; padding:8px 10px; border:0; border-bottom:2px solid transparent; background:none; color:var(--muted); font:500 14px var(--font); } .ds-detail button[aria-pressed=true] { border-bottom-color:var(--accent); color:var(--text); } .ds-detail > div { height:clamp(280px,45dvh,520px); overflow:auto; padding:12px 3px 16px; font-size:16px; } .ds-detail button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Prompt editor",
+      "kind": "input",
+      "refersTo": "prompt-editor",
+      "description": "Review/Fix/Merge guidance shares one flat editor; no duplicate prompt or routine safety panel.",
+      "html": "<section class=\"ds-prompt\"><nav aria-label=\"Agent prompts\"><button aria-pressed=\"true\">Review</button><button>Fix</button><button>Merge decision</button></nav><label for=\"ds-prompt-text\">Review instructions</label><textarea id=\"ds-prompt-text\">Review the selected changes privately.</textarea></section>",
+      "css": ".ds-prompt { color:var(--text); font-family:var(--font); } .ds-prompt nav { display:flex; gap:16px; overflow-x:auto; border-bottom:1px solid var(--border); } .ds-prompt button { flex:none; min-width:44px; min-height:48px; padding:10px 0; border:0; border-bottom:2px solid transparent; background:none; color:var(--muted); font:500 14px var(--font); } .ds-prompt button[aria-pressed=true] { border-color:var(--accent); color:var(--text); } .ds-prompt label { display:block; margin:14px 0 6px; font-size:14px; font-weight:650; } .ds-prompt textarea { box-sizing:border-box; width:100%; min-height:270px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font:400 16px/1.6 var(--font); resize:vertical; } .ds-prompt summary { min-height:44px; cursor:pointer; font-size:14px; } .ds-prompt :is(button,textarea,summary):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
     }
   ],
   "narrative": {
     "northStar": "The Continuous Project Desk",
-    "overview": "Contribute is one calm, project-shaped workspace rather than a dashboard of competing panes. A project directory leads into a continuous vertical document: project position, local work, decisions that need attention, saved private proposals, public contributions, and history appear in one readable flow. Technical depth stays available without displacing the next meaningful action.\n\nSelection is a temporary working layer at the bottom of that document. Native checkboxes collect contributions without navigating; a compact stack of selected cards can expand, remove individual items, and launch review or assignment. Those workflows reuse the same bottom position as a focused, nonmodal dock while the project remains behind it. The shell owns both light and dark appearance, typography, icons, and semantic color.",
+    "overview": "Contribute is one calm project workspace, not a separate agent dashboard or Reviews room. A compact local/upstream position keeps the prepare and pull loop visible, then the open pull-request list becomes the principal working surface. Titles, authors, labels, check counts and assignment are scannable before detail is opened. Prepared work appears above PRs only when actionable. Full merge cycles and History sit below the inventory; old work is never restarted merely by opening it.\n\nSelection belongs to the list: native checkboxes reveal bulk actions in a GitHub-style list header. An agent handoff leads to an inline choice and exact confirmation; it is not a direct action on selection. Details open inside the row, with a reserved scrolling body below stable actions and tabs. Settings is flat: Review, Fix and Merge guidance share a tabbed editor, with account management below. Model and effort are chosen per launch. Version, consent and safety checks remain implementation contracts, not routine settings content. The Möbius shell owns theme colors, typography, and icons.",
     "keyCharacteristics": [
-      "One continuous workspace per project; no persistent split pane or second review room.",
-      "Directory filters reflect real local-change and update facts.",
-      "Selection accumulates independently from contribution detail.",
-      "Review and assignment occupy a fixed bottom dock without resetting project scroll.",
-      "Description leads; Files and Activity load only when opened.",
-      "Exact contribution versions remain the unit of approval and refresh safety."
+      "One continuous project workspace; no persistent split pane or second review room.",
+      "Compact two-line project position and immediate PR inventory.",
+      "Separate PR selection, detail, assignment, and agent action.",
+      "Inline review-mode choice and exact confirmation before a run starts.",
+      "Stable row detail actions and tabs above a bounded, scrolling context region.",
+      "Named paused work and saved history remain reachable below current work."
     ],
     "rules": [
       {
         "name": "Inherited Theme",
-        "body": "Use the shell’s semantic color and font variables in both light and dark modes. Do not freeze the accent into a named hue, manufacture a tonal ramp, or introduce an app-owned light/dark palette.",
+        "body": "Use shell semantic color and font variables in light and dark modes. Do not pin a purple hex, manufacture a tonal ramp, or introduce an app-owned theme.",
         "section": "colors"
       },
       {
         "name": "Written State",
-        "body": "Color may reinforce a state, but labels such as “Ready for review,” “Needs you,” and “Prepared · not shared” carry the meaning.",
+        "body": "Text such as “✓ 18/18”, “2 failing”, “Needs you” and “Prepared · not shared” carries meaning independently of color. Passing checks are not a review verdict.",
         "section": "colors"
       },
       {
         "name": "Readable Floor",
-        "body": "Do not shrink workflow copy below the established 14px label and 16px body sizes to fit more controls. Let controls wrap and layouts stack instead.",
+        "body": "Never shrink workflow copy to fit the phone. Keep practical control targets at least 44px; prompt tabs are 48px tall.",
         "section": "typography"
       },
       {
         "name": "Stable Inventory",
-        "body": "Checkbox selection changes only selection. It never opens detail, changes filters, scrolls the page, or steals focus.",
+        "body": "Checkbox selection neither navigates nor opens detail, changes a filter, steals focus, or scrolls the page.",
         "section": "layout"
       },
       {
         "name": "Continuous Context",
-        "body": "Tasks may focus attention, but they do not replace the project with another room or discard its place in the document.",
+        "body": "Inline decisions and detail may focus attention, but they do not replace the project or revive paused work.",
         "section": "layout"
       },
       {
         "name": "Temporary Lift",
-        "body": "Persistent project content stays flat; elevation belongs to the bottom selection/task surface or a transient control state.",
+        "body": "Elevation clarifies transient controls, not every PR row or project section.",
         "section": "elevation"
       },
       {
         "name": "Purposeful Radius",
-        "body": "Radius signals interaction and temporary grouping. Do not turn every project section or contribution row into a floating card.",
+        "body": "Grouping and interaction earn a radius; repeated project sections do not become decorative cards.",
         "section": "shapes"
       }
     ],
     "dos": [
-      "Do keep each project as one continuous document from position through history.",
-      "Do make directory filters reflect the data conditions named by their labels.",
-      "Do keep native checkbox selection independent from row detail and keyboard focus.",
-      "Do preserve selected versions through refresh only when the exact head and base still match, and announce removals.",
-      "Do place selected work and review actions in the fixed bottom tray/dock while keeping the final inventory rows reachable.",
-      "Do preserve local-work and prepared-record summaries as readable text, not counts alone.",
-      "Do lead contribution detail with Description and defer Files and Activity until requested.",
-      "Do enumerate exact public effects and contribution versions before approval."
+      "preserve the local/upstream prepare-and-pull context above PR work.",
+      "lead with visible PR title, author, labels and actual checks; omit empty agent state.",
+      "keep selection independent from row detail and route agent action through inline confirmation.",
+      "distinguish assignment, private review, legacy merge scope, and scoped takeover.",
+      "keep detail controls stable while context loads and scrolls below them.",
+      "show paused work by name and preserve its remaining steps without automatic restart.",
+      "keep editable prompts separate from frozen run snapshots and immutable safety instructions.",
+      "identify selected PRs and explain actual public effects before approval; retain exact-version binding underneath."
     ],
     "donts": [
-      "Don't restore the discarded split-pane workspace, persistent task rail, or separate Reviews room.",
-      "Don't treat a row checkbox as navigation or clear selection merely because detail opened.",
-      "Don't make the bottom tray modal, reset project scroll, or discard selection while the review/assignment dock is open.",
-      "Don't hide changed-version removal; announce that the current version must be selected again.",
-      "Don't shrink labels below 14px or body copy below 16px to make the phone layout fit.",
-      "Don't invent fixed colors, tonal ramps, icons, approval states, or workflow capabilities outside the implemented semantic theme and product contract."
+      "restore a split-pane workspace, parallel Reviews room, or bottom tray as the primary PR action.",
+      "equate passing checks with a review verdict or queued work with merged work.",
+      "start agent work merely from selecting a PR or assigning a person.",
+      "hide changed-version removal, scope drift, or ambiguous outcomes.",
+      "shrink 14px metadata, 16px body copy, or 44px controls to fit the phone.",
+      "invent fixed colors, fonts, icons, approval states, or product permissions outside the shell and implemented contract."
     ]
   }
 }

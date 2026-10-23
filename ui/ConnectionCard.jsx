@@ -1,7 +1,28 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { openGithubSettings } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
-import { AgentModelSettings } from './AgentModelSettings.jsx'
+import { ReviewPromptSettings } from './ReviewPromptSettings.jsx'
+// Component-local settings layout. The app shell keeps its existing theme tokens.
+export const SETTINGS_CSS = `
+.co-settings-workspace { box-sizing:border-box; width:min(820px,calc(100vw - 32px)); max-height:calc(100dvh - 110px); padding:24px; }
+.co-settings-workspace > header { padding-bottom:14px; border-bottom:1px solid var(--border); }
+.co-settings-layout { display:block; }
+.co-settings-content { min-width:0; padding-top:15px; }
+.co-settings-content h3 { margin:0 0 12px; font-size:18px; line-height:1.4; font-weight:650; }
+.co-settings-content .co-prompt-settings { margin:0; padding:0; border:0; }
+.co-settings-content .co-prompt-settings textarea { min-height:270px; font-size:16px; line-height:1.6; }
+.co-settings-skeleton { min-height:420px; padding:24px 0; color:var(--muted); }
+.co-prompt-editor-group { padding:8px 0 16px; border-bottom:1px solid var(--border); }
+.co-prompt-editor-group .co-quiet-action { margin-top:4px; }
+.co-prompt-settings > label { font-weight:650; }
+.co-settings-account { padding-bottom:24px; margin-bottom:24px; border-bottom:1px solid var(--border); }
+.co-settings-workspace > header .co-quiet-action { min-height:44px; padding:8px 12px; border:0; border-radius:8px; background:none; color:var(--muted); font:inherit; cursor:pointer; }
+.co-settings-workspace > header .co-quiet-action:hover { background:var(--surface-2); color:var(--text); }
+.co-settings-account .co-conn-settings { display:block; }
+.co-settings-account .co-conn-actions { margin-top:10px; }
+@media(max-width:650px) { .co-settings-workspace { position:fixed; inset:68px 16px auto; width:auto; max-height:calc(100dvh - 84px); padding:18px; } .co-settings-content { padding-top:16px; } }
+`
+
 
 // One settings surface, opened on demand. It shows which GitHub account
 // Contribute uses; connecting or changing that account happens in Möbius
@@ -26,13 +47,18 @@ export function ConnectionSettings(props) {
     setOpen(next)
     if (next) void props.onChanged?.()
   }}>
-    <summary aria-label={`${accountStatus} — Contribute settings`} title={`${accountStatus} · Settings`}>
-      <Icon name="github" size={20} /><span>{accountLabel}</span>
+    <summary aria-label={`${accountStatus}${props.conn?.state === 'connected' && props.conn?.login ? ` as ${props.conn.login}` : ''} — Contribute settings`} title={`${accountStatus} · Settings`}>
+      <Icon name="settings" size={20} /><span>Settings</span>
     </summary>
-    {open ? <div className="co-settings-panel">
+    {open ? <div className="co-settings-panel co-settings-workspace"><style>{SETTINGS_CSS}</style>
       <header><h2>Settings</h2><button type="button" className="co-quiet-action" onClick={() => { ref.current.open = false; ref.current.querySelector('summary')?.focus() }}>Done</button></header>
-      <AgentModelSettings token={props.token} choice={props.agentChoice} onChange={props.onChooseAgent} />
-      <ConnectionCard {...props} />
+      <div className="co-settings-layout">
+        <div className="co-settings-content">
+          <section className="co-settings-account" aria-label="GitHub account"><h3>GitHub account</h3><ConnectionCard {...props} /></section>
+          <h3>Agent prompts</h3>
+          <ReviewPromptSettings token={props.token} appId={props.appId} />
+        </div>
+      </div>
     </div> : null}
   </details>
 }
@@ -120,7 +146,7 @@ export function ConnectionCard({
     return (
       <div className="co-conn is-connected">
         <p className="co-account-login"><Icon name="github" size={18} /> {conn.login}</p>
-        <p className="co-conn-note">Managed in Möbius Settings → Accounts.</p>
+        <p className="co-conn-note">This account is shared across Möbius apps.</p>
         <div className="co-conn-settings" role="group" aria-label="Contribution settings">
           {conn.autopilotAvailable && typeof onToggleAutopilotDefault === 'function' && (
             <div className="co-autopilot-setting">
@@ -156,7 +182,7 @@ export function ConnectionCard({
               </span>
             </div>
           )}
-          <div className="co-conn-actions">{settingsButton('Manage in Settings')}</div>
+          <div className="co-conn-actions">{settingsButton('GitHub account settings')}</div>
         </div>
       </div>
     )
