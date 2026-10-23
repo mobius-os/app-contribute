@@ -69,9 +69,13 @@ export function observeAttempt(attempt, byId) {
 }
 
 // The size of the change, from the reviewed diff stat (as the static card shows it).
-const STAT = /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/
+// The whole trimmed `git diff --shortstat` line, and nothing else. Git omits a
+// zero count, so insertions-only, deletions-only and a bare "N files changed"
+// (binary, mode, rename or empty-file changes) are all valid; any other text
+// is unreadable and keeps the card blocked.
+const STAT = /^(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?$/
 export function changeSize(plan) {
-  const stat = STAT.exec(String(plan?.diff_stat || ''))
+  const stat = STAT.exec(String(plan?.diff_stat || '').trim())
   if (!stat) return ''
   const files = Number(stat[1])
   return `${files} ${files === 1 ? 'file' : 'files'} · +${stat[2] || 0} −${stat[3] || 0}`

@@ -493,3 +493,29 @@ test('a change without a readable size is never offered for Confirm, single or i
   assert.equal(deletions.action('chat-send:one').confirming, true)
   assert.equal(deletions.action('chat-send:one').confirmation[0].facts.find(fact => fact.label === 'Change').value, '2 files · +0 −7')
 })
+
+test('only a whole Git shortstat line counts as a change size', () => {
+  const sizeOf = diffStat => confirmationItem(prepared('s', { plan: { diff_stat: diffStat } })).facts.find(fact => fact.label === 'Change')?.value
+  for (const [stat, size] of [
+    [' 3 files changed, 40 insertions(+), 2 deletions(-)', '3 files · +40 −2'],
+    ['1 file changed, 1 insertion(+)', '1 file · +1 −0'],
+    [' 2 files changed, 7 deletions(-)\n', '2 files · +0 −7'],
+    ['1 file changed', '1 file · +0 −0'],
+  ]) assert.equal(sizeOf(stat), size, stat)
+  for (const stat of ['1 file changed, lots of deletions', '2 files changed, 40 insertions(+), ??? deletions(-)',
+    'about 1 file changed', '1 file changed, 2 insertions(+) and more', '1 file changed, 2 deletions(-), 3 insertions(+)',
+    ' 3 files changed, 4 insertions(+)\n 1 file changed']) {
+    assert.equal(sizeOf(stat), undefined, `unreadable: ${JSON.stringify(stat)}`)
+  }
+})
+
+test('a malformed shortstat suffix keeps the card blocked', async () => {
+  for (const stat of ['1 file changed, lots of deletions', '2 files changed, 40 insertions(+), ??? deletions(-)']) {
+    const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one', { plan: { diff_stat: stat } })] })
+    await openConfirm(h, 'chat-send:one')
+    const state = h.action('chat-send:one')
+    assert.equal(state.confirming, false, stat)
+    assert.equal(state.note, SIZE_NOTE)
+    assert.equal(h.sends.length, 0)
+  }
+})
