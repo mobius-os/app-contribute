@@ -90,7 +90,10 @@ export function useProjectCycle(projectKey, deliver) {
     window.addEventListener('focus', check)
     return () => { clearInterval(timer); window.removeEventListener('focus', check) }
   }, [cycle.chatId, cycle.phase, refresh])
-  const NOT_SENT_AGAIN = 'No conversation holds this start any more, so it was not sent again. Start new work to send it.'
+  // No conversation holds the cycle: its first request never reached Möbius
+  // (the usual case), or the owner deleted the conversation it created.
+  const NEVER_REACHED = 'This start never reached Möbius. Start it again.'
+  const CONVERSATION_DELETED = 'Its conversation was deleted, so this start was not sent again. Start it again.'
   // Deliver cycle k, only while the project record names k as its current,
   // unconfirmed cycle. Everything else (a superseded or delivered cycle, an
   // unreadable record) sends nothing and changes nothing.
@@ -131,8 +134,8 @@ export function useProjectCycle(projectKey, deliver) {
       if (rows.length > 1) return keepUnsent('More than one conversation answers this project. Open them before continuing.')
       if (!rows.length) {
         await updateCurrentCycle(requestedProject, planned.k, planned.cid, { closed: true })
-        await settleFromRecord(requestedProject, NOT_SENT_AGAIN)
-        return { ok: false, closed: true, error: NOT_SENT_AGAIN }
+        await settleFromRecord(requestedProject, NEVER_REACHED)
+        return { ok: false, closed: true, error: NEVER_REACHED }
       }
       chatId = String(rows[0].id)
     }
@@ -147,8 +150,8 @@ export function useProjectCycle(projectKey, deliver) {
       { chatId: reached, modelApplied: outcome.modelApplied, delivered: Boolean(outcome.ok && reached), closed: Boolean(outcome.gone) })
     if (!isCurrent(requestedProject)) return outcome
     if (outcome?.gone) {
-      await settleFromRecord(requestedProject, NOT_SENT_AGAIN)
-      return { ok: false, closed: true, error: NOT_SENT_AGAIN }
+      await settleFromRecord(requestedProject, CONVERSATION_DELETED)
+      return { ok: false, closed: true, error: CONVERSATION_DELETED }
     }
     if (!outcome?.ok || !reached) {
       return keepUnsent(outcome?.error || 'This start was not confirmed. Send it again.', reached ? { chatId: reached } : {})

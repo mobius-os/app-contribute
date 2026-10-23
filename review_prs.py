@@ -114,9 +114,14 @@ def run_block(run):
   if not RUN_ID.fullmatch(str(run.get("id") or "")):
     raise ValueError("Invalid run identity.")
   items = run.get("items") or []
-  # The same public-effect naming as the app's run view: posting is not private.
-  posted = run.get("mode") == "review" and (run.get("options") or {}).get("post_review") is True
-  title = "GitHub review" if posted else RUN_TITLES.get(run.get("mode"), "Private review")
+  # The same naming as the app's run view (`reviewRunTitle`): posting is not
+  # private, and a run whose mode is not reported is not assumed private. A
+  # core run started outside Contribute arrives minimized
+  # (`details_in_owning_chat`), with `post_review` at the top level.
+  minimized = run.get("details_in_owning_chat") is True
+  posted = (run.get("post_review") if minimized else (run.get("options") or {}).get("post_review")) is True
+  mode = run.get("mode")
+  title = RUN_TITLES.get(mode) or ("GitHub review" if posted else "Private review" if mode == "review" else "Review run")
   return {"app": "contribute", "intent": f"review-run:{run['id']}", "title": title, "inline": False,
     "facts": [{"label": "Pull requests", "value": ", ".join(f"{item['repo']}#{item['number']}" for item in items)[:240] or "None"},
       {"label": "Status", "value": str(run.get("execution_state") or run.get("state") or "unknown")[:240]}]}

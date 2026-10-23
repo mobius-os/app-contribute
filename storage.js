@@ -504,24 +504,29 @@ const SETTINGS_FILE = 'settings.json'
 const DEFAULT_APP_SETTINGS = Object.freeze({
   autopilot_default: true,
   submission_method: 'github',
-  agent_provider: '',
-  agent_model: '',
-  agent_effort: '',
 })
+// Older builds kept one app-wide agent model here. Each launch now carries its
+// own model choice (none means the chat default), so these keys are retired.
+const RETIRED_SETTINGS = ['agent_provider', 'agent_model', 'agent_effort']
 
 export function normalizeAppSettings(raw) {
-  return raw && typeof raw === 'object'
-    ? { ...DEFAULT_APP_SETTINGS, ...raw, submission_method: 'github' }
-    : { ...DEFAULT_APP_SETTINGS }
+  const kept = raw && typeof raw === 'object'
+    ? Object.fromEntries(Object.entries(raw).filter(([key]) => !RETIRED_SETTINGS.includes(key)))
+    : {}
+  return { ...DEFAULT_APP_SETTINGS, ...kept, submission_method: 'github' }
 }
 
-// App-level preferences (not per-contribution): publication, Autopilot, and the
-// optional model used for new agent work started here. Missing/unreadable →
-// defaults; existing conversations retain the model they already use.
+// App-level preferences (not per-contribution): publication and Autopilot.
+// Missing/unreadable → defaults. A saved copy that still has the retired
+// app-wide model keys is rewritten without them, once.
 export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)
-    return normalizeAppSettings(raw)
+    const settings = normalizeAppSettings(raw)
+    if (raw && typeof raw === 'object' && RETIRED_SETTINGS.some(key => key in raw)) {
+      try { await window.mobius.storage.set(SETTINGS_FILE, settings) } catch { /* a later save drops them */ }
+    }
+    return settings
   } catch {
     return normalizeAppSettings(null)
   }

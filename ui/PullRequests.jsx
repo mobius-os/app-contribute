@@ -105,12 +105,14 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
   // null until the server preset resolves: loading is not the same as an
   // inactive capability, so the launch must not claim an update is missing.
   const [resolvedCapabilities,setCapabilities] = useState(null)
-  const capabilities = resolvedCapabilities || served
+  const [unsupported,setUnsupported] = useState(false)
+  const capabilities = resolvedCapabilities || served || (unsupported ? {} : null)
   // The preview resolves what "default" means right now (owner background
   // agent setting and its quota fallback); keep that answer for the picker.
   const [defaultChoice,setDefaultChoice] = useState(null)
   const resolve = useCallback(value => {
     setPromptOptions(value?.options || null); setCapabilities(value ? (value.capabilities || {}) : null)
+    if (value) setUnsupported(false)
     if (value && !value.agent) setDefaultChoice(value.preview?.options?.choice || null)
     onResolved?.(value)
   },[onResolved])
@@ -155,7 +157,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
     {bindCurrentTarget ? <p>On confirmation, unchanged PR heads are bound to the current tip of the same target branch, which may be newer than the snapshot below. Changed heads, target branches or draft status require a fresh confirmation.</p> : null}
     <details className="co-task-details"><summary>{bindCurrentTarget ? 'PR heads and target branches' : 'Exact versions covered by this approval'}</summary>{choice.pulls.map(pr => <p key={prKey(pr)}>#{pr.number}: version <code>{pr.headRefOid.slice(0, 7)} → {pr.baseRefName} ({bindCurrentTarget ? 'last seen ' : ''}{baseTip(pr)?.slice(0, 7)})</code></p>)}{!bindCurrentTarget ? <p>Changed code requires a fresh approval.</p> : null}</details>
     {onAgentChange ? <AgentModelSettings token={token} choice={choice.agent} defaultChoice={defaultChoice} defaultHint="Your background agent setting" onChange={next => { onAgentChange(next); return true }} /> : null}
-    {appId && token ? <ReviewPromptPreview token={token} appId={appId} choice={choice} onResolved={resolve} /> : null}
+    {appId && token ? <ReviewPromptPreview token={token} appId={appId} choice={choice} onResolved={resolve} onUnsupported={() => setUnsupported(true)} /> : null}
     <div className="co-board-actions">
       <button className="co-btn co-btn-primary" disabled={busy || disabled || (takeover && !takeoverAvailable)} onClick={onConfirm}>{busy ? 'Starting…' : takeover ? 'Allow scoped takeover' : merge ? 'Allow review & merge' : posting ? 'Review and post on GitHub' : 'Start private review'}</button>
       <button className="co-btn" disabled={busy} onClick={onCancel}>Cancel</button>

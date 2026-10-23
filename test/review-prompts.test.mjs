@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { loadWorkflowOptions, previewWorkflow, reviewOptions, saveWorkflowOptions, workflowAgent, workflowSettings } from '../review-prompts.js'
+import { loadWorkflowOptions, previewWorkflow, promptOverrides, reviewOptions, saveWorkflowOptions, workflowAgent, workflowSettings } from '../review-prompts.js'
 import { reviewRunRequest } from '../collaboration.js'
 
 const defaults = {review_prompt:'Review the full diff',fix_prompt:'Fix findings',merge_prompt:'Merge only when safe',max_rounds:null,autopilot:false,mandatory_instructions:'No unrelated scope'}
@@ -40,6 +40,21 @@ test('settings save compares the version the owner edited, never a new version r
   assert.deepEqual(writes,[['review-workflow.json',reviewOptions(defaults),{ifMatch:'v7'}]])
   await saveWorkflowOptions(defaults,null)
   assert.deepEqual(writes[1][2],{ifNoneMatch:true})
+})
+test('saving keeps only the prompts that differ from the current defaults; restore clears the override',async t=>{
+  const writes=[]
+  storage(t,null,null,{durableWrite:async(...args)=>{writes.push(args);return {durability:'synced',version:'v2'}}})
+  const presets={review_prompt:'Review preset',fix_prompt:'Fix preset',merge_prompt:'Merge preset',autopilot:true}
+  // Pressing Save on untouched settings pins no preset text.
+  await saveWorkflowOptions({...presets},'v1',presets)
+  assert.deepEqual(writes[0][1],{autopilot:true})
+  // Editing one prompt saves only that prompt.
+  await saveWorkflowOptions({...presets,fix_prompt:'My fix guidance'},'v2',presets)
+  assert.deepEqual(writes[1][1],{fix_prompt:'My fix guidance',autopilot:true})
+  // Restore sets the default text back, which removes the override on Save.
+  await saveWorkflowOptions({...presets,fix_prompt:presets.fix_prompt},'v3',presets)
+  assert.equal('fix_prompt' in writes[2][1],false)
+  assert.deepEqual(promptOverrides({review_prompt:'x'},null),{review_prompt:'x'},'without known defaults nothing is dropped')
 })
 test('offline reads and unconfirmed saves never claim durable prompt settings',async t=>{
   storage(t,null,null,{getWithVersion:async()=>({offline:true}),durableWrite:async()=>({durability:'queued'})})

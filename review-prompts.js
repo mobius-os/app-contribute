@@ -22,8 +22,17 @@ export async function workflowSettings() {
     }
   }
 }
-export async function saveWorkflowOptions(value, version) {
-  const receipt = await window.mobius.storage.durableWrite('review-workflow.json', reviewOptions(value), version ? { ifMatch:version } : { ifNoneMatch:true })
+// Only prompts the owner actually changed are saved, so later improvements to
+// the platform's presets still reach every prompt left at its default, and
+// restoring a prompt removes its override.
+const PROMPT_KEYS = ['review_prompt', 'fix_prompt', 'merge_prompt']
+export function promptOverrides(value, defaults) {
+  const options = reviewOptions(value)
+  if (!defaults) return options
+  return Object.fromEntries(Object.entries(options).filter(([key, text]) => !PROMPT_KEYS.includes(key) || text !== defaults[key]))
+}
+export async function saveWorkflowOptions(value, version, defaults = null) {
+  const receipt = await window.mobius.storage.durableWrite('review-workflow.json', promptOverrides(value, defaults), version ? { ifMatch:version } : { ifNoneMatch:true })
   if (receipt.durability !== 'synced') throw new Error('Settings are not confirmed saved. Go online and try again.')
   return receipt
 }
