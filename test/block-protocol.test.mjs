@@ -28,26 +28,55 @@ test('only the parent shell on this origin can initialise or drive a card sessio
   delete globalThis.window
 })
 
-test('state goes through the host handle that stamps its session and generation', () => {
+test('state goes through the host handle, or is posted with the document generation it received', () => {
   const { win, posted } = fakeWindow()
   globalThis.window = win
   const sent = []
   const handle = { sessionId: 's', generation: 3, setState: state => sent.push(state) }
-  publishBlockState({ sessionId: 's', actions: [] }, handle)
+  assert.equal(publishBlockState({ sessionId: 's', actions: [] }, handle), true)
   assert.deepEqual(sent, [{ actions: [] }])
-  publishBlockState({ sessionId: 'other', actions: [] }, handle)
-  assert.equal(posted.length, 1, 'a message-announced session is answered by message')
+  // A session announced by message is answered with that envelope's generation.
+  assert.equal(publishBlockState({ sessionId: 'm', generation: 99, actions: [] }, { sessionId: 'm', generation: 7 }), true)
+  assert.deepEqual(posted, [{ message: { type: 'moebius:app-block-state', sessionId: 'm', generation: 7, actions: [] }, origin: 'https://mobius.example' }])
+  // No generation, or another session: nothing the host would accept is sent.
+  assert.equal(publishBlockState({ sessionId: 'm', actions: [] }, { sessionId: 'm', generation: null }), false)
+  assert.equal(publishBlockState({ sessionId: 'x', actions: [] }, handle), false)
+  assert.equal(publishBlockState({ sessionId: 's', actions: [] }), false)
+  assert.equal(posted.length, 1)
   delete globalThis.window
   assert.equal(readBlockSession({ sessionId: 's', generation: 3, actions: [] }).generation, 3)
+  assert.equal(readBlockSession({ actions: [] }), null)
+  assert.deepEqual(readBlockSession({ sessionId: 's', generation: '3', actions: [], retain: 'yes', checkpoint: { id: 'c', data: '{}', other: 1 } }),
+    { sessionId: 's', generation: null, actions: [], checkpoint: { id: 'c', data: '{}' }, retain: false, recoveryError: false })
 })
 
-test('state goes only to the parent on this origin and session input is normalised', () => {
+// The real B2 host modules, when the platform's blocks clone is present.
+const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || '/data/workplans/contribute-stack-reviews/work/blocks/mobius/frontend'
+async function b2(t) {
+  try {
+    return {
+      host: await import(`${BLOCKS}/src/components/AppCanvas/appBlockSessionHost.js`),
+      state: await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`),
+    }
+  } catch { t.skip('B2 host modules are not available (set MOBIUS_BLOCKS_FRONTEND)'); return null }
+}
+
+test('the B2 host accepts exactly the reports this adapter posts for its document', async t => {
+  const modules = await b2(t)
+  if (!modules) return
   const { win, posted } = fakeWindow()
   globalThis.window = win
-  publishBlockState({ sessionId: 's', actions: [] })
-  assert.deepEqual(posted, [{ message: { type: 'moebius:app-block-state', sessionId: 's', actions: [] }, origin: 'https://mobius.example' }])
+  const documents = modules.host.createBlockDocuments()
+  const live = documents.load('v1')
+  documents.mounted('v1', { blockGeneration: live.generation, supportsAppBlocks: true })
+  const envelope = readBlockSession(modules.host.blockSessionEnvelope({ sessionId: 's', actions: [] }, live.generation))
+  publishBlockState({ sessionId: 's', actions: [] }, envelope)
+  const forwarded = []
+  assert.equal(modules.host.forwardBlockState({ message: posted[0].message, session: { sessionId: 's' }, document: live, isLive: true, onState: m => forwarded.push(m) }), true)
+  // After a reload (new generation), the old document's report is dropped.
+  const reloaded = documents.load('v1')
+  documents.mounted('v1', { blockGeneration: reloaded.generation, supportsAppBlocks: true })
+  assert.equal(modules.host.forwardBlockState({ message: posted[0].message, session: { sessionId: 's' }, document: reloaded, isLive: true, onState: m => forwarded.push(m) }), false)
+  assert.equal(forwarded.length, 1)
   delete globalThis.window
-  assert.equal(readBlockSession({ actions: [] }), null)
-  assert.deepEqual(readBlockSession({ sessionId: 's', actions: [], retain: 'yes', checkpoint: { id: 'c', data: '{}', other: 1 } }),
-    { sessionId: 's', generation: null, actions: [], checkpoint: { id: 'c', data: '{}' }, retain: false, recoveryError: false })
 })

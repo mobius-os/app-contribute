@@ -240,3 +240,29 @@ test('checkpoint and outcome rules are bounded and conservative', () => {
   const update = confirmationItem({ ...prepared('u'), number: 12, plan: { ...prepared('u').plan, action: 'pr_update' } })
   assert.equal(update.facts.find(fact => fact.label === 'Action').value, 'Update pull request #12')
 })
+
+test('a card never reports more than one confirming action, so the B2 host keeps Confirm available', async t => {
+  const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || '/data/workplans/contribute-stack-reviews/work/blocks/mobius/frontend'
+  let b2 = null
+  try { b2 = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`) } catch { /* checked locally below */ }
+  const ids = ['one', 'two']
+  const actions = [...ids.map(id => ({ key: `chat-send:${id}`, label: 'Contribute' })), { key: `chat-send-batch:${batchHandle(ids)}`, label: 'Contribute all' }]
+  const h = harness({ actions, records: ids.map(id => prepared(id)) })
+  const batch = actions.at(-1).key
+  const confirmingKeys = () => h.last().actions.filter(action => action.confirming).map(action => action.key)
+  await openConfirm(h, batch)
+  assert.deepEqual(confirmingKeys(), [batch])
+  // Another action's tap while one is confirming never adds a second Confirm.
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.deepEqual(confirmingKeys(), [batch])
+  h.fire(batch, 'cancel'); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.deepEqual(confirmingKeys(), ['chat-send:one'])
+  for (const state of h.states) assert.ok(state.actions.filter(action => action.confirming).length <= 1, 'never two confirming actions')
+  if (!b2) return t.diagnostic('B2 host module unavailable; checked the one-confirmation rule locally')
+  const parsed = b2.sessionState({ type: 'moebius:app-block-state', ...h.last() }, 'session-1', new Set(actions.map(action => action.key)))
+  const confirming = parsed.actions.filter(action => action.confirming)
+  assert.equal(confirming.length, 1)
+  assert.ok(confirming[0].confirmation?.length === 1 && !confirming[0].disabled, 'the host shows the app-sourced list and an enabled Confirm')
+  assert.notEqual(confirming[0].note, b2.AMBIGUOUS_CONFIRMATION)
+})

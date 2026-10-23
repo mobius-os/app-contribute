@@ -1217,7 +1217,7 @@ window.runWorkspaceChecks = async () => {
         data: { type: 'moebius:app-block-action', sessionId: 'card-1', key: 'chat-send:card-record', event: name, nonce } }))
       const before = calls.requests.length
       try {
-        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', generation: 4, actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
         await until(() => card() && !card().disabled, 'Card state was not published')
         ensure(!calls.requests.slice(before).some(call => call.url === '/api/github/status'), 'An idle card mounted the full app')
         fire('activate', 'card-n1')
@@ -1230,6 +1230,8 @@ window.runWorkspaceChecks = async () => {
         ensure(submits.length === 1, 'Confirm did not send exactly once: ' + submits.length)
         ensure(submits[0].expected_record?.id === 'card-record' && submits[0].expected_record.plan.head_sha === HEAD, 'Send did not carry the confirmed snapshot')
         ensure(states.at(-1).checkpoint === null, 'A proven result kept its recovery checkpoint')
+        ensure(states.length && states.every(state => state.generation === 4), 'A state report did not name its document generation')
+        ensure(states.every(state => state.actions.filter(action => action.confirming).length <= 1), 'More than one action asked for confirmation')
       } finally {
         window.postMessage = realPost
         window.fullAppSubmit = null; window.fullAppBinding = false
