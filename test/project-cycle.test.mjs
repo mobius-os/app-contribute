@@ -370,6 +370,49 @@ test('reserved-start guidance names only controls that exist on this Möbius', a
   assert.doesNotMatch(withoutFence, /Discard/, 'no instruction to use a control this Möbius lacks')
   assert.match(withoutFence, /cannot safely cancel it, so it stays reserved\. Check again/)
   assert.match(reservedStartBlocker({ action: null, mergeRights: true, canDiscard: true }), /Discard it, then start again/)
-  assert.match(reservedStartBlocker({ action: { ...ACTION, merge: true }, mergeRights: false, canDiscard: false }), /needs merge rights/)
-  assert.equal(reservedStartBlocker({ action: ACTION, mergeRights: false, canDiscard: false }), '')
+  // A saved start is always finishable, even after merge rights are lost.
+  assert.equal(reservedStartBlocker({ action: { ...ACTION, merge: true }, canDiscard: false }), '')
+  assert.equal(reservedStartBlocker({ action: ACTION, canDiscard: false }), '')
+})
+
+test('a new full-cycle reservation that never reached the platform is finished, not stranded, after merge rights are lost', async () => {
+  // Real storage helpers over an online CAS fixture; no legacy data.
+  const { claimProjectCycle, loadCycleState, settleProjectCycleClaim } = await import('../storage.js')
+  const stored = new Map(), versions = new Map()
+  const previousWindow = globalThis.window
+  globalThis.window = { mobius: { storage: {
+    get: async key => structuredClone(stored.get(key) ?? null),
+    getWithVersion: async key => ({ value: structuredClone(stored.get(key) ?? null), version: versions.get(key) || null }),
+    durableWrite: async (key, value, options = {}) => {
+      if ((options.ifNoneMatch && versions.has(key)) || (options.ifMatch && options.ifMatch !== versions.get(key))) throw Object.assign(Error('CAS'), { status: 412 })
+      stored.set(key, structuredClone(value)); versions.set(key, String((Number(versions.get(key)) || 0) + 1)); return { durability: 'synced', version: versions.get(key) }
+    },
+  } } }
+  try {
+    const cycle = { ...ACTION, event: 'contribution_cycle', merge: true }
+    const sent = []
+    const f = fixture({ saved: () => loadCycleState('fixture-project'), runtime: { running: true },
+      claim: (...args) => claimProjectCycle(...args), settle: (...args) => settleProjectCycleClaim(...args),
+      start: async action => { sent.push(JSON.parse(JSON.stringify(action))); return sent.length === 1 ? { ok: false, error: 'Network unreachable' } : { ok: true, chatId: 'cycle-chat' } } })
+    // Real storage hashes its key asynchronously; wait for the observed state, bounded.
+    const until = async predicate => { for (let i = 0; i < 400 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 5)) }
+    const settled = h => until(() => !['restoring', 'checking'].includes(h.render().cycle.phase))
+    f.render(); await f.restore(); await settled(f)
+    await f.render().start(cycle)
+    assert.equal(f.render().cycle.pending, true, 'an unknown start stays reserved: ' + JSON.stringify(f.render().cycle))
+    // Reload after merge rights are lost (G1: no cancelStart, empty lookup).
+    const reloaded = fixture({ saved: () => loadCycleState('fixture-project'), runtime: { running: true },
+      settle: (...args) => settleProjectCycleClaim(...args),
+      start: async action => { sent.push(JSON.parse(JSON.stringify(action))); return { ok: true, chatId: 'cycle-chat' } } })
+    reloaded.render(); await reloaded.restore()
+    await until(() => reloaded.render().cycle.pendingId)
+    assert.equal(reloaded.render().canDiscardStart, false)
+    assert.equal(reloaded.render().cycle.pendingAction?.merge, true, JSON.stringify(reloaded.render().cycle))
+    const result = await reloaded.render().finishStart()
+    assert.equal(result.ok, true)
+    assert.equal(sent[1].scope, sent[0].scope, 'the same scope is replayed')
+    assert.equal(sent[1].draft, cycle.draft)
+    assert.equal(reloaded.render().cycle.chatId, 'cycle-chat')
+    assert.equal((await loadCycleState('fixture-project')).pending, undefined, 'the reservation settled to its conversation')
+  } finally { globalThis.window = previousWindow }
 })

@@ -34,10 +34,14 @@ const STATUS_LABELS = {
 }
 
 // Why a reserved start cannot be finished here, naming only controls that exist.
-export function reservedStartBlocker({ action, mergeRights, canDiscard }) {
-  if (!action) return canDiscard ? 'This older start did not save its exact work. Discard it, then start again.'
+// Finishing replays the owner's already-chosen start under its own scope, so
+// it is never re-gated by today's merge rights: the gate decides whether a
+// *new* cycle may start, and GitHub plus the platform's merge executor still
+// enforce rights at merge time. A start with saved work is always finishable.
+export function reservedStartBlocker({ action, canDiscard }) {
+  if (action) return ''
+  return canDiscard ? 'This older start did not save its exact work. Discard it, then start again.'
     : 'This older start did not save its exact work, and this Möbius cannot safely cancel it, so it stays reserved. Check again finds its conversation if it started.'
-  return action.merge && !mergeRights ? 'Finishing this full merge cycle needs merge rights.' : ''
 }
 
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
@@ -67,7 +71,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
   // Recovery replays the reserved start exactly; it never substitutes today's
   // work or model. A full cycle still needs merge rights to be finished.
-  const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction, mergeRights: mayMerge(project.viewerPermission), canDiscard: workflow.canDiscardStart })
+  const finishBlocker = reservedStartBlocker({ action: cycle.pendingAction, canDiscard: workflow.canDiscardStart })
   async function start(action, agent) {
     setError('')
     try {

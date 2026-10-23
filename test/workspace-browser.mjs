@@ -129,7 +129,10 @@ window.fetch = async (url, options = {}) => {
       return response({ run: stopped })
     }
     calls.exactRuns.push(oldRun[1])
-    return response({ run: window.oldRuns.get(oldRun[1]) })
+    // Snapshot at request time; a held response is delivered later, as the network may.
+    const snapshot = structuredClone(window.oldRuns.get(oldRun[1]))
+    if (window.holdExactRun) await new Promise(resolve => { window.releaseExactRun = resolve })
+    return response({ run: snapshot })
   }
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') return response({ runs: reviewRuns })
@@ -980,6 +983,28 @@ window.runWorkspaceChecks = async () => {
       ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'A refresh resurrected the stale running snapshot')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Old run did not close')
+      window.oldRuns = null
+    })
+    await check('an exact run read issued before Stop cannot undo the confirmed Stop', async () => {
+      const run = { id: 'race-run-87654321', mode: 'review', state: 'reviewing', execution_state: 'running', can_stop: true, chat_id: 'race-run-chat',
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'reviewing', summary: 'Race run' }] }
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'race-run-link' })
+      const pane = () => query('[data-task="task:run:race-run-87654321"]')
+      await until(() => pane() && text(pane()).includes('Recorded status: Reviewing'), 'Race run did not open')
+      // Hold the exact read so it is issued before Stop and delivered after it.
+      window.holdExactRun = true
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore && window.releaseExactRun, 'Exact read was not issued')
+      window.holdExactRun = false
+      await click(button('Stop workflow', pane()))
+      await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
+      window.releaseExactRun(); window.releaseExactRun = null
+      for (let i = 0; i < 6; i++) await frame()
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'An older read overwrote the confirmed Stop')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Race run did not close')
       window.oldRuns = null
     })
     await check('switching project releases a chat PR link instead of pinning it on return', async () => {

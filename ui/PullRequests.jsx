@@ -264,21 +264,28 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const linkedRef = useRef(null)
   linkedRef.current = linked
   const runFocusRef = useRef(null)
+  // One ordering boundary for every run observation: a read applies only if
+  // nothing newer was issued or confirmed since it began. A Stop, a newer
+  // read advances it, and exact reads also match their lease nonce, so an older response can never
+  // overwrite a confirmed newer state.
+  const runsEpoch = useRef(0)
   const loadRuns = useCallback(async () => {
+    const epoch = ++runsEpoch.current
+    const current = () => alive.current && runsEpoch.current === epoch
     let list
     try {
-      const show = next => { if (alive.current) { setRuns(next.runs || []); setRunError('') } }
+      const show = next => { if (current()) { setRuns(next.runs || []); setRunError('') } }
       list = await loadReviewRuns(token, appId, { onList: show })
       show(list)
-    } catch (error) { if (alive.current) setRunError(error.message); return }
+    } catch (error) { if (current()) setRunError(error.message); return }
     const focus = runFocusRef.current
-    if (!focus || (list.runs || []).some(run => run.id === focus.runId)) return
+    if (!current() || !focus || (list.runs || []).some(run => run.id === focus.runId)) return
     const path = `review-runs/${encodeURIComponent(focus.runId)}`
     try {
       if (linkedRef.current && awaitsGithub(linkedRef.current)) await collaborationRequest(token, appId, `${path}/observe`, {})
       const exact = (await collaborationRequest(token, appId, path)).run
-      if (alive.current && runFocusRef.current?.runId === focus.runId && exact) setLinked(exact)
-    } catch (error) { if (alive.current) setRunError(`This run's latest status is unavailable: ${error.message}`) }
+      if (current() && runFocusRef.current?.nonce === focus.nonce && exact) setLinked(exact)
+    } catch (error) { if (current()) setRunError(`This run's latest status is unavailable: ${error.message}`) }
   }, [token, appId])
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   useEffect(() => {
@@ -315,6 +322,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const runFocusId = focusRun?.runId && conn.state === 'connected' && focusRun.repo?.toLowerCase() === repo.toLowerCase() ? focusRun.runId : ''
   runFocusRef.current = runFocusId ? focusRun : null
   // The lease brings its exact read; it is kept and refreshed only while held.
+  // An exact read lands only on the lease (nonce) it was issued for.
   useEffect(() => { setLinked(runFocusId && focusRun?.run?.id === runFocusId ? focusRun.run : null) }, [runFocusId, focusRun?.nonce])
   const runOpened = useRef('')
   const runPresent = !!runFocusId && (runs.some(run => run.id === runFocusId) || linked?.id === runFocusId)
@@ -385,8 +393,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   async function stopRun(run) {
     if (busy) return
     setBusy(true); setRunError('')
+    runsEpoch.current++ // reads issued before Stop cannot land after it
     try {
       const result=await collaborationRequest(token,appId,`review-runs/${encodeURIComponent(run.id)}/stop`,{})
+      runsEpoch.current++
       if (linkedRef.current?.id === run.id) setLinked(result.run)
       setRuns(old=>old.map(item=>item.id===run.id ? result.run : item))
     } catch(error) {setRunError(error.message)}
