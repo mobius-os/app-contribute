@@ -36,7 +36,9 @@ test('saved prompt and model proposals survive loading without importing consent
   const options={review_prompt:'Inspect every changed line',fix_prompt:'Fix scoped findings',merge_prompt:'Merge only ifsafe',max_rounds:2,autopilot:false}
   const agent={provider:'codex',model:'pinned-model',effort:'high'}
   const loaded=selectedReviewRequest({...proposal,mode:'review_fix_merge',options:{...options,approval:'untrusted'},agent,preview_sha256:'c'.repeat(64),resolved_snapshot:{untrusted:true},chat_approval:{context:'untrusted'}},ID)
-  assert.deepEqual(loaded.options,options)
+  assert.deepEqual(loaded.options,{review_prompt:options.review_prompt,merge_prompt:options.merge_prompt,fix_prompt:options.fix_prompt,max_rounds:2},'a takeover link keeps its repair options; automatic continuation is never carried')
+  const review=selectedReviewRequest({...proposal,mode:'review',options:{...options,post_review:true},agent,preview_sha256:'c'.repeat(64)},ID)
+  assert.deepEqual(review.options,{review_prompt:options.review_prompt,merge_prompt:options.merge_prompt,post_review:true},'a review link carries no repair options')
   assert.deepEqual(loaded.agent,agent)
   assert.equal(loaded.preview_sha256,'c'.repeat(64))
   assert.equal(loaded.chat_approval,undefined)

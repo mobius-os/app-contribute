@@ -98,9 +98,11 @@ test('review-and-merge confirmation names exact PRs and excludes extra public ac
   assert.doesNotMatch(privately, /Public effect/)
   const posting = render({mode:'review', pulls:[pull(1)], options:{post_review:true}})
   assert.doesNotMatch(posting, /Private findings|Start private review/, 'a review posted on GitHub is never called private')
-  assert.match(posting, /Findings posted on GitHub\. No code changes\./)
-  assert.match(posting, /Public effect: one comment review with the verdict and findings is posted on this PR from your connected GitHub account\. It never approves, requests changes, edits code or merges\./)
-  assert.match(posting, /Review and post on GitHub/)
+  assert.match(posting, /May post its verdict on GitHub\. No code changes\./)
+  // Only a verdict the agent explicitly marks public is posted (G2 `publish: true`).
+  assert.match(posting, /Possible public effect: one comment review per PR, only for a verdict the agent marks as public, posted on this PR from your connected GitHub account\. Questions to you and unverified results stay private\./)
+  assert.doesNotMatch(posting, /verdict and findings is posted|Findings posted on GitHub/, 'posting is a grant, not a promise that every outcome is public')
+  assert.match(posting, /Start review, allow posting/)
 })
 
 

@@ -33,14 +33,11 @@ test('agent setup presents separate review-only and scoped takeover modes', asyn
   assert.match(html, /disabled=""/)
 })
 
-test('private review continuation is offered inside its mode choice only', async t => {
+test('no automatic-continuation option is offered, because the platform does not support it', async t => {
   const html = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review' }, onModeChange:()=>{}, onOptionsChange:()=>{} })
   if (!html) return
-  const review = html.indexOf('class="co-pr-mode-group"')
-  const checkbox = html.indexOf('Continue private review automatically')
-  const takeover = html.indexOf('Review, fix &amp; merge')
-  assert.ok(review >= 0 && checkbox > review && takeover > checkbox)
-  assert.equal((html.match(/Continue private review automatically/g) || []).length, 1)
+  assert.match(html, /Review, fix &amp; merge/)
+  assert.doesNotMatch(html, /Continue private review automatically|autopilot/i)
 })
 
 test('drafts explain the unavailable takeover without hiding the workflow', async t => {
@@ -124,8 +121,8 @@ test('draft-ready launch explicitly names marking ready without adding routine s
 test('posting a review on GitHub is an opt-in inside Review only, shown only when the server supports it', async t => {
   const source = await import('node:fs').then(fs => fs.readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8'))
   assert.match(source, /choice\.mode === 'review' && onOptionsChange && capabilities\?\.post_review === true \? <label/)
-  assert.match(source, /Post the review on GitHub<small>Adds one comment review with the verdict and findings\. Never approves or requests changes\./)
+  assert.match(source, /Allow posting the review on GitHub<small>The agent may post one comment review with a verdict it marks as public\. Questions to you stay private\. It never approves or requests changes\./)
   const unresolved = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', request_id:'fixed' }, onModeChange:()=>{}, onOptionsChange:()=>{} })
   if (!unresolved) return
-  assert.doesNotMatch(unresolved, /Post the review on GitHub/, 'hidden until the served capability is known')
+  assert.doesNotMatch(unresolved, /posting the review on GitHub/, 'hidden until the served capability is known')
 })

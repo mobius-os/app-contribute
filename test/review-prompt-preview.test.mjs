@@ -7,9 +7,10 @@ import { pathToFileURL } from 'node:url'
 import { frontendModules } from './render-harness.mjs'
 import { reviewOptions, workflowAgent } from '../review-prompts.js'
 
-const options = { review_prompt:'Exact review', fix_prompt:'Exact fix', merge_prompt:'Exact merge', max_rounds:null, autopilot:false }
+const options = { review_prompt:'Exact review', fix_prompt:'Exact fix', merge_prompt:'Exact merge', max_rounds:3 }
 const agent = { provider:'codex', model:'pinned-fixture-model', effort:'high' }
-const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+// Like the server's fingerprint, independent of key order.
+const digest = value => createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:1)))).digest('hex')
 const deferred = () => { let resolve; return { promise:new Promise(done => { resolve=done }), resolve:value => resolve(value) } }
 let component
 async function load() {
@@ -39,8 +40,8 @@ async function fixture(t, choice, dependencies = {}) {
   if (!frontendModules) { t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for the native component bundler'); return null }
   const render = await load(), states=[], resolved=[], previews=[]
   const value = { states, resolved, previews, reviewOptions, workflowAgent,
-    loadWorkflowOptions:async()=>({options:{...options,review_prompt:'New default',autopilot:true},capabilities:{draft_takeover:true}}),
-    previewWorkflow:async(token,appId,sent,model)=>{previews.push({token,appId,options:sent,agent:model});return {preview_sha256:digest(sent)}},
+    loadWorkflowOptions:async()=>({options:{review_prompt:'New default',fix_prompt:'Fix default',merge_prompt:'Merge default'},capabilities:{draft_takeover:true,post_review:true}}),
+    previewWorkflow:async(token,appId,sent,model,mode)=>{previews.push({token,appId,options:sent,agent:model,mode});return {preview_sha256:digest(sent)}},
     ...dependencies,
   }
   const previous=globalThis.previewEffectFixture;globalThis.previewEffectFixture=value
@@ -50,28 +51,27 @@ async function fixture(t, choice, dependencies = {}) {
   value.flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve()}
   return value
 }
-for(const autopilot of [false,true]) test(`frozen takeover preview preserves saved autopilot ${autopilot} and resolves the equivalent hash without admission`, async t=>{
-  const frozen={...options,autopilot}, f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:frozen,agent,preview_sha256:digest(frozen)})
+test('a frozen takeover preview keeps its exact repair options and names its mode',async t=>{
+  const f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options,agent,preview_sha256:digest(options)})
   if(!f)return;await f.flush()
-  assert.deepEqual(f.previews,[{token:'fixture',appId:'fixture-app',options:frozen,agent}])
+  assert.deepEqual(f.previews.map(p=>({...p,options:digest(p.options)})),[{token:'fixture',appId:'fixture-app',options:digest(options),agent,mode:'review_fix_merge'}])
   assert.equal(f.resolved.length,2);assert.equal(f.resolved[0],null)
-  assert.deepEqual(f.resolved[1].options,frozen);assert.equal(f.resolved[1].preview.preview_sha256,digest(frozen))
-  assert.deepEqual(f.states.at(-1),f.resolved[1]);assert.deepEqual(frozen,{...options,autopilot})
+  assert.deepEqual(f.resolved[1].options,options);assert.equal(f.resolved[1].preview.preview_sha256,digest(options))
 })
-for(const autopilot of [false,true]) for(const post_review of [false,true]) test(`frozen takeover preserves exact autopilot ${autopilot} and post_review ${post_review} without admission`,async t=>{
-  const frozen={...options,autopilot,post_review}, f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:frozen,agent,preview_sha256:digest(frozen)})
+for(const legacy of [{autopilot:false},{autopilot:true},{post_review:false},{post_review:true}]) test(`a frozen takeover never sends ${JSON.stringify(legacy)}, which the platform does not accept for it`,async t=>{
+  const f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:{...options,...legacy},agent,preview_sha256:digest(options)})
   if(!f)return;await f.flush()
-  assert.deepEqual(f.previews[0].options,frozen);assert.deepEqual(f.resolved[1].options,frozen)
-  assert.equal(f.resolved[1].preview.preview_sha256,digest(frozen))
+  assert.equal(digest(f.previews[0].options),digest(options));assert.equal(f.resolved[1].preview.preview_sha256,digest(options))
 })
-test('new takeover still defaults to autopilot and resolves editable defaults without admission',async t=>{
-  const f=await fixture(t,{request_id:'new-fixture',mode:'review_fix_merge',options:{autopilot:false,post_review:true},agent})
+test('a new takeover sends its fix prompt but never automatic continuation or the post-review grant',async t=>{
+  const f=await fixture(t,{request_id:'new-fixture',mode:'review_fix_merge',options:{autopilot:true,post_review:true},agent})
   if(!f)return;await f.flush()
-  assert.equal(f.previews[0].options.autopilot,true);assert.equal(f.previews[0].options.post_review,undefined);assert.equal(f.previews[0].options.review_prompt,'New default')
+  assert.deepEqual(f.previews[0].options,{review_prompt:'New default',merge_prompt:'Merge default',fix_prompt:'Fix default'})
+  assert.equal(f.previews[0].mode,'review_fix_merge')
   assert.equal(f.resolved[1].preview.preview_sha256,digest(f.previews[0].options))
 })
 test('frozen options never import newly added defaults into their preview identity',async t=>{
-  const frozen={autopilot:false}, f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:frozen,agent,preview_sha256:digest(frozen)})
+  const frozen={review_prompt:'Only this'}, f=await fixture(t,{request_id:'selection-fixture',mode:'review_fix_merge',options:frozen,agent,preview_sha256:digest(frozen)})
   if(!f)return;await f.flush()
   assert.deepEqual(f.previews[0].options,frozen);assert.deepEqual(f.resolved[1].options,frozen)
 })
@@ -89,15 +89,22 @@ for(const outcome of ['success','drift']) test(`cancelled preview ignores late $
   assert.deepEqual(f.resolved,[null]);assert.deepEqual(f.states,[{loading:true}])
 })
 
-test('every admission mode previews the same frozen prompt snapshot; the mode is not a preview input',async t=>{
-  const frozen={...options,autopilot:true}
-  const bodies=[]
+test('a Möbius without posted review never receives the post-review grant',async t=>{
+  const f=await fixture(t,{request_id:'new-review',mode:'review',options:{post_review:true},agent},
+    {loadWorkflowOptions:async()=>({options:{review_prompt:'New default',post_review:true},capabilities:{}})})
+  if(!f)return;await f.flush()
+  assert.deepEqual(f.previews[0].options,{review_prompt:'New default'})
+})
+test('each mode previews with its own mode and only the options that mode accepts',async t=>{
+  const sent={}
   for(const mode of ['review','review_merge','review_fix_merge']){
-    const f=await fixture(t,{request_id:'selection-'+mode,mode,options:frozen,agent,preview_sha256:digest(frozen)})
+    const f=await fixture(t,{request_id:'new-'+mode,mode,options:{max_rounds:4,post_review:true,autopilot:true},agent})
     if(!f)return;await f.flush()
-    bodies.push(JSON.stringify(f.previews[0]))
-    assert.equal(f.resolved.at(-1).preview.preview_sha256,digest(frozen))
+    assert.equal(f.previews[0].mode,mode)
+    sent[mode]=f.previews[0].options
   }
-  assert.equal(new Set(bodies).size,1)
-  assert.doesNotMatch(bodies[0],/"mode"/)
+  assert.deepEqual(sent.review,{review_prompt:'New default',merge_prompt:'Merge default',post_review:true})
+  assert.deepEqual(sent.review_merge,{review_prompt:'New default',merge_prompt:'Merge default'})
+  assert.deepEqual(sent.review_fix_merge,{review_prompt:'New default',merge_prompt:'Merge default',fix_prompt:'Fix default'},'new work has no round cap')
+  for(const body of Object.values(sent)) assert.equal('autopilot' in body,false,'automatic continuation is never sent')
 })
