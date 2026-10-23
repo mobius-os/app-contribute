@@ -417,3 +417,48 @@ test('Confirm shows the public PR title and the first line of its description wi
   assert.equal(full.facts.length, 8)
   assert.equal(full.facts.some(fact => fact.label === 'Description'), false)
 })
+
+// The independent review's sequence: the review check fails before the first
+// ledger read finishes, the owner retries, then the ledger read completes.
+test('a retry during the first ledger read never strands the card on Checking', async () => {
+  const refreshes = []
+  const h = harness({ actions: [{ key: 'chat-send:one' }], records: [prepared('one')] })
+  const unavailable = { state: 'unavailable', byId: {}, addressed: ['one'] }
+  let ledgerReady = false
+  const runtime = () => ({ ...h.runtime(), ledgerReady, reviewStatus: unavailable, refresh: () => refreshes.push(true) })
+  h.session.start(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  h.session.updateRuntime(runtime()); await tick()
+  assert.equal(h.action('chat-send:one').label, 'Try again')
+  assert.equal(h.action('chat-send:one').disabled, false)
+  h.fire('chat-send:one', 'activate'); await tick()
+  assert.equal(refreshes.length, 1, 'the retry asks for a fresh check')
+  // The ledger read finishes; the check is still the same unavailable answer.
+  ledgerReady = true
+  h.session.updateRuntime(runtime()); await tick()
+  let state = h.action('chat-send:one')
+  assert.equal(state.confirming, false)
+  assert.equal(state.disabled, false, 'an unavailable answer is never held as pending')
+  assert.equal(state.label, 'Try again')
+  // A later retry reaches Confirm once the check recovers.
+  h.provide(); await tick()
+  h.fire('chat-send:one', 'activate'); await tick()
+  state = h.action('chat-send:one')
+  assert.equal(state.confirming, true)
+  assert.equal(h.sends.length, 0)
+})
+
+test('a card retry reads the review status even before the first ledger read finishes', async () => {
+  // The runtime's refresh wiring, executed from index.jsx's source.
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  const wiring = app.match(/\n\s*refresh: (\(\) => [^\n]+),\n/)?.[1]
+  assert.ok(wiring, 'the card runtime exposes refresh')
+  for (const ready of [false, true]) {
+    const calls = []
+    const refresh = new Function('ledgerReadyRef', 'refreshCoordinatorRef', 'refreshReviewStatus', `return ${wiring}`)(
+      { current: ready }, { current: () => calls.push('full refresh') }, () => calls.push('review status'))
+    refresh()
+    assert.deepEqual(calls, [ready ? 'full refresh' : 'review status'], `ledger ready: ${ready}`)
+  }
+})

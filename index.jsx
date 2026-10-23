@@ -1538,9 +1538,12 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // Chat sends require the binding at the moment of the write, too.
       send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
       sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
-      refresh: () => refreshCoordinatorRef.current(),
+      // A card's retry always reads the review status again. The full refresh
+      // pass (ledger, status, connection) waits for the first ledger read, so
+      // during startup the status is read on its own.
+      refresh: () => ledgerReadyRef.current ? refreshCoordinatorRef.current() : refreshReviewStatus(),
     })
-  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack])
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, refreshReviewStatus])
 
   if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.

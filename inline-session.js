@@ -136,7 +136,10 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   const unreadable = new Set()
   let runtime = null
   let activating = ''
-  let refreshing = null // the unavailable review status an activation asked to refresh
+  // True from an activation that asked the app for a fresh review check until
+  // the app's next runtime report. No status value is ever held as pending:
+  // whatever the next report says, it is a current answer.
+  let awaitingCheck = false
   let frozen = null // { key, units } — the exact snapshot the owner confirms
   let ackNonce = null
   let alive = true
@@ -242,11 +245,8 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   // A preflight that finished without authority: every read for the card is
   // done, but a named record could not be read or the review check is
   // unavailable. It ends the activation so the card offers Try again.
-  // An unavailable status counts only once it is a new answer, not the one
-  // that activation itself asked to refresh.
-  const preflightFailed = key => Boolean(runtime) && !reading.size
-    && (idsFor(key).some(id => unreadable.has(id))
-      || (runtime.reviewStatus?.state === 'unavailable' && runtime.reviewStatus !== refreshing))
+  const preflightFailed = key => Boolean(runtime) && !reading.size && !awaitingCheck
+    && (idsFor(key).some(id => unreadable.has(id)) || runtime.reviewStatus?.state === 'unavailable')
 
   function settle() {
     const now = current()
@@ -278,9 +278,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   function activate(key) {
     if (fault || sending() || frozen) return
     activating = key
-    refreshing = null
+    awaitingCheck = false
     if (!runtime) onNeedRuntime?.()
-    else if (runtime.reviewStatus?.state === 'unavailable') { refreshing = runtime.reviewStatus; runtime.refresh?.() }
+    else if (runtime.reviewStatus?.state === 'unavailable') { awaitingCheck = true; runtime.refresh?.() }
     void read(allIds())
   }
 
@@ -312,7 +312,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
   return {
     sessionId,
     start() { emit(); if (allIds().length) void read(allIds()) },
-    updateRuntime(next) { runtime = next; settle(); emit() },
+    updateRuntime(next) { runtime = next; awaitingCheck = false; settle(); emit() },
     handleEvent(event) {
       if (!advertised.some(item => item.key === event?.key) || !['activate', 'cancel', 'confirm'].includes(event.event)
         || typeof event.nonce !== 'string' || !event.nonce || event.nonce.length > 128) return false
