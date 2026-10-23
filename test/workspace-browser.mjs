@@ -985,9 +985,10 @@ window.runWorkspaceChecks = async () => {
       window.oldRuns = null
     })
     await check('a linked core run this app did not start renders honestly and is never observed here', async () => {
-      // G1's minimized projection: no prompt, findings, base or options.
-      const run = { id: 'core-run-1234', chat_id: 'core-owner-chat', state: 'reviewing', execution_state: 'running', app_id: null, can_stop: false,
-        mode: 'review_merge', details_in_owning_chat: true, items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, state: 'queued' }] }
+      // G1's committed minimized projection: no prompt, findings or options.
+      const run = { id: 'core-run-1234', chat_id: 'core-owner-chat', state: 'reviewing', execution_state: 'running', mode: 'review_merge',
+        created_at: '2026-10-23T09:00:00Z', app_id: null, can_stop: false, post_review: false, details_in_owning_chat: true,
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'queued' }] }
       window.oldRuns = new Map([[run.id, structuredClone(run)]])
       window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'core-run-link' })
       const pane = () => query('[data-task="task:run:core-run-1234"]')
@@ -998,7 +999,7 @@ window.runWorkspaceChecks = async () => {
       const shown = text(pane())
       ensure(shown.includes('Review & merge') && !shown.includes('Private review'), 'Minimized run was not titled by its mode')
       ensure(!/prompt snapshot|Older PR version|findings will appear here/.test(shown), 'Minimized run showed prompt or version warnings')
-      ensure(button('Open the owning conversation for details', pane()), 'Minimized run lacks its owning-conversation link')
+      ensure(button('Open the owning conversation for details', pane()) && !button('Stop workflow', pane()), 'Minimized run lacks its owning-conversation link or offers Stop')
       ensure(!calls.requests.some(call => call.url.includes(run.id) && call.url.endsWith('/observe')), 'A run this app does not own was observed')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Run detail did not close')

@@ -6,14 +6,11 @@ import { ResolvedPrompt } from './ReviewPromptSettings.jsx'
 
 // Saved conversations outlive the open-PR inventory. Its current snapshot
 // provides context, never new approval or a fresh verdict for old findings.
-// A minimized run may not report its target branch; its code is still exact.
 export function savedVersion(item, pulls = [], listState = {}) {
   if (listState.loading || listState.error) return 'Current version not checked'
   const pr = pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)
   if (!pr) return 'Not in the loaded open PRs'
-  if (item.head_sha !== pr.headRefOid) return 'Older PR version'
-  if (!item.base_ref) return 'Matches loaded PR code'
-  if (item.base_ref !== pr.baseRefName) return 'Older PR version'
+  if (item.head_sha !== pr.headRefOid || item.base_ref !== pr.baseRefName) return 'Older PR version'
   if (!item.base_sha || !baseTip(pr)) return 'Current base not checked'
   return item.base_sha === baseTip(pr) ? 'Matches loaded PR version' : 'Older base version'
 }
@@ -33,7 +30,7 @@ export function RunDetail({ run, pulls, listState, busy = false, error = '', onS
       : <details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>}
     <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}>
       <strong>#{item.number} · {reviewItemProgress(run, item).label}</strong>
-      <p className="co-pr-note">{savedVersion(item, pulls, listState)} · Recorded version <code>{item.head_sha?.slice(0, 7) || 'unknown'}{item.base_ref ? ` → ${item.base_ref}${item.base_sha ? ` (${item.base_sha.slice(0, 7)})` : ''}` : elsewhere ? '' : ' → unknown (unknown)'}</code>.{elsewhere ? '' : ' Saved findings are not a new approval.'}</p>
+      <p className="co-pr-note">{savedVersion(item, pulls, listState)} · Recorded version <code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code>.{elsewhere ? '' : ' Saved findings are not a new approval.'}</p>
       {item.summary ? <MarkdownView markdown={item.summary} /> : elsewhere ? null : <p>The agent’s findings will appear here.</p>}
       {item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a>
         : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p>

@@ -135,28 +135,26 @@ export async function collaborationRequest(token, appId, path, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(response.status === 404
+  if (!response.ok) throw Object.assign(new Error(response.status === 404
     ? 'These controls need the companion Möbius update to be activated.'
-    : typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Could not complete this action. Refresh before retrying.')
+    : typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Could not complete this action. Refresh before retrying.'),
+  { status: response.status, ...(typeof data.detail?.code === 'string' ? { code: data.detail.code } : {}) })
   return data
 }
 
-// A core review run Contribute did not start is read through a minimized
-// projection (G1): its mode, timing, PR identity and public outcome only.
-// Prompts, findings and approval wording stay in the conversation that owns
-// it. Older G1 builds marked it only by `app_id: null`; newer ones say
-// `details_in_owning_chat: true`. The post-review flag may arrive top-level
-// or under the full view's options.
-export const runDetailsElsewhere = run => run?.details_in_owning_chat === true || run?.app_id === null
-export const runPostsReview = run => run?.post_review === true || run?.options?.post_review === true
-// The one adapter for the minimized shape: a flat public-review state/URL is
-// read as the full view's `public_review`. Own runs pass through unchanged.
-export function normalizeRunView(run) {
-  if (!runDetailsElsewhere(run) || !Array.isArray(run.items)) return run
-  return { ...run, items: run.items.map(item => item.public_review || !item.public_review_state ? item
-    : { ...item, public_review: { state: item.public_review_state, ...(item.public_review_url ? { url: item.public_review_url } : {}) } }) }
-}
-const normalizeList = list => ({ ...list, runs: (list?.runs || []).map(normalizeRunView) })
+// A core review run Contribute did not start is read through G1's minimized
+// projection: id, chat_id, state, execution_state, mode, created_at,
+// `app_id: null`, `can_stop: false`, a top-level `post_review` boolean,
+// `details_in_owning_chat: true`, and items with only repo, number, head_sha,
+// base_ref, base_sha, state and an optional `public_review: {state, url}`.
+// Prompts, findings and approval wording stay in the owning conversation.
+export const runDetailsElsewhere = run => run?.details_in_owning_chat === true
+// Own runs carry their frozen options; minimized runs the top-level flag.
+export const runPostsReview = run => runDetailsElsewhere(run) ? run.post_review === true : run?.options?.post_review === true
+// Observe of a run this app does not own is refused with this code: the core
+// owns its reconciliation, so it is "not ours", not an error.
+export const NOT_OURS_TO_OBSERVE = 'details_in_owning_chat'
+export const notOursToObserve = error => error?.status === 403 && error?.code === NOT_OURS_TO_OBSERVE
 
 // A Review only run that posts on GitHub is not private, so its name says so.
 // A run whose mode is not reported is not assumed to be private.
@@ -185,19 +183,22 @@ const UNSETTLED = new Set(['queued', 'merging', 'merge_unknown', 'pushing', 'pus
 export const awaitsGithub = run => run.state !== 'complete' && (run.items || []).some(item => UNSETTLED.has(item.state))
 export const OBSERVE_EVERY_MS = 60000
 const observedAt = new Map()
+const notOurs = new Set()
 
 // Shows the saved list at once (onList), then re-reads it after any due
 // GitHub reconciliation so a settled merge replaces "In merge queue".
 export async function loadReviewRuns(token, appId, { onList, now = Date.now() } = {}) {
-  const list = normalizeList(await collaborationRequest(token, appId, 'review-runs'))
+  const list = await collaborationRequest(token, appId, 'review-runs')
   onList?.(list)
   // Only Contribute's own runs can be observed through its app route; a
   // minimized run is reconciled by its owning conversation.
-  const due = (list.runs || []).filter(run => !runDetailsElsewhere(run) && awaitsGithub(run) && now - (observedAt.get(run.id) ?? -Infinity) >= OBSERVE_EVERY_MS)
+  const due = (list.runs || []).filter(run => !runDetailsElsewhere(run) && !notOurs.has(run.id) && awaitsGithub(run) && now - (observedAt.get(run.id) ?? -Infinity) >= OBSERVE_EVERY_MS)
   if (!due.length) return list
   due.forEach(run => observedAt.set(run.id, now))
   const settled = await Promise.allSettled(due.map(run => collaborationRequest(token, appId, `review-runs/${encodeURIComponent(run.id)}/observe`, {})))
-  return settled.some(result => result.status === 'fulfilled') ? normalizeList(await collaborationRequest(token, appId, 'review-runs')) : list
+  // A refusal that names the run as not ours stops its polling for good.
+  settled.forEach((result, index) => { if (result.status === 'rejected' && notOursToObserve(result.reason)) notOurs.add(due[index].id) })
+  return settled.some(result => result.status === 'fulfilled') ? collaborationRequest(token, appId, 'review-runs') : list
 }
 
 export function reviewRunRequest(choice) {
@@ -235,14 +236,11 @@ export async function assignPulls(token, appId, pulls, login) {
 // A run belongs to the PR's exact code (repo, number, head) and target branch,
 // never a lookalike PR. The branch tip keeps moving as other work merges, so
 // `exactBase` says whether the run saw the current tip instead of hiding it.
-// A minimized run that does not report its target branch is matched by its
-// exact code alone.
 export function reviewForPull(runs, pr) {
   if (!pr.headRefOid || !pr.baseRefName) return null
   const matches = runs.flatMap(run => {
     const item = run.items?.find(item => item.repo.toLowerCase() === pr.repository.nameWithOwner.toLowerCase()
-      && item.number === pr.number && item.head_sha === pr.headRefOid
-      && (item.base_ref === pr.baseRefName || (runDetailsElsewhere(run) && !item.base_ref)))
+      && item.number === pr.number && item.head_sha === pr.headRefOid && item.base_ref === pr.baseRefName)
     return item ? [{ run, item, exactBase: !!baseTip(pr) && item.base_sha === baseTip(pr) }] : []
   })
   // Prefer the run on the current branch tip; otherwise the newest for this code.

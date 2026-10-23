@@ -73,7 +73,7 @@ import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { collaborationRequest, discoverRepositories, discoverRepository, normalizeRunView } from './collaboration.js'
+import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { chatBlockTarget } from './chat-blocks.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
@@ -195,7 +195,7 @@ export default function ContributeApp({ appId, token }) {
     setPullFocus({ runId: id, nonce })
     // Read the exact run: the recent list is capped and would hide older runs.
     let run = null
-    try { run = normalizeRunView((await collaborationRequest(tokenRef.current, appId, `review-runs/${encodeURIComponent(id)}`)).run || null) }
+    try { run = (await collaborationRequest(tokenRef.current, appId, `review-runs/${encodeURIComponent(id)}`)).run || null }
     catch (error) { if (pullFocusRef.current?.nonce === nonce) { setSelectionError(error.message); releasePullFocus(nonce) } return }
     if (pullFocusRef.current?.nonce !== nonce) return
     const repo = run?.items?.[0]?.repo
