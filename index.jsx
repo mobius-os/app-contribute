@@ -71,7 +71,6 @@ import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
-import { startFailureStatus } from './ui/useProjectCycle.js'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
 import { chatBlockTarget } from './chat-blocks.js'
@@ -293,15 +292,14 @@ export default function ContributeApp({ appId, token }) {
   // remounted frame resolve to one exact conversation without a read/create
   // race. The local guard exists only for immediate button feedback.
   const startAgentTask = useCallback(async (action) => {
-    // Refusals before the platform is asked are certified: nothing started.
     if (!action?.title || !action?.draft) {
-      return { ok: false, notStarted: true, error: 'This agent handoff is incomplete.' }
+      return { ok: false, error: 'This agent handoff is incomplete.' }
     }
     if (agentStartRef.current) {
-      return { ok: false, notStarted: true, error: 'Another agent task is already starting.' }
+      return { ok: false, error: 'Another agent task is already starting.' }
     }
     if (!window.mobius?.chat?.start) {
-      return { ok: false, notStarted: true, error: 'Agent handoffs are unavailable in this Möbius version.' }
+      return { ok: false, error: 'Agent handoffs are unavailable in this Möbius version.' }
     }
     agentStartRef.current = true
     try {
@@ -330,10 +328,9 @@ export default function ContributeApp({ appId, token }) {
         outcome: started.outcome || (started.reused ? 'reused' : 'started'),
       }
     } catch (error) {
-      // After the request leaves, only the platform's own code can certify
-      // that the scope was never admitted; anything else is unknown.
-      const status = startFailureStatus(error)
-      return { ok: false, ...(typeof error?.code === 'string' ? { code: error.code } : {}), ...(status ? { status } : {}), error: 'Could not start the agent. Try again.' }
+      // The platform's scope codes (cancelled/deleted) are the only verdict
+      // the project cycle acts on; every other failure leaves it to Finish.
+      return { ok: false, ...(typeof error?.code === 'string' ? { code: error.code } : {}), error: 'Could not start the agent. Try again.' }
     } finally {
       agentStartRef.current = false
     }

@@ -500,6 +500,7 @@ test('cycle state keeps only a bounded conversation pointer', () => {
     chat_id: 'cycle-chat',
     started_at: '2026-08-24T00:00:00Z',
     scope: 'contribute-task:current',
+    seq: 0,
   })
   assert.equal(normalizeCycleState({ chat_id: '  ' }), null)
 })

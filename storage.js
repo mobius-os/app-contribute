@@ -290,12 +290,17 @@ export function freezeStartAction(action) {
   return frozen
 }
 
+// A reservation names its deterministic platform scope. Older reservations
+// used a random id whose scope was `contribute-cycle:<id>`.
 function normalizePending(raw) {
   if (!raw || typeof raw.id !== 'string') return null
   const action = freezeStartAction(raw.action)
-  return { id: raw.id.slice(0, 80), previous_chat_id: String(raw.previous_chat_id || '').slice(0, 128),
+  const scope = typeof raw.scope === 'string' && raw.scope ? raw.scope.slice(0, 160) : `contribute-cycle:${raw.id.slice(0, 80)}`
+  return { id: raw.id.slice(0, 160), scope, ...(Number.isSafeInteger(raw.n) ? { n: raw.n } : {}),
+    previous_chat_id: String(raw.previous_chat_id || '').slice(0, 128),
     title: String(raw.title || '').slice(0, 240), event: String(raw.event || '').slice(0, 80), ...(action ? { action } : {}) }
 }
+const cycleSeq = raw => Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
 
 export function normalizeCycleState(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -304,7 +309,8 @@ export function normalizeCycleState(raw) {
   return {
     chat_id: chatId.slice(0, 128),
     started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
-    scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 128) : '',
+    scope: typeof raw.scope === 'string' ? raw.scope.slice(0, 160) : '',
+    seq: cycleSeq(raw),
     ...(typeof raw.event === 'string' ? { event: raw.event.slice(0, 80) } : {}),
     ...(typeof raw.title === 'string' && raw.title.trim() ? { title: raw.title.slice(0, 240) } : {}),
     ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined })).filter(Boolean) } : {}),
@@ -372,7 +378,7 @@ export async function loadCycleState(projectKey) {
     const key = await cycleKey(projectKey)
     const raw = await window.mobius.storage.get(key)
     const current = normalizeCycleState(raw)
-    if (!current && normalizePending(raw?.pending)) return { pending: normalizePending(raw.pending), history: [] }
+    if (!current && normalizePending(raw?.pending)) return { pending: normalizePending(raw.pending), seq: cycleSeq(raw), history: [] }
     if (current || !projectKey) return current
 
     // Older builds stored already-safe project identities directly. Preserve
@@ -405,9 +411,13 @@ export async function saveCycleState(state, projectKey) {
   }
 }
 
-// A fresh cycle needs a new scoped-start identity: the platform intentionally
-// reuses an old chat forever for the same scope. Claim it with app-storage CAS
-// first so two open project panes cannot create two owner conversations.
+// A project's cycles are numbered. Cycle n's identity is the deterministic
+// platform scope `contribute-cycle:<project digest>:<n>`, and the platform's
+// scoped start is the exactly-once primitive for it: under a per-(app, scope)
+// lock it returns the started conversation, retries an empty one in place, or
+// creates at most one. Starting and finishing therefore just call it again
+// with the same scope. The CAS reservation records that scope and the frozen
+// start; n advances only when that scope's conversation is confirmed started.
 export async function claimProjectCycle(projectKey, previousChatId = '', action = {}) {
   const storage = window.mobius?.storage
   if (!storage?.getWithVersion || !storage?.durableWrite) return { ok: false, error: 'Safe cycle starts are unavailable in this Möbius version.' }
@@ -417,13 +427,14 @@ export async function claimProjectCycle(projectKey, previousChatId = '', action 
     if (offline) return { ok: false, error: 'Reconnect before starting a new project cycle.' }
     const current = normalizeCycleState(value)
     if ((current?.chat_id || '') !== previousChatId || value?.pending) return { ok: false, error: 'Project work changed in another view. Refresh before starting.' }
-    const id = globalThis.crypto.randomUUID()
     const frozen = freezeStartAction(action)
-    if (!frozen) return { ok: false, notStarted: true, error: 'This agent handoff is incomplete.' }
-    const next = { ...(value || {}), schema: 2, pending: normalizePending({ id, previous_chat_id: previousChatId, title: frozen.title, event: frozen.event, action: frozen }) }
+    if (!frozen) return { ok: false, error: 'This agent handoff is incomplete.' }
+    const n = cycleSeq(value) + 1
+    const scope = `contribute-cycle:${key.replace(/^project-cycles\/|\.json$/g, '').slice(0, 32)}:${n}`
+    const next = { ...(value || {}), schema: 3, seq: cycleSeq(value), pending: normalizePending({ id: scope, scope, n, previous_chat_id: previousChatId, title: frozen.title, event: frozen.event, action: frozen }) }
     const receipt = await storage.durableWrite(key, next, version ? { ifMatch: version } : { ifNoneMatch: true })
     if (receipt?.durability !== 'synced') return { ok: false, error: 'Cycle reservation was not confirmed online. Refresh before trying again.' }
-    return { ok: true, id }
+    return { ok: true, id: scope, scope }
   } catch {
     return { ok: false, error: 'Could not reserve this project cycle. Refresh and try again.' }
   }
@@ -441,9 +452,12 @@ export async function settleProjectCycleClaim(projectKey, claimId, started = nul
       chat_id: previous.chat_id, title: previous.title, event: previous.event,
       scope: previous.scope, started_at: previous.started_at,
     })
+    // The scope is consumed either way: by its confirmed conversation, or by
+    // the platform's own cancellation of that exact scope.
+    const seq = Number.isSafeInteger(value.pending.n) ? value.pending.n : cycleSeq(value)
     const next = started
-      ? { schema: 2, ...normalizeCycleState(started), history }
-      : { ...value, pending: undefined }
+      ? { schema: 3, ...normalizeCycleState(started), seq, history }
+      : { ...value, schema: 3, seq, pending: undefined }
     const receipt = await storage.durableWrite(key, next, { ifMatch: version })
     return receipt?.durability === 'synced'
   } catch { return false }

@@ -271,8 +271,7 @@ function Fixture() {
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
     return { ok: true, record: shared }
   }
-  // A refusal before the request leaves is certified: nothing started.
-  async function start(action) { if(window.failStart) return {ok:false,notStarted:true,error:'Fixture agent unavailable'}; const started = await window.mobius.chat.start(action); if(window.lostStart) return {ok:false,error:'Response lost'}; return { ok: true, ...started } }
+  async function start(action) { if(window.failStart) return {ok:false,error:'Fixture agent unavailable'}; const started = await window.mobius.chat.start(action); if(window.lostStart) return {ok:false,error:'Response lost'}; return { ok: true, ...started } }
   return <div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       loadProjectDiff={loadProjectDiff} onRetry={async()=>{setRefreshKey(old=>old+1);return true}}
@@ -784,8 +783,10 @@ window.runWorkspaceChecks = async () => {
       window.failStart=true; await click(button('Start pull'))
       await until(()=>text(query('[data-task="task:update"]')).includes('Fixture agent unavailable'),'Agent-start failure missing')
       ensure(calls.starts.length===starts,'Failed handoff counted as started')
+      // A failed start stays reserved under its scope; Finish starting replays it.
+      ensure(button('Finish starting', query('[data-task="task:update"]')), 'A failed start offered no way to finish it')
       window.failStart=false
-      const start=button('Start pull'); start.click(); start.click()
+      const finish=button('Finish starting', query('[data-task="task:update"]')); finish.click(); finish.click()
       await until(()=>calls.starts.length===starts+1 && button('Open conversation'),'Update did not start once')
       const action=calls.starts.at(-1)
       ensure(action.event==='update_source_projects' && action.draft.includes('app:other') && !action.draft.includes('app:fixture'),'Update scope drifted')

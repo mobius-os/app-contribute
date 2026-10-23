@@ -18,45 +18,25 @@ export function projectCyclePhase(runtime) {
 }
 
 // A scope the platform finalised before its first turn (cancelled, or its
-// conversation deleted) is never admitted again under that scope.
+// conversation deleted) can never start: that cycle number is spent.
 export const TERMINAL_SCOPE_CODES = ['scope_cancelled', 'scope_deleted']
 
-// Every scoped start has exactly one of three outcomes. Only a certified
-// non-admission may release its reservation; anything else stays owned. A
-// local refusal proves only that *this* request did not leave: on a retry of
-// an earlier uncertain start it says nothing about that start, so only the
-// platform's scope-wide verdict (cancelled/deleted) can release it.
-// A request refusal (400/413/422) is decided before the platform looks up or
-// creates anything, so on the FIRST attempt of a fresh reservation it proves
-// that start was never admitted. On a retry it proves only that this retry was
-// refused: each request carries fresh transport fields (cid, timezone,
-// viewport) and body-size limits run before the scope lookup, so an earlier
-// uncertain attempt may still own a conversation. Retries therefore never
-// release on it. Auth (401/403), conflicts (409), throttling (429), 5xx and
-// lost responses certify nothing on any attempt.
-const VALIDATION_REFUSALS = [400, 413, 422]
-// The runtime reports the HTTP status on the error, or on older runtimes only
-// in its message ("…scoped start failed (422)").
-export function startFailureStatus(error) {
-  if (Number.isInteger(error?.status)) return error.status
-  return Number(/\((\d{3})\)$/.exec(String(error?.message || ''))?.[1]) || undefined
-}
-export function startOutcome(outcome, { retry = false } = {}) {
+// A reserved cycle has one identity, its scope, and the platform's scoped start
+// is idempotent for it. So there is nothing to infer from a failure: any error,
+// local refusal or lost response leaves the reservation in place with Finish
+// starting as the way forward. Only a confirmed conversation settles it, or the
+// platform's own verdict that this exact scope can never start.
+export function startOutcome(outcome) {
   if (outcome?.ok && outcome.chatId) return { state: 'admitted', chatId: String(outcome.chatId) }
-  if (VALIDATION_REFUSALS.includes(outcome?.status)) {
-    return retry
-      ? { state: 'unknown', error: `Möbius refused this retry (${outcome.status}). The earlier attempt may still have started, so the reservation stays.` }
-      : { state: 'not_admitted', error: `Möbius refused this start (${outcome.status}), so nothing was started and its reservation is released. Start again.` }
-  }
-  if (TERMINAL_SCOPE_CODES.includes(outcome?.code) || outcome?.notStarted && !retry) {
-    return { state: 'not_admitted', error: outcome.error || 'Nothing was started.' }
-  }
-  return { state: 'unknown', ...(outcome?.notStarted ? { error: outcome.error } : {}) }
+  if (TERMINAL_SCOPE_CODES.includes(outcome?.code)) return { state: 'spent', error: 'Möbius cancelled this start, so nothing was started. Start again.' }
+  return { state: 'unknown', ...(outcome?.error ? { error: outcome.error } : {}) }
 }
+// A scoped conversation is started only once its first turn exists. A
+// created-but-empty row is the platform's intermediate state, not an owner.
+export const scopedChatStarted = row => row?.has_messages === true
 
-// An older reservation without its saved work can be neither replayed nor,
-// without the platform's scope fence, safely released: Check again still
-// finds its conversation if that start was admitted.
+// An older reservation without its saved work cannot be replayed; Check again
+// still finds its conversation if that start was admitted.
 export const LEGACY_START = 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started.'
 const UNRESOLVED_START = 'This start is not confirmed. It stays reserved, so no second agent starts. Finish starting it, or check again.'
 
@@ -100,15 +80,16 @@ export function useProjectCycle(projectKey, startAgentTask) {
     }
     const base = { chatId: saved.chat_id, title: saved.title, event: saved.event, startedAt: saved.started_at, history: saved.history || [], error: '' }
     if (saved.pending) {
-      const unresolved = { ...base, pending: true, pendingId: saved.pending.id, pendingTitle: saved.pending.title, pendingEvent: saved.pending.event, pendingAction: saved.pending.action || null, phase: 'unknown', error: UNRESOLVED_START }
+      const scope = saved.pending.scope || `contribute-cycle:${saved.pending.id}`
+      const unresolved = { ...base, pending: true, pendingId: saved.pending.id, pendingScope: scope, pendingTitle: saved.pending.title, pendingEvent: saved.pending.event, pendingAction: saved.pending.action || null, phase: 'unknown', error: UNRESOLVED_START }
       setCycle(unresolved)
       try {
-        const scope = `contribute-cycle:${saved.pending.id}`
         const matches = await window.mobius.chat.list({ scope })
         if (!current()) return
-        // The exact scope must have one unambiguous owner. Never start,
-        // stop, or release a claim in response to an empty lookup.
-        const found = Array.isArray(matches) && matches.length === 1 ? matches[0] : null
+        // Only one unambiguous, *started* conversation settles the scope. An
+        // empty lookup, an empty (not yet admitted) row or several rows leave
+        // the reservation as it is.
+        const found = Array.isArray(matches) && matches.length === 1 && scopedChatStarted(matches[0]) ? matches[0] : null
         if (found?.id) {
           const recorded = await settleProjectCycleClaim(requestedProject, saved.pending.id, {
             chat_id: String(found.id), title: saved.pending.title || found.title,
@@ -144,28 +125,28 @@ export function useProjectCycle(projectKey, startAgentTask) {
     return () => { clearInterval(timer); window.removeEventListener('focus', check) }
   }, [cycle.chatId, cycle.pending, cycle.phase, refresh])
   // Settle the outcome of one reserved scoped start, whichever path observed it.
-  async function settleStart(requestedProject, claimId, action, previous, outcome) {
+  async function settleStart(requestedProject, claim, action, previous, outcome) {
     const current = () => alive.current && identity.current === requestedProject
-    if (outcome.state === 'not_admitted') {
-      const released = await settleProjectCycleClaim(requestedProject, claimId, null)
+    if (outcome.state === 'spent') {
+      const released = await settleProjectCycleClaim(requestedProject, claim.id, null)
       if (current()) setCycle(released ? { ...previous, pending: false, phase: previous.chatId ? previous.phase : 'idle', error: outcome.error }
-        : { ...previous, pending: true, pendingId: claimId, phase: 'unknown', error: 'Nothing was started, but the reservation could not be released. Check again.' })
+        : { ...previous, pending: true, pendingId: claim.id, pendingScope: claim.scope, phase: 'unknown', error: 'This start was cancelled, but the reservation could not be updated. Check again.' })
       return { ok: false, error: outcome.error }
     }
     if (outcome.state === 'unknown') {
       const error = outcome.error ? `${outcome.error} ${UNRESOLVED_START}` : UNRESOLVED_START
-      if (current()) setCycle({ ...previous, pending: true, pendingId: claimId, pendingTitle: action.title, pendingEvent: action.event, pendingAction: freezeStartAction(action) || previous.pendingAction || null, phase: 'unknown', error })
+      if (current()) setCycle({ ...previous, pending: true, pendingId: claim.id, pendingScope: claim.scope, pendingTitle: action.title, pendingEvent: action.event, pendingAction: freezeStartAction(action) || previous.pendingAction || null, phase: 'unknown', error })
       return { ok: false, reserved: true, error }
     }
-    const saved = { chat_id: outcome.chatId, title: action.title, event: action.event, started_at: new Date().toISOString(), scope: `contribute-cycle:${claimId}` }
-    const recorded = await settleProjectCycleClaim(requestedProject, claimId, saved)
+    const saved = { chat_id: outcome.chatId, title: action.title, event: action.event, started_at: new Date().toISOString(), scope: claim.scope }
+    const recorded = await settleProjectCycleClaim(requestedProject, claim.id, saved)
     const shortcutError = recorded ? '' : 'Work started, but its project shortcut could not be saved. Open this conversation and refresh before another cycle.'
     const history = previous.chatId && previous.chatId !== saved.chat_id ? [{ chat_id: previous.chatId, title: previous.title, event: previous.event, started_at: previous.startedAt }, ...(previous.history || [])] : previous.history || []
     if (current()) setCycle({ shortcutError, phase: recorded ? 'running' : 'unknown', chatId: saved.chat_id, title: saved.title, event: saved.event, startedAt: saved.started_at, history, error: shortcutError })
     return { ok: true, chatId: outcome.chatId }
   }
-  async function admit(action, claimId, retry = false) {
-    try { return startOutcome(await startAgentTask({ ...action, scope: `contribute-cycle:${claimId}` }), { retry }) }
+  async function admit(action, scope) {
+    try { return startOutcome(await startAgentTask({ ...action, scope })) }
     catch { return { state: 'unknown' } }
   }
   async function start(action) {
@@ -188,42 +169,42 @@ export function useProjectCycle(projectKey, startAgentTask) {
         if (alive.current && identity.current === requestedProject) setCycle({ ...previous, error: claim.error })
         return claim
       }
-      return await settleStart(requestedProject, claim.id, frozen, previous, await admit(frozen, claim.id))
+      const reserved = { id: claim.id, scope: claim.scope || `contribute-cycle:${claim.id}` }
+      return await settleStart(requestedProject, reserved, frozen, previous, await admit(frozen, reserved.scope))
     } finally { starting.current = false }
   }
-  // Explicit recovery of a reserved start whose outcome is unknown. Replaying
-  // the same scope is idempotent on the platform: it returns the admitted
-  // conversation or admits its first turn once; it never starts a second agent.
-  // It replays the exact frozen payload (work, title, model), never a choice
-  // rebuilt from today's project state.
+  // Finish starting asks the platform's scoped start again for the same scope
+  // with the saved work and model. That call is idempotent: it returns the
+  // started conversation, admits the first turn of an empty one, or creates
+  // the only one. It is always safe to repeat.
   async function finishStart() {
-    const claimId = cycle.pendingId
+    const claim = { id: cycle.pendingId, scope: cycle.pendingScope || `contribute-cycle:${cycle.pendingId}` }
     const action = cycle.pendingAction
-    if (!claimId || starting.current) return { ok: false, error: 'There is no reserved start to finish.' }
+    if (!claim.id || starting.current) return { ok: false, error: 'There is no reserved start to finish.' }
     if (!action) return { ok: false, error: LEGACY_START }
     starting.current = true
     observation.current++
     const previous = cycle
     setCycle(current => ({ ...current, phase: 'starting', error: '' }))
-    try { return await settleStart(projectKey, claimId, action, { ...previous, pending: false }, await admit(action, claimId, true)) }
+    try { return await settleStart(projectKey, claim, action, { ...previous, pending: false }, await admit(action, claim.scope)) }
     finally { starting.current = false }
   }
   // Where the platform can fence a scope, the owner may abandon a reserved
   // start instead: a cancelled or deleted scope is certified never admitted.
   const canDiscardStart = typeof globalThis.window?.mobius?.chat?.cancelStart === 'function'
   async function discardStart() {
-    const claimId = cycle.pendingId
-    if (!claimId || !canDiscardStart || starting.current) return
+    const claim = { id: cycle.pendingId, scope: cycle.pendingScope || `contribute-cycle:${cycle.pendingId}` }
+    if (!claim.id || !canDiscardStart || starting.current) return
     starting.current = true
     const previous = { ...cycle, pending: false }
     try {
       let fenced
-      try { fenced = await window.mobius.chat.cancelStart({ scope: `contribute-cycle:${claimId}` }) } catch { fenced = null }
+      try { fenced = await window.mobius.chat.cancelStart({ scope: claim.scope }) } catch { fenced = null }
       const outcome = fenced?.outcome === 'started' && fenced.chatId ? { state: 'admitted', chatId: fenced.chatId }
-        : ['cancelled', 'deleted'].includes(fenced?.outcome) ? { state: 'not_admitted', error: 'The reserved start was cancelled; nothing was started.' }
+        : ['cancelled', 'deleted'].includes(fenced?.outcome) ? { state: 'spent', error: 'The reserved start was cancelled; nothing was started.' }
         : { state: 'unknown' }
       // The saved replay payload survives an unknown fence outcome.
-      await settleStart(projectKey, claimId, cycle.pendingAction || { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, outcome)
+      await settleStart(projectKey, claim, cycle.pendingAction || { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, outcome)
     } finally { starting.current = false }
   }
   async function stop() {

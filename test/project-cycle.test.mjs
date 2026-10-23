@@ -167,7 +167,7 @@ test('mounted lost-start recheck recovers the exact saved reservation without du
     saved:()=>saved, runtime:{running:true},
     claim:async()=>{saved={pending:{id:'reservation-one',title:'Prepare',event:'private'}};return {ok:true,id:'reservation-one'}},
     start:async action=>{starts++;assert.equal(action.scope,'contribute-cycle:reservation-one');return {ok:false,error:'Lost response'}},
-    list:async({scope})=>{assert.equal(scope,'contribute-cycle:reservation-one');return visible?[{id:'same-chat',title:'Recovered',created_at:'2026-09-10T12:00:00Z'}]:[]},
+    list:async({scope})=>{assert.equal(scope,'contribute-cycle:reservation-one');return visible?[{id:'same-chat',title:'Recovered',created_at:'2026-09-10T12:00:00Z',has_messages:visible==='started'}]:[]},
     settle:async(key,id,next)=>{assert.equal(key,'fixture-project');assert.equal(id,saved.pending.id);saved=next;return true},
   })
   f.render();await f.restore()
@@ -177,7 +177,11 @@ test('mounted lost-start recheck recovers the exact saved reservation without du
   await f.render().recheck()
   assert.equal(f.render().cycle.pending,true)
   assert.equal((await f.render().start({title:'Duplicate'})).ok,false)
-  visible=true
+  // A created-but-empty row is not yet an owner; the reservation stays.
+  visible='empty'
+  await f.render().recheck()
+  assert.equal(f.render().cycle.pending,true)
+  visible='started'
   await f.render().recheck()
   assert.equal(f.render().cycle.chatId,'same-chat')
   assert.equal(f.render().cycle.phase,'running')
@@ -240,25 +244,13 @@ test('a scoped lookup with multiple owners remains reserved rather than choosing
   assert.equal(f.calls.filter(([kind])=>['settle','claim','stop'].includes(kind)).length,0)
 })
 
-test('a start has three outcomes; only a certified non-admission releases its reservation', async () => {
+test('a start has one identity: only a confirmed conversation or the platform\'s scope verdict settles it', () => {
   const { outcome } = fixture()
   assert.equal(JSON.stringify(outcome({ ok: true, chatId: 'chat-1' })), JSON.stringify({ state: 'admitted', chatId: 'chat-1' }))
-  assert.equal(outcome({ ok: false, notStarted: true, error: 'Incomplete' }).state, 'not_admitted')
-  assert.equal(outcome({ ok: false, code: 'scope_cancelled' }).state, 'not_admitted')
-  assert.equal(outcome({ ok: false, code: 'scope_deleted' }).state, 'not_admitted')
-  for (const value of [{ ok: false, error: 'Lost response' }, { ok: false, code: 'first_turn_rejected' }, null, { ok: true }]) assert.equal(outcome(value).state, 'unknown')
-
-  let saved = null
-  const released = fixture({ saved: () => saved,
-    claim: async () => { saved = { pending: { id: 'claim-refused' } }; return { ok: true, id: 'claim-refused' } },
-    start: async () => ({ ok: false, notStarted: true, error: 'Another agent task is already starting.' }),
-    settle: async (key, id, next) => { assert.equal(id, 'claim-refused'); assert.equal(next, null); saved = null; return true } })
-  released.render(); await released.restore()
-  const result = await released.render().start({ title: 'Prepare', event: 'private', draft: 'Prepare draft' })
-  assert.equal(result.ok, false)
-  assert.equal(Boolean(released.render().cycle.pending), false, 'a certified refusal released its reservation')
-  assert.match(released.render().cycle.error, /already starting/)
-  assert.deepEqual(released.calls.filter(([kind]) => kind === 'settle').map(call => call[3]), [null])
+  assert.equal(outcome({ ok: false, code: 'scope_cancelled' }).state, 'spent')
+  assert.equal(outcome({ ok: false, code: 'scope_deleted' }).state, 'spent')
+  for (const value of [{ ok: false, error: 'Lost response' }, { ok: false, notStarted: true, error: 'Another agent task is already starting.' },
+    { ok: false, status: 422 }, { ok: false, status: 413 }, { ok: false, code: 'first_turn_rejected' }, null, { ok: true }]) assert.equal(outcome(value).state, 'unknown')
 })
 
 const ACTION = { title: 'Prepare', draft: 'Only record A', event: 'private', agent: { provider: 'codex', model: 'chosen-model', effort: 'high' } }
@@ -440,14 +432,11 @@ test('a start is bounded to the platform limits before it is reserved', async ()
   assert.equal((await refused.render().start({ ...ACTION, agent: { provider: 'codex', model: 'm'.repeat(257) } })).ok, false)
 })
 
-test('a refusal releases a fresh reservation only on its first attempt; retries never release', async () => {
-  const { failureStatus } = fixture()
-  assert.equal(failureStatus({ status: 422 }), 422)
-  assert.equal(failureStatus(new Error('window.mobius.chat.start: scoped start failed (422)')), 422)
-  assert.equal(failureStatus(new Error('network down')), undefined)
-  // First attempt: a request refusal certifies the fresh reservation was never admitted.
-  for (const [response, released] of [[{ ok: false, status: 422 }, true], [{ ok: false, status: 413 }, true], [{ ok: false, status: 400 }, true],
-      [{ ok: false, status: 500 }, false], [{ ok: false, status: 409 }, false], [{ ok: false, status: 401 }, false], [{ ok: false, error: 'network' }, false]]) {
+test('no error, refusal or retry outcome releases a reservation; Finish stays available', async () => {
+  const failures = [{ ok: false, status: 422 }, { ok: false, status: 413 }, { ok: false, status: 400 }, { ok: false, status: 500 },
+    { ok: false, status: 409 }, { ok: false, status: 401 }, { ok: false, error: 'Another agent task is already starting.' }, { ok: false, error: 'network' }]
+  for (const response of failures) {
+    // First attempt.
     let saved = null
     const settled = []
     const f = fixture({ saved: () => saved, runtime: { running: true },
@@ -455,29 +444,17 @@ test('a refusal releases a fresh reservation only on its first attempt; retries 
       start: async () => response, settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
     f.render(); await f.restore()
     await f.render().start(ACTION)
-    if (released) {
-      assert.deepEqual(settled, [null], `first-attempt ${response.status} releases`)
-      assert.match(f.render().cycle.error, /refused this start/)
-    } else {
-      assert.deepEqual(settled, [], `first-attempt ${response.status || 'network'} keeps the reservation`)
-      assert.equal(f.render().cycle.pending, true)
-    }
-  }
-  // Retry (Finish) of an uncertain start: no refusal of any kind releases it.
-  for (const response of [{ ok: false, status: 422 }, { ok: false, status: 413 }, { ok: false, status: 400 }, { ok: false, status: 500 }, { ok: false, error: 'network' }]) {
-    let saved = { pending: { id: 'claim-v', title: ACTION.title, event: ACTION.event, action: freezeStartAction(ACTION) } }
-    const settled = []
-    const f = fixture({ saved: () => saved, runtime: { running: true }, start: async () => response,
-      settle: async (key, id, next) => { settled.push(next); saved = next; return true } })
-    f.render(); await f.restore()
-    await f.render().finishStart()
-    assert.deepEqual(settled, [], `retry ${response.status || 'network'} keeps the reservation`)
+    assert.deepEqual(settled, [], `first attempt ${response.status || response.error} keeps the reservation`)
     assert.equal(f.render().cycle.pending, true)
-    if (response.status && response.status < 500) assert.match(f.render().cycle.error, /refused this retry/)
+    assert.equal(f.render().cycle.pendingAction?.draft, ACTION.draft, 'Finish stays available with the saved work')
+    // Finish.
+    await f.render().finishStart()
+    assert.deepEqual(settled, [], `Finish ${response.status || response.error} keeps the reservation`)
+    assert.equal(f.render().cycle.pending, true)
   }
 })
 
-test('an admitted start whose response was lost is not released by a 413 on Finish (no second owner)', async () => {
+for (const retryStatus of [413, 422]) test(`an admitted start whose response was lost is not released by a ${retryStatus} on Finish (no second owner)`, async () => {
   // Reviewer's round-5 probe: the platform admits the first request but the
   // response is lost; the retry is refused by the body-size limit before any
   // scope lookup. Releasing on that would let a fresh start create a second owner.
@@ -487,7 +464,7 @@ test('an admitted start whose response was lost is not released by a 413 on Fini
     claim: async (key, previous, action) => { saved = { pending: { id: 'claim-' + (++claims), action: freezeStartAction(action) } }; return { ok: true, id: saved.pending.id } },
     start: async () => {
       if (!liveChats.length) { liveChats.push('old-admitted'); return { ok: false, error: 'Response lost' } }
-      return { ok: false, status: 413, error: 'Request body too large' }
+      return { ok: false, status: retryStatus, error: 'Refused' }
     },
     settle: async (key, id, next) => { saved = next; return true } })
   f.render(); await f.restore()
@@ -498,4 +475,83 @@ test('an admitted start whose response was lost is not released by a 413 on Fini
   reloaded.render(); await reloaded.restore()
   assert.equal((await reloaded.render().start(ACTION)).ok, false)
   assert.deepEqual(liveChats, ['old-admitted'])
+})
+
+// Real storage helpers over an online CAS fixture, and a platform stand-in with
+// the scoped start's contract: one conversation per scope, ever.
+async function realCycles(t) {
+  const storage = await import('../storage.js')
+  const stored = new Map(), versions = new Map()
+  const previousWindow = globalThis.window
+  globalThis.window = { mobius: { storage: {
+    get: async key => structuredClone(stored.get(key) ?? null),
+    getWithVersion: async key => ({ value: structuredClone(stored.get(key) ?? null), version: versions.get(key) || null }),
+    durableWrite: async (key, value, options = {}) => {
+      if ((options.ifNoneMatch && versions.has(key)) || (options.ifMatch && options.ifMatch !== versions.get(key))) throw Object.assign(Error('CAS'), { status: 412 })
+      stored.set(key, structuredClone(value)); versions.set(key, String((Number(versions.get(key)) || 0) + 1)); return { durability: 'synced', version: versions.get(key) }
+    },
+  } } }
+  t.after(() => { globalThis.window = previousWindow })
+  const chats = new Map() // scope -> { id, has_messages }
+  const until = async predicate => { for (let i = 0; i < 400 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 5)) }
+  const pane = (start, list = async ({ scope }) => chats.has(scope) ? [{ ...chats.get(scope) }] : []) => fixture({
+    saved: () => storage.loadCycleState('fixture-project'), runtime: { running: true },
+    claim: (...args) => storage.claimProjectCycle(...args), settle: (...args) => storage.settleProjectCycleClaim(...args), start, list })
+  return { storage, chats, until, pane }
+}
+
+test('an empty scoped chat seen by a second pane is not an owner: no second scope can start', async t => {
+  const { chats, until, pane } = await realCycles(t)
+  let release
+  const held = new Promise(resolve => { release = resolve })
+  const admit = async action => {
+    // The platform commits the empty chat, then admits its first turn later.
+    if (!chats.has(action.scope)) chats.set(action.scope, { id: 'chat-' + chats.size, has_messages: false })
+    await held
+    chats.get(action.scope).has_messages = true
+    return { ok: true, chatId: chats.get(action.scope).id }
+  }
+  const a = pane(admit), b = pane(admit)
+  a.render(); await a.restore(); await until(() => a.render().cycle.phase === 'idle')
+  const first = a.render().start(ACTION)
+  await until(() => chats.size === 1)
+  b.render(); await b.restore(); await until(() => b.render().cycle.pendingId)
+  await b.render().recheck()
+  assert.equal(b.render().cycle.pending, true, 'the empty row did not settle the reservation')
+  assert.equal((await b.render().start(ACTION)).ok, false, 'the second pane cannot start another scope')
+  release(); await first
+  assert.equal(chats.size, 1, 'one scope, one conversation')
+})
+
+test('repeating Finish is idempotent and a finished cycle advances to the next scope exactly once', async t => {
+  const { storage, chats, until, pane } = await realCycles(t)
+  let lose = true
+  const platform = async action => {
+    if (!chats.has(action.scope)) chats.set(action.scope, { id: 'chat-' + chats.size, has_messages: true })
+    if (lose) return { ok: false, error: 'Response lost' }
+    return { ok: true, chatId: chats.get(action.scope).id }
+  }
+  const p = pane(platform)
+  p.render(); await p.restore(); await until(() => p.render().cycle.phase === 'idle')
+  await p.render().start(ACTION)
+  const scope1 = p.render().cycle.pendingScope
+  assert.match(scope1, /^contribute-cycle:[0-9a-f]{32}:1$/)
+  await p.render().finishStart()
+  await p.render().finishStart()
+  assert.equal(p.render().cycle.pendingScope, scope1, 'an uncertain Finish keeps the same scope')
+  lose = false
+  await p.render().finishStart()
+  assert.equal(p.render().cycle.chatId, 'chat-0')
+  assert.equal((await p.render().finishStart()).ok, false, 'nothing left to finish')
+  assert.equal(chats.size, 1, 'repeated Finish created one conversation')
+  const afterFirst = await storage.loadCycleState('fixture-project')
+  assert.equal(afterFirst.seq, 1)
+  // The next cycle starts only after this one finishes, under scope n+1.
+  const next = pane(platform, async () => [])
+  next.render(); await next.restore(); await until(() => next.render().cycle.chatId)
+  next.setCycle({ ...next.render().cycle, phase: 'complete' })
+  await next.render().start(ACTION)
+  assert.equal(next.render().cycle.chatId, 'chat-1')
+  assert.deepEqual([...chats.keys()], [scope1, scope1.replace(/:1$/, ':2')])
+  assert.equal((await storage.loadCycleState('fixture-project')).seq, 2)
 })
