@@ -346,3 +346,30 @@ test('discarding a reserved start releases it only when the platform fences the 
   await unfenced.render().discardStart()
   assert.equal(unfenced.render().cycle.pending, true, 'an unknown fence keeps the reservation')
 })
+
+test('a failed discard keeps the saved work immediately replayable', async () => {
+  let saved = { pending: { id: 'claim-keep', title: ACTION.title, event: ACTION.event, action: freezeStartAction(ACTION) } }
+  const replays = []
+  const f = fixture({ saved: () => saved, runtime: { running: true }, cancelStart: async () => { throw Error('offline') },
+    start: async action => { replays.push(JSON.parse(JSON.stringify(action))); return { ok: true, chatId: 'kept-chat' } },
+    settle: async (key, id, next) => { saved = next; return true } })
+  f.render(); await f.restore()
+  await f.render().discardStart()
+  assert.equal(f.render().cycle.pending, true)
+  assert.equal(f.render().cycle.pendingAction?.draft, ACTION.draft, 'the replay payload survived the failed fence')
+  await f.render().finishStart()
+  assert.equal(replays[0].draft, ACTION.draft)
+  assert.equal(replays[0].scope, 'contribute-cycle:claim-keep')
+})
+
+test('reserved-start guidance names only controls that exist on this Möbius', async t => {
+  const { frontendModules, renderModule } = await import('./render-harness.mjs')
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { reservedStartBlocker } = await renderModule(`export { reservedStartBlocker } from './ui/ProjectControls.jsx'`)
+  const withoutFence = reservedStartBlocker({ action: null, mergeRights: true, canDiscard: false })
+  assert.doesNotMatch(withoutFence, /Discard/, 'no instruction to use a control this Möbius lacks')
+  assert.match(withoutFence, /cannot safely cancel it, so it stays reserved\. Check again/)
+  assert.match(reservedStartBlocker({ action: null, mergeRights: true, canDiscard: true }), /Discard it, then start again/)
+  assert.match(reservedStartBlocker({ action: { ...ACTION, merge: true }, mergeRights: false, canDiscard: false }), /needs merge rights/)
+  assert.equal(reservedStartBlocker({ action: ACTION, mergeRights: false, canDiscard: false }), '')
+})

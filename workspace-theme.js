@@ -211,9 +211,11 @@ export const WORKSPACE_CSS = `
 .co-model-row.is-selected .co-model-dot { border-color:var(--accent); background:var(--accent); }
 .co-model-row.is-selected .co-model-dot::after { content:''; position:absolute; left:4px; top:2px; width:5px; height:8px; border:1.5px solid var(--accent-fg,#fff); border-top:0; border-left:0; transform:rotate(45deg); }
 .co-effort-indent { margin:4px 12px 8px 52px; }
-.co-effort { display:flex; align-items:center; gap:12px; min-width:0; }
+.co-effort { display:flex; flex-wrap:wrap; align-items:center; gap:0 12px; min-width:0; }
 .co-effort.is-disabled { opacity:.55; }
-.co-effort-track { position:relative; flex:1; min-width:0; height:44px; display:flex; align-items:center; justify-content:space-between; }
+/* The track never squeezes its 44px stops: when the row is too narrow the
+   label moves to its own line instead (phones, six effort levels). */
+.co-effort-track { position:relative; flex:1 1 auto; min-width:min-content; height:44px; display:flex; align-items:center; justify-content:space-between; }
 .co-effort-track::before { content:''; position:absolute; left:22px; right:22px; top:50%; height:2px; background:var(--border); border-radius:2px; transform:translateY(-50%); }
 /* Each stop is a 44px target; the 13px dot is only its visible mark. */
 .co-effort-stop { position:relative; width:44px; height:44px; flex-shrink:0; padding:0; border:0; border-radius:50%; background:none; cursor:pointer; }
@@ -226,7 +228,7 @@ export const WORKSPACE_CSS = `
 .co-effort-label { min-width:70px; font-size:14px; font-weight:500; color:var(--text); white-space:nowrap; text-align:right; }
 .co-model-note { margin:8px 10px; color:var(--muted); font-size:14px; }
 .co-model-note button { margin-left:6px; border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; text-decoration:underline; }
-@media (max-width:520px) { .co-model-row { min-height:44px; gap:10px; padding:7px 8px; } }
+@media (max-width:520px) { .co-model-row { min-height:44px; gap:10px; padding:7px 8px; } .co-effort-indent { margin-left:8px; margin-right:8px; } .co-effort-label { order:-1; flex-basis:100%; min-width:0; text-align:left; } }
 @media (prefers-reduced-motion:reduce) { .co-effort-stop::before,.co-agent-trigger-chevron { transition:none; } }
 .co-change-total { display:inline-flex; align-items:baseline; gap:7px; font-variant-numeric:tabular-nums; }
 .co-change-total b { color:var(--green); font-weight:650; }

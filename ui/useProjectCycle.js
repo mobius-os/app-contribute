@@ -34,6 +34,10 @@ export function startOutcome(outcome, { retry = false } = {}) {
   return { state: 'unknown', ...(outcome?.notStarted ? { error: outcome.error } : {}) }
 }
 
+// An older reservation without its saved work can be neither replayed nor,
+// without the platform's scope fence, safely released: Check again still
+// finds its conversation if that start was admitted.
+export const LEGACY_START = 'This older start did not save its exact work, so it cannot be finished here. Check again finds its conversation if it started.'
 const UNRESOLVED_START = 'This start is not confirmed. It stays reserved, so no second agent starts. Finish starting it, or check again.'
 
 export function useProjectCycle(projectKey, startAgentTask) {
@@ -130,7 +134,7 @@ export function useProjectCycle(projectKey, startAgentTask) {
     }
     if (outcome.state === 'unknown') {
       const error = outcome.error ? `${outcome.error} ${UNRESOLVED_START}` : UNRESOLVED_START
-      if (current()) setCycle({ ...previous, pending: true, pendingId: claimId, pendingTitle: action.title, pendingEvent: action.event, pendingAction: freezeStartAction(action), phase: 'unknown', error })
+      if (current()) setCycle({ ...previous, pending: true, pendingId: claimId, pendingTitle: action.title, pendingEvent: action.event, pendingAction: freezeStartAction(action) || previous.pendingAction || null, phase: 'unknown', error })
       return { ok: false, reserved: true, error }
     }
     const saved = { chat_id: outcome.chatId, title: action.title, event: action.event, started_at: new Date().toISOString(), scope: `contribute-cycle:${claimId}` }
@@ -172,7 +176,7 @@ export function useProjectCycle(projectKey, startAgentTask) {
     const claimId = cycle.pendingId
     const action = cycle.pendingAction
     if (!claimId || starting.current) return { ok: false, error: 'There is no reserved start to finish.' }
-    if (!action) return { ok: false, error: 'This older start did not save its exact work, so it cannot be finished here. Discard it, then start again.' }
+    if (!action) return { ok: false, error: LEGACY_START }
     starting.current = true
     observation.current++
     const previous = cycle
@@ -194,7 +198,8 @@ export function useProjectCycle(projectKey, startAgentTask) {
       const outcome = fenced?.outcome === 'started' && fenced.chatId ? { state: 'admitted', chatId: fenced.chatId }
         : ['cancelled', 'deleted'].includes(fenced?.outcome) ? { state: 'not_admitted', error: 'The reserved start was cancelled; nothing was started.' }
         : { state: 'unknown' }
-      await settleStart(projectKey, claimId, { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, outcome)
+      // The saved replay payload survives an unknown fence outcome.
+      await settleStart(projectKey, claimId, cycle.pendingAction || { title: cycle.pendingTitle, event: cycle.pendingEvent }, previous, outcome)
     } finally { starting.current = false }
   }
   async function stop() {

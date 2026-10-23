@@ -56,7 +56,7 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], githubRetries: 0 }
+const calls = { exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], githubRetries: 0 }
 const values = new Map(), versions = new Map(), navigation = [], reviewRuns = []
 let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
@@ -71,7 +71,7 @@ function forbidden(kind) {
 window.fetch = async (url, options = {}) => {
   const call = { url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null }
   calls.requests.push(call)
-  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['low','high'],default_effort:'low'}]}})
+  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['none','minimal','low','medium','high','xhigh'],default_effort:'low'}]}})
   if (call.url === '/api/owner/model-prefs') return response({hidden_ids:[]})
   if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'}})
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
@@ -119,6 +119,17 @@ window.fetch = async (url, options = {}) => {
     if (window.fixtureChangedHead) found = found.map(pr => pr.number===8 ? {...pr,headRefOid:'e'.repeat(40)} : pr)
     return response({ data: { search: { nodes: found, issueCount: pulls.length,
       pageInfo: { hasNextPage: Boolean(window.fixturePaging && !laterPage), endCursor: window.fixturePaging && !laterPage ? 'fixture-page-2' : null } } } })
+  }
+  // Runs older than the capped recent list are reachable only by exact id.
+  const oldRun = /^\/api\/github\/contributions\/fixture-app\/review-runs\/([\w-]+)(\/stop)?$/.exec(call.url)
+  if (oldRun && window.oldRuns?.has(oldRun[1])) {
+    if (oldRun[2]) {
+      const stopped = { ...window.oldRuns.get(oldRun[1]), execution_state: 'stopped', can_stop: false }
+      window.oldRuns.set(oldRun[1], stopped)
+      return response({ run: stopped })
+    }
+    calls.exactRuns.push(oldRun[1])
+    return response({ run: window.oldRuns.get(oldRun[1]) })
   }
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') return response({ runs: reviewRuns })
@@ -729,8 +740,14 @@ window.runWorkspaceChecks = async () => {
         const box = stop.getBoundingClientRect()
         ensure(box.width >= 44 && box.height >= 44, 'Effort target below 44px: ' + box.width + 'x' + box.height)
       }
-      const stops = [...pane.querySelectorAll('.co-effort-stop')], edge = stops.at(-1).getBoundingClientRect()
-      ensure(document.elementFromPoint(edge.right - 3, edge.top + edge.height / 2) === stops.at(-1), 'The edge of an effort target does not hit it')
+      // Every supported level (six), and both edges of each target, are tappable.
+      const stops = [...pane.querySelectorAll('.co-effort-stop')]
+      ensure(stops.length === 6, 'Fixture did not offer the full effort scale')
+      for (const stop of stops) {
+        stop.scrollIntoView({ block: 'center', inline: 'nearest' }); await frame()
+        const box = stop.getBoundingClientRect()
+        for (const x of [box.left + 3, box.right - 3]) ensure(document.elementFromPoint(x, box.top + box.height / 2) === stop, 'An effort target edge does not hit it: ' + stop.getAttribute('aria-label'))
+      }
       await inventory(); await chooseProject('Fixture project')
     })
     await check('finishing an uncertain start replays its exact saved work, not today\'s choice', async () => {
@@ -930,12 +947,14 @@ window.runWorkspaceChecks = async () => {
           public_review: { state: 'posted', url: 'https://github.com/owner/project/pull/7#pullrequestreview-1' } }] }
       // An older run, beyond the capped recent list: the link carries its exact read.
       const before = mutationRequests().length, starts = calls.starts.length
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
       window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'run-link' })
       const pane = () => query('[data-task="task:run:chat-run-12345678"]')
       await until(() => pane() && text(pane()).includes('Linked run findings'), 'Run link did not open its run')
       ensure(!reviewRuns.some(item => item.id === run.id), 'Fixture run leaked into the recent list')
+      const exactBefore = calls.exactRuns.length
       await click(query('[aria-label="Refresh project status"]'))
-      await until(() => calls.requests.filter(call => call.url.endsWith('/review-runs')).length > 0, 'Runs were not reread')
+      await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run')
       ensure(pane() && text(pane()).includes('Linked run findings'), 'A refresh evicted the linked run')
       ensure(text(pane()).includes('Recorded version') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open review conversation', pane()), 'Shared run detail lost its version note, posted review or owning chat')
       ensure(mutationRequests().length === before && calls.starts.length === starts, 'Opening a run link started or changed work')
@@ -943,6 +962,25 @@ window.runWorkspaceChecks = async () => {
       await until(() => !pane(), 'Run detail did not close')
       ensure(calls.releases.includes('run-link'), 'Leaving the run did not release its link')
       await until(() => !query('[data-review-run="' + run.id + '"]'), 'A released old run stayed pinned in project history')
+      window.oldRuns = null
+    })
+    await check('a linked old run keeps its newest state across refresh instead of its navigation snapshot', async () => {
+      const run = { id: 'old-run-87654321', mode: 'review', state: 'reviewing', execution_state: 'running', can_stop: true, chat_id: 'old-run-chat',
+        items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'reviewing', summary: 'Old active run' }] }
+      window.oldRuns = new Map([[run.id, structuredClone(run)]])
+      window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'old-run-link' })
+      const pane = () => query('[data-task="task:run:old-run-87654321"]')
+      await until(() => pane() && text(pane()).includes('Recorded status: Reviewing'), 'Old run did not open')
+      await click(button('Stop workflow', pane()))
+      await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
+      const exactBefore = calls.exactRuns.length
+      await click(query('[aria-label="Refresh project status"]'))
+      await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run exactly')
+      await frame(); await frame()
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'A refresh resurrected the stale running snapshot')
+      pane().focus(); await nativeEscape()
+      await until(() => !pane(), 'Old run did not close')
+      window.oldRuns = null
     })
     await check('switching project releases a chat PR link instead of pinning it on return', async () => {
       window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'switch' })

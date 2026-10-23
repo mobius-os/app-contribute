@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { baseTip, collaborationRequest, DRAFT_TAKEOVER_SCOPE, discoverPull, discoverPulls, liveSelection, loadReviewRuns, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, assignPulls, takeoverBlocker, takeoverScope } from '../collaboration.js'
+import { awaitsGithub, baseTip, collaborationRequest, DRAFT_TAKEOVER_SCOPE, discoverPull, discoverPulls, liveSelection, loadReviewRuns, matchingPulls, mayAssign, mayMerge, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, assignPulls, takeoverBlocker, takeoverScope } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, observePulls, pullsInView } from '../pull-view.js'
 import { pullConversations, recordsForPull } from '../provenance.js'
 import { RunDetail, savedVersion } from './RunDetail.jsx'
@@ -257,11 +257,28 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
       if (id === request.current && alive.current) setData(old => ({ ...old, loading: false, error: error.message }))
     }
   }, [token, repo, publish, readFocus])
+  // A linked run older than the capped recent list is kept as its own exact
+  // record: every refresh rereads it (observing an unsettled public outcome)
+  // so a list refresh can never fall back to the navigation-time snapshot.
+  const [linked, setLinked] = useState(null)
+  const linkedRef = useRef(null)
+  linkedRef.current = linked
+  const runFocusRef = useRef(null)
   const loadRuns = useCallback(async () => {
+    let list
     try {
       const show = next => { if (alive.current) { setRuns(next.runs || []); setRunError('') } }
-      show(await loadReviewRuns(token, appId, { onList: show }))
-    } catch (error) { if (alive.current) setRunError(error.message) }
+      list = await loadReviewRuns(token, appId, { onList: show })
+      show(list)
+    } catch (error) { if (alive.current) setRunError(error.message); return }
+    const focus = runFocusRef.current
+    if (!focus || (list.runs || []).some(run => run.id === focus.runId)) return
+    const path = `review-runs/${encodeURIComponent(focus.runId)}`
+    try {
+      if (linkedRef.current && awaitsGithub(linkedRef.current)) await collaborationRequest(token, appId, `${path}/observe`, {})
+      const exact = (await collaborationRequest(token, appId, path)).run
+      if (alive.current && runFocusRef.current?.runId === focus.runId && exact) setLinked(exact)
+    } catch (error) { if (alive.current) setRunError(`This run's latest status is unavailable: ${error.message}`) }
   }, [token, appId])
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   useEffect(() => {
@@ -296,10 +313,11 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   const focusDetailOpen = !!focusKey && focusOpened.current === focusPull?.nonce && task?.activeId === 'task:detail' && opened === focusKey
   // A run link opens that run's detail once runs are read, under the same lease.
   const runFocusId = focusRun?.runId && conn.state === 'connected' && focusRun.repo?.toLowerCase() === repo.toLowerCase() ? focusRun.runId : ''
-  const runFocusRef = useRef(null)
   runFocusRef.current = runFocusId ? focusRun : null
+  // The lease brings its exact read; it is kept and refreshed only while held.
+  useEffect(() => { setLinked(runFocusId && focusRun?.run?.id === runFocusId ? focusRun.run : null) }, [runFocusId, focusRun?.nonce])
   const runOpened = useRef('')
-  const runPresent = !!runFocusId && (runs.some(run => run.id === runFocusId) || focusRun?.run?.id === runFocusId)
+  const runPresent = !!runFocusId && (runs.some(run => run.id === runFocusId) || linked?.id === runFocusId)
   useEffect(() => {
     if (!runPresent || runOpened.current === focusRun.nonce) return
     runOpened.current = focusRun.nonce
@@ -335,7 +353,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
   if (conn.state !== 'connected' || !project || !repo) return null
   // A linked run is shown from its exact read while its lease is held, even
   // when it is older than the capped recent list; a refresh cannot evict it.
-  const linkedRun = runFocusId && focusRun.run?.id === runFocusId && !runs.some(run => run.id === runFocusId) ? [focusRun.run] : []
+  const linkedRun = runFocusId && linked?.id === runFocusId && !runs.some(run => run.id === runFocusId) ? [linked] : []
   const relevantRuns = [...linkedRun, ...runs].filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
   const statusFor = pr => reviewForPull(relevantRuns, pr)
   const detailPr = pulls.find(pr => prKey(pr) === opened)
@@ -369,7 +387,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     setBusy(true); setRunError('')
     try {
       const result=await collaborationRequest(token,appId,`review-runs/${encodeURIComponent(run.id)}/stop`,{})
-      setRuns(old=>old.some(item=>item.id===run.id) ? old.map(item=>item.id===run.id ? result.run : item) : [result.run, ...old])
+      if (linkedRef.current?.id === run.id) setLinked(result.run)
+      setRuns(old=>old.map(item=>item.id===run.id ? result.run : item))
     } catch(error) {setRunError(error.message)}
     finally {setBusy(false)}
   }
