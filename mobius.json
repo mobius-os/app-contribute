@@ -1,7 +1,7 @@
 {
   "id": "contribute",
   "name": "Contribute",
-  "version": "0.5.43",
+  "version": "0.5.44",
   "description": "See local project changes, prepare and review them privately, and follow shared work through acceptance.",
   "author": "mobius-os",
   "license": "MIT",
@@ -104,6 +104,7 @@
     "ui/TaskPane.jsx",
     "workspace-theme.js",
     "ui/useProjectCycle.js",
+    "ui/useScreenshots.js",
     "ui/SourceConversations.jsx",
     "repositories.js",
     "ui/RepositoryPicker.jsx",

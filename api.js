@@ -148,6 +148,32 @@ export async function fetchReviewStatus(token, appId, recordIds = []) {
   }
 }
 
+function base64(bytes) {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(binary)
+}
+
+// One staged screenshot of a prepared record, as a data:image/png URL for the
+// review card, or null when it cannot be read. The route serves only the exact
+// bytes the plan approved; Send uploads from the platform's own copy.
+export async function fetchContributionScreenshot(token, appId, recordId, name) {
+  try {
+    const r = await fetchRead(
+      '/api/github/contributions/' + encodeURIComponent(appId) + '/' +
+        encodeURIComponent(recordId) + '/screenshots/' + encodeURIComponent(name),
+      { headers: authHeaders(token) },
+      20000,
+    )
+    if (!r.ok) return null
+    return 'data:image/png;base64,' + base64(new Uint8Array(await r.arrayBuffer()))
+  } catch {
+    return null
+  }
+}
+
 // POSTs one read-only GraphQL document; returns response.data or null.
 // Callers leave records stale on null — the refresh is best-effort polish,
 // and GitHub returns null nodes (not errors) for anything inaccessible.
