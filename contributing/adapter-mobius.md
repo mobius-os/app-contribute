@@ -136,7 +136,8 @@ guess.
 Every `area: ui` PR, and every app PR that changes what people see, carries
 the before/after screenshots described in [prepare.md](prepare.md). Capture
 them with the Möbius `screenshot` tool at a desktop width and at 390 px wide,
-so reviewers see both layouts.
+so reviewers see both layouts. The tool reports where it saved each image;
+crop a copy to the change if needed and attach that file when you stage.
 
 ## A new app: check the catalog first
 

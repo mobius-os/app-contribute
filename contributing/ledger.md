@@ -24,7 +24,9 @@ mapi -X POST /api/github/contributions/<id>/<record-id>/stage \
   "repo_path": "/data/contrib/<record-id>/worktree", "repo": "<owner>/<repo>",
   "title": "<title>", "body_draft": "<full PR body, word for word>",
   "summary": "<one plain-language sentence about what improves for people>",
-  "labels": ["<type>", "<area>"], "prior_work": {...}
+  "labels": ["<type>", "<area>"], "prior_work": {...},
+  "screenshots": [{"name": "before-desktop.png", "path": "/abs/path.png",
+                   "alt": "<what it shows>"}]
 }'
 ```
 
@@ -36,9 +38,13 @@ be sent). Optional fields: `base_sha`
 (the accepted base; default is the merge base with the target's freshly
 fetched default branch, and a stack layer uses its parent's head),
 `source_repo_path` (only for a checkout that is not a linked worktree of the
-live source), `coauthor_trailer: false`, and `chat_id` (the source chat, when a
-helper stages for it). An open or draft PR restages as a `pr_update` whose
-title and body are copied from GitHub. Staging never pushes anything.
+live source), `coauthor_trailer: false`, `chat_id` (the source chat, when a
+helper stages for it), and `screenshots` (up to 8 PNGs of at most 2 MB, each
+named in lowercase with hyphens and shown in `body_draft` as
+`(screenshot:NAME)`; staging copies them, `[]` removes them, and leaving the
+field out keeps the current ones). An open or draft PR restages as a
+`pr_update` whose title and body are copied from GitHub. Staging never pushes
+anything.
 
 A 404 from either call means this Möbius predates them: tell the owner a
 platform update is needed rather than writing the record by hand.

@@ -176,15 +176,18 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
   with neutral test data when the real one shows any. When a screenshot
   cannot show the change (it appears only on a real device, or only as
   timing), say why in the body instead.
-- GitHub offers no API for image attachments, so host screenshots on an
-  `assets` branch of the owner's fork of the target, or of the target itself
-  when the owner owns it; never on the PR branch, and never in a shared
-  repository the owner only has push rights to. Store each record's images
-  under `assets/<topic-branch>/` and link
-  `https://raw.githubusercontent.com/<login>/<repo>/assets/<topic-branch>/<file>.png`.
-  Pushing that branch is a public action: list the exact image files in the
-  handoff so the owner's Send approval covers them, push them only after that
-  approval and before Send, and confirm each link loads before publishing.
+- Attach screenshots when you stage, never by pushing them yourself:
+  GitHub has no API for description images, so Send hosts them on an
+  `assets` branch of the owner's own repository (their fork, or the target
+  when they own it) and links them. List each PNG in
+  the stage call's `screenshots` (see [ledger.md](ledger.md)) and show it in
+  `body_draft` as `![What it shows](screenshot:before-desktop.png)`; Send
+  replaces each reference with its public link. Every attached image must
+  appear in the body, and every reference must name an attached image. The
+  owner sees the images in the card and approves them with the text, and
+  Send refuses an image that changed afterwards. When `mapi /api/github/status`
+  does not report `"screenshot_upload": true`, this Möbius cannot attach
+  them yet: say in the body that screenshots are not included and why.
 - For a screenshot already hosted as a GitHub attachment, link the image to
   its canonical `https://github.com/user-attachments/assets/...` URL:
   `[![Screenshot description](URL)](URL)`. GitHub may render a plain image's
