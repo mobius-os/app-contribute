@@ -69,6 +69,7 @@ class JobEndpoints:
       "comments": {"nodes": [{
         "url": "https://github.com/example/project/pull/1#comment",
         "createdAt": "2026-01-02T00:00:00Z", "author": {"login": "reviewer"},
+        "authorAssociation": "MEMBER",
       }]},
     }
     self.version = 1
@@ -224,6 +225,19 @@ class ContributionPushTest(unittest.TestCase):
     self.assertEqual(len(job.responded), 2)
     self.assertEqual(job.sent, [])
     self.assertNotIn("announced_at", job.record["attention"])
+
+  def test_an_outside_comment_reaches_the_owner_but_never_starts_autopilot(self):
+    job = JobEndpoints()
+    job.node["comments"]["nodes"][0].update(
+      authorAssociation="NONE", author={"login": "drive-by"},
+    )
+    job.change(autopilot={"enabled": True})
+    job.run()
+    job.run()
+    self.assertEqual(job.responded, [])
+    self.assertEqual(job.record["attention"]["type"], "outside_activity")
+    self.assertEqual(len(job.sent), 1)
+    self.assertIn("drive-by", job.sent[0]["body"])
 
   def test_platform_human_required_remains_platform_owned(self):
     for autopilot in (False, True):
