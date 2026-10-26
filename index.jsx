@@ -74,7 +74,10 @@ import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
-import { chatBlockTarget } from './chat-blocks.js'
+import { cardRecordIds, chatBlockTarget } from './chat-blocks.js'
+import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
+import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
+import { readBlockSession } from './block-protocol.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -151,7 +154,42 @@ function stalePublicApproval() {
   }
 }
 
-export default function ContributeApp({ appId, token }) {
+// Chat sends only through routes that bind the confirmed snapshot; the
+// Möbius relay route does not, so relay contributions are sent from
+// Contribute itself.
+function relayFromChatRefusal() {
+  return {
+    notAttempted: true,
+    error: 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.',
+    failure: { owner: 'owner', code: 'relay_not_inline' },
+  }
+}
+
+// The longest a card's explicit Try again may take before it settles as failed.
+export const CARD_REFRESH_DEADLINE_MS = 20000
+
+// Lets the chat host run this app headless behind a Contribute card.
+export const appBlockSessions = true
+
+// A chat card starts with exact record reads only. The ordinary app, with its
+// account, ledger and review reads and its guarded Send handlers, mounts only
+// once the owner taps the card's action, and stays invisible.
+export default function ContributeEntry({ appId, token, blockSession = null }) {
+  const [runtimeWanted, setRuntimeWanted] = useState(false)
+  const [runtime, setRuntime] = useState(null)
+  const addressed = useMemo(() => cardRecordIds((readBlockSession(blockSession)?.actions || []).map(action => action.key)), [blockSession])
+  if (!blockSession) return <ContributeApp appId={appId} token={token} />
+  return <>
+    <InlineBlockSession blockSession={blockSession} runtime={runtime} onNeedRuntime={() => setRuntimeWanted(true)} />
+    {runtimeWanted ? <ContributeApp appId={appId} token={token} addressedRecordIds={addressed} onPublicationRuntime={setRuntime} /> : null}
+  </>
+}
+
+function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationRuntime = null }) {
+  // Behind a chat card the app runs only what inline Send needs: the ledger,
+  // the addressed review status, the GitHub connection and the guarded Send
+  // handlers. It renders nothing and skips the workspace's other reads.
+  const sendOnly = Boolean(onPublicationRuntime)
   const [records, setRecords] = useState([])
   const [fromCache, setFromCache] = useState(false)
   const [conn, setConn] = useState({ state: 'checking' })
@@ -252,17 +290,18 @@ export default function ContributeApp({ appId, token }) {
     } catch (error) { if (requestId === repositoryRequest.current) setRepositoryAccess(old => ({ ...old, error: error.message })) }
   }, [token])
   useEffect(() => {
+    if (sendOnly) return undefined
     if (conn.state === 'connected') void loadRepositories()
     else { repositoryRequest.current += 1; setRepositoryAccess({ repositories: [], error: '', hasNextPage: false }) }
     return () => { repositoryRequest.current += 1 }
-  }, [conn.state, loadRepositories])
+  }, [conn.state, loadRepositories, sendOnly])
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
   const submissionMethod = 'github'
   const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
-  useEffect(() => { void loadCycleState().then(setEarlierCycle) }, [])
+  useEffect(() => { if (!sendOnly) void loadCycleState().then(setEarlierCycle) }, [sendOnly])
   const pageRef = useRef(null)
   // Latest records for callbacks (the connect-flow refresh) that must not take
   // a `records` dependency and re-bind on every ledger change.
@@ -361,9 +400,9 @@ export default function ContributeApp({ appId, token }) {
   const replaceFeed = useCallback((next) => {
     recordsRef.current = next
     setRecords(next)
-    cacheFeed(next)
+    if (!sendOnly) cacheFeed(next)
     return next
-  }, [])
+  }, [sendOnly])
 
   const applyRecordUpdates = useCallback((updates) => (
     replaceFeed(mergeRecordUpdates(recordsRef.current, updates))
@@ -377,20 +416,28 @@ export default function ContributeApp({ appId, token }) {
   // (applyLiveStates passes records through), so a flaky network never blanks
   // or downgrades the feed. Pure fetch: the caller owns setRecords/cacheFeed.
   const fetchRefreshed = useCallback(async (recs) => {
+    if (sendOnly) return recs
     const refresh = buildRefreshQuery(recs)
     if (!refresh) return recs
     const data = await fetchLiveStates(token, refresh.query)
     return applyLiveStates(recs, refresh.aliases, data)
-  }, [token])
+  }, [token, sendOnly])
 
+  // A chat card's status request names its records and, once the ledger is
+  // read, every prepared layer of their stacks.
+  const reviewAddressKey = useMemo(() => addressedRecordIds
+    ? reviewAddressFor(addressedRecordIds, ledgerReady ? records : []).join('\n') : null, [addressedRecordIds, ledgerReady, records])
+  const reviewAddress = useMemo(() => reviewAddressKey === null ? null : reviewAddressKey.split('\n').filter(Boolean), [reviewAddressKey])
   const refreshReviewStatus = useCallback(async () => {
     const requestId = reviewStatusRequestRef.current + 1
     reviewStatusRequestRef.current = requestId
     setReviewStatus((current) => ({ ...current, state: 'loading' }))
-    const outcome = await fetchReviewStatus(token, appId)
+    const outcome = await fetchReviewStatus(token, appId, reviewAddress || [])
     if (requestId !== reviewStatusRequestRef.current) return null
     if (outcome.ok) {
-      const indexed = indexReviewStatus(outcome.data)
+      // Tagged with the address it answers, so a status for an older, narrower
+      // address is never mistaken for a check of the card's whole stack.
+      const indexed = { ...indexReviewStatus(outcome.data), address: reviewAddressKey }
       setReviewStatus(indexed)
       return indexed
     }
@@ -398,10 +445,11 @@ export default function ContributeApp({ appId, token }) {
       state: 'unavailable',
       byId: {},
       checkedAt: '',
+      address: reviewAddressKey,
     }
     setReviewStatus(next)
     return next
-  }, [token, appId])
+  }, [token, appId, reviewAddress, reviewAddressKey])
 
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
@@ -434,6 +482,7 @@ export default function ContributeApp({ appId, token }) {
   }, [token])
 
   useEffect(() => {
+    if (sendOnly) return undefined
     let cancelled = false
     async function loadSources() {
       const cached = await loadCachedSourceSnapshot()
@@ -450,7 +499,7 @@ export default function ContributeApp({ appId, token }) {
     }
     loadSources()
     return () => { cancelled = true }
-  }, [refreshSources, signalReady])
+  }, [refreshSources, signalReady, sendOnly])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
   // Proposal coverage depends on which recorded sources source status
   // compared. When the active set changes (feed load, staging, dismissal),
@@ -459,8 +508,8 @@ export default function ContributeApp({ appId, token }) {
     () => proposalSourceCommits(records).join(','), [records],
   )
   useEffect(() => {
-    if (sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
-  }, [sourceCommitsKey, refreshSources])
+    if (!sendOnly && sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
+  }, [sourceCommitsKey, refreshSources, sendOnly])
 
   // Account reads do not scan the feed; the foreground coordinator owns that.
   const refreshConnection = useCallback(async () => {
@@ -493,8 +542,8 @@ export default function ContributeApp({ appId, token }) {
   }, [token])
 
   useEffect(() => {
-    refreshIncomingReviews()
-  }, [conn.state, refreshIncomingReviews])
+    if (!sendOnly) refreshIncomingReviews()
+  }, [conn.state, refreshIncomingReviews, sendOnly])
 
   // Mount: the cached first screen, GitHub status, and app preferences are all
   // small independent reads. Publish them without holding those controls
@@ -558,7 +607,7 @@ export default function ContributeApp({ appId, token }) {
           feedReplaced = true
         }
       }
-      if (!feedReplaced) cacheFeed(toCache)
+      if (!feedReplaced && !sendOnly) cacheFeed(toCache)
     }
     load().catch((err) => {
       if (cancelled) return
@@ -572,7 +621,7 @@ export default function ContributeApp({ appId, token }) {
       })
     })
     return () => { cancelled = true }
-  }, [token, fetchRefreshed, replaceFeed, signalReady])
+  }, [token, fetchRefreshed, replaceFeed, signalReady, sendOnly])
 
   // Event-driven liveness: refresh when the app becomes actionable again.
   // Focus + visibility can fire together, and an online transition can land
@@ -580,8 +629,12 @@ export default function ContributeApp({ appId, token }) {
   // preserves exactly one trailing refresh when an event arrives mid-flight.
   // There is deliberately no timer: a hidden/idle app consumes no resources.
   const refreshWorkRef = useRef(null)
+  const forceRefreshRef = useRef(false)
   const runRefreshWork = useCallback(async () => {
-    if (document.visibilityState !== 'visible') return
+    // A card's explicit Try again runs even while the frame is not visible.
+    const force = forceRefreshRef.current
+    forceRefreshRef.current = false
+    if (!force && document.visibilityState !== 'visible') return
     // Mount already owns the first authoritative scan. Startup focus and
     // visibility events must not queue another full pass behind it.
     if (!ledgerReadyRef.current) return
@@ -804,7 +857,9 @@ export default function ContributeApp({ appId, token }) {
   // New PRs use the connected owner's GitHub identity. Existing-PR updates
   // stay on the personal GitHub identity that owns their public branch. Both
   // actions consume one exact reviewed record and remain explicit clicks.
-  const onSend = useCallback(async (rec) => {
+  // `rec` is the exact record the owner confirmed. Where the platform binds
+  // it, the server compares it under its publication lock before any write.
+  const onSend = useCallback(async (rec, { requireBinding = false } = {}) => {
     let canonical = null
     try {
       canonical = await loadFreshContributionRecord(rec.id)
@@ -844,7 +899,9 @@ export default function ContributeApp({ appId, token }) {
           failure: { owner: 'owner', code: 'github_not_connected' },
         }
       }
-      outcome = await updateContribution({ appId, token, rec: refreshed })
+      const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding })
+      if (unbound) return unbound
+      outcome = await updateContribution({ appId, token, rec: refreshed, expectedRecord: connRef.current.frozenBinding ? rec : null })
     } else {
       const decision = contributionPathDecision(
         refreshed,
@@ -857,6 +914,8 @@ export default function ContributeApp({ appId, token }) {
         failure: { owner: 'owner' },
       }
       viaMobius = decision.method === 'mobius'
+      const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding, relay: viaMobius })
+      if (unbound) return unbound
       outcome = viaMobius
         ? await submitContributionViaMobius({ appId, token, rec: refreshed })
         : await submitContribution({
@@ -865,6 +924,7 @@ export default function ContributeApp({ appId, token }) {
             rec: refreshed,
             autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
             publicationStage: 'ready',
+            expectedRecord: connRef.current.frozenBinding ? rec : null,
           })
     }
     if (outcome.ok) {
@@ -960,6 +1020,7 @@ export default function ContributeApp({ appId, token }) {
     }
     refreshReviewStatus()
     return {
+      ...(outcome.notAttempted ? { notAttempted: true } : {}),
       error: outcome.error || 'Could not submit this PR.',
       failure: outcome.failure,
     }
@@ -1179,7 +1240,7 @@ export default function ContributeApp({ appId, token }) {
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
   // returned ledger record rather than treating the phase as all-or-nothing.
-  const onSendStack = useCallback(async (stackRecords) => {
+  const onSendStack = useCallback(async (stackRecords, { requireBinding = false } = {}) => {
     const approvedPublicationRecords = stackPublicationRecords({
       type: 'stack', records: stackRecords, total: stackRecords.length,
     })
@@ -1240,6 +1301,8 @@ export default function ContributeApp({ appId, token }) {
         }
       }
     }
+    const unbound = writeBindingRefusal({ requireBinding, frozenBinding: connRef.current.frozenBinding })
+    if (unbound) return unbound
     const writeStack = updating
       ? updateContributionStack
       : submitContributionStack
@@ -1248,6 +1311,10 @@ export default function ContributeApp({ appId, token }) {
       token,
       recordIds: currentRecords.map((rec) => rec.id),
       publicationStage: 'ready',
+      // The owner confirmed the whole chain, including public context.
+      expectedRecords: connRef.current.frozenBinding
+        ? currentRecords.map((current) => stackRecords.find((approved) => approved.id === current.id))
+        : null,
     })
     const updates = outcome.ok || outcome.records || []
     if (updates.length > 0) {
@@ -1339,6 +1406,7 @@ export default function ContributeApp({ appId, token }) {
     }
     refreshReviewStatus()
     return {
+      ...(outcome.notAttempted ? { notAttempted: true } : {}),
       error: outcome.error || 'Could not submit this PR stack.',
       failure: outcome.failure,
     }
@@ -1466,6 +1534,63 @@ export default function ContributeApp({ appId, token }) {
   // content state instead of leaving "Checking…" visible forever.
   const checking = loading && records.length === 0 && !sourceSnapshot
 
+  // A card's Try again: once the first ledger read is done, the full pass
+  // (ledger, review status, connection) through the refresh coordinator, even
+  // while the frame is hidden; before that, the review status on its own. One
+  // card refresh runs at a time. The card sees `refreshing` while it runs and
+  // `refreshDone` once it has completed, so intermediate reports are not
+  // mistaken for its result.
+  const [cardRefreshes, setCardRefreshes] = useState({ running: false, done: 0, outcome: '' })
+  const cardRefreshRef = useRef(null)
+  const cardRefresh = useCallback(() => {
+    if (cardRefreshRef.current) return cardRefreshRef.current
+    setCardRefreshes(state => ({ ...state, running: true }))
+    const run = (async () => {
+      // A read whose response never settles (network timeouts end at the
+      // headers, not the body) or that fails still completes this refresh, so
+      // the card returns to Try again. A late result only updates state; the
+      // card's activation has already ended, so it cannot arm Confirm.
+      // The completion carries its outcome: done, failed, or timeout.
+      let timer, outcome = 'failed'
+      const deadline = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), CARD_REFRESH_DEADLINE_MS) })
+      try {
+        let work
+        if (ledgerReadyRef.current) {
+          forceRefreshRef.current = true
+          work = refreshCoordinatorRef.current()
+        } else {
+          work = refreshReviewStatus()
+        }
+        outcome = await Promise.race([Promise.resolve(work).then(() => 'done', () => 'failed'), deadline])
+      } finally {
+        clearTimeout(timer)
+        cardRefreshRef.current = null
+        setCardRefreshes(state => ({ running: false, done: state.done + 1, outcome }))
+      }
+    })()
+    cardRefreshRef.current = run
+    return run
+  }, [refreshReviewStatus])
+
+  // Behind a chat card, hand the inline session this app's own state and
+  // guarded Send handlers; there is no second publication path.
+  useEffect(() => {
+    onPublicationRuntime?.({
+      // The ledger is loading until its first read finishes, then current, or
+      // incomplete when that read could not list every contribution.
+      records, ledgerReady: ledgerReady && ledgerCurrentRef.current,
+      ledger: !ledgerReady ? 'loading' : ledgerCurrentRef.current ? 'current' : 'incomplete',
+      reviewStatus: reviewStatus.address === reviewAddressKey ? reviewStatus : { ...reviewStatus, state: 'loading' },
+      connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
+      // The relay route cannot bind a confirmed snapshot, so chat never uses it.
+      // Chat sends require the binding at the moment of the write, too.
+      send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
+      sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
+      refresh: cardRefresh, refreshing: cardRefreshes.running, refreshDone: cardRefreshes.done, refreshOutcome: cardRefreshes.outcome,
+    })
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
+
+  if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <div className="co-root" data-design-seed="ae1883df">

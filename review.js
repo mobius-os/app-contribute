@@ -87,6 +87,10 @@ export function indexReviewStatus(payload) {
     checkedAt: typeof payload?.generated_at === 'string'
       ? payload.generated_at
       : '',
+    // Which records the server checked directly; an older server omits it.
+    addressed: Array.isArray(payload?.addressed_record_ids)
+      ? payload.addressed_record_ids.filter(id => typeof id === 'string')
+      : null,
   }
 }
 

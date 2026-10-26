@@ -24,6 +24,7 @@ import {
   isAutopilotResponding,
   needsHuman,
 } from '../autopilot.js'
+import { needsSourceRefresh, reviewIncomplete as recordReviewIncomplete, sendNeedsAttention } from '../send-readiness.js'
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { Icon } from './Icons.jsx'
@@ -553,14 +554,13 @@ function ReviewActions({
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
-  const blocked = reviewState?.state === 'needs_refresh'
-  const attentionBlocked = rec.needs_attention === true
+  const blocked = needsSourceRefresh(reviewState)
   // A failed publication needs the source-aware agent recovery above this
   // action row. Do not offer the same blind GitHub mutation again while its
   // cause is unresolved.
-  const submitFailed = Boolean(rec.last_submit_error) || attentionBlocked
-  const quality = qualityReviewFor(rec)
-  const reviewIncomplete = isPr && quality.state !== 'all_clear'
+  const attentionBlocked = rec.needs_attention === true
+  const submitFailed = sendNeedsAttention(rec)
+  const reviewIncomplete = isPr && recordReviewIncomplete(rec)
   const keepButtonRef = useRef(null)
   const confirmDescriptionId = useId()
 
