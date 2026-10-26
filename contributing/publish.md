@@ -45,6 +45,27 @@ only for a genuinely missing decision or approval, not every failed preflight.
 A record flipped to `abandoned` means the partner dropped it — never argue with
 one, never resurrect it unasked.
 
+## Offering Send in chat
+
+When prepared, all-clear work is ready for the owner to send, show it in the
+source chat instead of asking them to open Contribute:
+
+```bash
+python3 /data/apps/contribute/prepared_block.py <record-id> [<record-id> …]
+```
+
+Paste the printed `mobius-app` fence unchanged. One id prints one card with
+**Contribute**; 2–12 ids print one card with a **Contribute** per item and a
+**Contribute all** that names them by a short handle. Tapping re-reads the
+exact records and their current review, then turns the same button into
+**Confirm**, listing exactly what will be sent; nothing is sent before Confirm,
+and the server refuses if a record changed after that snapshot. Independent
+contributions are sent in parallel; a stack's layers are sent in order. A lost
+response keeps that card locked (it reads the result, it never resends) until
+Contribute shows the outcome. The card is not approval: do not describe a
+printed card as sent or approved, and do not send the same work again yourself
+while the card owns it.
+
 ## Updating an existing PR after approval
 
 A prepared `pr_update` record (built as in *Updating an existing open PR* in

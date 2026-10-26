@@ -28,6 +28,7 @@ import { upsertRecord } from '../domain.js'
 import { stackPublicationRecords } from '../stack.js'
 import { contributionPathDecision, contributionStackDecision } from '../contribution-policy.js'
 import { contributionRecordPaths } from '../storage.js'
+import { writeBindingRefusal } from '../send-readiness.js'
 
 const appSource = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const feedSource = readFileSync(new URL('../ui/Feed.jsx', import.meta.url), 'utf8')
@@ -397,7 +398,7 @@ test('all private handoffs use changed-work scopes instead of permanent one-shot
 
 test('a reviewed existing-PR update stays distinct from opening a new PR', () => {
   assert.match(appSource, /refreshed\.plan\?\.action === 'pr_update'/)
-  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed \}\)/)
+  assert.match(appSource, /updateContribution\(\{ appId, token, rec: refreshed, expectedRecord: connRef\.current\.frozenBinding \? rec : null \}\)/)
   assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts before updating this pull request/)
   assert.match(cardSource, /pr_update: 'Update PR'/)
   assert.match(cardSource, /isUpdate \? 'Send update' : 'Send PR'/)
@@ -445,7 +446,7 @@ test('submit failures lead back to private agent recovery without overstating a 
   assert.match(cardSource, /onStart=\{onReview\}/)
   assert.match(cardSource, /Review needs refreshing/)
   assert.match(cardSource, /<summary>Technical details<\/summary>/)
-  assert.match(cardSource, /const submitFailed = Boolean\(rec\.last_submit_error\)/)
+  assert.match(cardSource, /const submitFailed = sendNeedsAttention\(rec\)/)
   assert.match(cardSource, /!reviewIncomplete && !submitFailed/)
 })
 
@@ -626,19 +627,19 @@ function publicCallback(name, dependencies) {
   const helper=appSource.match(/^function stalePublicApproval\(\) \{[\s\S]*?^\}/m)?.[0] || ''
   return new Function(...Object.keys(dependencies),`${helper}; return (${appSource.slice(start,end)}\n  })`)(...Object.values(dependencies))
 }
-function preflightFixture(name, read) {
+function preflightFixture(name, read, conn = {state:'connected'}) {
   const head='a'.repeat(40)
   const approved={id:'preflight',type:'pr',status:name==='onMarkReady'?'draft':'prepared',repo:'team/repo',
     ...(name==='onMarkReady'?{number:1,url:'https://github.com/team/repo/pull/1'}:{}),
     plan:{action:'pr',repo:'team/repo',branch:'fix/preflight',head_sha:head},quality_review:{state:'all_clear',reviewed_head_sha:head}}
   const writes=[]
   const write=async()=>{writes.push(name);return {error:'Unconfirmed server response',failure:{owner:'automatic'}}}
-  const dependencies={appId:'fixture',token:'fixture',autopilotDefault:false,submissionMethod:'github',connRef:{current:{state:'connected'}},
+  const dependencies={appId:'fixture',token:'fixture',autopilotDefault:false,submissionMethod:'github',connRef:{current:conn},writeBindingRefusal,
     applyRecordUpdates:()=>{},refreshReviewStatus:()=>{},contributionApprovalIsCurrent,contributionPhaseApprovalIsCurrent,qualityReviewFor,stackPublicationRecords,
     contributionPathDecision,contributionStackDecision,
     loadFreshContributionRecord:async()=>read(approved),loadFreshContributionRecords:async()=>{const value=await read(approved);return value?[value]:[]},
     updateContribution:write,submitContribution:write,submitContributionViaMobius:write,markContributionReady:write,updateContributionStack:write,submitContributionStack:write}
-  return {writes,run:()=>publicCallback(name,dependencies)(name==='onSendStack'?[approved]:approved)}
+  return {writes,run:(options)=>publicCallback(name,dependencies)(name==='onSendStack'?[approved]:approved,options)}
 }
 test('app publication callbacks report failed fresh-ledger preflight as not attempted without invoking a write',async()=>{
   for(const name of ['onSend','onMarkReady','onSendStack']) for(const read of [()=>null,()=>{throw Error('offline')}]) {
@@ -665,5 +666,24 @@ test('automatic errors after entering the publication transport are never labele
     const outcome=await fixture.run()
     assert.equal(outcome.notAttempted,undefined,name)
     assert.deepEqual(fixture.writes,[name])
+  }
+})
+
+// The real onSend / onSendStack callbacks from index.jsx, run with fixture dependencies.
+test('a chat send whose binding disappeared before the write is refused as not attempted, with no write', async () => {
+  for (const name of ['onSend', 'onSendStack']) {
+    for (const conn of [{ state: 'connected', frozenBinding: false }, { state: 'connected' }]) {
+      const fixture = preflightFixture(name, record => record, conn)
+      const outcome = await fixture.run({ requireBinding: true })
+      assert.equal(outcome.notAttempted, true, name)
+      assert.equal(outcome.failure.code, 'binding_unavailable', name)
+      assert.deepEqual(fixture.writes, [], name + ' made no request')
+    }
+    const bound = preflightFixture(name, record => record, { state: 'connected', frozenBinding: true })
+    await bound.run({ requireBinding: true })
+    assert.deepEqual(bound.writes, [name], name + ' writes while the binding holds')
+    const fullApp = preflightFixture(name, record => record, { state: 'connected' })
+    await fullApp.run()
+    assert.deepEqual(fullApp.writes, [name], name + ': the full-app Send does not require the binding')
   }
 })
