@@ -177,9 +177,9 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
   cannot show the change (it appears only on a real device, or only as
   timing), say why in the body instead.
 - Attach screenshots when you stage, never by pushing them yourself:
-  GitHub has no API for description images, so Send hosts them on an
-  `assets` branch of the owner's own repository (their fork, or the target
-  when they own it) and links them. List each PNG in
+  GitHub has no API for description images, so Send hosts them on a
+  `mobius-screenshots` branch of the owner's own repository (their fork, or
+  the target when they own it) and links them. List each PNG in
   the stage call's `screenshots` (see [ledger.md](ledger.md)) and show it in
   `body_draft` as `![What it shows](screenshot:before-desktop.png)`; Send
   replaces each reference with its public link. Every attached image must
