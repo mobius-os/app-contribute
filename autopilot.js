@@ -7,7 +7,7 @@
 // the app can't see or write). The app reads it only to render state; every
 // action (Send grant, Pause/Resume, Retry) goes through a platform endpoint.
 // Shape:
-//   { enabled, granted_at, state: 'idle'|'responding', rounds_used, max_rounds,
+//   { enabled, granted_at, state: 'idle'|'responding', rounds_used,
 //     last_round?: { finished_at, outcome, summary }, rounds: [ ... ] }
 
 // Attention types the background loop can handle on its own. Anything else

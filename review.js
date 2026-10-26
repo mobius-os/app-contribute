@@ -531,15 +531,6 @@ export function contributionFailureOwner(outcome) {
   return 'agent'
 }
 
-export function contributionCyclePhase(runtime) {
-  if (!runtime || typeof runtime !== 'object') return 'checking'
-  if (runtime.running === true) return 'running'
-  if (runtime.pending_question_id) return 'waiting'
-  if (runtime.goal?.status === 'failed') return 'failed'
-  if (runtime.goal?.status === 'paused') return 'paused'
-  return 'complete'
-}
-
 export function isContributionCycleChat(chat) {
   const scope = typeof chat?.scope === 'string' ? chat.scope : ''
   return scope === 'contribute-cycle' || scope.startsWith('contribute-task:')

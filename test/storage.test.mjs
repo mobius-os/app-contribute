@@ -7,6 +7,7 @@ import {
   cacheSourceSnapshot,
   loadFreshContributionRecord,
   loadFreshContributionRecords,
+  loadAppSettings,
   loadLedger,
   normalizeAppSettings,
   normalizeCycleState,
@@ -94,6 +95,56 @@ test('follow sent PRs defaults on without overriding a saved choice', () => {
   assert.equal(normalizeAppSettings(null).autopilot_default, true)
   assert.equal(normalizeAppSettings({}).autopilot_default, true)
   assert.equal(normalizeAppSettings({ autopilot_default: false }).autopilot_default, false)
+})
+
+// A versioned store like the runtime's: every write bumps the version; a
+// conditional write against an older version is a conflict.
+function versionedSettings(initial, { beforeWrite } = {}) {
+  let value = initial, version = 1
+  const writes = []
+  const storage = {
+    get: async () => structuredClone(value),
+    getWithVersion: async () => ({ value: structuredClone(value), version: String(version) }),
+    set: async (path, next) => { value = structuredClone(next); version += 1 },
+    durableWrite: async (path, next, options) => {
+      await beforeWrite?.()
+      if (options?.ifMatch !== String(version)) throw Object.assign(new Error('conflict'), { code: 'conflict', status: 412 })
+      writes.push(structuredClone(next)); value = structuredClone(next); version += 1
+      return { durability: 'synced', version: String(version) }
+    },
+  }
+  return { storage, writes, current: () => value }
+}
+
+test('the retired app-wide agent model keys are dropped and cleared once', async (t) => {
+  assert.deepEqual(normalizeAppSettings({ autopilot_default: false, agent_provider: 'codex', agent_model: 'm', agent_effort: 'high' }),
+    { autopilot_default: false, submission_method: 'github' })
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  const store = versionedSettings({ autopilot_default: false, agent_provider: 'codex', agent_model: 'm' })
+  globalThis.window = { mobius: { storage: store.storage } }
+  assert.deepEqual(await loadAppSettings(), { autopilot_default: false, submission_method: 'github' })
+  assert.deepEqual(store.current(), { autopilot_default: false }, 'only the retired keys were removed')
+  await loadAppSettings()
+  assert.equal(store.writes.length, 1, 'a clean copy is not rewritten')
+})
+
+test('clearing the retired keys never overwrites a settings save that lands in between', async (t) => {
+  const previousWindow = globalThis.window
+  t.after(() => { globalThis.window = previousWindow })
+  let raced = false
+  const store = versionedSettings({ autopilot_default: true, agent_model: 'm' }, {
+    // Another view saves "follow sent PRs: off" between the read and the cleanup write.
+    beforeWrite: async () => { if (!raced) { raced = true; await store.storage.set('settings.json', { autopilot_default: false, submission_method: 'github', agent_model: 'm' }) } },
+  })
+  globalThis.window = { mobius: { storage: store.storage } }
+  await loadAppSettings()
+  assert.deepEqual(store.current(), { autopilot_default: false, submission_method: 'github' }, 'the newer save is kept; only the retired key is gone')
+  // Without a conditional write path, nothing is written blindly.
+  const blind = []
+  globalThis.window = { mobius: { storage: { get: async () => ({ autopilot_default: false, agent_model: 'm' }), set: async (...args) => blind.push(args) } } }
+  assert.deepEqual(await loadAppSettings(), { autopilot_default: false, submission_method: 'github' })
+  assert.deepEqual(blind, [], 'no unconditional write')
 })
 
 test('ledger uses JSON content batched into the storage listing', async () => {

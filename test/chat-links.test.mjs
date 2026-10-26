@@ -7,6 +7,13 @@ import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull,
 const pr = (number, extra = {}) => ({ number, title: `PR ${number}`, headRefOid: 'a', baseRefOid: 'b', baseRefName: 'main',
   repository: { nameWithOwner: 'owner/repo' }, assignees: { nodes: [] }, ...extra })
 
+test('a review-run link names one run and starts nothing', () => {
+  assert.deepEqual(chatBlockTarget('review-run:run-12345678'), { kind: 'run', id: 'run-12345678' })
+  for (const intent of ['review-run:short', 'review-run:../run-12345678', 'chat-review-run:run-12345678', `review-run:${'r'.repeat(65)}`]) {
+    assert.equal(chatBlockTarget(intent), null, intent)
+  }
+})
+
 test('chat PR links resolve only exact, bounded PR identities', () => {
   assert.deepEqual(chatBlockTarget('pull-request:owner/repo#7'), { kind: 'pull', repo: 'owner/repo', number: 7 })
   for (const intent of ['pull-request:../repo#7', 'pull-request:owner/..#7', 'pull-request:owner/repo#0',

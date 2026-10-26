@@ -54,8 +54,12 @@ contribution. This app is the dashboard for that loop:
   panel; settings never prepare or publish changes.
 - **PR workflows** — each project shows all open PRs, with All, Unassigned,
   Assigned to me and My PRs filters. Select individual PRs or a batch for
-  private Review or exact-version Review & merge. Independent reviews run in
-  parallel through existing agent delegation; questions stay in their review
+  private **Review**, pinned **Review & merge**, or explicitly scoped
+  **Review, fix & merge**. Takeover repairs only the named PR file scope via
+  guarded fast-forward publication and freshly independent full-diff review
+  of each successor. Public comments/reviews are not part of this grant.
+  Independent reviewers use durable programmatic children with frozen prompts
+  and model settings; questions stay in their review
   conversation. Assignment uses GitHub's shared, additive assignee list.
   Repo permissions control assignment/merge; admins manage access on GitHub.
   The companion platform review-runs backend must be activated before actions
@@ -106,13 +110,10 @@ contribution. This app is the dashboard for that loop:
     cannot be sent. A retry can keep an already-open or draft parent in view;
     if that parent has merged, Contribute asks the agent to refresh the
     remaining layers on `main` instead of silently changing the reviewed diff.
-    Once every PR is open and green, an unprotected app repository gets a
-    separate **Land** confirmation. The server rechecks every diff, commit,
-    branch, PR relationship, and CI result, then advances unchanged `main` to
-    the stack tip in one exact-base fast-forward. If `main` moved or any rule,
-    protection, failed check, or stale ref is present, nothing is changed.
-    Protected repositories—including the Möbius platform—keep GitHub's normal
-    merge or merge-queue flow.
+    Sending never grants merge. Any later acceptance uses a separate exact
+    confirmation and GitHub's normal merge or merge-queue rules. Parent-first
+    acceptance rechecks the remaining stack before progressing; it never
+    blindly advances a repository ref because checks are green.
     A durable upstream conflict remains **Needs update** until the agent
     refreshes the reviewed contribution; retryable service errors do not mask
     a later fresh local check. If the browser loses a submit response,
@@ -199,7 +200,6 @@ shape:
     "granted_at": "2026-07-06T09:05:00Z",
     "state": "idle | responding",
     "rounds_used": 1,
-    "max_rounds": 5,
     "last_round": { "outcome": "pushed | replied | stale | failed | escalated", "summary": "…" },
     "rounds": [ /* recent entries, capped */ ],
     "ignored_event_urls": [ /* exact recent replies posted by the platform */ ]
@@ -264,9 +264,44 @@ refresh, the Dismiss button — avoid silently overwriting each other. On older
 runtimes that don't return a version, Dismiss re-reads and re-checks the record
 before writing, while the cron refresh falls back to a plain best-effort write.
 
-## Autopilot: one-click ship
+## Continuous Project Desk: private PR review runs
 
-When you send a PR with **autopilot** on (the default; toggle it per app and
+The existing project workspace keeps local/upstream position, **Prepare
+changes** and **Pull updates**. PR state, private proposal, exact-head review,
+agent execution and settled history remain separate. Named paused work stays
+visible as unfinished; this iteration does not resume old cycles automatically.
+
+Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
+Review, Review & merge or Review, fix & merge, plus model and effort. There is
+no automatic-continuation option: the platform does not support it. Each launch
+sends only the options its mode accepts: review and merge prompts always, the
+fix prompt only for Review, fix & merge (new takeovers have no repair-round
+limit), and the post-review grant only for Review. The mode-aware
+`review-preview` freezes the exact instructions and agent choice for that mode;
+start passes its `preview_sha256` and rejects drift. Mandatory safety
+instructions are platform-owned. With the post-review grant, the agent may post
+one comment review per PR, and only for a verdict it explicitly marks public;
+questions to the owner stay private.
+
+A run publishes necessary takeover repairs only through a dedicated
+server-owned checkout and guarded receipts, then requires new independent
+full-diff review and passing evidence before merging a successor. It does not
+post comments or GitHub reviews itself. Unclear public outcomes reconcile read-only;
+queued is not merged. Stop prevents new execution and does not prevent observing
+an existing receipt, but observation never restarts the cycle.
+
+GitHub is a core Settings capability even without Contribute. The platform
+`github-workflows` skill and `python3 "$SCRIPTS_DIR/github_review.py"` provide
+app-independent private previews and scoped chat runs through the same owner
+and receipt mechanisms. Contribute adds the project desk and app-backed detail;
+installing it is not a prerequisite for GitHub work. Both require the companion
+backend activation; local source edits alone do not activate routes or skills.
+
+## Publication follow-up autopilot
+
+This existing outgoing-contribution follow-up is distinct from the private
+selected-PR review/takeover run above; its separate publication grant governs
+any reviewer replies. When you send a PR with **autopilot** on (the default; toggle it per app and
 pause/resume per PR), you're the last click. The platform then handles the whole
 review loop in the background: the scheduled job detects each new review, failing
 check or comment and asks the platform to respond; merge conflicts stay a
@@ -281,7 +316,8 @@ merging**, or
 If the platform cannot honor the Autopilot grant, Contribute falls back to the
 ordinary review notification rather than hiding the review.
 
-The consent, claim, and five-round limit live in a platform database row — never
+The consent and claim live in a platform database row (follow-up has no round
+budget; two consecutive failed rounds still hand back to the owner) — never
 in the agent-writable ledger — so a tampered ledger can't authorize or forge an
 action. The background agent follows the `review-followup.md` skill, which keeps
 every public action server-mediated and source-only, treats reviewer text as
@@ -337,4 +373,4 @@ Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
 
-Project Refresh renews source, contribution, PR and run status without pulling code.
+Project Refresh renews source, contribution, PR and run status without pulling code. Prepare and Pull open launch panels independently of old dormant work. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its Project work row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.

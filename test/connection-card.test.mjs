@@ -40,8 +40,8 @@ test('connected Contribute shows the account read-only with a Settings link', as
   const { renderConnection } = await connectionRenderer()
   const html = renderConnection({ state: 'connected', login: 'octocat', scopes: ['repo', 'workflow'] })
   assert.match(html, /octocat/)
-  assert.match(html, /Managed in Möbius Settings/)
-  assert.match(html, />Manage in Settings</)
+  assert.match(html, /This account is shared across Möbius apps/)
+  assert.match(html, />GitHub account settings</)
   assert.doesNotMatch(html, /Disconnect|Add access/)
 })
 
@@ -49,12 +49,13 @@ test('the header shows the connected handle without claiming an unchecked connec
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderSettings } = await connectionRenderer()
   const connected = renderSettings({ state: 'connected', login: 'octocat' })
-  assert.match(connected, /<span>octocat<\/span>/)
-  assert.match(connected, /GitHub connected — Contribute settings/)
+  assert.match(connected, /octocat[\s\S]*Contribute settings/)
+  assert.match(connected, /<span>Settings<\/span>/)
+  assert.match(connected, /GitHub connected as octocat — Contribute settings/)
   assert.doesNotMatch(connected, /Connect GitHub|co-settings-panel/)
   for (const state of ['checking', 'unknown', 'unsupported']) {
     const html = renderSettings({ state })
-    assert.match(html, /<span>GitHub<\/span>/)
+    assert.match(html, /<span>Settings<\/span>/)
     assert.doesNotMatch(html, /GitHub connected|Connect GitHub|co-settings-panel/)
   }
 })

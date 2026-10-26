@@ -55,6 +55,7 @@
     "autopilot.js",
     "diff.js",
     "api.js",
+    "cycle-delivery.js",
     "github-connection.js",
     "storage.js",
     "prepared_reconcile.py",
@@ -109,6 +110,9 @@
     "chat-blocks.js",
     "provenance.js",
     "pull-view.js",
-    "pr_block.py"
+    "pr_block.py",
+    "review-prompts.js",
+    "ui/ReviewPromptSettings.jsx",
+    "ui/RunDetail.jsx"
   ]
 }
