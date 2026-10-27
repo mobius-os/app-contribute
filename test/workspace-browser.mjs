@@ -1250,12 +1250,13 @@ window.runWorkspaceChecks = async () => {
         data: { type: 'moebius:app-block-action', sessionId: 'card-1', key: 'chat-send:card-record', event: name, nonce } }))
       const before = calls.requests.length
       try {
-        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', generation: 4, actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-1', generation: 4, actions: [{ key: 'chat-send:card-record', label: 'Contribute' }], items: [{ intent: 'review:card-record' }] }} />)
         await until(() => card() && !card().disabled, 'Card state was not published')
         ensure(!calls.requests.slice(before).some(call => call.url === '/api/github/status'), 'An idle card mounted the full app')
         fire('activate', 'card-n1')
         await until(() => card()?.confirming, 'Contribute did not become Confirm: ' + JSON.stringify(card()))
         ensure(card().confirmation?.[0]?.facts?.some(fact => fact.label === 'Version' && fact.value === HEAD.slice(0, 12)), 'Confirm lacked the app-sourced identity')
+        ensure(JSON.stringify(card().confirmation[0].facts.slice(0, 2).map(fact => fact.label)) === '["Project","Change"]', 'Confirm did not lead with the card facts')
         ensure(calls.requests.some(call => call.url.includes('/review-status?record_id=card-record')), 'Card did not ask for its addressed review status')
         // The hidden runtime runs only what inline Send needs and renders nothing.
         const sinceCard = calls.requests.slice(before)
@@ -1273,6 +1274,32 @@ window.runWorkspaceChecks = async () => {
       } finally {
         window.postMessage = realPost
         window.fullAppSubmit = null; window.fullAppBinding = false
+        root.render(null)
+      }
+    })
+    await check('A card session without its items (an older Möbius) never offers Confirm', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      values.set('contributions/card-record.json', structuredClone({ ...prepared, id: 'card-record', updated_at: '2026-10-20T10:00:00Z',
+        plan: { ...prepared.plan, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 2 insertions(+)' } }))
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:card-record')
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-old', generation: 2, actions: [{ key: 'chat-send:card-record', label: 'Contribute' }] }} />)
+        await until(() => card(), 'Card state was not published')
+        window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+          data: { type: 'moebius:app-block-action', sessionId: 'card-old', key: 'chat-send:card-record', event: 'activate', nonce: 'old-n1' } }))
+        await new Promise(resolve => setTimeout(resolve, 300))
+        ensure(card().disabled && /newer Möbius/.test(card().note) && !card().confirming, 'A card without items offered Confirm: ' + JSON.stringify(card()))
+        ensure(!calls.requests.slice(before).some(call => call.url.includes('/review-status?record_id=')), 'A card without items addressed a review status')
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
         root.render(null)
       }
     })
@@ -1300,7 +1327,7 @@ window.runWorkspaceChecks = async () => {
         data: { type: 'moebius:app-block-action', sessionId: 'card-ledger', key: 'chat-send:ledger-record', event: name, nonce } }))
       const before = calls.requests.length
       try {
-        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-ledger', generation: 6, actions: [{ key: 'chat-send:ledger-record', label: 'Contribute' }] }} />)
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-ledger', generation: 6, actions: [{ key: 'chat-send:ledger-record', label: 'Contribute' }], items: [{ intent: 'review:ledger-record' }] }} />)
         await until(() => card() && !card().disabled, 'Card state was not published')
         fire('activate', 'ledger-n1')
         for (let i = 0; i < 150 && !(card()?.label === 'Try again' && !card().disabled); i++) await new Promise(resolve => setTimeout(resolve, 50))
@@ -1346,7 +1373,7 @@ window.runWorkspaceChecks = async () => {
         data: { type: 'moebius:app-block-action', sessionId: 'card-2', key: 'chat-send:stack-base', event: name, nonce } }))
       const before = calls.requests.length
       try {
-        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: 'chat-send:stack-base', label: 'Contribute' }] }} />)
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: 'chat-send:stack-base', label: 'Contribute' }], items: [{ intent: 'review:stack-base' }] }} />)
         await until(() => card() && !card().disabled && card().badges?.length, 'Stack card state was not published')
         fire('activate', 'stack-n1')
         // Wait on timers rather than animation frames: the hidden runtime mounts behind the card.

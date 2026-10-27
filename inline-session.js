@@ -20,6 +20,7 @@ const UNKNOWN_NOTE = 'The result is not confirmed yet. Check Contribute before t
 export const LEDGER_NOTE = 'Could not read every contribution. Open Contribute to send.'
 export const TIMEOUT_NOTE = 'Contribute didn’t answer in time. Try again.'
 export const REFRESH_FAILED_NOTE = 'Contribute couldn’t check this right now. Try again.'
+export const NEWER_NOTE = 'Sending from chat needs a newer Möbius. Open Contribute to send.'
 export const RECOVERY_NOTE = 'The previous result from this card could not be restored. Open Contribute to check it; nothing will be sent from here.'
 
 // ---- Recovery checkpoint: unresolved attempt identities only, never records,
@@ -106,14 +107,16 @@ export function descriptionExcerpt(body, max = 160) {
 export function confirmationItem(record) {
   const plan = record.plan || {}
   const meta = stackMeta(record)
+  // The card's own per-contribution facts (Project, Change) come first, with
+  // the same values, then the exact identity this Confirm binds.
   const facts = [
-    ['Repository', plan.repo || record.repo],
+    ['Project', plan.repo || record.repo],
+    ...(changeSize(plan) ? [['Change', changeSize(plan)]] : []),
     ...(meta ? [['Stack', `Layer ${meta.position} of ${meta.total} · ${meta.name}`]] : []),
     ['Action', plan.action === 'pr_update' ? `Update pull request #${record.number}` : 'Open a new pull request'],
     ['Branch', meta ? `${plan.branch || record.branch} → ${meta.baseBranch}` : plan.branch || record.branch],
     ['Version', String(plan.head_sha || '').slice(0, 12)],
     ['Reviewed diff', String(plan.diff_sha256 || '').slice(0, 12)],
-    ...(changeSize(plan) ? [['Change', changeSize(plan)]] : []),
     ['Review', 'All clear for this version'],
   ]
   // The public text the owner publishes: the PR title is the item's heading,
@@ -136,10 +139,10 @@ const confirmable = record => !relayed(record) && sized(record) && confirmationI
 
 const PUBLIC_LABELS = { draft: 'Draft', open: 'Open', landing: 'Open', merged: 'Merged', closed: 'Closed' }
 
-export function createInlineSession({ sessionId, actions, checkpoint = null, retain = false, recoveryError = false, publish, loadExact, onNeedRuntime }) {
+export function createInlineSession({ sessionId, actions, items = null, checkpoint = null, retain = false, recoveryError = false, publish, loadExact, onNeedRuntime }) {
   const advertised = [...new Map((actions || []).filter(item => typeof item?.key === 'string').map(item => [item.key, item])).values()]
-  const cardKeys = advertised.map(item => item.key)
-  const targets = new Map(advertised.map(item => [item.key, sendTarget(item.key, cardKeys)]))
+  // The card's items name its records; its one action covers exactly them.
+  const targets = new Map(advertised.map(item => [item.key, sendTarget(item.key, items)]))
   const idsFor = key => targets.get(key)?.ids || []
   let attempts = []
   let fault = ''
@@ -193,6 +196,9 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     && runtime.connection !== 'checking' && !reading.size && !idsFor(key).some(id => unreadable.has(id))
 
   function blockedReason(key) {
+    // A host that does not send the card's items cannot say which records the
+    // action covers, so nothing is confirmable from here.
+    if (targets.get(key)?.needsItems) return NEWER_NOTE
     if (targets.get(key)?.invalid) return 'This card no longer matches its listed contributions. Open Contribute to send them.'
     if (!runtime) return ''
     if (runtime.reviewStatus?.state === 'unavailable') return 'Could not verify the current review. Try again; nothing was sent.'
@@ -203,7 +209,7 @@ export function createInlineSession({ sessionId, actions, checkpoint = null, ret
     // Without server-side binding of the confirmed snapshot, or a review check
     // addressed to these exact records, chat never sends.
     if (runtime.frozenBinding !== true || !idsFor(key).every(id => runtime.reviewStatus?.addressed?.includes(id))) {
-      return 'Sending from chat needs a newer Möbius. Open Contribute to send.'
+      return NEWER_NOTE
     }
     if (idsFor(key).some(id => relayed(current().get(id)))) return RELAY_NOTE
     if (readyUnits(key).length) return ''

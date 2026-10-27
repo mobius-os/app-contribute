@@ -232,3 +232,14 @@ test('the read-only PR link helper has its own routing row outside maintainer ri
   assert.ok(rights && !rights.includes('pr_block.py'), 'pr_block.py is not filed under maintainer rights')
   assert.ok(rows.some(line => line.includes('pr_block.py') && /no rights needed/.test(line)))
 })
+
+test('the Send-in-chat guidance describes one item per contribution and exactly one card action', () => {
+  const publish = read('contributing/publish.md').replace(/\s+/g, ' ')
+  assert.match(publish, /one item \(its PR title, opening that exact entry in Contribute, with its \*\*Project\*\* and \*\*Change\*\* size\) and has exactly one action/)
+  assert.match(publish, /Items have no buttons of their own/)
+  assert.match(publish, /at most 12 items; with more, it says how many more are in Contribute and offers no action/)
+  assert.doesNotMatch(publish, /a \*\*Contribute\*\* per item/)
+  const readme = read('README.md').replace(/\s+/g, ' ')
+  assert.match(readme, /session `items`/)
+  assert.match(readme, /"expand": false/)
+})
