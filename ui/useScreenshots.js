@@ -2,8 +2,9 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { planScreenshots } from '../domain.js'
 
 // The workspace supplies how a staged screenshot is read:
-// (recordId, shot) => Promise<data URL | null>. Without it no image is fetched
-// and the description shows its neutral placeholders.
+// (recordId, shot) => Promise<data URL | null>, resolving only to bytes whose
+// SHA-256 is shot.sha256 (the cache below trusts that). Without it no image is
+// fetched and the description shows its neutral placeholders.
 export const ScreenshotLoaderContext = createContext(null)
 
 // Successful reads only, keyed by record + content hash, so re-renders and

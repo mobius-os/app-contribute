@@ -157,18 +157,24 @@ function base64(bytes) {
 }
 
 // One staged screenshot of a prepared record, as a data:image/png URL for the
-// review card, or null when it cannot be read. The route serves only the exact
-// bytes the plan approved; Send uploads from the platform's own copy.
-export async function fetchContributionScreenshot(token, appId, recordId, name) {
+// review card, or null when it cannot be read. The route serves the record's
+// current entry for that name, which a restage can replace while this plan is on
+// screen, so the bytes are shown only when they hash to the plan's own sha256.
+// Send uploads from the platform's own copy.
+export async function fetchContributionScreenshot(token, appId, recordId, shot) {
   try {
     const r = await fetchRead(
       '/api/github/contributions/' + encodeURIComponent(appId) + '/' +
-        encodeURIComponent(recordId) + '/screenshots/' + encodeURIComponent(name),
+        encodeURIComponent(recordId) + '/screenshots/' + encodeURIComponent(shot.name),
       { headers: authHeaders(token) },
       20000,
     )
     if (!r.ok) return null
-    return 'data:image/png;base64,' + base64(new Uint8Array(await r.arrayBuffer()))
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+    const hex = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+    if (hex !== shot.sha256) return null
+    return 'data:image/png;base64,' + base64(bytes)
   } catch {
     return null
   }

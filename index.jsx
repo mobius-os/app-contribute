@@ -1593,7 +1593,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
 
   // Staged screenshots a prepared card shows in its description.
-  const loadScreenshot = useCallback((recordId, shot) => fetchContributionScreenshot(token, appId, recordId, shot.name), [token, appId])
+  const loadScreenshot = useCallback((recordId, shot) => fetchContributionScreenshot(token, appId, recordId, shot), [token, appId])
 
   if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.
