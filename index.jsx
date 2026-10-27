@@ -50,6 +50,7 @@ import {
   fetchGithubStatus,
   fetchLiveStates,
   fetchMobiusContributionStatus,
+  fetchContributionScreenshot,
   fetchReviewStatus,
   fetchSourceDiff,
   fetchSourceStatus,
@@ -65,6 +66,7 @@ import {
 import { ConnectionSettings } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
+import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
@@ -1590,9 +1592,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     })
   }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
 
+  // Staged screenshots a prepared card shows in its description.
+  const loadScreenshot = useCallback((recordId, shot) => fetchContributionScreenshot(token, appId, recordId, shot), [token, appId])
+
   if (sendOnly) return null
   // One workspace owns project context and the exact contribution beneath it.
   return (
+    <ScreenshotLoaderContext.Provider value={loadScreenshot}>
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       <div className="co-header-shell">
@@ -1656,5 +1662,6 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         />}
       </main>
     </div>
+    </ScreenshotLoaderContext.Provider>
   )
 }

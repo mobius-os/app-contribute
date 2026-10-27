@@ -8,6 +8,7 @@
 // Only attempts whose outcome is unknown cross a reload, and they lock their
 // unit until a read-only observation proves the result.
 import { sendTarget } from './chat-blocks.js'
+import { planScreenshots, screenshotCountText } from './domain.js'
 import { isPublished, publicationUnits, publishedPull } from './send-readiness.js'
 import { stackMeta } from './stack.js'
 
@@ -89,12 +90,18 @@ export function changeSize(plan) {
 export function descriptionExcerpt(body, max = 160) {
   // Skip HTML comments (also across lines) and fenced code blocks; prefer
   // prose over headings.
+  // Image-only lines and table rows are skipped and inline images become their
+  // alt text, so a before/after screenshot never shows as raw
+  // ![...](screenshot:...) markup.
   let fenced = false
   const lines = String(body || '').replace(/<!--[\s\S]*?(-->|$)/g, '').split('\n').map(value => value.trim())
     .filter(value => {
       if (/^(```|~~~)/.test(value)) { fenced = !fenced; return false }
-      return value && !fenced
+      return !fenced
     })
+    .map(value => /^\|.*\|$/.test(value) || /^(\s*!\[[^\]]*\]\([^)]*\))+\s*$/.test(value) ? ''
+      : value.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').trim())
+    .filter(Boolean)
   const prose = lines.find(value => !/^#+\s/.test(value)) || lines[0] || ''
   // Strip a block marker only when it is one (followed by whitespace), so
   // emphasis such as **Summary** stays intact.
@@ -116,6 +123,12 @@ export function confirmationItem(record) {
     ...(changeSize(plan) ? [['Change', changeSize(plan)]] : []),
     ['Review', 'All clear for this version'],
   ]
+  // Screenshots are published with the PR, so Confirm always names them, on
+  // the Change line: the fact budget stays free for the description excerpt.
+  const screenshots = planScreenshots(plan).length
+  const change = facts.findIndex(([label]) => label === 'Change')
+  if (screenshots && change >= 0) facts[change] = ['Change', `${facts[change][1]} · ${screenshotCountText(screenshots)}`]
+  else if (screenshots) facts.splice(facts.length - 1, 0, ['Change', screenshotCountText(screenshots)])
   // The public text the owner publishes: the PR title is the item's heading,
   // and the description's first line is shown when the 8-fact limit allows.
   const excerpt = descriptionExcerpt(plan.body_draft)

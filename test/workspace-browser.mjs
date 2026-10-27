@@ -29,6 +29,9 @@ import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
+import { ReviewPlan } from './ui/ContributionCard.jsx'
+import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
+import { fetchContributionScreenshot } from './api.js'
 import { organizePrivateWorkAction } from './review.js'
 import { CSS } from './theme.js'
 import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
@@ -1370,6 +1373,74 @@ window.runWorkspaceChecks = async () => {
         root.render(null)
       }
     })
+    await check('a prepared description shows its staged screenshots within the card width', async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 1600; canvas.height = 900
+      const wide = canvas.toDataURL('image/png'), loads = []
+      const loader = (recordId, shot) => { loads.push(shot.name); return Promise.resolve(shot.name === 'before.png' ? wide : null) }
+      const shot = name => ({ name, sha256: 'e'.repeat(64), size: 1200, alt: name })
+      const rec = { ...prepared, id: 'fixture-shots', plan: { ...prepared.plan, screenshots: [shot('before.png'), shot('after.png')],
+        body_draft: 'Wraps the title.\n\n| Before | After |\n| --- | --- |\n| ![Before, desktop](screenshot:before.png) | ![After, desktop](screenshot:after.png) |\n\n![Before, full width](screenshot:before.png)' } }
+      const mount = key => root.render(<div className="co-root"><style>{CSS}</style><main className="co-page"><ScreenshotLoaderContext.Provider value={loader}>
+        <div className="co-review"><ReviewPlan key={key} rec={rec} /></div></ScreenshotLoaderContext.Provider></main></div>)
+      try {
+        mount('first')
+        await until(() => document.querySelectorAll('.co-markdown img.co-markdown-shot').length === 2 && loads.length === 2, 'The resolved screenshot did not render')
+        const markdown = query('.co-markdown'), images = [...document.querySelectorAll('.co-markdown img.co-markdown-shot')]
+        await until(() => images.every(image => image.complete && image.naturalWidth === 1600), 'The screenshot did not decode')
+        ensure(images.every(image => image.getAttribute('src').startsWith('data:image/png;base64,') && image.alt.startsWith('Before')), 'A screenshot was not a data image')
+        ensure(![...markdown.querySelectorAll('[src],[href]')].some(node => /^screenshot:/i.test(node.getAttribute('src') || node.getAttribute('href') || '')), 'A screenshot: URL reached the DOM')
+        ensure(text(query('.co-markdown-shot-pending')) === 'Screenshot: After, desktop', 'An unreadable screenshot was not a neutral placeholder')
+        ensure(text(query('.co-shot-note')).startsWith('2 screenshots will be uploaded to your GitHub account'), 'The upload note is missing')
+        const box = markdown.getBoundingClientRect()
+        ensure(markdown.scrollWidth <= markdown.clientWidth + 1 && images.every(image => image.getBoundingClientRect().right <= box.right + 1 && image.getBoundingClientRect().width > 40),
+          'Screenshots overflow or collapse in the card: ' + images.map(image => image.getBoundingClientRect().width).join(',') + ' in ' + box.width)
+        root.render(null); await frame()
+        mount('reopened')
+        await until(() => loads.length === 3 && document.querySelectorAll('.co-markdown img.co-markdown-shot').length === 2, 'Reopening did not show the cached screenshot')
+        ensure(loads.filter(name => name === 'before.png').length === 1, 'A cached screenshot was fetched again: ' + loads.join(','))
+      } finally {
+        root.render(null)
+      }
+    })
+    await check('a restaged screenshot never shows or caches under the digest its plan approved', async () => {
+      // The real reader and cache against a name-keyed route whose bytes a
+      // restage replaces: server A→B→A while plan A, then plan B, is on screen.
+      const png = color => { const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 4
+        const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 4, 4)
+        return new Promise(resolve => canvas.toBlob(resolve, 'image/png')).then(blob => blob.arrayBuffer()) }
+      const hex = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('')
+      const dataUrl = bytes => 'data:image/png;base64,' + btoa(String.fromCharCode(...new Uint8Array(bytes)))
+      const A = await png('#c00'), B = await png('#00c'), shotA = { name: 'before.png', sha256: await hex(A) }, shotB = { name: 'before.png', sha256: await hex(B) }
+      ensure(shotA.sha256 !== shotB.sha256, 'The fixture images are identical')
+      const route = '/api/github/contributions/fixture-app/fixture-restaged/screenshots/before.png', original = window.fetch, loads = [], settled = []
+      let served = B
+      window.fetch = (url, options) => String(url) === route ? Promise.resolve(new Response(served.slice(0), { headers: { 'Content-Type': 'image/png' } })) : original(url, options)
+      const loader = (recordId, shot) => { loads.push(shot.sha256); return fetchContributionScreenshot('tok', 'fixture-app', recordId, shot).then(url => { settled.push(url); return url }) }
+      const rec = shot => ({ ...prepared, id: 'fixture-restaged', plan: { ...prepared.plan, screenshots: [shot], body_draft: 'Restaged.\n\n![Before](screenshot:before.png)' } })
+      const mount = (key, shot) => root.render(<div className="co-root"><style>{CSS}</style><main className="co-page"><ScreenshotLoaderContext.Provider value={loader}>
+        <div className="co-review"><ReviewPlan key={key} rec={rec(shot)} /></div></ScreenshotLoaderContext.Provider></main></div>)
+      const shown = () => query('.co-markdown img.co-markdown-shot')?.getAttribute('src') || null
+      try {
+        mount('a-while-b-served', shotA)
+        await until(() => settled.length === 1, 'Plan A did not read its screenshot')
+        await frame(); await frame()
+        ensure(shown() === null && text(query('.co-markdown-shot-pending')) === 'Screenshot: Before', 'Restaged bytes rendered under plan A')
+        mount('b', shotB)
+        await until(() => shown() === dataUrl(B), 'The restaged plan did not show its own bytes')
+        served = A
+        root.render(null); await frame()
+        mount('a-reopened', shotA)
+        await until(() => shown() === dataUrl(A), 'Reopened plan A did not show A: ' + String(shown()).slice(0, 60))
+        ensure(loads.filter(sha => sha === shotA.sha256).length === 2, 'The mismatched read was cached under A: ' + loads.length)
+        root.render(null); await frame()
+        mount('a-cached', shotA)
+        await until(() => shown() === dataUrl(A), 'Plan A lost its verified image')
+        ensure(loads.length === 3, 'A verified screenshot was fetched again: ' + loads.length)
+      } finally {
+        window.fetch = original
+        root.render(null)
+      }
+    })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
       reviewRequests: reviewRuns.length, assignments: mutationRequests().filter(call => call.url.endsWith('/assign-review')).length,
@@ -1484,7 +1555,7 @@ async function main() {
       unsubscribeInput()
       if (inputErrors.length) { report.status = 'fail'; report.nativeInputErrors = inputErrors }
       const network = protocol.events.filter(event => event.sessionId === sessionId && event.method === 'Network.requestWillBeSent'
-        && !event.params.request.url.startsWith('file:')).map(event => event.params.request.url)
+        && !/^(file|data):/.test(event.params.request.url)).map(event => event.params.request.url)
       if (network.length) { report.status = 'fail'; report.unexpectedNetwork = network }
       reports.push({ viewport, ...report })
       await protocol.send('Target.closeTarget', { targetId })

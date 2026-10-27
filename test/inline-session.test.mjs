@@ -703,3 +703,55 @@ test('a refresh that fails ends the check on Try again with a note', async () =>
   assert.equal(state.label, 'Try again')
   assert.equal(state.note, REFRESH_FAILED_NOTE)
 })
+
+const SHA = 'e'.repeat(64)
+const shot = (name, alt = name) => ({ name, sha256: SHA, size: 1200, alt })
+
+test('the description excerpt never shows raw screenshot markup', () => {
+  assert.equal(descriptionExcerpt('![Before, desktop](screenshot:before-desktop.png)\n\nMakes the header wrap on phones.'), 'Makes the header wrap on phones.', 'an image-only line is skipped')
+  assert.equal(descriptionExcerpt('| Before | After |\n| --- | --- |\n| ![Before](screenshot:before.png) | ![After](screenshot:after.png) |\n\nFixes the clipped title.'), 'Fixes the clipped title.', 'a before/after table is skipped')
+  assert.equal(descriptionExcerpt('The header now wraps ![After](screenshot:after.png) on phones.'), 'The header now wraps After on phones.', 'an inline image becomes its alt text')
+  assert.doesNotMatch(descriptionExcerpt('## Screenshots\n\n![Only](screenshot:only.png)'), /screenshot:|!\[/)
+})
+
+test('Confirm names the screenshots a new pull request will publish on its Change line', () => {
+  const body = '## Summary\n\nFixes the clipped title.\n\n| Before | After |\n| --- | --- |\n| ![Before](screenshot:before.png) | ![After](screenshot:after.png) |'
+  const item = confirmationItem(prepared('shots', { plan: { body_draft: body, screenshots: [shot('before.png'), shot('after.png')] } }))
+  assert.equal(item.facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0 · 2 screenshots')
+  assert.equal(item.facts.some(fact => fact.label === 'Screenshots'), false, 'no separate fact spends the limit')
+  assert.equal(item.facts.find(fact => fact.label === 'Description')?.value, 'Fixes the clipped title.', 'the excerpt is kept')
+  assert.ok(item.facts.length <= 8)
+  assert.ok(item.facts.every(fact => !/screenshot:/.test(fact.value)))
+  assert.equal(confirmationItem(prepared('one', { plan: { screenshots: [shot('one.png')] } })).facts.find(fact => fact.label === 'Change').value,
+    '1 file · +2 −0 · 1 screenshot')
+
+  // Malformed entries are not counted; none at all leaves the Change line as is.
+  const plain = confirmationItem(prepared('plain', { plan: { screenshots: [{ name: '../x.png', sha256: SHA }, { name: 'ok.png', sha256: 'short' }] } }))
+  assert.equal(plain.facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0')
+
+  // Without a readable diff stat, the count still gets its own Change line.
+  const unsized = confirmationItem(prepared('unsized', { plan: { diff_stat: '', screenshots: [shot('a.png')] } }))
+  assert.equal(unsized.facts.find(fact => fact.label === 'Change')?.value, '1 screenshot')
+
+  // A stack layer already uses all eight facts; the count still fits on its Change line.
+  const base = layer('base', 1, '')
+  const full = confirmationItem({ ...base, plan: { ...base.plan, diff_stat: '1 file changed, 1 insertion(+)', screenshots: [shot('a.png'), shot('b.png')] } })
+  assert.equal(full.facts.length, 8)
+  assert.equal(full.facts.find(fact => fact.label === 'Change').value, '1 file · +1 −0 · 2 screenshots')
+})
+
+test('the B2 host accepts a confirmation that names screenshots', async t => {
+  const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || ''
+  if (!BLOCKS) return t.skip('set MOBIUS_BLOCKS_FRONTEND to a Möbius frontend with the passive block host to run this check')
+  const b2 = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`)
+  const base = layer('base', 1, '')
+  const items = [
+    confirmationItem(prepared('shots', { plan: { body_draft: '![Before](screenshot:a.png)\n\nFix.', screenshots: [shot('a.png'), shot('b.png')] } })),
+    confirmationItem({ ...base, plan: { ...base.plan, diff_stat: '1 file changed, 1 insertion(+)', screenshots: [shot('a.png')] } }),
+  ]
+  const parsed = b2.confirmationOf(items)
+  assert.ok(parsed, 'the host rejected the list, which would keep Confirm disabled')
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0 · 2 screenshots')
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Description').value, 'Fix.')
+  assert.match(parsed[1].facts.find(fact => fact.label === 'Change').value, /1 screenshot$/)
+})
