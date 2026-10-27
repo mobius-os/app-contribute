@@ -150,7 +150,7 @@ VIEWPORT_WIDTH=390 VIEWPORT_HEIGHT=844 \
   bash "$SCRIPTS_DIR/agent-screenshot.sh" <route> "$TMPDIR/after-phone.png"
 ```
 
-Crop a copy to the change if needed and attach that file when you stage
+Crop a copy to the change if needed and attach that screenshot when you stage
 ([ledger.md](ledger.md)).
 
 ## A new app: check the catalog first

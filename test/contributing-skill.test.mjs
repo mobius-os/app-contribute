@@ -256,3 +256,41 @@ test('prepared PRs name the bug cause and show visible changes with attached scr
   assert.match(mobius, /bash "\$SCRIPTS_DIR\/agent-screenshot\.sh" <route>/)
   assert.doesNotMatch(mobius, /Capture them with the Möbius `screenshot` tool/)
 })
+
+test('every attach or upload a mode file instructs exports only what the core allowlist lists', () => {
+  const section = core.split('## What may leave — the privacy allowlist')[1].split(/\n## /)[0]
+  // The allowlist is exhaustive: its bold entries before the exclusions are everything that may leave.
+  const allowed = [...section.split('**Never')[0].matchAll(/\*\*([^*]+)\*\*/g)].map((match) => match[1].toLowerCase())
+  assert.ok(allowed.length > 0, 'the allowlist names its entries')
+  const hardStop = core.match(/^2\. \*\*([^*]+)\*\*/m)[1].toLowerCase()
+  // What a mode file might export, by the words that name it; a kind is allowed only if an entry names it,
+  // so the core's exclusions (memory, storage, db, logs, creds, chat, personal data) never are.
+  const kinds = {
+    'source code': /\bsource\b|\bdiff\b|\bcommits?\b/i,
+    screenshot: /\bscreenshots?\b|\bimages?\b/i,
+    memory: /\bmemory\b/i,
+    storage: /\bstorage\b|\bdatabase\b|\bdb\b/i,
+    logs: /\blogs?\b/i,
+    credentials: /\bcreds\b|\bcredentials?\b|\btokens?\b/i,
+    chat: /\bchat (?:text|content|transcripts?|messages?|history)\b|\bconversations?\b/i,
+    'personal data': /\bpersonal\b/i,
+  }
+  const allowedKinds = Object.keys(kinds).filter((kind) => allowed.some((entry) => entry.includes(kind)))
+  for (const kind of allowedKinds) assert.ok(hardStop.includes(kind.split(' ')[0]), `Hard stop #2 names ${kind}`)
+  const exportVerb = /\b(?:attach(?:es|ing)?|upload(?:s|ing)?)\b|\battached\b(?! to\b)/i
+  let exports = 0
+  for (const name of modeFiles) {
+    for (const paragraph of mode(name).split(/\n\s*\n|\n(?=- )/)) {
+      if (!exportVerb.test(paragraph)) continue
+      exports++
+      const named = Object.keys(kinds).filter((kind) => kinds[kind].test(paragraph))
+      assert.ok(named.length > 0, `${name} exports something it does not name: ${paragraph.trim().slice(0, 80)}`)
+      for (const kind of named) assert.ok(allowedKinds.includes(kind), `${name} exports ${kind}, which the core allowlist does not list`)
+    }
+  }
+  assert.ok(exports > 0, 'the scan sees the mode files\' export instructions')
+  // Mode files point back to the rule instead of restating it.
+  for (const name of ['prepare.md', 'ledger.md']) {
+    assert.match(mode(name).replace(/\s+/g, ' '), /screenshot entry of the privacy allowlist in \[SKILL\.md\]\(SKILL\.md\)/, `${name} refers to the core rule`)
+  }
+})

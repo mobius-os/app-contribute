@@ -43,10 +43,11 @@ helper stages for it), and `screenshots` (below). An open or draft PR
 restages as a `pr_update` whose title and body are copied from GitHub.
 Staging never pushes anything.
 
-`screenshots` lists up to 8 PNGs of at most 2 MB, each named in lowercase
-with hyphens and shown in `body_draft` as `(screenshot:NAME)`. Every attached
-image must appear in the body, and every reference must name an attached
-image. Each `path` must be a regular file under `/data` or the temp folder,
+`screenshots` carries only images that meet the screenshot entry of the
+privacy allowlist in [SKILL.md](SKILL.md). It lists up to 8 PNGs of at most
+2 MB, each named in lowercase with hyphens and shown in `body_draft` as
+`(screenshot:NAME)`. Every attached image must appear in the body, and every
+reference must name an attached image. Each `path` must be a regular file under `/data` or the temp folder,
 not a link. Staging copies the images, `[]` removes them, and leaving the
 field out keeps the current ones. GitHub has no API for description images,
 so Send hosts them on a `mobius-screenshots` branch of the owner's own

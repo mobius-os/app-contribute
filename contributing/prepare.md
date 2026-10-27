@@ -171,11 +171,10 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
 - A change people can see shows it with before/after screenshots in
   `body_draft`: the same state before and after, cropped to the change.
   Capture the before state before you edit; the adapter names the capture
-  tool and sizes. Every image leaves the instance, so check it like the diff:
-  no chat text, names, files, or other personal content. Reproduce the state
-  with neutral test data when the real one shows any. When a screenshot
-  cannot show the change (it appears only on a real device, or only as
-  timing), say why in the body instead.
+  tool and sizes. Every image leaves the instance, so it must meet the
+  screenshot entry of the privacy allowlist in [SKILL.md](SKILL.md). When a
+  screenshot cannot show the change (it appears only on a real device, or
+  only as timing), say why in the body instead.
 - Attach screenshots when you stage, never by pushing them yourself: list
   each image in the stage call's `screenshots` and show it in `body_draft`
   as `![What it shows](screenshot:before-desktop.png)`. Send publishes the
