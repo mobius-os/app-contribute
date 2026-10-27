@@ -100,6 +100,14 @@ class PreparedBlockTests(unittest.TestCase):
     block = self.card(record('one', plan={'diff_stat': 'about 1 file changed'}))
     self.assertEqual(block['items'][0]['facts'][1], {'label': 'Change', 'value': 'Size not recorded'})
 
+  def test_change_names_the_screenshots_the_pr_will_publish(self):
+    shot = lambda name: {'name': name, 'sha256': 'e' * 64, 'size': 1200, 'alt': name}
+    two = self.card(record('one', plan={'screenshots': [shot('before.png'), shot('after.png'), {'name': '../x.png', 'sha256': 'e' * 64}]}))
+    self.assertEqual(two['items'][0]['facts'][1], {'label': 'Change', 'value': '2 files · +4 −1 · 2 screenshots'})
+    one = self.card(record('one', plan={'screenshots': [shot('a.png'), {'name': 'b.png', 'sha256': 'short'}]}))
+    self.assertEqual(one['items'][0]['facts'][1]['value'], '2 files · +4 −1 · 1 screenshot')
+    self.assertEqual(module.change_text({'diff_stat': '', 'screenshots': [shot('a.png')]}), '1 screenshot')
+
   def test_handle_matches_the_app(self):
     # chat-blocks.js: batchHandle(['b', 'a']) === '968bcf1a16b2b0ee'
     self.assertEqual(module.batch_handle(['b', 'a']), '968bcf1a16b2b0ee')

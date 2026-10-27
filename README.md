@@ -360,7 +360,9 @@ ids, and lock their unit until a read shows the result.
 
 The card (`"expand": false`, so no inline app view) has one item per
 contribution: its title opens that entry (`review:<id>`) and its facts are
-**Project** and **Change** (`N files · +a −d`, from the staged shortstat). The
+**Project** and **Change** (`N files · +a −d`, from the staged shortstat,
+plus `· N screenshots` when the PR publishes staged screenshots, as Confirm
+shows it). The
 card itself opens the single entry, the stack all items belong to, or the
 review queue. There are no item actions; the one card action is
 `chat-send:<id>` for one item or `chat-send-batch:<16-hex handle>` over all

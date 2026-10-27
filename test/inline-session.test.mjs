@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { batchHandle, cardRecordIds, itemRecordIds, sendTarget } from '../chat-blocks.js'
+import { readBlockSession } from '../block-protocol.js'
 import { reviewAddressFor } from '../send-readiness.js'
 import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, NEWER_NOTE, UNLISTED_LAYER_NOTE, REFRESH_FAILED_NOTE, SIZE_NOTE, TIMEOUT_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
@@ -793,15 +794,18 @@ function printedCard(records) {
 async function hostView(block) {
   const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || ''
   if (!BLOCKS) return { actions: [block.action, ...block.items.map(item => item.action)].filter(Boolean).map(action => ({ key: action.intent, label: action.label })), items: block.items.map(({ intent }) => ({ intent })) }
-  const { appBlockFromToken, blockActions } = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlock.js`)
+  const { appBlockFromToken, blockActions, blockItems } = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlock.js`)
   const parsed = appBlockFromToken({ type: 'code', lang: 'mobius-app', text: JSON.stringify(block) })
   assert.ok(parsed, 'the host accepts the printed card')
   assert.equal(parsed.expand, false)
-  return { actions: blockActions(parsed).map(({ key, label }) => ({ key, label })), items: parsed.items.map(({ intent }) => ({ intent })) }
+  // The session init's items exactly as the host builds them (#1944 blockItems), read through this app's adapter.
+  const items = blockItems ? readBlockSession({ sessionId: 's', actions: [], items: blockItems(parsed) }).items : parsed.items.map(({ intent }) => ({ intent }))
+  return { actions: blockActions(parsed).map(({ key, label }) => ({ key, label })), items }
 }
 
 test('the printed card has one action that reaches Confirm for exactly its items', async () => {
-  const records = [prepared('one'), prepared('two'), prepared('three')]
+  const shots = [{ name: 'before.png', sha256: 'e'.repeat(64), size: 1200, alt: 'Before' }, { name: 'after.png', sha256: 'e'.repeat(64), size: 1200, alt: 'After' }]
+  const records = [prepared('one'), prepared('two', { plan: { screenshots: shots } }), prepared('three')]
   const view = await hostView(printedCard(records))
   assert.equal(view.actions.length, 1, 'one block-level action, no per-item actions')
   const h = harness({ actions: view.actions, items: view.items, records })
@@ -812,6 +816,7 @@ test('the printed card has one action that reaches Confirm for exactly its items
   // Confirm repeats each item's card facts.
   const block = printedCard(records)
   for (const [index, item] of block.items.entries()) assert.deepEqual(state.confirmation[index].facts.slice(0, 2), item.facts)
+  assert.equal(block.items[1].facts[1].value, '1 file · +2 −0 · 2 screenshots', 'the card and Confirm name the same screenshots')
   // A card printed for one stack layer lists the whole phase, so it reaches Confirm.
   const layers = [layer('base', 1, ''), layer('top', 2, 'base')]
   layers[1].plan.base_sha = layers[0].plan.head_sha
@@ -831,4 +836,56 @@ test('the printed card has one action that reaches Confirm for exactly its items
   const one = harness({ actions: single.actions, items: single.items, records: [prepared('one')] })
   await openConfirm(one, single.actions[0].key)
   assert.deepEqual(one.action(single.actions[0].key).confirmation.map(item => item.title), ['Change one'])
+})
+
+const SHA = 'e'.repeat(64)
+const shot = (name, alt = name) => ({ name, sha256: SHA, size: 1200, alt })
+
+test('the description excerpt never shows raw screenshot markup', () => {
+  assert.equal(descriptionExcerpt('![Before, desktop](screenshot:before-desktop.png)\n\nMakes the header wrap on phones.'), 'Makes the header wrap on phones.', 'an image-only line is skipped')
+  assert.equal(descriptionExcerpt('| Before | After |\n| --- | --- |\n| ![Before](screenshot:before.png) | ![After](screenshot:after.png) |\n\nFixes the clipped title.'), 'Fixes the clipped title.', 'a before/after table is skipped')
+  assert.equal(descriptionExcerpt('The header now wraps ![After](screenshot:after.png) on phones.'), 'The header now wraps After on phones.', 'an inline image becomes its alt text')
+  assert.doesNotMatch(descriptionExcerpt('## Screenshots\n\n![Only](screenshot:only.png)'), /screenshot:|!\[/)
+})
+
+test('Confirm names the screenshots a new pull request will publish on its Change line', () => {
+  const body = '## Summary\n\nFixes the clipped title.\n\n| Before | After |\n| --- | --- |\n| ![Before](screenshot:before.png) | ![After](screenshot:after.png) |'
+  const item = confirmationItem(prepared('shots', { plan: { body_draft: body, screenshots: [shot('before.png'), shot('after.png')] } }))
+  assert.equal(item.facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0 · 2 screenshots')
+  assert.equal(item.facts.some(fact => fact.label === 'Screenshots'), false, 'no separate fact spends the limit')
+  assert.equal(item.facts.find(fact => fact.label === 'Description')?.value, 'Fixes the clipped title.', 'the excerpt is kept')
+  assert.ok(item.facts.length <= 8)
+  assert.ok(item.facts.every(fact => !/screenshot:/.test(fact.value)))
+  assert.equal(confirmationItem(prepared('one', { plan: { screenshots: [shot('one.png')] } })).facts.find(fact => fact.label === 'Change').value,
+    '1 file · +2 −0 · 1 screenshot')
+
+  // Malformed entries are not counted; none at all leaves the Change line as is.
+  const plain = confirmationItem(prepared('plain', { plan: { screenshots: [{ name: '../x.png', sha256: SHA }, { name: 'ok.png', sha256: 'short' }] } }))
+  assert.equal(plain.facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0')
+
+  // Without a readable diff stat, the count still gets its own Change line.
+  const unsized = confirmationItem(prepared('unsized', { plan: { diff_stat: '', screenshots: [shot('a.png')] } }))
+  assert.equal(unsized.facts.find(fact => fact.label === 'Change')?.value, '1 screenshot')
+
+  // A stack layer already uses all eight facts; the count still fits on its Change line.
+  const base = layer('base', 1, '')
+  const full = confirmationItem({ ...base, plan: { ...base.plan, diff_stat: '1 file changed, 1 insertion(+)', screenshots: [shot('a.png'), shot('b.png')] } })
+  assert.equal(full.facts.length, 8)
+  assert.equal(full.facts.find(fact => fact.label === 'Change').value, '1 file · +1 −0 · 2 screenshots')
+})
+
+test('the B2 host accepts a confirmation that names screenshots', async t => {
+  const BLOCKS = process.env.MOBIUS_BLOCKS_FRONTEND || ''
+  if (!BLOCKS) return t.skip('set MOBIUS_BLOCKS_FRONTEND to a Möbius frontend with the passive block host to run this check')
+  const b2 = await import(`${BLOCKS}/src/components/ChatView/markdown/appBlockSession.js`)
+  const base = layer('base', 1, '')
+  const items = [
+    confirmationItem(prepared('shots', { plan: { body_draft: '![Before](screenshot:a.png)\n\nFix.', screenshots: [shot('a.png'), shot('b.png')] } })),
+    confirmationItem({ ...base, plan: { ...base.plan, diff_stat: '1 file changed, 1 insertion(+)', screenshots: [shot('a.png')] } }),
+  ]
+  const parsed = b2.confirmationOf(items)
+  assert.ok(parsed, 'the host rejected the list, which would keep Confirm disabled')
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Change').value, '1 file · +2 −0 · 2 screenshots')
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Description').value, 'Fix.')
+  assert.match(parsed[1].facts.find(fact => fact.label === 'Change').value, /1 screenshot$/)
 })

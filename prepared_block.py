@@ -22,6 +22,9 @@ RECORD_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}')
 # The whole stripped `git diff --shortstat` line, as the app parses it
 # (inline-session.js changeSize). Anything else has no readable size.
 STAT = re.compile(r'(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?')
+# A staged screenshot entry, as the app counts them (domain.js planScreenshots).
+SCREENSHOT_NAME = re.compile(r'[a-z0-9][a-z0-9-]{0,60}\.png')
+SHA256 = re.compile(r'[0-9a-f]{64}')
 VERDICTS = {'all_clear': 'All clear', 'changes_needed': 'Changes needed', 'reviewing': 'Reviewing'}
 # The chat host shows at most 12 items, and one action covers at most 12.
 MAX_ITEMS = 12
@@ -96,6 +99,20 @@ def change_size(plan):
   return f'{files} {"file" if files == 1 else "files"} · +{stat[2] or 0} −{stat[3] or 0}'
 
 
+def screenshot_count(plan):
+  shots = plan.get('screenshots')
+  return sum(1 for shot in shots if isinstance(shot, dict) and SCREENSHOT_NAME.fullmatch(str(shot.get('name') or ''))
+    and SHA256.fullmatch(str(shot.get('sha256') or ''))) if isinstance(shots, list) else 0
+
+
+def change_text(plan):
+  """The Change fact, with the screenshots the PR will publish, exactly as
+  Confirm shows it (inline-session.js confirmationItem)."""
+  size, count = change_size(plan), screenshot_count(plan)
+  shots = f'{count} {"screenshot" if count == 1 else "screenshots"}' if count else ''
+  return ' · '.join(part for part in (size, shots) if part) or 'Size not recorded'
+
+
 def prepared_item(record):
   plan = record.get('plan') if isinstance(record.get('plan'), dict) else {}
   if record.get('status') != 'prepared' or plan.get('action') not in ('pr', 'pr_update'):
@@ -103,7 +120,7 @@ def prepared_item(record):
   return {'title': bounded(plan.get('title') or record.get('title') or 'Prepared contribution'),
     'intent': f'review:{record["id"]}',
     'facts': [{'label': 'Project', 'value': bounded(plan.get('repo') or record.get('repo') or 'Unknown')},
-      {'label': 'Change', 'value': change_size(plan) or 'Size not recorded'}]}
+      {'label': 'Change', 'value': change_text(plan)}]}
 
 
 def sendable(record):

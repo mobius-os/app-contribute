@@ -67,7 +67,8 @@ that stack, because its phase is sent as one; a card that does not list every
 layer is refused in chat. Tapping re-reads the
 exact records and their current review, then turns the same button into
 **Confirm**, listing exactly what will be sent, each with the same Project and
-Change as its item; nothing is sent before Confirm,
+Change as its item (Change also names any screenshots the PR will
+publish); nothing is sent before Confirm,
 and the server refuses if a record changed after that snapshot. Independent
 contributions are sent in parallel; a stack's layers are sent in order. A lost
 response keeps that card locked (it reads the result, it never resends) until
