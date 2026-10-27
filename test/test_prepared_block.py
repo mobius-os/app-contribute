@@ -32,7 +32,7 @@ class PreparedBlockTests(unittest.TestCase):
     return [module.read_record(item['id'], self.ledger.name) for item in records]
 
   def card(self, *records):
-    return module.card_block(self.save(*records))
+    return module.card_block(self.save(*records), self.ledger.name)
 
   def test_single_card_is_one_item_opening_its_entry_with_one_action(self):
     block = self.card(record('one'))
@@ -61,6 +61,19 @@ class PreparedBlockTests(unittest.TestCase):
     self.assertEqual(block['intent'], 'review:base')
     other = self.card(record('base', plan=stack(1)), record('alone'))
     self.assertEqual(other['intent'], 'reviews:queue')
+
+  def test_a_card_for_one_stack_layer_lists_every_prepared_layer_in_order(self):
+    stack = lambda position, sid='s1': {'stack': {'id': sid, 'name': 'Stack', 'position': position, 'total': 3}}
+    published = record('first', status='open', plan=stack(1))
+    self.save(published, record('third', plan=stack(3)), record('other-stack', plan=stack(1, 's2')))
+    block = self.card(record('alone'), record('second', plan=stack(2)))
+    self.assertEqual([item['intent'] for item in block['items']], ['review:alone', 'review:second', 'review:third'],
+      'the whole ready phase, not the published layer or another stack')
+    self.assertEqual(block['action']['intent'], f'chat-send-batch:{module.batch_handle(["alone", "second", "third"])}')
+    self.save(record('late', plan=stack(2, 's3'), quality_review={}))
+    unreviewed = self.card(record('lonely', plan=stack(1, 's3')))
+    self.assertEqual(len(unreviewed['items']), 2)
+    self.assertNotIn('action', unreviewed, 'one unreviewed layer withholds the action for the phase')
 
   def test_a_card_that_is_not_all_clear_offers_no_send_and_says_why(self):
     stale = record('one', quality_review={'state': 'all_clear', 'reviewed_head_sha': 'b' * 40})

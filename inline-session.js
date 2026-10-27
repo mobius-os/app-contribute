@@ -134,6 +134,7 @@ export const RELAY_NOTE = 'This contribution is sent through the Möbius relay, 
 // The owner must see how big each change is, so a record without a readable
 // diff stat is never confirmable (staging always records one from Git).
 const sized = record => Boolean(changeSize(record?.plan))
+export const UNLISTED_LAYER_NOTE = 'This card doesn’t list every layer of the stack. Open Contribute to send it.'
 export const SIZE_NOTE = 'This contribution needs a fresh check in Contribute before it can be sent: its change size is missing.'
 const confirmable = record => !relayed(record) && sized(record) && confirmationItem(record).facts.every(fact => fact.value)
 
@@ -189,7 +190,11 @@ export function createInlineSession({ sessionId, actions, items = null, checkpoi
   const overlaps = (attempt, unit) => attempt.unitKey === unit.key || attempt.ids.some(id => unit.records.some(record => record.id === id))
   const locked = unit => attempts.some(attempt => UNRESOLVED.has(attempt.state) && overlaps(attempt, unit))
   const units = key => publicationUnits(idsFor(key), [...current().values()], runtime?.reviewStatus, { requireCheck: true })
-  const readyUnits = key => units(key).filter(unit => unit.ready.length && !locked(unit) && unit.ready.every(confirmable))
+  // The action covers exactly the records the card lists: a unit whose ready
+  // phase includes a record the card does not list (another stack layer) is
+  // never confirmed, partly or expanded.
+  const unlisted = (key, unit) => unit.ready.some(record => !idsFor(key).includes(record.id))
+  const readyUnits = key => units(key).filter(unit => unit.ready.length && !unlisted(key, unit) && !locked(unit) && unit.ready.every(confirmable))
   // Readiness is decided only from a complete ledger, a current review check,
   // a known connection and finished exact reads of everything this card names.
   const authoritative = key => Boolean(runtime?.ledgerReady) && runtime.reviewStatus?.state === 'ready'
@@ -212,8 +217,9 @@ export function createInlineSession({ sessionId, actions, items = null, checkpoi
       return NEWER_NOTE
     }
     if (idsFor(key).some(id => relayed(current().get(id)))) return RELAY_NOTE
-    if (readyUnits(key).length) return ''
     const all = units(key)
+    if (all.some(unit => unlisted(key, unit))) return UNLISTED_LAYER_NOTE
+    if (readyUnits(key).length) return ''
     if (all.some(unit => unit.ready.length && !unit.ready.every(sized))) return SIZE_NOTE
     return all.map(unit => unit.reason).find(Boolean) || (all.some(locked) ? UNKNOWN_NOTE : '')
   }

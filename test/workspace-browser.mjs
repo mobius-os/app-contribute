@@ -30,6 +30,7 @@ import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { organizePrivateWorkAction } from './review.js'
+import { batchHandle } from './chat-blocks.js'
 import { CSS } from './theme.js'
 import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
 
@@ -1352,7 +1353,7 @@ window.runWorkspaceChecks = async () => {
         root.render(null)
       }
     })
-    await check('a card naming one layer of a stack reaches Confirm, and sends nothing if binding is lost before the write', async () => {
+    await check('a card listing every layer of a stack reaches Confirm, and sends nothing if binding is lost before the write', async () => {
       root.render(null)
       await frame(); await frame()
       values.clear()
@@ -1368,17 +1369,18 @@ window.runWorkspaceChecks = async () => {
       const states = []
       const realPost = window.postMessage
       window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
-      const card = () => states.at(-1)?.actions?.find(action => action.key === 'chat-send:stack-base')
+      const stackKey = 'chat-send-batch:' + batchHandle(['stack-base', 'stack-top'])
+      const card = () => states.at(-1)?.actions?.find(action => action.key === stackKey)
       const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
-        data: { type: 'moebius:app-block-action', sessionId: 'card-2', key: 'chat-send:stack-base', event: name, nonce } }))
+        data: { type: 'moebius:app-block-action', sessionId: 'card-2', key: stackKey, event: name, nonce } }))
       const before = calls.requests.length
       try {
-        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: 'chat-send:stack-base', label: 'Contribute' }], items: [{ intent: 'review:stack-base' }] }} />)
-        await until(() => card() && !card().disabled && card().badges?.length, 'Stack card state was not published')
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-2', generation: 5, actions: [{ key: stackKey, label: 'Contribute all' }], items: [{ intent: 'review:stack-base' }, { intent: 'review:stack-top' }] }} />)
+        await until(() => card() && !card().disabled, 'Stack card state was not published')
         fire('activate', 'stack-n1')
         // Wait on timers rather than animation frames: the hidden runtime mounts behind the card.
         for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 100))
-        await until(() => card()?.confirming, 'A one-layer stack card never reached Confirm: ' + JSON.stringify(card()) + ' requests: ' + JSON.stringify(calls.requests.slice(before).map(call => call.method + ' ' + call.url)))
+        await until(() => card()?.confirming, 'A whole-stack card never reached Confirm: ' + JSON.stringify(card()) + ' requests: ' + JSON.stringify(calls.requests.slice(before).map(call => call.method + ' ' + call.url)))
         const statusQueries = calls.requests.slice(before).filter(call => call.url.includes('/review-status')).map(call => call.url)
         ensure(statusQueries.some(url => url.includes('record_id=stack-base') && url.includes('record_id=stack-top')), 'The review check was not addressed to every prepared layer: ' + JSON.stringify(statusQueries))
         ensure(card().confirmation.length === 2 && card().confirmation.every(item => item.facts.some(fact => fact.label === 'Change' && fact.value === '2 files · +5 −1')), 'Confirm lacked the stack phase or its size')

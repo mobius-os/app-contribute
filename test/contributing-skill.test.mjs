@@ -239,6 +239,7 @@ test('the Send-in-chat guidance describes one item per contribution and exactly 
   assert.match(publish, /Items have no buttons of their own/)
   assert.match(publish, /at most 12 items; with more, it says how many more are in Contribute and offers no action/)
   assert.doesNotMatch(publish, /a \*\*Contribute\*\* per item/)
+  assert.match(publish, /Naming any layer of a stack lists every prepared layer of that stack/)
   const readme = read('README.md').replace(/\s+/g, ' ')
   assert.match(readme, /session `items`/)
   assert.match(readme, /"expand": false/)

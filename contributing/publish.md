@@ -62,7 +62,9 @@ exactly the listed items. Items have no buttons of their own, and the card has
 no inline app view. It shows at most 12 items; with more, it says how many
 more are in Contribute and offers no action, so send those from Contribute.
 A card whose items are not all clear for their current version offers no
-action and says so. Tapping re-reads the
+action and says so. Naming any layer of a stack lists every prepared layer of
+that stack, because its phase is sent as one; a card that does not list every
+layer is refused in chat. Tapping re-reads the
 exact records and their current review, then turns the same button into
 **Confirm**, listing exactly what will be sent, each with the same Project and
 Change as its item; nothing is sent before Confirm,

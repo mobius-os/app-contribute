@@ -51,6 +51,35 @@ def read_record(record_id, ledger):
   raise ValueError(f'No contribution {record_id} in the Contribute ledger.')
 
 
+def stack_of(record):
+  stack = (record.get('plan') or {}).get('stack')
+  return (stack.get('id'), (record.get('plan') or {}).get('repo') or record.get('repo')) if isinstance(stack, dict) and stack.get('id') else None
+
+
+def with_complete_stacks(records, ledger):
+  """Every prepared layer of each listed record's stack, in layer order where
+  that stack first appears. Contribute sends a stack's ready phase as one, and
+  the card's one action covers only what it lists, so a card naming one layer
+  must list the whole phase (otherwise Contribute refuses it in chat)."""
+  layers = {}
+  for path in sorted(Path(ledger).glob('*.json')):
+    try:
+      other = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+      continue
+    if isinstance(other, dict) and other.get('status') == 'prepared' and stack_of(other) and RECORD_ID.fullmatch(str(other.get('id') or '')):
+      layers.setdefault(stack_of(other), {})[other['id']] = other
+  listed, seen = [], set()
+  for record in records:
+    group = layers.get(stack_of(record), {}) if stack_of(record) else {}
+    members = sorted(group.values(), key=lambda layer: ((layer.get('plan') or {}).get('stack') or {}).get('position') or 0) if record['id'] in group else [record]
+    for member in members:
+      if member['id'] not in seen:
+        seen.add(member['id'])
+        listed.append(member)
+  return listed
+
+
 def verdict(record):
   plan = record.get('plan') or {}
   review = record.get('quality_review') if isinstance(record.get('quality_review'), dict) else {}
@@ -89,8 +118,10 @@ def group_intent(records):
   return f'review:{records[0]["id"]}' if len(records) == 1 or stacks != {None} and len(stacks) == 1 else 'reviews:queue'
 
 
-def card_block(records):
+def card_block(records, ledger=None):
   records = list({record['id']: record for record in records}.values())
+  if ledger is not None:
+    records = with_complete_stacks(records, ledger)
   if not records:
     raise ValueError('A card names at least one prepared record.')
   items = [prepared_item(record) for record in records]
@@ -120,7 +151,7 @@ def main():
   parser.add_argument('--ledger-dir', type=Path)
   args = parser.parse_args()
   ledger = args.ledger_dir or find_ledger()
-  block = card_block([read_record(record_id, ledger) for record_id in args.record_ids])
+  block = card_block([read_record(record_id, ledger) for record_id in args.record_ids], ledger)
   print('```mobius-app\n' + json.dumps(block, ensure_ascii=False) + '\n```')
 
 

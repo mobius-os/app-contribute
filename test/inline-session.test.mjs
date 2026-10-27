@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { batchHandle, cardRecordIds, itemRecordIds, sendTarget } from '../chat-blocks.js'
 import { reviewAddressFor } from '../send-readiness.js'
-import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, NEWER_NOTE, REFRESH_FAILED_NOTE, SIZE_NOTE, TIMEOUT_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
+import { attemptOutcome, confirmationItem, descriptionExcerpt, LEDGER_NOTE, NEWER_NOTE, UNLISTED_LAYER_NOTE, REFRESH_FAILED_NOTE, SIZE_NOTE, TIMEOUT_NOTE, createInlineSession, decodeCheckpoint, encodeCheckpoint, observeAttempt, RECOVERY_NOTE } from '../inline-session.js'
 
 const HEAD = 'a'.repeat(40), NEXT = 'c'.repeat(40)
 function prepared(id, extra = {}) {
@@ -193,23 +193,38 @@ test('Contribute all sends independent units in parallel and a stack as one orde
   assert.equal(h.last().summary, '3 sent · 1 prepared', 'a sibling failure never makes a sent unit pending')
 })
 
-test('a card naming one layer of a new stack reaches Confirm once every prepared layer is addressed', async () => {
+test('a card listing one layer never confirms or sends the stack layers it does not list', async () => {
+  // The reviewer's probe: items=[review:base], action=chat-send:base.
   const records = [layer('base', 1, ''), layer('top', 2, 'base')]
   records[1].plan.base_sha = records[0].plan.head_sha
-  const actions = [{ key: 'chat-send:base', label: 'Contribute' }]
-  assert.deepEqual(reviewAddressFor(['base'], records), ['base', 'top'], 'the status request covers the whole stack phase')
-  // As the server answers a request addressed only to the card's own id: the other layer has no check.
-  const narrow = harness({ actions, records, address: ['base'] })
-  await openConfirm(narrow, 'chat-send:base')
-  assert.equal(narrow.action('chat-send:base').confirming, false)
-  assert.match(narrow.action('chat-send:base').note, /current source check/)
-  // The app's request covers every prepared layer, so the stack's phase can be confirmed and sent as one.
-  const h = harness({ actions, records })
+  const h = harness({ actions: [{ key: 'chat-send:base', label: 'Contribute' }], items: reviewItems(['base']), records })
   await openConfirm(h, 'chat-send:base')
   const state = h.action('chat-send:base')
+  assert.equal(state.confirming, false, 'no partial or expanded Confirm')
+  assert.equal(state.note, UNLISTED_LAYER_NOTE)
+  h.fire('chat-send:base', 'confirm'); await tick()
+  assert.deepEqual(h.sends, [])
+})
+
+test('a card listing every prepared layer reaches Confirm once each is addressed, and sends the stack as one', async () => {
+  const records = [layer('base', 1, ''), layer('top', 2, 'base')]
+  records[1].plan.base_sha = records[0].plan.head_sha
+  const ids = ['base', 'top']
+  const actions = [{ key: `chat-send-batch:${batchHandle(ids)}`, label: 'Contribute all' }]
+  const key = actions[0].key
+  assert.deepEqual(reviewAddressFor(['base'], records), ['base', 'top'], 'the status request covers the whole stack phase')
+  // The server answered for both layers but has no current check of one: the whole phase waits.
+  const narrow = harness({ actions, items: reviewItems(ids), records,
+    runtime: { reviewStatus: { state: 'ready', addressed: ids, byId: { base: { state: 'ready' } } } } })
+  await openConfirm(narrow, key)
+  assert.equal(narrow.action(key).confirming, false)
+  assert.match(narrow.action(key).note, /current source check/)
+  const h = harness({ actions, items: reviewItems(ids), records })
+  await openConfirm(h, key)
+  const state = h.action(key)
   assert.equal(state.confirming, true)
   assert.deepEqual(state.confirmation.map(item => item.title), ['Change base', 'Change top'])
-  h.fire('chat-send:base', 'confirm'); await tick()
+  h.fire(key, 'confirm'); await tick()
   assert.deepEqual(h.sends.map(call => [call.kind, call.ids.join(',')]), [['stack', 'base,top']])
 })
 
@@ -550,9 +565,10 @@ test('a change without a readable size is never offered for Confirm, single or i
     const base = layer('base', 1, ''), top = layer('top', 2, 'base')
     top.plan.base_sha = base.plan.head_sha
     top.plan.diff_stat = diffStat
-    const stack = harness({ actions: [{ key: 'chat-send:base' }], records: [base, top] })
-    await openConfirm(stack, 'chat-send:base')
-    state = stack.action('chat-send:base')
+    const stackKey = `chat-send-batch:${batchHandle(['base', 'top'])}`
+    const stack = harness({ actions: [{ key: stackKey }], items: reviewItems(['base', 'top']), records: [base, top] })
+    await openConfirm(stack, stackKey)
+    state = stack.action(stackKey)
     assert.equal(state.confirming, false, `${name}: stack`)
     assert.equal(state.note, SIZE_NOTE)
     assert.equal(stack.sends.length, 0)
@@ -796,6 +812,21 @@ test('the printed card has one action that reaches Confirm for exactly its items
   // Confirm repeats each item's card facts.
   const block = printedCard(records)
   for (const [index, item] of block.items.entries()) assert.deepEqual(state.confirmation[index].facts.slice(0, 2), item.facts)
+  // A card printed for one stack layer lists the whole phase, so it reaches Confirm.
+  const layers = [layer('base', 1, ''), layer('top', 2, 'base')]
+  layers[1].plan.base_sha = layers[0].plan.head_sha
+  const ledgerDir = mkdtempSync(join(tmpdir(), 'contribute-card-'))
+  let stackCard
+  try {
+    for (const record of layers) writeFileSync(join(ledgerDir, `${record.id}.json`), JSON.stringify(record))
+    const run = spawnSync('python3', [new URL('../prepared_block.py', import.meta.url).pathname, 'base', '--ledger-dir', ledgerDir], { encoding: 'utf8' })
+    assert.equal(run.status, 0, run.stderr)
+    stackCard = await hostView(JSON.parse(/```mobius-app\n(.*)\n```/s.exec(run.stdout)[1]))
+  } finally { rmSync(ledgerDir, { recursive: true, force: true }) }
+  assert.deepEqual(stackCard.items, reviewItems(['base', 'top']))
+  const stacked = harness({ actions: stackCard.actions, items: stackCard.items, records: layers })
+  await openConfirm(stacked, stackCard.actions[0].key)
+  assert.deepEqual(stacked.action(stackCard.actions[0].key).confirmation.map(item => item.title), ['Change base', 'Change top'])
   const single = await hostView(printedCard([prepared('one')]))
   const one = harness({ actions: single.actions, items: single.items, records: [prepared('one')] })
   await openConfirm(one, single.actions[0].key)

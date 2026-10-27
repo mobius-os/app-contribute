@@ -367,7 +367,9 @@ review queue. There are no item actions; the one card action is
 items. The record set comes from the host's session `items` (the card's item
 intents), never from block text: the action must match those items exactly,
 each item must be a ledger entry, and Confirm is built from Contribute's own
-records. A host that sends no `items` gets no Confirm ("needs a newer
+records. A stack phase that includes a layer the card does not list is never
+confirmed ("doesn’t list every layer"); `prepared_block.py` lists every
+prepared layer of any stack it names. A host that sends no `items` gets no Confirm ("needs a newer
 Möbius"). At most 12 items are listed; beyond that the card names how many
 more are in Contribute and has no action.
 
