@@ -571,6 +571,31 @@ def _attention_resolved(attention, check_state, mergeable, review_decision):
   return bool(resolved and resolved(check_state, mergeable, review_decision))
 
 
+def _without_type(items: list, kind: str) -> list:
+  return [item for item in items if item.get("type") != kind]
+
+
+# One attention slot holds one reason. A blocker displaced by a newer reason
+# waits while GitHub still shows it, and returns, already announced, once the
+# slot frees: a blocker is never lost and never pushed twice.
+def _waiting_blockers(rec: dict, current: dict, attention: dict | None,
+                      slot_free: bool, state: tuple) -> tuple:
+  waiting = [
+    item for item in (rec.get("waiting_attention") or [])
+    if isinstance(item, dict) and not _attention_resolved(item, *state)
+  ]
+  if not attention:
+    return (waiting[0], waiting[1:]) if slot_free and waiting else (None, waiting)
+  waiting = _without_type(waiting, attention.get("type"))
+  displaced = (
+    not slot_free and current.get("type") in _RESOLVED_WHEN
+    and current.get("type") != attention.get("type")
+  )
+  if displaced:
+    waiting = _without_type(waiting, current.get("type")) + [current]
+  return None, waiting
+
+
 def _attention_update(rec, node):
   patch = {}
   if not isinstance(node, dict):
@@ -704,6 +729,11 @@ def _attention_update(rec, node):
     if refreshed != current_attention:
       patch["attention"] = refreshed
 
+  restored, waiting = _waiting_blockers(
+    rec, current_attention, attention, slot_free,
+    (check_state, mergeable, review_decision))
+  set_if_changed("waiting_attention", waiting)
+  attention = attention or restored
   if attention:
     patch["needs_attention"] = True
     patch["attention"] = attention

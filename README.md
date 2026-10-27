@@ -22,7 +22,9 @@ contribution. This app is the dashboard for that loop:
   contributions, blockers before news. Each row names the reason (Merge
   blocked, Checks failing, Changes requested, New feedback), the affected PR
   and its related group, and when it was detected; its button says what it
-  opens. A blocker leaves the list once GitHub shows it resolved.
+  opens. A blocker leaves the list once GitHub shows it resolved. A blocker
+  pushed aside by a newer reason comes back, without a second push
+  notification, while GitHub still shows it.
 - **One tab per job** — under To look at and the project's status, **All PRs**
   (the default), **Review requests** and **My work** (agent jobs, agent
   reviews, agent activity and finished work) split the project by what the
@@ -212,6 +214,9 @@ shape:
     "message": "The latest GitHub checks are failing.",
     "url": "https://github.com/…"
   },
+  // Blockers displaced from the one attention slot while GitHub still shows
+  // them; the job puts the first one back when the slot frees.
+  "waiting_attention": [{ "type": "merge_conflict", "key": "…" }],
   // Display-only MIRROR of the autopilot state (see below). The real grant +
   // claim live in a platform DB row; this block is written by the platform for
   // the app/cron to render and must never be treated as authorization.
