@@ -129,7 +129,7 @@ test('posting a review on GitHub is an opt-in inside Review only, shown only whe
   const source = await import('node:fs').then(fs => fs.readFileSync(new URL('../ui/ReviewConfirmation.jsx', import.meta.url), 'utf8'))
   assert.match(source, /const canPost = onOptionsChange && capabilities\?\.post_review === true/)
   assert.match(source, /label="Allow posting the review on GitHub"/)
-  assert.match(source, /One comment from your account, only for a verdict the agent is sure about\. It never approves or asks for changes\. Questions to you stay private\./)
+  assert.match(source, /detail=\{merge \? 'Turn off Merge when safe to post a review\.' : hints\.posting\}/)
   const unresolved = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', request_id:'fixed' }, onModeChange:()=>{}, onOptionsChange:()=>{} })
   if (!unresolved) return
   assert.doesNotMatch(unresolved, /posting the review on GitHub/, 'hidden until the served capability is known')

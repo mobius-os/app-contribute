@@ -79,6 +79,18 @@ export function reviewWindowCopy({ mode, posting = false, draftScope = false, co
   }
 }
 
+// The hints under the two Review only switches, per selected PR for a batch.
+export function reviewSwitchHints(count = 1) {
+  if (count === 1) return {
+    posting: 'One comment from your account, only for a verdict the agent is sure about. It never approves or asks for changes. Questions to you stay private.',
+    merge: 'Merges or queues the PR after a clean review and passing checks. It does not change any code.',
+  }
+  return {
+    posting: 'Up to one comment per PR from your account, only for a verdict the agent is sure about. It never approves or asks for changes. Questions to you stay private.',
+    merge: 'Merges or queues each PR after a clean review and passing checks. It does not change any code.',
+  }
+}
+
 // Why "Merge when safe" cannot be switched on right now, or '' when it can.
 export function mergeWhenSafeBlocker({ drafts, mayMergeAll, posting }) {
   if (drafts) return 'Not available for drafts.'
