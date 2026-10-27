@@ -176,20 +176,18 @@ prior_work?: {searched_at, query, decision, summary?, matches?}
   with neutral test data when the real one shows any. When a screenshot
   cannot show the change (it appears only on a real device, or only as
   timing), say why in the body instead.
-- Attach screenshots when you stage, never by pushing them yourself:
-  GitHub has no API for description images, so Send hosts them on a
-  `mobius-screenshots` branch of the owner's own repository (their fork, or
-  the target when they own it) and links them. List each PNG in
-  the stage call's `screenshots` (see [ledger.md](ledger.md)) and show it in
-  `body_draft` as `![What it shows](screenshot:before-desktop.png)`; Send
-  replaces each reference with its public link. Every attached image must
-  appear in the body, and every reference must name an attached image. The
-  owner sees the images in the card and approves them with the text, and
-  Send refuses an image that changed afterwards. When `mapi /api/github/status`
-  does not report `"screenshot_upload": true`, this Möbius cannot attach
-  them yet: say in the body that screenshots are not included and why.
-- For a screenshot already hosted as a GitHub attachment, link the image to
-  its canonical `https://github.com/user-attachments/assets/...` URL:
+- Attach screenshots when you stage, never by pushing them yourself: list
+  each image in the stage call's `screenshots` and show it in `body_draft`
+  as `![What it shows](screenshot:before-desktop.png)`. Send publishes the
+  images and replaces each reference with its public link. The owner
+  approves the images together with the text. [ledger.md](ledger.md) says
+  when attaching is available and where it is refused; when it is not, leave
+  the images out and say in the body that screenshots are not included and
+  why.
+- Attaching at staging is the normal path. Only for an image that is already
+  hosted as a GitHub attachment (one uploaded through GitHub's own editor),
+  link the image to its canonical
+  `https://github.com/user-attachments/assets/...` URL:
   `[![Screenshot description](URL)](URL)`. GitHub may render a plain image's
   click target as a short-lived `private-user-images.githubusercontent.com`
   URL, even when its Markdown source uses the canonical URL. The explicit
