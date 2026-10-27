@@ -450,6 +450,18 @@ window.runWorkspaceChecks = async () => {
       await click(trigger)
       await until(() => !row.querySelector('[role=menuitem]'), 'Row Agent menu did not close')
     })
+    await check('the PR detail Agent menu opens inward from its left-hand trigger', async () => {
+      const row=[...document.querySelectorAll('.co-pr-row')][0]
+      await click(row.querySelector('.co-pr-title, .co-pr-main, button'))
+      await until(() => query('.co-pr-detail .co-agent-menu-button'), 'PR detail did not open')
+      const detail=query('.co-pr-detail'), trigger=detail.querySelector('.co-agent-menu-button')
+      await click(trigger)
+      await until(() => detail.querySelector('[role=menuitem]'), 'Detail Agent menu did not open')
+      const menu=detail.querySelector('.co-agent-menu-list').getBoundingClientRect(), box=detail.getBoundingClientRect()
+      ensure(menu.left >= box.left - 1 && menu.right <= window.innerWidth + 1, 'The detail Agent menu ran past the pane edge')
+      await click(trigger)
+      await until(() => !detail.querySelector('[role=menuitem]'), 'Detail Agent menu did not close')
+    })
     await check('inline list header keeps count, bulk actions and visible selection without changing scope', async () => {
       const header=query('.co-pr-box-head')
       ensure(button('Assign',header) && header.querySelector('.co-agent-menu-button') && text(header).includes('2 selected'),'Inline bulk actions missing')
