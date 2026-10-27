@@ -557,6 +557,20 @@ def _is_autopilot(rec):
   return bool(block and block.get("enabled"))
 
 
+# Each blocker clears only when GitHub shows its own condition resolved;
+# feedback and unknown reasons stay until handled or dismissed.
+_RESOLVED_WHEN = {
+  "checks_failed": lambda checks, mergeable, review: checks == "SUCCESS",
+  "merge_conflict": lambda checks, mergeable, review: mergeable == "MERGEABLE",
+  "changes_requested": lambda checks, mergeable, review: review == "APPROVED",
+}
+
+
+def _attention_resolved(attention, check_state, mergeable, review_decision):
+  resolved = _RESOLVED_WHEN.get(attention.get("type"))
+  return bool(resolved and resolved(check_state, mergeable, review_decision))
+
+
 def _attention_update(rec, node):
   patch = {}
   if not isinstance(node, dict):
@@ -601,14 +615,24 @@ def _attention_update(rec, node):
   current_attention = (
     rec.get("attention") if isinstance(rec.get("attention"), dict) else {}
   )
-  if (
-    current_attention.get("type") == "checks_failed"
-    and check_state == "SUCCESS"
-  ):
+  resolved = _attention_resolved(
+    current_attention, check_state, mergeable, review_decision)
+  if resolved:
     patch["needs_attention"] = False
     patch["attention"] = None
   if check_state == "SUCCESS" and rec.get("last_checks_attention_key"):
     patch["last_checks_attention_key"] = None
+  if mergeable == "MERGEABLE" and rec.get("last_conflict_attention_key"):
+    patch["last_conflict_attention_key"] = None
+  # One attention slot holds one reason. A conflict that arrived while another
+  # reason held the slot is raised once the slot frees, so it is never lost.
+  slot_free = resolved or not (rec.get("needs_attention") and current_attention)
+  conflict_key = "merge_conflict:%s" % _record_head(rec)
+  conflict_pending = (
+    mergeable == "CONFLICTING"
+    and conflict_key not in (
+      rec.get("last_conflict_attention_key"), current_attention.get("key"))
+  )
 
   attention = None
   checks_attention = None
@@ -650,10 +674,11 @@ def _attention_update(rec, node):
       "event_at": latest["at"],
       "detected_at": now,
     }
-  elif mergeable == "CONFLICTING" and previous_mergeable != "CONFLICTING":
+  elif conflict_pending and (previous_mergeable != "CONFLICTING" or slot_free):
+    patch["last_conflict_attention_key"] = conflict_key
     attention = {
       "type": "merge_conflict",
-      "key": "merge_conflict:%s" % _record_head(rec),
+      "key": conflict_key,
       "title": "Needs a refresh to merge",
       "message": "New upstream changes conflict with this contribution.",
       "url": rec.get("url") or "",

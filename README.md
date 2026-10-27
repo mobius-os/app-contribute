@@ -18,7 +18,12 @@ contribution. This app is the dashboard for that loop:
   There is no separate Reviews destination. All, **With your edits** and
   **Behind GitHub** filter the same searchable overview, where each project
   carries a Platform or App tag and apps with nothing to do fold away.
-- **One tab per job** — under the project's status and Needs you, **All PRs**
+- **To look at first** — a project opens on what needs you on its tracked
+  contributions, blockers before news. Each row names the reason (Merge
+  blocked, Checks failing, Changes requested, New feedback), the affected PR
+  and its related group, and when it was detected; its button says what it
+  opens. A blocker leaves the list once GitHub shows it resolved.
+- **One tab per job** — under To look at and the project's status, **All PRs**
   (the default), **Review requests** and **My work** (agent jobs, agent
   reviews, agent activity and finished work) split the project by what the
   owner came to do. Saved public work the live list cannot show stays on All
@@ -26,7 +31,7 @@ contribution. This app is the dashboard for that loop:
 - **Task-first controls** — open a project to see its work list beside one
   contextual task, with a compact project switcher rather than another sidebar.
   The project's status says in plain words what is local ("2 files changed on
-  this Möbius are not on GitHub yet") and how it compares with GitHub; **Make
+  this Möbius") and how it compares with GitHub; **Make
   PRs from my edits** is the main action and appears only when there are edits.
   A permitted maintainer can choose **Follow through to merge** without granting
   unknown future public actions. Contribute does not update projects itself:
@@ -93,7 +98,7 @@ contribution. This app is the dashboard for that loop:
   Projects row reserves its space and reports its own refresh instead of
   making counts pop into the layout.
 - **Work list**, grouped:
-  - **Needs you** — actual blockers and questions, linked to their owning work.
+  - **To look at** — actual blockers and feedback, linked to their owning work.
   - **Prepared proposals · not shared** — private drafts waiting on your go-ahead. Each card
     shows high-level review context first: repo, branch, diff stat, and
     summary. Open the card to review exactly what would go public: the action

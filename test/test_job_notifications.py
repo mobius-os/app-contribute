@@ -365,6 +365,56 @@ class ContributionPushTest(unittest.TestCase):
     job.run()
     self.assertEqual(len(job.sent), 2)
 
+  def test_resolved_conflict_leaves_needs_you_when_the_pr_can_merge_again(self):
+    job = JobEndpoints()
+    job.node["comments"] = {"nodes": []}
+    job.node["mergeable"] = "CONFLICTING"
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "merge_conflict")
+    job.node["mergeable"] = "MERGEABLE"
+    job.run()
+    self.assertFalse(job.record["needs_attention"])
+    self.assertIsNone(job.record["attention"])
+
+  def test_approval_clears_an_earlier_changes_request(self):
+    job = JobEndpoints()
+    job.node["comments"] = {"nodes": []}
+    job.node["reviewDecision"] = "CHANGES_REQUESTED"
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "changes_requested")
+    job.node["reviewDecision"] = "APPROVED"
+    job.run()
+    self.assertFalse(job.record["needs_attention"])
+
+  def test_conflict_masked_by_failing_checks_is_raised_once_checks_pass(self):
+    job = JobEndpoints()
+    job.node["comments"] = {"nodes": []}
+    rollup = {"state": "FAILURE"}
+    job.node["commits"] = {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}
+    job.node["mergeable"] = "CONFLICTING"
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "checks_failed")
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "checks_failed")
+    rollup["state"] = "SUCCESS"
+    job.run()
+    self.assertTrue(job.record["needs_attention"])
+    self.assertEqual(job.record["attention"]["type"], "merge_conflict")
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "merge_conflict")
+
+  def test_dismissed_conflict_is_not_raised_again_for_the_same_head(self):
+    job = JobEndpoints()
+    job.node["comments"] = {"nodes": []}
+    job.node["mergeable"] = "CONFLICTING"
+    job.run()
+    sent = len(job.sent)
+    job.change(needs_attention=False)
+    job.run()
+    job.run()
+    self.assertFalse(job.record["needs_attention"])
+    self.assertEqual(len(job.sent), sent)
+
   def test_terminal_notifications_target_the_record_without_stale_attention(self):
     for state in ("MERGED", "CLOSED"):
       for record_id in ("fixture-record", "a" * 121, "a" * 122, "bad\n"):
