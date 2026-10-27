@@ -239,6 +239,81 @@ class ContributionPushTest(unittest.TestCase):
     self.assertEqual(len(job.sent), 1)
     self.assertIn("drive-by", job.sent[0]["body"])
 
+  def _legacy_pending(self, job, association, attention_type):
+    # A record written before authors were classified: its pending attention
+    # names the newest comment, which the activity cursor already covers.
+    comment = job.node["comments"]["nodes"][0]
+    comment.update(authorAssociation=association, author={"login": "commenter"})
+    job.change(
+      autopilot={"enabled": True},
+      last_github_activity_at=comment["createdAt"],
+      needs_attention=True,
+      attention={
+        "type": attention_type,
+        "key": "%s:%s" % (attention_type, comment["createdAt"]),
+        "title": "New GitHub activity", "message": "New comment from commenter.",
+        "url": comment["url"], "event_at": comment["createdAt"],
+        "detected_at": "2026-01-02T00:05:00Z",
+      },
+    )
+    job.respond_results = [{"status": "claimed"}] * 3
+
+  def test_legacy_pending_activity_without_trusted_provenance_is_notification_only(self):
+    for attention_type in ("github_activity", "changes_requested"):
+      with self.subTest(attention_type=attention_type):
+        job = JobEndpoints()
+        self._legacy_pending(job, "NONE", attention_type)
+        job.run()
+        job.run()
+        self.assertEqual(job.responded, [])
+        self.assertEqual(job.record["attention"]["type"], "outside_activity")
+        self.assertEqual(len(job.sent), 1)
+        job.run()
+        self.assertEqual(len(job.sent), 1)
+
+  def test_downgrading_an_already_announced_legacy_attention_stays_quiet(self):
+    job = JobEndpoints()
+    self._legacy_pending(job, "NONE", "github_activity")
+    job.change(
+      autopilot={"enabled": False},
+      attention=dict(job.record["attention"], announced_at="2026-01-02T00:06:00Z"),
+    )
+    job.run()
+    job.run()
+    self.assertEqual(job.record["attention"]["type"], "outside_activity")
+    self.assertEqual(job.sent, [])
+    self.assertEqual(job.responded, [])
+
+  def test_legacy_pending_activity_from_a_maintainer_still_reaches_autopilot(self):
+    job = JobEndpoints()
+    self._legacy_pending(job, "MEMBER", "github_activity")
+    key = job.record["attention"]["key"]
+    job.run()
+    self.assertEqual([r["attention"]["key"] for r in job.responded], [key])
+    self.assertEqual(job.record["attention"]["type"], "github_activity")
+    self.assertEqual(job.sent, [])
+
+  def test_a_newer_outside_comment_keeps_an_undelivered_trusted_retry(self):
+    job = JobEndpoints()  # one MEMBER comment
+    job.change(autopilot={"enabled": True})
+    job.respond_results = [TimeoutError("fixture")] + [{"status": "claimed"}] * 3
+    job.run()
+    trusted_key = job.record["attention"]["key"]
+    job.node["comments"]["nodes"].append({
+      "url": "https://github.com/example/project/pull/1#outside",
+      "createdAt": "2026-01-03T00:00:00Z", "author": {"login": "drive-by"},
+      "authorAssociation": "NONE",
+    })
+    job.run()
+    self.assertEqual(
+      [r["attention"]["key"] for r in job.responded], [trusted_key, trusted_key],
+    )
+    self.assertEqual(job.record["attention"]["key"], trusted_key)
+    self.assertEqual(len(job.sent), 1)
+    self.assertIn("drive-by", job.sent[0]["body"])
+    job.run()
+    self.assertEqual(len(job.sent), 1)
+
   def test_platform_human_required_remains_platform_owned(self):
     for autopilot in (False, True):
       with self.subTest(autopilot=autopilot):

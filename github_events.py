@@ -104,3 +104,42 @@ def trusted_changes_request(
     if e["kind"] == "review" and e["trusted"] and e.get("state") == "CHANGES_REQUESTED"
   ]
   return max(requests, key=lambda e: e["at"]) if requests else None
+
+
+# Attention types raised from a GitHub author's comment or review. A pending
+# one may start a round only while it still names a trusted event on the thread.
+AUTHOR_ATTENTION_TYPES = frozenset(("github_activity", "changes_requested"))
+
+
+def attention_from_trusted_author(
+  attention: Any, node: Any, ignore_urls: set[str] | None = None,
+) -> bool:
+  """Whether a pending author attention names an event a trusted author wrote.
+
+  The attention's key carries the event timestamp (``<type>:<at>``) and its
+  URL names the event. Both must match a comment or review that GitHub reports
+  as written by a trusted author; a ``changes_requested`` attention must name
+  such a review that requested changes. A stored attention's type is display
+  data, not evidence: an attention written before authors were classified, or
+  one whose event left the fetched window, fails this proof.
+  """
+  if not isinstance(attention, dict):
+    return False
+  kind = attention.get("type")
+  key = attention.get("key")
+  url = attention.get("url")
+  if kind not in AUTHOR_ATTENTION_TYPES or not isinstance(key, str) or not url:
+    return False
+  prefix = kind + ":"
+  if not key.startswith(prefix):
+    return False
+  at = key[len(prefix):]
+  for event in review_events(node, ignore_urls):
+    if not (event["trusted"] and event["at"] == at and event["url"] == url):
+      continue
+    if kind == "changes_requested" and not (
+      event["kind"] == "review" and event.get("state") == "CHANGES_REQUESTED"
+    ):
+      continue
+    return True
+  return False

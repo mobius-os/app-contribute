@@ -118,7 +118,8 @@ def _record_path(name):
 sys.path.insert(0, os.environ["SCRIPT_DIR"])
 from ledger_scan import LedgerScan, awaiting_publication_connection
 from github_events import (
-  COMMENT_FIELDS, REVIEW_FIELDS, latest_events, trusted_changes_request,
+  AUTHOR_ATTENTION_TYPES, COMMENT_FIELDS, REVIEW_FIELDS,
+  attention_from_trusted_author, latest_events, trusted_changes_request,
 )
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
@@ -513,6 +514,28 @@ def _is_autopilot(rec):
   return bool(block and block.get("enabled"))
 
 
+def _ignored_event_urls(rec):
+  block = rec.get("autopilot") if _is_autopilot(rec) else {}
+  return set(
+    str(url) for url in (block.get("ignored_event_urls") or [])
+    if isinstance(url, str) and url
+  )
+
+
+def _proven_actionable(attention, node, ignore_urls):
+  # Autopilot may act on a pending attention only when its provenance holds
+  # now: failing checks come from GitHub's rollup, while an author attention
+  # must still name a trusted author's event on the fetched thread. The stored
+  # type alone proves nothing (records written before authors were classified
+  # carry github_activity for anyone's comment).
+  kind = attention.get("type") if isinstance(attention, dict) else None
+  if kind not in ACTIONABLE_ATTENTION:
+    return False
+  if kind not in AUTHOR_ATTENTION_TYPES:
+    return True
+  return attention_from_trusted_author(attention, node, ignore_urls)
+
+
 def _attention_update(rec, node):
   patch = {}
   if not isinstance(node, dict):
@@ -522,11 +545,7 @@ def _attention_update(rec, node):
     if (value or rec.get(key)) and rec.get(key) != value:
       patch[key] = value
 
-  block = rec.get("autopilot") if _is_autopilot(rec) else {}
-  ignore_urls = set(
-    str(url) for url in (block.get("ignored_event_urls") or [])
-    if isinstance(url, str) and url
-  )
+  ignore_urls = _ignored_event_urls(rec)
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
@@ -564,6 +583,13 @@ def _attention_update(rec, node):
   ):
     patch["needs_attention"] = False
     patch["attention"] = None
+  # Actionable work still waiting for its round (or its owner) keeps the one
+  # attention slot until it is handled or dismissed. Later outside activity
+  # is reported beside it, never in place of it.
+  pending_work = (
+    bool(rec.get("needs_attention")) and "attention" not in patch
+    and _proven_actionable(current_attention, node, ignore_urls)
+  )
   if check_state == "SUCCESS" and rec.get("last_checks_attention_key"):
     patch["last_checks_attention_key"] = None
 
@@ -616,7 +642,7 @@ def _attention_update(rec, node):
     # Someone without standing in the repository commented. Tell the owner;
     # never start a round from it (outside_activity is not actionable).
     label = "review" if latest["kind"] == "review" else "comment"
-    attention = {
+    outside = {
       "type": "outside_activity",
       "key": "outside_activity:%s" % latest["at"],
       "title": "New GitHub activity",
@@ -628,6 +654,10 @@ def _attention_update(rec, node):
       "event_at": latest["at"],
       "detected_at": now,
     }
+    if pending_work:
+      patch["outside_activity"] = outside
+    else:
+      attention = outside
   elif mergeable == "CONFLICTING" and previous_mergeable != "CONFLICTING":
     attention = {
       "type": "merge_conflict",
@@ -656,6 +686,31 @@ def _attention_update(rec, node):
       refreshed["detected_at"] = now
     if refreshed != current_attention:
       patch["attention"] = refreshed
+
+  if (
+    not attention
+    and rec.get("needs_attention")
+    and current_attention.get("type") in AUTHOR_ATTENTION_TYPES
+    and not pending_work
+  ):
+    # Pending author attention without trusted provenance (written before
+    # authors were classified, or its event is no longer on the thread) is
+    # kept for the owner as notification-only. A notice already announced
+    # stays announced.
+    downgraded = dict(current_attention)
+    downgraded.update({
+      "type": "outside_activity",
+      "title": "New GitHub activity",
+      "key": "outside_activity:%s" % str(
+        current_attention.get("key") or ""
+      ).split(":", 1)[-1],
+      "message": (
+        "GitHub activity that could not be confirmed as coming from a "
+        "maintainer of this repository. Autopilot will not act on it."
+      ),
+      "downgraded_from": current_attention.get("type"),
+    })
+    patch["attention"] = downgraded
 
   if attention:
     patch["needs_attention"] = True
@@ -734,63 +789,83 @@ def _respond_autopilot(rec, attention):
     return True
 
 
-def _deliver_attention(name):
+def _read_record(path):
+  raw, headers = _call("GET", path, headers={"x-mobius-version": "1"})
+  return json.loads(raw), headers.get("ETag")
+
+
+def _confirm_announced(path, rec, etag, slot, pending):
+  # /notifications/send has no idempotency key (a tag only groups OS
+  # pushes). Confirm only a successful response, never merely detection or
+  # a transient /respond result. An ambiguous send or a crash before this
+  # CAS can still repeat a notification; exactly-once needs endpoint support.
+  # Returns the record and version this job last saw.
+  for attempt in range(3):
+    current = rec.get(slot)
+    if (
+      not _is_target(rec)
+      or (slot == "attention" and not rec.get("needs_attention"))
+      or not isinstance(current, dict)
+      or (current.get("key"), current.get("detected_at"))
+        != (pending.get("key"), pending.get("detected_at"))
+      or current.get("announced_at")
+    ):
+      return rec, etag
+    updated = dict(rec)
+    updated[slot] = dict(current, announced_at=now)
+    try:
+      _, headers = _call("PUT", path, updated, headers={"If-Match": etag})
+      return updated, headers.get("ETag")
+    except urllib.error.HTTPError as exc:
+      if exc.code != 412 or attempt == 2:
+        raise
+    # Merge only confirmation into a fresh record; never restore a stale
+    # attention or overwrite unrelated changes from another writer.
+    rec, etag = _read_record(path)
+    if not etag:
+      return rec, None
+  return rec, etag
+
+
+def _deliver_attention(name, node):
   # A prior pass may have durably written the attention but lost delivery.
   # Detection is not delivery. The scheduled runner owns single-flight for
   # this app; the record owns confirmation across runs. Re-read before routing
   # so a concurrent Dismiss, escalation or terminal transition stays in charge.
   path = _record_path(name)
   try:
-    raw, headers = _call("GET", path, headers={"x-mobius-version": "1"})
-    rec = json.loads(raw)
-    etag = headers.get("ETag")
+    rec, etag = _read_record(path)
+    if not etag or not _is_target(rec):
+      return
     pending = rec.get("attention")
     if (
-      not etag or not _is_target(rec) or not rec.get("needs_attention")
-      or not isinstance(pending, dict) or not pending.get("key")
+      rec.get("needs_attention")
+      and isinstance(pending, dict) and pending.get("key")
       # /escalate owns human_required delivery, not this job.
-      or pending.get("type") == "human_required"
+      and pending.get("type") != "human_required"
     ):
-      return
+      # Only work whose trusted provenance holds against this pass's GitHub
+      # read reaches /respond; anything else is notification-only.
+      routed = (
+        _is_autopilot(rec)
+        and _proven_actionable(pending, node, _ignored_event_urls(rec))
+        and _respond_autopilot(rec, pending)
+      )
+      # Legacy attention has no delivery proof either; announce it once
+      # rather than infer success from its presence on the record.
+      if not routed and not pending.get("announced_at"):
+        _notify_attention(rec, pending)
+        rec, etag = _confirm_announced(path, rec, etag, "attention", pending)
+    # Outside activity that arrived while actionable work held the attention
+    # slot is reported on its own, once, without displacing that work.
+    # Without a version (lost confirmation), the next pass delivers it.
+    outside = rec.get("outside_activity")
     if (
-      _is_autopilot(rec) and pending.get("type") in ACTIONABLE_ATTENTION
-      and _respond_autopilot(rec, pending)
+      etag and _is_target(rec) and isinstance(outside, dict)
+      and outside.get("key") and not outside.get("announced_at")
     ):
-      return
-    # Legacy attention has no delivery proof either; announce it once rather
-    # than infer success from its presence on the record.
-    if pending.get("announced_at"):
-      return
-    _notify_attention(rec, pending)
-    # /notifications/send has no idempotency key (a tag only groups OS
-    # pushes). Confirm only a successful response, never merely detection or
-    # a transient /respond result. An ambiguous send or a crash before this
-    # CAS can still repeat a notification; exactly-once needs endpoint support.
-    for attempt in range(3):
-      current = rec.get("attention")
-      if (
-        not _is_target(rec) or not rec.get("needs_attention")
-        or not isinstance(current, dict)
-        or (current.get("key"), current.get("detected_at"))
-          != (pending.get("key"), pending.get("detected_at"))
-        or current.get("announced_at")
-      ):
-        return
-      updated = dict(rec)
-      updated["attention"] = dict(current, announced_at=now)
-      try:
-        _call("PUT", path, updated, headers={"If-Match": etag})
-        return
-      except urllib.error.HTTPError as exc:
-        if exc.code != 412 or attempt == 2:
-          raise
-      # Merge only confirmation into a fresh record; never restore a stale
-      # attention or overwrite unrelated changes from another writer.
-      raw, headers = _call("GET", path, headers={"x-mobius-version": "1"})
-      rec = json.loads(raw)
-      etag = headers.get("ETag")
-      if not etag:
-        return
+      _notify_attention(rec, outside)
+      _confirm_announced(path, rec, etag, "outside_activity", outside)
   except Exception as exc:
     print("contribute: attention delivery %s pending: %s" % (name, exc),
           file=sys.stderr)
@@ -816,7 +891,7 @@ for alias, (name, rec, etag) in aliases.items():
       patch["needs_attention"] = False
       patch["attention"] = None
   if not patch:
-    _deliver_attention(name)
+    _deliver_attention(name, node)
     continue
   if not etag:
     print("contribute: skip %s — storage version unavailable" % name,
@@ -860,7 +935,7 @@ for alias, (name, rec, etag) in aliases.items():
             file=sys.stderr)
   if new_status == "merged":
     _finish_publication_connection(updated)
-  _deliver_attention(name)
+  _deliver_attention(name, node)
   if new_status == "merged" and was != "merged":
     title = rec.get("title") or "contribution"
     try:

@@ -1,7 +1,9 @@
 import os
 import unittest
 
-from github_events import latest_events, review_events, trusted_changes_request
+from github_events import (
+  attention_from_trusted_author, latest_events, review_events, trusted_changes_request,
+)
 
 
 def comment(at, association, login="someone", url=None):
@@ -81,6 +83,44 @@ class TrustedChangesRequestTest(unittest.TestCase):
 
   def test_a_trusted_comment_review_is_not_a_change_request(self):
     self.assertIsNone(trusted_changes_request(pr(reviews=[review("2026-10-26T09:00:00Z", "OWNER")])))
+
+
+class AttentionProvenanceTest(unittest.TestCase):
+
+  def attention(self, kind, event):
+    at = event.get("createdAt") or event.get("submittedAt")
+    return {"type": kind, "key": "%s:%s" % (kind, at), "url": event["url"]}
+
+  def test_pending_activity_must_name_a_trusted_event_on_the_thread(self):
+    member = comment("2026-10-26T09:00:00Z", "MEMBER")
+    stranger = comment("2026-10-26T09:05:00Z", "NONE")
+    node = pr([member, stranger])
+    self.assertTrue(attention_from_trusted_author(self.attention("github_activity", member), node))
+    self.assertFalse(attention_from_trusted_author(self.attention("github_activity", stranger), node))
+    # The event left the fetched window, or the key and URL disagree.
+    self.assertFalse(attention_from_trusted_author(self.attention("github_activity", member), pr([stranger])))
+    mixed = dict(self.attention("github_activity", member), url=stranger["url"])
+    self.assertFalse(attention_from_trusted_author(mixed, node))
+    # The platform's own replies never prove anything.
+    self.assertFalse(attention_from_trusted_author(
+      self.attention("github_activity", member), node, {member["url"]}))
+
+  def test_requested_changes_must_name_a_trusted_change_request(self):
+    request = review("2026-10-26T09:00:00Z", "MEMBER", "CHANGES_REQUESTED")
+    remark = review("2026-10-26T09:01:00Z", "MEMBER")
+    node = pr(reviews=[request, remark])
+    self.assertTrue(attention_from_trusted_author(self.attention("changes_requested", request), node))
+    self.assertFalse(attention_from_trusted_author(self.attention("changes_requested", remark), node))
+
+  def test_only_author_attention_types_with_a_key_and_url_qualify(self):
+    member = comment("2026-10-26T09:00:00Z", "MEMBER")
+    node = pr([member])
+    for attention in (
+      None, {}, dict(self.attention("github_activity", member), url=""),
+      dict(self.attention("github_activity", member), type="outside_activity"),
+      dict(self.attention("github_activity", member), type="checks_failed"),
+    ):
+      self.assertFalse(attention_from_trusted_author(attention, node), attention)
 
 
 class JobWiringTest(unittest.TestCase):
