@@ -297,18 +297,32 @@ agent execution and settled history remain separate. Named paused work stays
 visible as unfinished; this iteration does not resume old cycles automatically.
 
 Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
-**Agent ▾ → Review only** (optionally **Merge when safe** or **Allow posting the
-review on GitHub**) or **Review, fix and merge**, plus model and effort, in the
+**Agent ▾ → Review only** (optionally **Allow posting the review on GitHub**,
+**Allow approve or request changes**, and **Merge when safe**, in any
+combination) or **Review, fix and merge**, plus model and effort, in the
 review window. There is
 no automatic-continuation option: the platform does not support it. Each launch
 sends only the options its mode accepts: review and merge prompts always, the
 fix prompt only for Review, fix & merge (new takeovers have no repair-round
-limit), and the post-review grant only for Review. The mode-aware
+limit), and the post-review grant (with its verdict form) only for Review only,
+with or without merge. The mode-aware
 `review-preview` freezes the exact instructions and agent choice for that mode;
 start passes its `preview_sha256` and rejects drift. Mandatory safety
 instructions are platform-owned. With the post-review grant, the agent may post
 one comment review per PR, and only for a verdict it explicitly marks public;
-questions to the owner stay private.
+questions to the owner stay private. With merge as well, the review is posted
+first and the PR merges only after GitHub confirms that review and the
+required checks pass. **Allow approve or request changes** turns that public
+verdict into a proposal: the run shows the exact approve or request-changes
+text with **Approve on GitHub** / **Request changes on GitHub** and **Discard**,
+and nothing is posted until you choose. Only your own tap can submit it; the
+review agent cannot. A pending, discarded or changes-requested verdict never
+merges; a submitted approval resumes the review conversation to run the usual
+merge checks. GitHub does not allow verdicts on your own PRs, so those get a
+comment instead. Re-reviewing after the author responds is a new review you
+start yourself. These options need a Möbius that advertises
+`post_review_merge` and `propose_verdict`; an older one keeps posting and
+merging apart and hides the verdict switch.
 
 A run publishes necessary takeover repairs only through a dedicated
 server-owned checkout and guarded receipts, then requires new independent

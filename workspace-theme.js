@@ -143,6 +143,12 @@ export const WORKSPACE_CSS = `
 .co-task-pulls .co-markdown { margin-top:8px; font-size:15px; }
 .co-task-pulls a { display:inline-flex; align-items:center; font-size:14px; color:var(--accent); min-height:44px; }
 .co-task-secondary { margin:12px 10px 0 0; }
+.co-verdict { margin-top:12px; padding:12px 14px; border-radius:12px; border:1px solid color-mix(in srgb,#cf9526 42%,transparent); background:color-mix(in srgb,#cf9526 8%,transparent); }
+.co-verdict.is-approve { border-color:color-mix(in srgb,var(--green) 40%,transparent); background:color-mix(in srgb,var(--green) 8%,transparent); }
+.co-verdict-status { margin:0; font-size:15px; font-weight:600; }
+.co-verdict .co-task-details { margin-top:8px; }
+.co-verdict-actions { display:flex; flex-wrap:wrap; gap:10px; }
+.co-verdict-actions .co-btn { min-height:44px; }
 .co-scope-row { display:grid; grid-template-columns:1fr auto; gap:6px 12px; width:100%; padding:16px 0; border:0; border-bottom:1px solid var(--border); background:none; color:var(--text); text-align:left; cursor:pointer; min-height:64px; }
 .co-scope-row strong { font-size:16px; }
 .co-scope-row span { font-size:14px; color:var(--muted); grid-column:1; }
