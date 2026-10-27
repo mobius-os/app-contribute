@@ -438,6 +438,18 @@ window.runWorkspaceChecks = async () => {
       secondCheckbox.removeEventListener('keydown',capture)
       ensure(events.length === 2 && events.every(event => event.trusted && event.code === 'Space'),'Keyboard test was not native')
     })
+    await check('a row Agent menu opens past the end of a short PR list instead of being clipped', async () => {
+      const row=[...document.querySelectorAll('.co-pr-row')].at(-1), trigger=row.querySelector('.co-agent-menu-button')
+      await click(trigger)
+      await until(() => row.querySelector('[role=menuitem]'), 'Row Agent menu did not open')
+      const item=[...row.querySelectorAll('[role=menuitem]')].at(-1)
+      item.scrollIntoView({ block: 'nearest' }); await frame()
+      const rect=item.getBoundingClientRect()
+      ensure(rect.bottom > query('.co-pr-box').getBoundingClientRect().bottom, 'Fixture: the menu no longer reaches past the list box')
+      ensure(item.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 6)), 'The PR list box clipped the Agent menu')
+      await click(trigger)
+      await until(() => !row.querySelector('[role=menuitem]'), 'Row Agent menu did not close')
+    })
     await check('inline list header keeps count, bulk actions and visible selection without changing scope', async () => {
       const header=query('.co-pr-box-head')
       ensure(button('Assign',header) && header.querySelector('.co-agent-menu-button') && text(header).includes('2 selected'),'Inline bulk actions missing')
