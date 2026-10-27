@@ -179,7 +179,12 @@ export const appBlockSessions = true
 export default function ContributeEntry({ appId, token, blockSession = null }) {
   const [runtimeWanted, setRuntimeWanted] = useState(false)
   const [runtime, setRuntime] = useState(null)
-  const addressed = useMemo(() => cardRecordIds((readBlockSession(blockSession)?.actions || []).map(action => action.key)), [blockSession])
+  // Status is read only for the records the card's items name (none when the
+  // host sent no items).
+  const addressed = useMemo(() => {
+    const session = readBlockSession(blockSession)
+    return cardRecordIds((session?.actions || []).map(action => action.key), session?.items)
+  }, [blockSession])
   if (!blockSession) return <ContributeApp appId={appId} token={token} />
   return <>
     <InlineBlockSession blockSession={blockSession} runtime={runtime} onNeedRuntime={() => setRuntimeWanted(true)} />
