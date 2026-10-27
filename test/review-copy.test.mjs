@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeWhenSafeBlocker, reviewWindowCopy } from '../review-copy.js'
+import { mergeWhenSafeBlocker, reviewSwitchHints, reviewWindowCopy } from '../review-copy.js'
 
 test('a plain private review says nothing reaches GitHub and starts privately', () => {
   const copy = reviewWindowCopy({ mode: 'review', bindCurrentTarget: true })
@@ -56,4 +56,11 @@ test('merge when safe explains why it is unavailable', () => {
   assert.equal(mergeWhenSafeBlocker({ drafts: false, mayMergeAll: false, posting: false }), 'Needs merge rights on this repository.')
   assert.equal(mergeWhenSafeBlocker({ drafts: false, mayMergeAll: true, posting: true }), 'Turn off posting to merge when safe.')
   assert.equal(mergeWhenSafeBlocker({ drafts: false, mayMergeAll: true, posting: false }), '')
+})
+
+test('the switch hints say per PR for a batch and stay singular for one PR', () => {
+  assert.match(reviewSwitchHints(1).posting, /^One comment from your account, only for a verdict the agent is sure about\./)
+  assert.match(reviewSwitchHints(1).merge, /Merges or queues the PR after/)
+  assert.match(reviewSwitchHints(2).posting, /^Up to one comment per PR from your account/)
+  assert.match(reviewSwitchHints(2).merge, /Merges or queues each PR after/)
 })
