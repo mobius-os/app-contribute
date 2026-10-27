@@ -31,18 +31,25 @@ function takeoverCopy({ count, draftScope, bindCurrentTarget }) {
     steps,
     publicEffect: {
       tone: 'public',
-      text: `the pushed fixes${draftScope ? ', the draft marked ready (this may notify reviewers)' : ''} and the merge. No comments, and nothing outside ${scope}.`,
+      text: `the pushed fixes${draftScope ? ', the draft marked ready (this may notify reviewers)' : ''} and ${count === 1 ? 'the merge' : 'the merge of each PR'}. No comments, and nothing outside ${scope}.`,
     },
     startLabel: 'Allow fix and merge',
     footnote: `You can stop it at any time. An action already underway may finish. ${versionNote(count, bindCurrentTarget, true)}`,
   }
 }
 
-function reviewPublicEffect({ merge, posting }) {
-  if (merge) return { tone: 'public', text: 'the merge. No comments and no code changes.' }
+// The grant covers every selected PR, so a batch can merge or comment on each one.
+function reviewPublicEffect({ merge, posting, count }) {
+  const each = count === 1 ? '' : ' per PR'
+  if (merge) return { tone: 'public', text: `${count === 1 ? 'the merge' : 'the merge of each PR'}. No comments and no code changes.` }
   // Posting is a grant, not a promise: only a verdict the agent marks public is posted.
-  if (posting) return { tone: 'public', text: 'at most one review comment from your account, only for a verdict the agent marks as public. Questions to you and unverified results stay private. It never approves or asks for changes.' }
+  if (posting) return { tone: 'public', text: `at most one review comment${each} from your account, only for a verdict the agent marks as public. Questions to you and unverified results stay private. It never approves or asks for changes.` }
   return { tone: 'private', text: 'nothing. Only you see the review.' }
+}
+
+function postingStep(count) {
+  if (count === 1) return 'If it is sure about its verdict, it posts one comment on GitHub from your account.'
+  return 'For each PR whose verdict it is sure about, it posts one comment on that PR from your account.'
 }
 
 function reviewStartLabel({ merge, posting }) {
@@ -59,14 +66,14 @@ export function reviewWindowCopy({ mode, posting = false, draftScope = false, co
   const steps = [
     { text: `The agent reads ${it}: the code, the checks and the discussion.` },
     { text: 'It writes its findings for you in a private conversation.' },
-    ...(commenting ? [{ text: 'If it is sure about its verdict, it posts one comment on GitHub from your account.', added: true }] : []),
+    ...(commenting ? [{ text: postingStep(count), added: true }] : []),
     ...(merge ? [{ text: `If the review is clean and all required checks pass, it merges ${it} or adds it to the merge queue.`, added: true }] : []),
     { text: 'If it has a question, it asks you first.' },
   ]
   return {
     title: 'Review only',
     steps,
-    publicEffect: reviewPublicEffect({ merge, posting: commenting }),
+    publicEffect: reviewPublicEffect({ merge, posting: commenting, count }),
     startLabel: reviewStartLabel({ merge, posting: commenting }),
     footnote: versionNote(count, bindCurrentTarget, merge),
   }

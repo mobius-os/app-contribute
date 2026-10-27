@@ -29,9 +29,9 @@ async function ui(t) {
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { ProjectTabs } from './ui/ProjectTabs.jsx'
-    import { PullRequests } from './ui/PullRequests.jsx'
+    import { EmptyPulls, PullRequests } from './ui/PullRequests.jsx'
     import { SourceMap } from './ui/SourceMap.jsx'
-    export const render = (Component, props) => renderToStaticMarkup(React.createElement({ ProjectTabs, PullRequests, SourceMap }[Component], props))
+    export const render = (Component, props) => renderToStaticMarkup(React.createElement({ EmptyPulls, ProjectTabs, PullRequests, SourceMap }[Component], props))
   `)
   return renderer
 }
@@ -85,4 +85,18 @@ test('the projects list tags each project and folds apps with nothing to do', as
   assert.match(html, /1 PR waits for your review\. 2 things need you\./)
   assert.match(html, /<details class="co-quiet-projects"><summary><span>Apps with nothing to do<\/span><b>1<\/b>/)
   assert.doesNotMatch(html, /Everything else/)
+})
+
+test('the Review requests tab never calls the inbox empty while more PRs can load', async t => {
+  const { render } = await ui(t) || {}
+  if (!render) return
+  const unloaded = render('EmptyPulls', { scope: 'requests', filter: 'all', query: '', hasNextPage: true, waiting: 3 })
+  assert.doesNotMatch(unloaded, /right now/)
+  assert.match(unloaded, /No review requests in the PRs loaded so far/)
+  assert.match(unloaded, /You have 3 review requests in this project\. Load more PRs to check the rest\./)
+  const searched = render('EmptyPulls', { scope: 'requests', filter: 'all', query: 'menu', hasNextPage: true, waiting: 3 })
+  assert.match(searched, /No review requests match in the PRs loaded so far/)
+  assert.doesNotMatch(searched, /You have/, 'a search may exclude the waiting requests, so their count is not claimed')
+  const done = render('EmptyPulls', { scope: 'requests', filter: 'all', query: '', hasNextPage: false, waiting: 0 })
+  assert.match(done, /No review requests right now/)
 })

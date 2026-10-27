@@ -31,8 +31,16 @@ function AgentReviewHistory({ runs, pulls, listState, onOpen }) {
   </details>
 }
 
-function EmptyPulls({ scope, filter, query, hasNextPage }) {
-  if (scope === 'requests') return <div className="co-pr-empty"><strong>No review requests{query ? ' match' : ' right now'}</strong><p>When someone asks for your review, the PR appears here.</p></div>
+// The tab badge counts every request, but this list filters only the loaded
+// pages: with more pages left, never claim the inbox is empty.
+function EmptyRequests({ query, hasNextPage, waiting }) {
+  if (!hasNextPage) return <div className="co-pr-empty"><strong>No review requests{query ? ' match' : ' right now'}</strong><p>When someone asks for your review, the PR appears here.</p></div>
+  const known = waiting && !query ? `You have ${waiting === 1 ? '1 review request' : `${waiting} review requests`} in this project. ` : ''
+  return <div className="co-pr-empty"><strong>No review requests{query ? ' match' : ''} in the PRs loaded so far</strong><p>{known}Load more PRs to check the rest.</p></div>
+}
+
+export function EmptyPulls({ scope, filter, query, hasNextPage, waiting = 0 }) {
+  if (scope === 'requests') return <EmptyRequests query={query} hasNextPage={hasNextPage} waiting={waiting} />
   const kind = filter === 'unassigned' ? 'unassigned ' : filter === 'assigned' ? 'assigned ' : ''
   const hint = hasNextPage ? 'Load more to search the remaining results.' : filter === 'all' ? 'When work is shared on GitHub, it appears here.' : 'Choose Show: all to see the project’s other pull requests.'
   return <div className="co-pr-empty"><strong>No {kind}pull requests{query ? ' match' : ''}</strong><p>{hint}</p></div>
@@ -422,7 +430,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, records =
     {!assignAnchor ? assignPane : null}
     {relevantRuns.filter(run => !visibleKeys.has(runAnchor(run))).map(runPane)}
     {data.loading && !pulls.length ? <p className="co-pr-empty" role="status">Loading pull requests…</p> : null}
-    {!data.loading && !data.error && !visible.length ? <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} /> : null}
+    {!data.loading && !data.error && !visible.length ? <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} /> : null}
     <div className="co-pr-list">{visible.map(pr => {
       const key = prKey(pr)
       const status = statusFor(pr)
