@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { baseTip, DRAFT_TAKEOVER_SCOPE, mayMerge, prKey, takeoverBlocker } from '../collaboration.js'
-import { mergeWhenSafeBlocker, reviewWindowCopy } from '../review-copy.js'
+import { mergeWhenSafeBlocker, reviewSwitchHints, reviewWindowCopy } from '../review-copy.js'
 import { focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
 import { ReviewPromptPreview } from './ReviewPromptSettings.jsx'
@@ -62,15 +62,16 @@ function ReviewSwitches({ choice, promptOptions, capabilities, onModeChange, onO
   const mayMergeAll = choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission))
   const mergeBlocker = mergeWhenSafeBlocker({ drafts, mayMergeAll, posting })
   const canPost = onOptionsChange && capabilities?.post_review === true
+  const hints = reviewSwitchHints(choice.pulls.length)
   if (!canPost && !onModeChange) return null
   return <div className="co-rw-options">
     {canPost ? <Switch checked={posting} disabled={busy || !promptOptions || merge}
       label="Allow posting the review on GitHub"
-      detail={merge ? 'Turn off Merge when safe to post a review.' : 'One comment from your account, only for a verdict the agent is sure about. It never approves or asks for changes. Questions to you stay private.'}
+      detail={merge ? 'Turn off Merge when safe to post a review.' : hints.posting}
       onChange={checked => onOptionsChange({ ...promptOptions, ...choice.options, post_review: checked })} /> : null}
     {onModeChange ? <Switch checked={merge} disabled={busy || (!merge && !!mergeBlocker)}
       label="Merge when safe"
-      detail={!merge && mergeBlocker ? mergeBlocker : 'Merges or queues the PR after a clean review and passing checks. It does not change any code.'}
+      detail={!merge && mergeBlocker ? mergeBlocker : hints.merge}
       onChange={checked => onModeChange(checked ? 'review_merge' : 'review')} /> : null}
   </div>
 }
