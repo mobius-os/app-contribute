@@ -338,8 +338,11 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-pr-search input { flex:1; min-width:0; min-height:38px; padding:0; border:0; background:none; font-size:14px; }
 .co-pr-search input:focus { outline:none; }
 .co-pr-search-toggle { display:none; }
-.co-pr-box { border:1px solid var(--border); border-radius:8px; overflow:clip; }
-.co-pr-box-head { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-height:52px; padding:4px 12px 4px 4px; background:var(--surface); }
+/* The box does not clip, so an Agent menu can open past its bottom edge even
+   with one PR; the header and the last row round their own corners instead. */
+.co-pr-box { border:1px solid var(--border); border-radius:8px; }
+.co-pr-box-head { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-height:52px; padding:4px 12px 4px 4px; background:var(--surface); border-radius:7px 7px 0 0; }
+.co-pr-list > .co-pr-row:last-child { border-radius:0 0 7px 7px; }
 .co-pr-box-count { display:inline-flex; align-items:center; gap:6px; margin-right:auto; font-size:14px; font-weight:600; }
 .co-pr-box-actions { display:flex; align-items:center; gap:8px; }
 .co-pr-box-actions .co-btn { min-height:36px; padding:6px 12px; font-size:14px; display:inline-flex; align-items:center; gap:6px; }
