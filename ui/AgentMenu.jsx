@@ -7,8 +7,10 @@ const CHOICES = [
 ]
 
 // "Agent ▾": choose what an agent should do with the PRs. Choosing only opens
-// the review window; nothing starts until the owner confirms there.
-export function AgentMenu({ onChoose, disabled = false, active = false, variant = 'ghost', label = 'Agent', ariaLabel }) {
+// the review window; nothing starts until the owner confirms there. `align`
+// names the trigger edge the menu lines up with: 'end' for a trigger at the
+// right of its row, 'start' for one at the left, so the menu opens inward.
+export function AgentMenu({ onChoose, disabled = false, active = false, variant = 'ghost', label = 'Agent', ariaLabel, align = 'end' }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   useEffect(() => {
@@ -35,7 +37,7 @@ export function AgentMenu({ onChoose, disabled = false, active = false, variant 
     root.current?.querySelector('button')?.focus({ preventScroll: true })
     onChoose(mode)
   }
-  return <div className="co-agent-menu" ref={root}>
+  return <div className={`co-agent-menu is-align-${align}`} ref={root}>
     <button type="button" className={`co-agent-menu-button is-${variant}` + (active ? ' is-active' : '')} aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onClick={() => setOpen(value => !value)}>
       <Icon name="prepare" size={15} /><span>{label}</span><Icon name="chevron" size={14} />
     </button>
