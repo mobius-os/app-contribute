@@ -20,6 +20,16 @@ test('each allowed public effect adds its own step, summary and start label', ()
   assert.match(merge.footnote, /merges into the newest version of the target branch/)
 })
 
+test('a batch discloses one possible comment and one merge on each selected PR', () => {
+  const posting = reviewWindowCopy({ mode: 'review', posting: true, count: 3 })
+  assert.match(posting.publicEffect.text, /at most one review comment per PR from your account/)
+  assert.ok(posting.steps.some(step => step.added && /posts one comment on that PR/.test(step.text)))
+  const merge = reviewWindowCopy({ mode: 'review_merge', count: 3 })
+  assert.match(merge.publicEffect.text, /^the merge of each PR\./)
+  const single = reviewWindowCopy({ mode: 'review', posting: true, count: 1 })
+  assert.doesNotMatch(single.publicEffect.text, /per PR/)
+})
+
 test('posting never appears with merge, matching the platform rule that posting is review-only', () => {
   const copy = reviewWindowCopy({ mode: 'review_merge', posting: true })
   assert.equal(copy.startLabel, 'Start review, merge when safe')
@@ -36,7 +46,7 @@ test('review, fix and merge names pushes, independent review, checks and Stop', 
   assert.match(steps, /It marks the draft ready for review/)
   assert.match(steps, /required checks/)
   assert.match(copy.publicEffect.text, /may notify reviewers/)
-  assert.match(copy.publicEffect.text, /nothing outside these PRs/)
+  assert.match(copy.publicEffect.text, /the merge of each PR\. No comments, and nothing outside these PRs/)
   assert.match(copy.footnote, /You can stop it at any time/)
   assert.match(copy.footnote, /these exact versions/)
 })

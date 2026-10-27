@@ -89,7 +89,7 @@ test('review-and-merge confirmation names exact PRs and excludes extra public ac
   const { render } = await renderModule(`import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ReviewConfirmation} from './ui/ReviewConfirmation.jsx'; export const render = choice => renderToStaticMarkup(React.createElement(ReviewConfirmation, {choice}));`)
   const html = render({mode:'review_merge', pulls:[pull(1), pull(2)]})
   assert.match(html, /Start review, merge when safe/)
-  assert.match(html, /all required checks pass, it merges each PR or adds it to the merge queue/); assert.match(html, /the merge\. No comments and no code changes\./)
+  assert.match(html, /all required checks pass, it merges each PR or adds it to the merge queue/); assert.match(html, /the merge of each PR\. No comments and no code changes\./, 'a batch merge discloses one merge per PR')
   assert.match(html, /<strong>#1<\/strong> A clear change<span>team\/repo<\/span>/)
   assert.match(html, /<strong>#2<\/strong> A clear change<span>team\/repo<\/span>/)
   assert.match(html, /Exact versions/, 'a saved pinned merge keeps its exact-version disclosure')
