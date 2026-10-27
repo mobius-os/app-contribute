@@ -151,7 +151,7 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 file<\/strong> changed on this Möbius is not on GitHub yet\./)
+  assert.match(html, /1 file<\/strong> changed on this Möbius\./)
   assert.match(html, /Your edits and GitHub/)
   assert.match(html, /See the files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
