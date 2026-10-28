@@ -118,8 +118,8 @@ def _record_path(name):
 sys.path.insert(0, os.environ["SCRIPT_DIR"])
 from ledger_scan import LedgerScan, awaiting_publication_connection
 from github_events import (
-  AUTHOR_ATTENTION_TYPES, COMMENT_FIELDS, REVIEW_FIELDS,
-  attention_from_trusted_author, latest_events, trusted_changes_request,
+  AUTHOR_ATTENTION_TYPES, COMMENT_FIELDS, REVIEW_FIELDS, TRUSTED, UNTRUSTED,
+  UNVERIFIED, attention_provenance, latest_events, trusted_changes_request,
 )
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
@@ -522,18 +522,49 @@ def _ignored_event_urls(rec):
   )
 
 
-def _proven_actionable(attention, node, ignore_urls):
+GITHUB_EVENT_LOOKUPS = {}
+
+
+def _fetch_github_event(api_path):
+  # One exact comment or review, at most once per pass (refresh and delivery
+  # both ask). None means GitHub reports it gone; any other failure raises,
+  # so the event stays unverified rather than looking untrusted.
+  if api_path not in GITHUB_EVENT_LOOKUPS:
+    try:
+      out = subprocess.run(
+        ["gh", "api", api_path], capture_output=True, text=True, timeout=20,
+      )
+      if out.returncode == 0:
+        GITHUB_EVENT_LOOKUPS[api_path] = json.loads(out.stdout)
+      elif re.search(r"\(HTTP (404|410)\)", out.stderr or ""):
+        GITHUB_EVENT_LOOKUPS[api_path] = None
+      else:
+        GITHUB_EVENT_LOOKUPS[api_path] = RuntimeError(
+          (out.stderr or "gh api failed").strip()[:200]
+        )
+    except Exception as exc:
+      GITHUB_EVENT_LOOKUPS[api_path] = exc
+  result = GITHUB_EVENT_LOOKUPS[api_path]
+  if isinstance(result, Exception):
+    raise result
+  return result
+
+
+def _attention_provenance(rec, attention, node, ignore_urls):
   # Autopilot may act on a pending attention only when its provenance holds
   # now: failing checks come from GitHub's rollup, while an author attention
-  # must still name a trusted author's event on the fetched thread. The stored
-  # type alone proves nothing (records written before authors were classified
-  # carry github_activity for anyone's comment).
+  # must name an event GitHub reports as a trusted author's
+  # (github_events.attention_provenance). The stored type alone proves nothing
+  # (records written before authors were classified carry github_activity for
+  # anyone's comment).
   kind = attention.get("type") if isinstance(attention, dict) else None
   if kind not in ACTIONABLE_ATTENTION:
-    return False
+    return UNTRUSTED
   if kind not in AUTHOR_ATTENTION_TYPES:
-    return True
-  return attention_from_trusted_author(attention, node, ignore_urls)
+    return TRUSTED
+  return attention_provenance(
+    attention, node, rec.get("url"), _fetch_github_event, ignore_urls,
+  )
 
 
 def _attention_update(rec, node):
@@ -585,10 +616,12 @@ def _attention_update(rec, node):
     patch["attention"] = None
   # Actionable work still waiting for its round (or its owner) keeps the one
   # attention slot until it is handled or dismissed. Later outside activity
-  # is reported beside it, never in place of it.
+  # is reported beside it, never in place of it. Work GitHub could not be
+  # asked about this pass keeps the slot too; only proof of an untrusted or
+  # deleted event gives it up.
   pending_work = (
     bool(rec.get("needs_attention")) and "attention" not in patch
-    and _proven_actionable(current_attention, node, ignore_urls)
+    and _attention_provenance(rec, current_attention, node, ignore_urls) != UNTRUSTED
   )
   if check_state == "SUCCESS" and rec.get("last_checks_attention_key"):
     patch["last_checks_attention_key"] = None
@@ -694,9 +727,9 @@ def _attention_update(rec, node):
     and not pending_work
   ):
     # Pending author attention without trusted provenance (written before
-    # authors were classified, or its event is no longer on the thread) is
-    # kept for the owner as notification-only. A notice already announced
-    # stays announced.
+    # authors were classified, its author lost standing, or the event was
+    # deleted) is kept for the owner as notification-only. A notice already
+    # announced stays announced.
     downgraded = dict(current_attention)
     downgraded.update({
       "type": "outside_activity",
@@ -845,15 +878,18 @@ def _deliver_attention(name, node):
       and pending.get("type") != "human_required"
     ):
       # Only work whose trusted provenance holds against this pass's GitHub
-      # read reaches /respond; anything else is notification-only.
-      routed = (
-        _is_autopilot(rec)
-        and _proven_actionable(pending, node, _ignored_event_urls(rec))
-        and _respond_autopilot(rec, pending)
+      # read reaches /respond; anything else is notification-only. Work
+      # GitHub could not be asked about waits quietly for the next pass, like
+      # a transient /respond failure: no round, and no fallback notice.
+      provenance = (
+        _attention_provenance(rec, pending, node, _ignored_event_urls(rec))
+        if _is_autopilot(rec) else UNTRUSTED
       )
+      held = provenance == UNVERIFIED
+      routed = provenance == TRUSTED and _respond_autopilot(rec, pending)
       # Legacy attention has no delivery proof either; announce it once
       # rather than infer success from its presence on the record.
-      if not routed and not pending.get("announced_at"):
+      if not (held or routed) and not pending.get("announced_at"):
         _notify_attention(rec, pending)
         rec, etag = _confirm_announced(path, rec, etag, "attention", pending)
     # Outside activity that arrived while actionable work held the attention

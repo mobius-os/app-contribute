@@ -85,6 +85,8 @@ class JobEndpoints:
     self.on_put = None
     self.on_read = None
     self.record_reads = 0
+    self.lookups = []
+    self.lookup_failures = []
     self.errors = io.StringIO()
 
   def change(self, **fields):
@@ -143,9 +145,51 @@ class JobEndpoints:
 
   def gh(self, args, **kwargs):
     if args[:3] == ["gh", "api", "graphql"]:
-      return subprocess.CompletedProcess(args, 0, json.dumps({"data": {"r0": self.node}}), "")
+      return subprocess.CompletedProcess(args, 0, json.dumps({"data": {"r0": self.fetched_node(args[-1])}}), "")
+    if len(args) == 3 and args[:2] == ["gh", "api"]:
+      return self.rest_event(args)
     self.unexpected.append(args)
     raise AssertionError(args)
+
+  def fetched_node(self, query):
+    # GitHub returns only the requested tail of each connection, oldest first.
+    node = copy.deepcopy(self.node)
+    for field in ("comments", "reviews"):
+      window = re.search(r"%s\(last: (\d+)\)" % field, query)
+      if window and isinstance(node.get(field), dict):
+        node[field]["nodes"] = node[field]["nodes"][-int(window.group(1)):]
+    return node
+
+  def rest_event(self, args):
+    # The REST view of one exact comment or review, read from the whole thread.
+    path = args[2]
+    self.lookups.append(path)
+    failure = self.lookup_failures.pop(0) if self.lookup_failures else None
+    if failure:
+      return subprocess.CompletedProcess(args, 1, "", "gh: %s\n" % failure)
+    found = None
+    comment = re.fullmatch(r"repos/example/project/issues/comments/(\d+)", path)
+    review = re.fullmatch(r"repos/example/project/pulls/1/reviews/(\d+)", path)
+    if comment:
+      for item in (self.node.get("comments") or {}).get("nodes") or []:
+        if item["url"].endswith("#issuecomment-" + comment.group(1)):
+          found = {"html_url": item["url"], "created_at": item["createdAt"]}
+          found["author_association"] = item.get("authorAssociation")
+    elif review:
+      for item in (self.node.get("reviews") or {}).get("nodes") or []:
+        if item["url"].endswith("#pullrequestreview-" + review.group(1)):
+          found = {"html_url": item["url"], "submitted_at": item["submittedAt"],
+                   "state": item["state"]}
+          found["author_association"] = item.get("authorAssociation")
+    else:
+      self.unexpected.append(args)
+      raise AssertionError(args)
+    if not found:
+      return subprocess.CompletedProcess(
+        args, 1, json.dumps({"message": "Not Found", "status": "404"}),
+        "gh: Not Found (HTTP 404)\n",
+      )
+    return subprocess.CompletedProcess(args, 0, json.dumps(found), "")
 
   def run(self):
     # No shell, live token, gh process, or real urlopen is ever used. Each pass
@@ -312,6 +356,83 @@ class ContributionPushTest(unittest.TestCase):
     self.assertEqual(len(job.sent), 1)
     self.assertIn("drive-by", job.sent[0]["body"])
     job.run()
+    self.assertEqual(len(job.sent), 1)
+
+  def _trusted_comment_then_outside_flood(self, job, association="MEMBER"):
+    # A maintainer comments, its round's /respond times out, then more outside
+    # comments than the job's fetched window (last: 10) push it off the tail.
+    trusted = job.node["comments"]["nodes"][0]
+    trusted.update(url="https://github.com/example/project/pull/1#issuecomment-1")
+    job.change(autopilot={"enabled": True})
+    job.respond_results = [TimeoutError("fixture")] + [{"status": "claimed"}] * 4
+    job.run()
+    self.assertEqual(job.lookups, [])  # an event on the fetched page proves itself
+    key = job.record["attention"]["key"]
+    trusted["authorAssociation"] = association
+    job.node["comments"]["nodes"] += [{
+      "url": "https://github.com/example/project/pull/1#issuecomment-%d" % (100 + i),
+      "createdAt": "2026-01-03T00:%02d:00Z" % i, "author": {"login": "drive-by-%d" % i},
+      "authorAssociation": "NONE",
+    } for i in range(11)]
+    return key
+
+  def test_more_outside_comments_than_the_fetched_window_keep_a_trusted_retry(self):
+    job = JobEndpoints()
+    trusted_key = self._trusted_comment_then_outside_flood(job)
+    job.run()
+    job.run()
+    # Every pass retries the maintainer's event; no outsider ever starts a round.
+    self.assertEqual(
+      [r["attention"]["key"] for r in job.responded], [trusted_key] * 3,
+    )
+    self.assertEqual(job.record["attention"]["type"], "github_activity")
+    self.assertEqual(job.record["attention"]["key"], trusted_key)
+    self.assertEqual(job.record["last_github_activity_at"], "2026-01-03T00:10:00Z")
+    # The trusted event was resolved by its own ID, once per pass, not by
+    # scanning the thread.
+    self.assertEqual(job.lookups, ["repos/example/project/issues/comments/1"] * 2)
+    # The newest outside comment is reported once, beside the pending retry.
+    self.assertEqual(len(job.sent), 1)
+    self.assertIn("drive-by-10", job.sent[0]["body"])
+    self.assertEqual(job.record["outside_activity"]["key"], "outside_activity:2026-01-03T00:10:00Z")
+
+  def test_an_off_page_event_whose_author_lost_standing_is_notification_only(self):
+    job = JobEndpoints()
+    self._trusted_comment_then_outside_flood(job, association="NONE")
+    job.run()
+    job.run()
+    # Revalidated by its own ID, then refused: only the first, failed attempt
+    # ever reached /respond, and the owner hears about the newest comment.
+    self.assertIn("repos/example/project/issues/comments/1", job.lookups)
+    self.assertEqual(len(job.responded), 1)
+    self.assertEqual(job.record["attention"]["type"], "outside_activity")
+    self.assertEqual(len(job.sent), 1)
+
+  def test_a_deleted_off_page_event_is_notification_only(self):
+    job = JobEndpoints()
+    self._trusted_comment_then_outside_flood(job)
+    del job.node["comments"]["nodes"][0]
+    job.run()
+    job.run()
+    self.assertIn("repos/example/project/issues/comments/1", job.lookups)
+    self.assertEqual(len(job.responded), 1)
+    self.assertEqual(job.record["attention"]["type"], "outside_activity")
+    self.assertEqual(len(job.sent), 1)
+
+  def test_an_unavailable_lookup_holds_the_trusted_retry_without_running_it(self):
+    job = JobEndpoints()
+    trusted_key = self._trusted_comment_then_outside_flood(job)
+    job.lookup_failures = ["Bad Gateway (HTTP 502)"]
+    job.run()
+    # Unproven this pass: no round, no downgrade, no notice for the trusted
+    # event; the outside comment is still reported on its own.
+    self.assertEqual(len(job.responded), 1)
+    self.assertEqual(job.record["attention"]["key"], trusted_key)
+    self.assertEqual(job.record["attention"]["type"], "github_activity")
+    self.assertEqual(len(job.sent), 1)
+    self.assertIn("drive-by-10", job.sent[0]["body"])
+    job.run()
+    self.assertEqual([r["attention"]["key"] for r in job.responded], [trusted_key] * 2)
     self.assertEqual(len(job.sent), 1)
 
   def test_platform_human_required_remains_platform_owned(self):

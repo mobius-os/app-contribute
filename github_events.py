@@ -14,7 +14,8 @@ untrusted data; this filter only controls who can start a round.
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Callable
 
 
 # GitHub's CommentAuthorAssociation values for people with standing in the
@@ -110,36 +111,105 @@ def trusted_changes_request(
 # one may start a round only while it still names a trusted event on the thread.
 AUTHOR_ATTENTION_TYPES = frozenset(("github_activity", "changes_requested"))
 
+# What GitHub says now about the event a pending author attention names.
+TRUSTED = "trusted"
+UNTRUSTED = "untrusted"
+# GitHub could not be asked this pass. Not evidence either way: the attention
+# may neither start a round nor be downgraded until a later pass proves it.
+UNVERIFIED = "unverified"
 
-def attention_from_trusted_author(
-  attention: Any, node: Any, ignore_urls: set[str] | None = None,
-) -> bool:
+# The immutable URL GitHub gives one comment or review on a PR or issue. The
+# fragment's numeric ID addresses the same object through the REST API.
+_EVENT_URL = re.compile(
+  r"(https://github\.com/([^/#]+)/([^/#]+)/(pull|issues)/(\d+))"
+  r"#(issuecomment|pullrequestreview)-(\d+)"
+)
+
+
+def _event_api_path(url: str, thread_url: Any) -> tuple[str, str] | None:
+  """``(REST path, kind)`` of the exact comment or review ``url`` names on
+  this thread, or None when ``url`` is not one."""
+  match = _EVENT_URL.fullmatch(url)
+  if not match or not isinstance(thread_url, str):
+    return None
+  thread, owner, repo, thread_kind, number, fragment, event_id = match.groups()
+  if thread.lower() != thread_url.rstrip("/").lower():
+    return None
+  if fragment == "issuecomment":
+    return "repos/%s/%s/issues/comments/%s" % (owner, repo, event_id), "comment"
+  if thread_kind == "pull":
+    return "repos/%s/%s/pulls/%s/reviews/%s" % (owner, repo, number, event_id), "review"
+  return None
+
+
+def _rest_event(payload: dict[str, Any], kind: str) -> dict[str, Any]:
+  user = payload.get("user")
+  login = user.get("login") if isinstance(user, dict) else ""
+  event = {
+    "kind": kind,
+    "at": payload.get("submitted_at" if kind == "review" else "created_at") or "",
+    "url": payload.get("html_url") or "",
+    "author": login if isinstance(login, str) and login else "GitHub",
+    "trusted": payload.get("author_association") in TRUSTED_AUTHOR_ASSOCIATIONS,
+  }
+  if kind == "review":
+    event["state"] = payload.get("state") or ""
+  return event
+
+
+def _names_trusted_event(kind: str, at: str, url: str, event: dict[str, Any]) -> bool:
+  if not (event["trusted"] and event["at"] == at and event["url"] == url):
+    return False
+  return kind != "changes_requested" or (
+    event["kind"] == "review" and event.get("state") == "CHANGES_REQUESTED"
+  )
+
+
+def attention_provenance(
+  attention: Any, node: Any, thread_url: Any,
+  fetch_event: Callable[[str], Any], ignore_urls: set[str] | None = None,
+) -> str:
   """Whether a pending author attention names an event a trusted author wrote.
 
   The attention's key carries the event timestamp (``<type>:<at>``) and its
-  URL names the event. Both must match a comment or review that GitHub reports
-  as written by a trusted author; a ``changes_requested`` attention must name
-  such a review that requested changes. A stored attention's type is display
-  data, not evidence: an attention written before authors were classified, or
-  one whose event left the fetched window, fails this proof.
+  URL names the event. Both must match a comment or review that GitHub
+  currently reports as written by a trusted author; a ``changes_requested``
+  attention must name such a review that requested changes. A stored
+  attention's type is display data, not evidence: an attention written before
+  authors were classified proves nothing by itself.
+
+  The fetched thread is only its newest page, so an event missing from it has
+  not been shown untrusted. That one event is then resolved by the ID in its
+  URL: ``fetch_event(api_path)`` returns GitHub's REST object, ``None`` when
+  GitHub reports it gone, and raises when GitHub cannot be asked. Returns
+  ``TRUSTED``, ``UNTRUSTED`` (including deleted events), or ``UNVERIFIED``.
   """
   if not isinstance(attention, dict):
-    return False
+    return UNTRUSTED
   kind = attention.get("type")
   key = attention.get("key")
   url = attention.get("url")
-  if kind not in AUTHOR_ATTENTION_TYPES or not isinstance(key, str) or not url:
-    return False
+  if kind not in AUTHOR_ATTENTION_TYPES or not isinstance(key, str):
+    return UNTRUSTED
+  if not isinstance(url, str) or not url or url in (ignore_urls or ()):
+    return UNTRUSTED
   prefix = kind + ":"
   if not key.startswith(prefix):
-    return False
+    return UNTRUSTED
   at = key[len(prefix):]
-  for event in review_events(node, ignore_urls):
-    if not (event["trusted"] and event["at"] == at and event["url"] == url):
-      continue
-    if kind == "changes_requested" and not (
-      event["kind"] == "review" and event.get("state") == "CHANGES_REQUESTED"
-    ):
-      continue
-    return True
-  return False
+  on_page = [e for e in review_events(node, ignore_urls) if e["url"] == url]
+  if not on_page:
+    lookup = _event_api_path(url, thread_url)
+    if not lookup:
+      return UNTRUSTED
+    api_path, event_kind = lookup
+    try:
+      payload = fetch_event(api_path)
+    except Exception:
+      return UNVERIFIED
+    if not isinstance(payload, dict):
+      return UNTRUSTED
+    on_page = [_rest_event(payload, event_kind)]
+  if any(_names_trusted_event(kind, at, url, e) for e in on_page):
+    return TRUSTED
+  return UNTRUSTED
