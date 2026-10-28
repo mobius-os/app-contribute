@@ -66,6 +66,7 @@
     "storage.js",
     "prepared_reconcile.py",
     "ledger_scan.py",
+    "github_events.py",
     "agent_snapshot.py",
     "contributing/SKILL.md",
     "contributing/cycle.md",
