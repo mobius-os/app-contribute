@@ -12,10 +12,12 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
+import { feedbackPull } from '../desk.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   contributionTitle,
   findRunItemByRecord,
+  attentionListItems,
   isPublicFeedback,
   runPrimaryRecord,
   runUnitKey,
@@ -481,6 +483,7 @@ function ExactBatchAction({
         publicationPreference={publicationPreference}
         githubState={githubState}
         progress={progress}
+        onSelect={busy ? undefined : onSelect}
       />
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
       {checking ? <p className="co-run-error" role="status">Checking the recorded result. Refresh Contribute to check it; nothing will be sent again from this confirmation.</p> : null}
@@ -859,6 +862,8 @@ export function ContributionRun({
   controls,
   projectProgress,
   reviewRequestCount = 0,
+  edits = null,
+  editsCount = null,
   defaultTab = 'all',
   projectName = 'project',
   selectedId = '',
@@ -867,6 +872,7 @@ export function ContributionRun({
   focusTarget,
   focusReady,
   onFocusConsumed,
+  onOpenPull = null,
 }) {
   const task = useProjectTask()
   const [missingTarget, setMissingTarget] = useState(false)
@@ -905,6 +911,14 @@ export function ContributionRun({
 
   function selectRunItem(item) { onSelect?.(item.id) }
 
+  // Feedback on a published PR reads best on the PR page itself; anything
+  // without a PR behind it keeps its saved decision card.
+  function openAttentionItem(item) {
+    const target = feedbackPull(item)
+    if (target && onOpenPull) onOpenPull(target)
+    else selectRunItem(item)
+  }
+
 
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review' && !isPublicFeedback(item))
@@ -922,14 +936,12 @@ export function ContributionRun({
   const history = [...(run?.recent || []), ...(run?.archive || [])]
   const publishItems = decisions.filter(item => item.kind === 'publish')
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
-  const ownerDecisions = decisions.filter(item => isPublicFeedback(item) || ![
-    'publish', 'mark_ready', 'private_review', 'request',
-  ].includes(item.kind))
+  const ownerDecisions = attentionListItems(decisions)
   const preparedItems = [...privateItems, ...decisions.filter(item => item.kind === 'request')]
 
   // What needs the owner opens by itself; it can still be folded away.
   const needsYou = presentation === 'project'
-    ? <AttentionList items={ownerDecisions} heading={itemHeading} onSelect={selectRunItem} />
+    ? <AttentionList items={ownerDecisions} heading={itemHeading} onSelect={openAttentionItem} />
     : null
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
@@ -1027,7 +1039,7 @@ export function ContributionRun({
       </div>
       {presentation === 'project' ? controls : null}
 
-      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} defaultTab={defaultTab} /> : null}
+      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} /> : null}
       {presentation !== 'project' ? renderPublicWork?.() : null}
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}
     </section>

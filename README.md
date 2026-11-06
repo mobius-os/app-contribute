@@ -40,7 +40,7 @@ contribution. This app is the dashboard for that loop:
   when GitHub has updates it links to the place that applies them, Settings →
   Updates for Möbius and the App Store for apps. On phones, a task takes the
   screen and **Back to project** restores the same inventory.
-- **Check GitHub** — reloads this Möbius and asks GitHub, read-only, whether
+- **Sync with GitHub** (in the header) — reloads this Möbius and asks GitHub, read-only, whether
   each project's repository has commits newer than the one this Möbius last
   compared with (`upstream-check.js`, one GraphQL query through the platform
   proxy). It reports commits, never files: what an update changes is still the
@@ -397,8 +397,24 @@ card never sends, including when the binding disappears between Confirm and the
 write.
 Independent units are sent in parallel; a stack's layers in order. Only
 attempts whose outcome is unknown survive a reload, as a bounded checkpoint of
-ids, and lock their unit until a read shows the result. A batch card's action
-is `chat-send-batch:<16-hex handle>`, bound to the exact records the card lists.
+ids, and lock their unit until a read shows the result.
+
+The card (`"expand": false`, so no inline app view) has one item per
+contribution: its title opens that entry (`review:<id>`) and its facts are
+**Project** and **Change** (`N files · +a −d`, from the staged shortstat,
+plus `· N screenshots` when the PR publishes staged screenshots, as Confirm
+shows it). The
+card itself opens the single entry, the stack all items belong to, or the
+review queue. There are no item actions; the one card action is
+`chat-send:<id>` for one item or `chat-send-batch:<16-hex handle>` over all
+items. The record set comes from the host's session `items` (the card's item
+intents), never from block text: the action must match those items exactly,
+each item must be a ledger entry, and Confirm is built from Contribute's own
+records. A stack phase that includes a layer the card does not list is never
+confirmed ("doesn’t list every layer"); `prepared_block.py` lists every
+prepared layer of any stack it names. A host that sends no `items` gets no Confirm ("needs a newer
+Möbius"). At most 12 items are listed; beyond that the card names how many
+more are in Contribute and has no action.
 
 ### PR links from chat
 
@@ -432,4 +448,4 @@ Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
 
-**Check GitHub** renews source, contribution, PR and run status without pulling code, and asks GitHub whether anything is new. **Make PRs from my edits** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent jobs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its Project work row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.
+**Sync with GitHub** renews source, contribution, PR and run status without pulling code, asks GitHub whether anything is new, and says when it last did beside the button. **Make PRs from my edits** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent jobs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its Project work row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.

@@ -148,9 +148,56 @@ export async function fetchReviewStatus(token, appId, recordIds = []) {
   }
 }
 
+function base64(bytes) {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(binary)
+}
+
+// One staged screenshot of a prepared record, as a data:image/png URL for the
+// review card, or null when it cannot be read. The route serves the record's
+// current entry for that name, which a restage can replace while this plan is on
+// screen, so the bytes are shown only when they hash to the plan's own sha256.
+// Send uploads from the platform's own copy.
+export async function fetchContributionScreenshot(token, appId, recordId, shot) {
+  try {
+    const r = await fetchRead(
+      '/api/github/contributions/' + encodeURIComponent(appId) + '/' +
+        encodeURIComponent(recordId) + '/screenshots/' + encodeURIComponent(shot.name),
+      { headers: authHeaders(token) },
+      20000,
+    )
+    if (!r.ok) return null
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+    const hex = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+    if (hex !== shot.sha256) return null
+    return 'data:image/png;base64,' + base64(bytes)
+  } catch {
+    return null
+  }
+}
+
 // POSTs one read-only GraphQL document; returns response.data or null.
 // Callers leave records stale on null — the refresh is best-effort polish,
 // and GitHub returns null nodes (not errors) for anything inaccessible.
+// The one PR shape every live list shares: lists, incoming reviews and the
+// Desk home all read these fields. collaboration.js re-exports it.
+export const PR_FIELDS = `id number title url headRefOid headRefName baseRefName baseRefOid baseRef { target { oid } } isDraft
+  additions deletions changedFiles createdAt updatedAt
+  author { login } assignees(first:100) { nodes { login } }
+  repository { nameWithOwner viewerPermission }
+  headRepository { nameWithOwner viewerPermission isArchived }
+  labels(first:20) { nodes { name color } totalCount }
+  comments { totalCount }
+  reviews { totalCount }
+  commits(last:1) { nodes { commit { statusCheckRollup { state contexts {
+    totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
+  } } } } }
+  reviewDecision mergeable`
+
 export async function fetchLiveStates(token, query) {
   try {
     const r = await fetchRead('/api/github/graphql', {
@@ -170,10 +217,9 @@ export async function fetchLiveStates(token, query) {
 // each flagged when it actually asks for the viewer's review. GitHub's
 // "involves" search does not cover review requests, so both are read at once.
 export async function fetchIncomingReviews(token) {
-  const fields = 'id number title url headRefOid baseRefName baseRefOid isDraft author { login } assignees(first:100) { nodes { login } } repository { nameWithOwner viewerPermission } reviewDecision mergeable'
   const query = `query ContributeIncomingReviews {
-    involved: search(query: "is:pr is:open involves:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } }
-    requested: search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } }
+    involved: search(query: "is:pr is:open involves:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${PR_FIELDS} } } }
+    requested: search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${PR_FIELDS} } } }
   }`
   const data = await fetchLiveStates(token, query)
   const valid = nodes => (Array.isArray(nodes) ? nodes : []).filter((item) => item?.repository?.nameWithOwner && item?.number && item?.url)
