@@ -40,12 +40,13 @@ import { contributionActionScope, contributionApprovalIsCurrent, contributionPha
 import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
+import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createRefreshCoordinator } from './refresh.js'
 import { checkUpstream } from './upstream-check.js'
 import { DESK_LAST_LOOKED_KEY, deskCounts, projectNeedsCount } from './desk.js'
 import { hasActiveReview } from './review-frame.js'
-import { loadReviewRuns } from './collaboration.js'
+import { loadReviewRuns, withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
 import {
   contributionPathDecision,
   contributionStackDecision,
@@ -75,6 +76,7 @@ import { ContributionRun } from './ui/Feed.jsx'
 import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
+import { useReviewList } from './ui/useReviewList.js'
 import { SyncNote } from './ui/GithubParts.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
@@ -315,6 +317,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // Whether a new Send grants autopilot. Default on; consulted only at Send
   // time (job.sh keys off each record's stamped grant, never this preference).
   const [autopilotDefault, setAutopilotDefault] = useState(true)
+  // How a new PR opens when the owner does not pick for that send (see publication-stage.js).
+  const [newPrStage, setNewPrStage] = useState(DEFAULT_STAGE)
+  // Findings the owner set aside, by review version (see ignoreKey). Kept in the app's settings.
+  const [ignoredReviews, setIgnoredReviews] = useState({})
   const [deskView, setDeskView] = useState('needs')
   const [lastLooked, setLastLooked] = useState('')
   // The PR page the desk pane shows, over whatever view or project is behind
@@ -621,6 +627,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       if (typeof appSettings.autopilot_default === 'boolean') {
         setAutopilotDefault(appSettings.autopilot_default)
       }
+      setNewPrStage(appSettings.new_pr_stage)
+      if (appSettings.ignored_reviews && typeof appSettings.ignored_reviews === 'object') setIgnoredReviews(appSettings.ignored_reviews)
       // The previous visit's time marks what changed "since you last looked";
       // this visit becomes the next one's mark. One write per app open.
       if (typeof appSettings[DESK_LAST_LOOKED_KEY] === 'string') {
@@ -893,7 +901,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // actions consume one exact reviewed record and remain explicit clicks.
   // `rec` is the exact record the owner confirmed. Where the platform binds
   // it, the server compares it under its publication lock before any write.
-  const onSend = useCallback(async (rec, { requireBinding = false } = {}) => {
+  const onSend = useCallback(async (rec, { requireBinding = false, stage = newPrStage } = {}) => {
     let canonical = null
     try {
       canonical = await loadFreshContributionRecord(rec.id)
@@ -957,7 +965,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
             token,
             rec: refreshed,
             autopilot: autopilotDefault && connRef.current.autopilotAvailable === true,
-            publicationStage: 'ready',
+            publicationStage: stage,
             expectedRecord: connRef.current.frozenBinding ? rec : null,
           })
     }
@@ -1062,6 +1070,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     appId,
     token,
     autopilotDefault,
+    newPrStage,
     submissionMethod,
     applyRecordUpdates,
     refreshReviewStatus,
@@ -1233,6 +1242,22 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return { error: outcome.error || 'Could not update autopilot.' }
   }, [appId, token, applyRecordUpdates])
 
+  const onChangeNewPrStage = useCallback(async (next) => {
+    const stage = stageOf(next)
+    setNewPrStage(stage)
+    const settings = await loadAppSettings()
+    saveAppSettings({ ...settings, new_pr_stage: stage })
+  }, [])
+
+  // Setting a review's findings aside is the owner's own note: nothing is posted anywhere.
+  const saveIgnoredReviews = useCallback(async (change) => {
+    setIgnoredReviews(change)
+    const settings = await loadAppSettings()
+    saveAppSettings({ ...settings, ignored_reviews: change(settings.ignored_reviews || {}) })
+  }, [])
+  const onIgnoreReview = useCallback((item, reason) => saveIgnoredReviews(notes => withIgnoreNote(notes, item, reason)), [saveIgnoredReviews])
+  const onUndoIgnore = useCallback(item => saveIgnoredReviews(notes => withoutIgnoreNote(notes, item)), [saveIgnoredReviews])
+
   const onToggleAutopilotDefault = useCallback(async (next) => {
     setAutopilotDefault(next)
     const settings = await loadAppSettings()
@@ -1274,7 +1299,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
   // returned ledger record rather than treating the phase as all-or-nothing.
-  const onSendStack = useCallback(async (stackRecords, { requireBinding = false } = {}) => {
+  const onSendStack = useCallback(async (stackRecords, { requireBinding = false, stage = newPrStage } = {}) => {
     const approvedPublicationRecords = stackPublicationRecords({
       type: 'stack', records: stackRecords, total: stackRecords.length,
     })
@@ -1344,7 +1369,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       appId,
       token,
       recordIds: currentRecords.map((rec) => rec.id),
-      publicationStage: 'ready',
+      publicationStage: stage,
       // The owner confirmed the whole chain, including public context.
       expectedRecords: connRef.current.frozenBinding
         ? currentRecords.map((current) => stackRecords.find((approved) => approved.id === current.id))
@@ -1447,6 +1472,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [
     appId,
     token,
+    newPrStage,
     submissionMethod,
     applyRecordUpdates,
     refreshReviewStatus,
@@ -1552,13 +1578,16 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const projectAttention = useMemo(() => Object.fromEntries(sourceProjects
     .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, conn.login || '')])), [sourceProjects, records, reviewStatus, conn.login])
   // The home's clickable counts: every number names a next step and its view.
+  // Reviews you started: one row per PR for the PR reviews page, counted in the rail.
+  const reviewList = useReviewList({ token, runs: reviewRuns, ignored: ignoredReviews, login: conn.login || '', refreshKey })
   const deskCountsValue = useMemo(() => deskCounts({
     projects: sourceProjects,
     decisions: contributionRun.decisions,
     incoming: incomingReviews,
     records,
     login: conn.login || '',
-  }), [sourceProjects, contributionRun, incomingReviews, records, conn.login])
+    reviews: reviewList.counts,
+  }), [sourceProjects, contributionRun, incomingReviews, records, conn.login, reviewList.counts])
   const desk = {
     view: deskView,
     onView: setDeskView,
@@ -1566,6 +1595,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     login: conn.login || '',
     records,
     runs: reviewRuns,
+    ignored: ignoredReviews,
+    reviews: reviewList,
     lastLooked,
     decisionsFor: project => projectRun(project).decisions,
     onOpenPull: openPullPage,
@@ -1585,10 +1616,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       incomingReviews: [],
     }) : contributionRun
   }
-  function openPullPage(project, pr, tab = 'conversation') {
+  // `intent` lets a desk row open the PR straight into a window ('fix' = Address feedback).
+  function openPullPage(project, pr, tab = 'conversation', intent = '') {
     const repo = pr?.repository?.nameWithOwner || project?.canonical_repo || ''
     if (!repo || !pr?.number) return
-    setPullPage({ key: project?.key || '', repo, number: pr.number, tab, nonce: crypto.randomUUID() })
+    setPullPage({ key: project?.key || '', repo, number: pr.number, tab, intent, nonce: crypto.randomUUID() })
   }
   // `view` comes from the project tabs: which PRs to show, how to switch tabs,
   // and where to report the open PR count. Without it the list shows all PRs.
@@ -1596,7 +1628,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     if (page) {
       return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token}
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
-        presentation="page" focusPull={page} onFocusRelease={() => {}} onStartAgent={startAgentTask}
+        presentation="page" focusPull={page} onFocusRelease={() => {}} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore}
         records={recordsForProject(records, project)} onRecord={record => {
           setPullPage(null)
           if (project?.key) setProjectFocus({ key: project.key, nonce: crypto.randomUUID() })
@@ -1604,7 +1636,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     }
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews}
-      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} onStartAgent={startAgentTask}
+      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore}
       onOpenPage={(pr, tab) => openPullPage(project, pr, tab)}
       focusPull={pullFocus?.number ? pullFocus : null} focusRun={pullFocus?.runId ? pullFocus : null} onFocusRelease={releasePullFocus}
       records={recordsForProject(records, project)} onRecord={record => {
@@ -1722,11 +1754,12 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       connection: conn.state === 'checking' ? 'checking' : conn.state, frozenBinding: conn.frozenBinding === true,
       // The relay route cannot bind a confirmed snapshot, so chat never uses it.
       // Chat sends require the binding at the moment of the write, too.
-      send: rec => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { requireBinding: true }),
-      sendStack: stack => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { requireBinding: true }),
+      stage: newPrStage,
+      send: (rec, options) => rec?.submission_mode === 'mobius-bot' ? relayFromChatRefusal() : onSend(rec, { ...options, requireBinding: true }),
+      sendStack: (stack, options) => stack?.some(rec => rec?.submission_mode === 'mobius-bot') ? relayFromChatRefusal() : onSendStack(stack, { ...options, requireBinding: true }),
       refresh: cardRefresh, refreshing: cardRefreshes.running, refreshDone: cardRefreshes.done, refreshOutcome: cardRefreshes.outcome,
     })
-  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, cardRefresh, cardRefreshes])
+  }, [onPublicationRuntime, records, ledgerReady, reviewStatus, reviewAddressKey, conn, onSend, onSendStack, newPrStage, cardRefresh, cardRefreshes])
 
   // Staged screenshots a prepared card shows in its description.
   const loadScreenshot = useCallback((recordId, shot) => fetchContributionScreenshot(token, appId, recordId, shot), [token, appId])
@@ -1759,6 +1792,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
             autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
+            newPrStage={newPrStage} onChangeNewPrStage={onChangeNewPrStage}
           />
         </Header>
       </div>
@@ -1791,7 +1825,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               projectName={project?.name || 'all projects'}
               selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack}
               loading={loading} omittedCount={fromCache ? 0 : omittedCount}
-              publicationPreference="github" githubState={conn.state}
+              publicationPreference="github" githubState={conn.state} newPrStage={newPrStage}
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
