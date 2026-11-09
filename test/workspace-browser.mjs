@@ -40,6 +40,8 @@ import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ProjectEdits } from './ui/ProjectEdits.jsx'
+import { localChangeSentence, localChangeSummary } from './source-map.js'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { ReviewPlan } from './ui/ContributionCard.jsx'
@@ -396,11 +398,12 @@ function Fixture() {
   return <SyncHubContext.Provider value={hub}><div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     <button type="button" className="co-btn co-toolbar-refresh" onClick={syncFromHeader} disabled={syncing} aria-busy={syncing} aria-label="Sync with GitHub">Sync with GitHub</button>
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
-      loadProjectDiff={loadProjectDiff} onRetry={retryAll}
       addProject={quiet => <RepositoryPicker quiet={quiet} token="fixture-only" connected onAdded={repositoryAdded} />}
       renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
+        edits={localChangeSentence(project).edits ? <ProjectEdits key={'fixture-'+refreshKey} project={project} run={runFor(project)} loadProjectDiff={loadProjectDiff} onRefresh={retryAll} /> : null}
+        editsCount={localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={view => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project} scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal}
@@ -483,6 +486,11 @@ async function chooseDraftThenMergeSwitch() {
   ensure(mergeSwitch && !mergeSwitch.checked,'Drafting a verdict did not offer an unchecked merge switch')
   return mergeSwitch
 }
+// Make PRs from local changes sits in the Local changes tab, so open the tab to reach it.
+async function makePrsButton() {
+  await openTab('Local changes')
+  return button('Make PRs from local changes')
+}
 async function openTab(name) {
   const tab = [...document.querySelectorAll('[role=tab]')].find(node => text(node).startsWith(name))
   ensure(tab, 'Tab missing: ' + name)
@@ -540,7 +548,7 @@ window.runWorkspaceChecks = async () => {
       ensure(search && search.querySelector('svg') && filters.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING, 'The project search is not the shared search field under the filters')
       ensure(button('All',filters).getAttribute('aria-pressed')==='true', 'The active project filter is not exposed')
       await click(query('.co-source-row'))
-      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && button('Make PRs from local changes') && !button('Make PRs from local changes').disabled, 'Project did not settle')
+      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab][data-tab="edits"]'), 'Project did not settle')
       ensure(query('.co-workspace-inventory') && !query('.co-task-content'), 'Opening a project displayed task work')
       ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
     })
@@ -552,7 +560,8 @@ window.runWorkspaceChecks = async () => {
     const inventoryNavigationDepth = navigation.length
     await check('project tabs lead with All PRs, whose filter chips offer each view and change totals stay visible', async () => {
       const tabs=[...document.querySelectorAll('[role=tab]')].map(node => text(node).replace(/\d+$/, ''))
-      ensure(tabs.join('|')==='All PRs|Review requests|Agent runs','Project tabs drifted: '+tabs.join('|'))
+      // The fixture project has one edited file, so the fourth tab is on offer.
+      ensure(tabs.join('|')==='All PRs|Review requests|Agent runs|Local changes1 file','Project tabs drifted: '+tabs.join('|'))
       ensure([...document.querySelectorAll('[role=tab]')][0].getAttribute('aria-selected')==='true','All PRs is not the default tab')
       const chips=[...query('.co-pr-filters').querySelectorAll('button')].map(node => text(node).replace(/\d+$/, '').trim())
       ensure(chips.join('|')==='All|Opened by me|Drafts|Failing checks|Bots|Unassigned|Assigned to me','PR filter choices drifted: '+chips.join('|'))
@@ -897,29 +906,28 @@ window.runWorkspaceChecks = async () => {
       await fill(search,'')
       ensure(mutationRequests().length===before && query('.co-pr-list')===originalList,'Read states mutated work or remounted inventory')
     })
-    await check('local comparison is lazy, versioned, read-only and distinguishes loading, failure, empty and stale', async () => {
+    await check('local comparison is lazy, read-only and distinguishes loading, failure, empty and stale', async () => {
       const before=mutationRequests().length
       ensure(calls.diffs.length===0,'Local source diff loaded before inspection')
       window.holdDiff=true; window.diffMode='error'
-      const local=()=>button('See the files')
+      const local=()=>query('[role="tab"][data-tab="edits"]')
       await click(local())
       await until(()=>window.releaseDiff && query('.co-project-diff-loading'),'Comparison loader missing')
       window.holdDiff=false; window.releaseDiff(); window.releaseDiff=null
       await until(()=>button('Could not load diffs · try again'),'Comparison error missing')
       window.diffMode='empty'; await click(button('Could not load diffs · try again'))
       await until(()=>text(query('.co-project-diff-empty')).includes('No changed files'),'Empty comparison missing')
-      await inventory(); window.diffMode='stale'; await click(local())
+      // Leaving and re-opening the tab is what reads the comparison again.
+      await openTab('All PRs'); window.diffMode='stale'; await click(local())
       await until(()=>button('Project changed · check again'),'Stale comparison not distinguished')
       window.diffMode='ready'; await click(button('Project changed · check again'))
       await until(()=>text(query('.diff-view')).includes('local improvement'),'Fresh comparison did not recover')
-      await click(query('.co-position-details summary'))
-      ensure(text(query('.co-position-details')).includes('aaaaaaa') && text(query('.co-position-details')).includes('bbbbbbb'),'Compared versions missing')
       ensure(calls.diffs.every(call=>call.key==='app:fixture' && call.head===HEAD && call.base===BASE),'Comparison drifted to another source')
       ensure(mutationRequests().length===before && calls.starts.length===0,'Read-only comparison started work')
-      await inventory()
+      await openTab('All PRs')
     })
     await check('source conversation scope loads lazily and remains separate from project preparation', async () => {
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
       const scope = query('.co-prepare-scope')
       ensure(text(scope).includes('1 edited file'),'Preparation did not show the collocated file scope')
@@ -956,12 +964,12 @@ window.runWorkspaceChecks = async () => {
       const pane = () => query('[data-task="task:cycle"]')
       await until(() => pane() && button('Open current conversation', pane()), 'Cycle status hidden without merge rights')
       ensure(!button('Start fresh full merge cycle', pane()), 'A read-only project offered a new merge cycle')
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
       window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
     })
     await check('effort choices are 44px targets on every viewport', async () => {
-      await chooseProject('Other project'); await click(button('Make PRs from local changes'))
+      await chooseProject('Other project'); await click(await makePrsButton())
       await until(() => query('[data-task="task:prepare"] .co-agent-trigger'), 'Make PRs launch did not open')
       const pane = query('[data-task="task:prepare"]')
       await click(pane.querySelector('.co-agent-trigger'))
@@ -990,7 +998,7 @@ window.runWorkspaceChecks = async () => {
       const starts = calls.starts.length
       window.lostStart = true
       const startIn = () => button('Start', query('[data-task="task:prepare"]'))
-      await click(button('Make PRs from local changes')); await until(() => startIn() && !startIn().disabled, 'Make PRs did not settle')
+      await click(await makePrsButton()); await until(() => startIn() && !startIn().disabled, 'Make PRs did not settle')
       await click(startIn())
       await openTab('Agent runs')
       await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'An unconfirmed start was not offered again')
@@ -1013,7 +1021,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length, starts=calls.starts.length
       const pane=()=>query('[data-task="task:prepare"]'), start=()=>button('Start', pane())
       ensure(!button('Pull updates') && !button('Start pull'),'Contribute still offered its own pull')
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       await until(()=>start() && !start().disabled,'Make PRs action did not settle')
       ensure(calls.starts.length===starts && mutationRequests().length===before,'Opening preparation started or published work')
       window.failStart=true; await click(start())

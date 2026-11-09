@@ -228,11 +228,9 @@ test('the new-dot legend shows only when a dot is on screen', () => {
   assert.match(css, /\.co-desk-pane:has\(\.co-desk-row \.co-newdot\) \.co-desk-legend \{ display:flex/)
 })
 
-test('the project status is one panel of equal rows, with real buttons and icons, never a text link', () => {
+test('the project screen has no status panel, and no action is a text link', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-project-position \{ margin:12px 0 16px; border:1px solid var\(--border\); border-radius:var\(--co-radius-panel\);/)
-  assert.match(css, /\.co-status-row \{ display:flex; align-items:center; gap:12px; min-height:56px;/)
-  assert.match(css, /\.co-status-actions \.co-btn \{ gap:8px; padding:0 12px; \}/)
+  assert.doesNotMatch(css, /co-project-position|co-status-/)
   assert.doesNotMatch(css, /co-link-action/)
 })
 

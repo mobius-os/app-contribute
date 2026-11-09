@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import { contributionCycleAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
-import { localChangeSentence, localChangeSummary, projectCycleIdentity, projectUpstreamLine } from '../source-map.js'
-import { projectUpdater } from '../updates.js'
+import { localChangeSummary, projectCycleIdentity } from '../source-map.js'
 import { Icon } from './Icons.jsx'
-import { TimeAgo } from './GithubParts.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
@@ -23,37 +21,6 @@ const CYCLE_CSS = `
 .co-task-content .co-task-progress p{margin:4px 0 0;font-size:var(--co-text-meta)}
 .co-task-progress .co-cycle-actions{margin:12px 0 0}
 `
-
-// One plain-language fact about the project, with its next step beside it.
-function StatusLine({ icon, title, tone = 'plain', strong, text, sub, children }) {
-  return <div className={'co-status-row is-' + tone} role="group" aria-label={title}>
-    <span className="co-status-icon" aria-hidden="true"><Icon name={icon} size={18} /></span>
-    <p className="co-status-text"><strong>{strong}</strong>{text}{sub ? <span className="co-status-sub"> {sub}</span> : null}</p>
-    {children ? <div className="co-status-actions">{children}</div> : null}
-  </div>
-}
-
-const UPSTREAM_ICON = { ok: 'check', warn: 'refresh', muted: 'info' }
-
-function LocalLine({ project, run, task }) {
-  const local = localChangeSentence(project)
-  return <StatusLine icon="edit" title="Local changes" strong={local.strong} text={local.text} sub={local.sub || null}>
-    {local.edits ? <>
-      <button type="button" className="co-btn" disabled={!run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={15} />Make PRs from local changes</button>
-      <button type="button" className="co-btn co-btn-icon" onClick={() => task?.open('task:files')} aria-label="See the files" title="See the files"><Icon name="file" size={16} /></button>
-    </> : null}
-  </StatusLine>
-}
-
-function UpstreamLine({ project, check }) {
-  const line = projectUpstreamLine(project, check)
-  if (!line) return null
-  const updater = line.update ? projectUpdater(project) : null
-  const checked = check?.checkedAt ? <TimeAgo prefix="Checked " value={check.checkedAt} /> : 'Use Sync with GitHub for the latest.'
-  return <StatusLine icon={UPSTREAM_ICON[line.tone]} title="Updates from GitHub" tone={line.tone} strong={line.strong} text={line.text} sub={updater ? null : checked}>
-    {updater ? <button type="button" className="co-btn" onClick={updater.open}><Icon name="settings" size={15} />{updater.label}</button> : null}
-  </StatusLine>
-}
 
 const STATUS_LABELS = {
   restoring: 'Checking saved work', checking: 'Checking work status', starting: 'Starting agent', stopping: 'Stopping work',
@@ -89,7 +56,7 @@ function CycleNotice({ cycle, label, waiting, workflow }) {
   </div>
 }
 
-export function ProjectControls({ appId, token, project, run, onStart, loading, check = null, children }) {
+export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
   const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
   const { cycle } = workflow
@@ -159,10 +126,6 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     <style>{CYCLE_CSS}</style>
-    {local ? <div className="co-project-position" aria-label="Local changes and GitHub">
-      <LocalLine project={project} run={run} task={task} />
-      <UpstreamLine project={project} check={check} />
-    </div> : null}
     {local ? <SourceConversations project={project} appId={appId} token={token} /> : null}
     <TaskPane id="task:prepare" dock={false}>
       <h3>Make PRs from local changes</h3>
