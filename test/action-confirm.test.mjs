@@ -494,6 +494,8 @@ test('Request review waits for the people list, shows why it failed, and says wh
   assert.equal(requestReviewCopy(pr(), { standing, candidates: null }).disabled, true)
   const failed = requestReviewCopy(pr(), { standing, candidates: { error: 'Could not load the people. Try again.' } })
   assert.deepEqual([failed.disabled, failed.facts.map(fact => `${fact.tone}:${fact.text}`)], [true, ['bad:Could not load the people. Try again.']])
+  const capped = readSheet({}, { people, pending: [], partial: true })
+  assert.ok(capped.facts.some(fact => fact.tone === 'warn' && fact.text.includes(`only the first ${people.length} are shown`)), 'a list cut short says so')
   const alone = readSheet({}, { people: ['alex'], pending: [] })
   assert.deepEqual([alone.people.options, alone.facts.map(fact => fact.text)], [[], ['Nobody else can be asked']])
 })

@@ -136,15 +136,23 @@ test('the people Request review can offer are the repository’s people, read pa
     const page = Number(asked.at(-1))
     return new Response(JSON.stringify({ assignees: page === 1 ? [{ login: 'sam' }, { login: 'kim' }] : [{ login: 'bo' }, {}], next_page: page === 1 ? 2 : null }))
   })
-  assert.deepEqual(await loadReviewPeople('test', 80, pull(1)), ['sam', 'kim', 'bo'])
+  assert.deepEqual(await loadReviewPeople('test', 80, pull(1)), { people: ['sam', 'kim', 'bo'], partial: false })
   assert.deepEqual(asked, ['1', '2'])
 })
 
-test('a repository with endless people is read for a few pages, not forever', async t => {
+test('a repository with more people than one read allows is read whole up to a generous cap, and past it says so', async t => {
   let reads = 0
+  t.mock.method(globalThis, 'fetch', async url => {
+    reads += 1
+    const page = Number(new URL(url, 'http://app').searchParams.get('page'))
+    return new Response(JSON.stringify({ assignees: [{ login: `p${page}` }], next_page: page < 6 ? page + 1 : null }))
+  })
+  const six = await loadReviewPeople('test', 80, pull(1))
+  assert.deepEqual([six.people.length, six.partial, reads], [6, false, 6], 'the sixth page is not dropped')
+  reads = 0
   t.mock.method(globalThis, 'fetch', async () => { reads += 1; return new Response(JSON.stringify({ assignees: [{ login: `p${reads}` }], next_page: reads + 1 })) })
-  assert.equal((await loadReviewPeople('test', 80, pull(1))).length, 5)
-  assert.equal(reads, 5)
+  const endless = await loadReviewPeople('test', 80, pull(1))
+  assert.deepEqual([endless.people.length, endless.partial, reads], [30, true, 30])
 })
 
 test('merge option is enabled only for an entirely eligible exact selection', async t => {
@@ -411,4 +419,21 @@ test('an unconfirmed request on one PR is read back, never repeated, and the oth
   const outcome = await requestReviewMany('t', 80, [owned(1), owned(2), owned(3)], ['sam'])
   assert.deepEqual(calls, [1, 2, 3])
   assert.deepEqual(outcome, { pending: true, error: 'GitHub may have asked for the review on #2. Check it before trying again.' })
+})
+
+test('a retry after a partial failure asks only the PR and person pairs that are left, even when the pick changed', async t => {
+  const sent = []
+  const answers = { 2: { status: 409, json: { detail: 'The author of a pull request cannot be asked to review it.' } } }
+  t.mock.method(globalThis, 'fetch', async (url, options) => { const body = JSON.parse(options.body); sent.push([body.number, body.reviewers]); return replyPerPr(answers)(url, options) })
+  const done = new Set()
+  const first = await requestReviewMany('t', 80, [owned(1), owned(2)], ['sam'], { done })
+  assert.match(first.error, /^Not asked: #2: /)
+  delete answers[2]
+  sent.length = 0
+  const second = await requestReviewMany('t', 80, [owned(1), owned(2)], ['kim'], { done })
+  assert.deepEqual(sent, [[1, ['kim']], [2, ['kim']]], 'Kim is asked on both PRs; nobody is asked on a PR where they already were')
+  assert.deepEqual(second, { ok: true, state: 'requested', asked: [1, 2], skipped: [] })
+  sent.length = 0
+  await requestReviewMany('t', 80, [owned(1), owned(2)], ['sam', 'kim', 'bo'], { done })
+  assert.deepEqual(sent, [[1, ['bo']], [2, ['sam', 'bo']]], 'only the pairs not yet asked are sent')
 })

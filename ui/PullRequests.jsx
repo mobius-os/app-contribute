@@ -221,7 +221,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [acting, setActing] = useState(null)
   // Request review's sheet reads, as it opens, who can be asked: the repository's people and who already was asked.
   const [candidates, setCandidates] = useState(null)
-  // The PRs a Request review over several already asked, so a retry after a partial failure skips them.
+  // The PRs and people a Request review over several already asked, so a retry after a partial failure skips them.
   const askedPulls = useRef(new Set())
   useEffect(() => {
     askedPulls.current = new Set()
@@ -229,8 +229,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     let alive = true
     async function read() {
       try {
-        const [people, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), acting.pulls ? null : loadPullReviewers(token, acting.pr)])
-        if (alive) setCandidates({ people, pending: asked ? pendingReviewers(asked.reviewers) : [] })
+        const [read, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), acting.pulls ? null : loadPullReviewers(token, acting.pr)])
+        if (alive) setCandidates({ people: read.people, partial: read.partial, pending: asked ? pendingReviewers(asked.reviewers) : [] })
       } catch (error) {
         if (alive) setCandidates({ error: error.message || 'Could not load the people. Try again.' })
       }

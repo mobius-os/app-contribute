@@ -355,34 +355,40 @@ export const pullAction = (token, appId, pr, action, extra = {}) => {
 }
 
 // Request review for several PRs at once: one request per PR, naming the ticked people who may be asked there (not its
-// author, not who approved this version). A PR asked on an earlier try (`done`, which this fills) is skipped, so a retry
-// after a partial failure asks nobody twice. { ok } when every PR is asked or has nobody left to ask, { pending } when GitHub
-// may have taken a request (read it back, never repeat), otherwise { error } naming the PRs that were refused.
+// author, not who approved this version). `done` (which this fills) holds each PR and person already asked on an earlier try,
+// so a retry after a partial failure asks only the pairs that are left, even when the ticks changed in between: nobody is
+// asked twice, and a newly ticked person is still asked on every PR. { ok } when every PR is asked or has nobody left to ask,
+// { pending } when GitHub may have taken a request (read it back, never repeat), otherwise { error } naming the PRs that were refused.
+const askedPair = (pr, login) => `${prKey(pr)}@${String(login).toLowerCase()}`
 export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set() } = {}) {
   const asked = [], skipped = [], refused = [], unsure = []
-  for (const pr of pulls.filter(item => !done.has(prKey(item)))) {
+  for (const pr of pulls) {
     const askable = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
-    if (!askable.length) { skipped.push(pr.number); done.add(prKey(pr)); continue }
-    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: askable })
-    if (outcome.ok) { asked.push(pr.number); done.add(prKey(pr)) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
+    if (!askable.length) { skipped.push(pr.number); continue }
+    const left = askable.filter(login => !done.has(askedPair(pr, login)))
+    if (!left.length) continue
+    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: left })
+    if (outcome.ok) { asked.push(pr.number); left.forEach(login => done.add(askedPair(pr, login))) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
   }
   if (unsure.length) return { pending: true, error: `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.` }
   if (refused.length) return { error: `Not asked: ${refused.join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
   return { ok: true, state: 'requested', asked, skipped }
 }
 
-// Everyone a PR's repository lets work on it: the list Assign shows, read to its end (a few pages at most), which is also
-// who GitHub lets be asked to review. Logins only; who may not be asked (the author, a bot, someone who approved this
-// version) is for the sheet to leave out.
-const PEOPLE_PAGES = 5
+// Everyone a PR's repository lets work on it: the list Assign shows, which is also who GitHub lets be asked to review.
+// Read to its end; a repository with more people than PEOPLE_PAGES pages (100 each) comes back `partial`, and the sheet says
+// so. Logins only; who may not be asked (the author, a bot, someone who approved this version) is for the sheet to leave out.
+const PEOPLE_PAGES = 30
 export async function loadReviewPeople(token, appId, pr) {
-  const logins = []
-  for (let page = 1, seen = 0; page && seen < PEOPLE_PAGES; seen += 1) {
+  const people = []
+  let page = 1
+  for (let read = 0; page; read += 1) {
+    if (read === PEOPLE_PAGES) return { people, partial: true }
     const next = await collaborationRequest(token, appId, `assignees?repo=${encodeURIComponent(pr.repository.nameWithOwner)}&page=${page}`)
-    logins.push(...(next.assignees || []).map(person => person.login).filter(Boolean))
+    people.push(...(next.assignees || []).map(person => person.login).filter(Boolean))
     page = next.next_page
   }
-  return logins
+  return { people, partial: false }
 }
 
 // What a finished private review would say on GitHub, word for word, with the hash that binds the

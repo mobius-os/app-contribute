@@ -190,7 +190,7 @@ export function reviewCandidates(pulls, standing, { people = [], pending = [] } 
 
 // Request review: GitHub's usual review request to whoever you tick, on one PR or on each of several, whether or not they
 // have reviewed before. A person who did is shown with what is true of them (one PR only). `candidates` is what the sheet
-// read when it opened: { loading } | { error } | { people, pending }. Assign is a different thing and the footnote says so.
+// read when it opened: { loading } | { error } | { people, pending, partial }. Assign is a different thing and the footnote says so.
 export function requestReviewCopy(pr, { standing = null, candidates = null, pulls = null } = {}) {
   const many = pulls?.length > 1
   const count = many ? pulls.length : 1
@@ -209,6 +209,7 @@ export function requestReviewCopy(pr, { standing = null, candidates = null, pull
           : !options.length ? [{ tone: 'bad', text: 'Nobody else can be asked' }]
             : [picked.length ? { tone: 'ok', text: `GitHub asks ${who} to review${many ? ` each of the ${count} PRs` : ''}` } : { tone: 'bad', text: 'Pick at least one person' }]),
         ...(loaded && candidates.pending?.length ? [{ tone: 'ok', text: `Already asked: ${names(candidates.pending)}` }] : []),
+        ...(loaded && candidates.partial ? [{ tone: 'warn', text: `The repository has more people than could be listed: only the first ${candidates.people.length} are shown` }] : []),
       ],
       footnote: `They get GitHub’s usual review request${many ? ' on each PR' : ''}. It does not assign ${many ? 'the PRs' : 'the PR'} to them, and nothing is posted in the conversation.`,
       disabled: !picked.length,
