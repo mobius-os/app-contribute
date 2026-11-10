@@ -12,13 +12,14 @@ test('opening for review says what happens, what GitHub shows now, and what it c
   const copy = openForReviewCopy(pr())
   assert.equal(copy.title, 'Open #9 for review?')
   assert.deepEqual(copy.facts.map(fact => `${fact.tone}:${fact.text}`), [
-    'ok:Reviewers are asked to look at it',
+    'ok:It stops being a draft and is ready for review',
     'ok:21 checks passed',
     'ok:No conflicts with main',
     'ok:You can turn it back into a draft later',
   ])
   assert.match(copy.footnote, /abcdef0/)
   assert.match(copy.footnote, /Nothing merges/)
+  assert.match(copy.footnote, /does not ask anyone to review/)
   assert.equal(ACTION_COPY.open_for_review, openForReviewCopy)
 })
 

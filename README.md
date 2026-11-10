@@ -82,7 +82,9 @@ contribution. This app is the dashboard for that loop:
   of each successor. Public comments/reviews are not part of this grant.
   Independent reviewers use durable programmatic children with frozen prompts
   and model settings; questions stay in their review
-  conversation. Assignment uses GitHub's shared, additive assignee list.
+  conversation. Assignment uses GitHub's shared, additive assignee list: an
+  assignee is the person responsible for a PR, and assigning never asks anyone
+  to review it (a review request is its own GitHub action).
   Repo permissions control assignment/merge; admins manage access on GitHub.
   The companion platform review-runs backend must be activated before actions
   can start. No browser or agent-writable ledger can grant itself merge access.

@@ -170,11 +170,17 @@ test('only project drill-down owns reversible navigation; inline actions preserv
   assert.match(sourceMapSource, /workTriggerRef\.current = document\.activeElement/)
 })
 
-test('an assigned incoming review stays recoverable until its conversation starts', () => {
+test('an incoming review stays recoverable until its conversation starts', () => {
   assert.match(
     appSource,
-    /const started = await startAgentTask\([\s\S]*if \(!started\.ok\)[\s\S]*Assigned on GitHub[\s\S]*setIncomingReviews/,
+    /const started = await startAgentTask\([\s\S]*if \(!started\.ok\) return started[\s\S]*setIncomingReviews/,
   )
+})
+
+test('reviewing someone else’s PR never assigns the owner to it', () => {
+  assert.doesNotMatch(appSource, /assignIncomingReview|assign_and_review/)
+  assert.match(feedSource, /\{busy \? 'Starting…' : NAMES\.review\}/)
+  assert.doesNotMatch(feedSource, /Assign & review|Assigning…/)
 })
 
 test('contribution details retain their project parent and refresh only source diffs', () => {
