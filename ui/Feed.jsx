@@ -115,7 +115,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (item?.kind === 'mark_ready') {
     return githubState === 'connected'
       ? ''
-      : 'Reconnect GitHub in Möbius Settings → Accounts before requesting review for these drafts.'
+      : 'Reconnect GitHub in Möbius Settings → Accounts before opening these drafts for review.'
   }
   if (item?.kind !== 'publish') return ''
   const records = item?.unit?.type === 'stack'
