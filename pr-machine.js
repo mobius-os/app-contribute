@@ -82,6 +82,8 @@ function derive(facts) {
     openFindings: result?.outcome === 'findings' && !result.setAside,
     outbox,
     coveredBy: outbox?.covers ? outbox.kind : '',
+    // GitHub said no review request is pending (`asked` is a count, absent when it was not read): nobody was asked, whatever else is assigned.
+    nobodyAsked: facts.asked === 0,
   }
   return { ...standing, askable: askablePeople(people, standing) }
 }
@@ -141,7 +143,10 @@ export const STATES = {
 const FIX_WAITING = { label: 'Fix to push', headline: 'A fix is ready. Read it, then push it or don’t' }
 // An approval that only carries over says so: "at this version" would be untrue of it.
 const CARRIED_APPROVAL = { headline: 'Your PR · approved by {who}, {green}. The lines you added and removed are the same as when they approved. Merge it' }
+// Nobody has reviewed it and no review was requested: waiting would be untrue. Assigning someone asks nobody.
+const NOBODY_ASKED = { label: 'Nobody asked yet', headline: 'Your PR · nobody has been asked to review it on GitHub yet. Use Request review' }
 function wordsOf(key, d) {
+  if (key === 'author.waiting_review' && d.nobodyAsked) return { ...STATES[key], ...NOBODY_ASKED }
   if (key === 'to_confirm' && d.outbox?.kind === 'repair') return { ...STATES[key], ...FIX_WAITING }
   return key === 'author.approved' && d.carriedOnly ? { ...STATES[key], ...CARRIED_APPROVAL } : STATES[key]
 }

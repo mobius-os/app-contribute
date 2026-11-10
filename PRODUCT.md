@@ -312,6 +312,6 @@ behind a confirm sheet and each shown only where this Möbius can do it.
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·
 Findings · Checks or conflicts · Feedback to answer · Waiting on re-review · Looked again,
-not approved · Commented, not approved · Approval is old · Waiting on reviewers · Approved (checks pending or unknown) · Ready to merge. Their
+not approved · Commented, not approved · Approval is old · Waiting on reviewers (reads *Nobody asked yet* while GitHub holds no review request: an assignee is not one) · Approved (checks pending or unknown) · Ready to merge. Their
 PR: Draft · To review · Review ready · Waiting on the author · New commits · review
 again · Reviewed · Kept private · Ready to merge.

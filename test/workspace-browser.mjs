@@ -120,7 +120,7 @@ window.fetch = async (url, options = {}) => {
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/request-review') {
     calls.reviewRequests.push(call.body)
     const pending = (pulls[0].reviewRequests ||= { nodes: [] })
-    for (const login of call.body.reviewers) { pending.nodes.push({ requestedReviewer: { __typename: 'User', login } }); (window.reviewRequestEvents ||= []).push({ createdAt: new Date().toISOString(), requestedReviewer: { __typename: 'User', login } }) }
+    for (const login of call.body.reviewers) { pending.nodes.push({ requestedReviewer: { __typename: 'User', login } }); pending.totalCount = pending.nodes.length; (window.reviewRequestEvents ||= []).push({ createdAt: new Date().toISOString(), requestedReviewer: { __typename: 'User', login } }) }
     return response({ state: 'requested', observed_head_sha: call.body.head_sha, repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha })
   }
   // A conversation of the app: the platform returns the PR's existing one for its scope, and takes a message into any chat the app made.
@@ -2412,15 +2412,16 @@ window.runRequestReviewChecks = async () => {
     window.fixtureAssignees = ['reconnected-owner', 'teammate', 'second-reviewer', 'new-colleague', 'a-reviewer-with-the-longest-login-1234']
     // 0. A Möbius whose platform cannot ask for the review yet offers no button: the page is as it always was, and Assign stays.
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { nodes: [] } } })
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
+    ensure(text(query('.co-next-step')).includes('Nobody asked yet') && text(query('.co-next-step')).includes('Use Request review'), 'The page still said it waits on reviewers: ' + text(query('.co-next-step')))
     ensure(![...query('.co-pr-detail-actions').querySelectorAll('button')].some(node => text(node) === 'Request review'), 'A Möbius that cannot ask for the review offered the button')
     ensure(query('.co-pr-detail-actions [aria-label="Assign"]'), 'Assign went missing on a Möbius without Request review')
-    checks.push({ name: 'a Möbius whose platform cannot ask for the review yet shows no Request review button, and Assign stays', status: 'pass' })
+    checks.push({ name: 'with nobody asked the PR says so instead of waiting on reviewers, and a Möbius whose platform cannot ask for the review yet shows no Request review button, and Assign stays', status: 'pass' })
     await captureShot('request-review-page-before')
     // 1. Nobody was asked: the button is there, and Ask for re-review has no one to name.
     window.fixtureCapabilities = { request_review_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { nodes: [] } } })
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
     const toolbar = query('.co-pr-detail-actions')
     const labels = [...toolbar.querySelectorAll('button, a')].map(node => text(node) || node.getAttribute('aria-label') || '')
@@ -2460,7 +2461,7 @@ window.runRequestReviewChecks = async () => {
     await click(button('Done'))
     // 4. The Review tab lists who was asked, newest first, one badge each; an assignee is not among them.
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, assignees: { nodes: [{ login: 'assigned-only' }] },
-      reviewRequests: { nodes: [{ requestedReviewer: { __typename: 'User', login: 'teammate' } }, { requestedReviewer: { __typename: 'User', login: 'new-colleague' } }] },
+      reviewRequests: { totalCount: 2, nodes: [{ requestedReviewer: { __typename: 'User', login: 'teammate' } }, { requestedReviewer: { __typename: 'User', login: 'new-colleague' } }] },
       reviews: { totalCount: 2, nodes: [{ state: 'COMMENTED', submittedAt: '2026-11-09T09:00:00Z', author: { login: 'teammate' } },
         { state: 'APPROVED', submittedAt: '2026-11-09T10:00:00Z', author: { login: 'second-reviewer' } }] } } })
     window.reviewRequestEvents = [
