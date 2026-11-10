@@ -330,7 +330,13 @@ test('a row reads title, facts, labels, then pills, each on its own line, in lis
 
 test('the attention bar does not sit inside a second border', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-decisions:has\(> \.co-attn:only-child\) \{ border:0; overflow:visible; \}/)
+  assert.match(css, /\.co-decisions:has\(> \.co-attn:only-child\) \{ border:0; \}/)
+})
+
+test('the decisions box does not clip, so a menu can open past its bottom edge', () => {
+  const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  const box = css.match(/\n\.co-decisions \{[^}]*\}/)?.[0] || ''
+  assert.ok(box && !/overflow/.test(box), 'The box around the prepared-PR bar clips its open-for-review menu')
 })
 
 test('a row only counts as assigning while the picker pane is actually open', () => {

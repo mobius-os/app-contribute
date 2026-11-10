@@ -29,7 +29,9 @@ contribution. This app is the dashboard for that loop:
   (the default), **Review requests** and **Agent runs** (agent jobs, agent
   reviews, agent activity and finished work) split the project by what the
   owner came to do. Saved public work the live list cannot show stays on All
-  PRs, so an unreachable GitHub never hides it behind another tab.
+  PRs, so an unreachable GitHub never hides it behind another tab. It appears
+  once the list has been read, so a PR the list is about to show never flashes
+  in there first.
 - **Task-first controls** — open a project to see its work list beside one
   contextual task, with a compact project switcher rather than another sidebar.
   The project's status says in plain words what is local ("2 files changed on

@@ -346,10 +346,13 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     void load()
     void onChanged?.()
   }, [postedKey, load, onChanged])
+  // Which PRs this list shows, for the project page's saved public work. While the first read of the open PRs is pending that is not
+  // known (null), so a saved open PR is not offered as Shared work only to move into its row a moment later.
+  const unread = conn.state === 'connected' && data.loading && !pulls.length
   useEffect(() => {
-    task?.setPublicKeys(new Set(view.inventory))
-    return () => task?.setPublicKeys(new Set())
-  }, [view.inventory, task?.setPublicKeys])
+    task?.setPublicKeys(unread ? null : new Set(view.inventory))
+    return () => task?.setPublicKeys(null)
+  }, [unread, view.inventory, task?.setPublicKeys])
   useEffect(() => {
     setFocusError(null)
     const focus = focusRef.current

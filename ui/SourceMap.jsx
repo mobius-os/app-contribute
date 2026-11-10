@@ -73,7 +73,8 @@ function ProjectDetail({
   navigation,
   sourceRevision,
 }) {
-  const [publicKeys, setPublicKeys] = useState(new Set())
+  // The open PRs the project's PR list shows; null until that list has been read.
+  const [publicKeys, setPublicKeys] = useState(null)
   const projectView = useRef(null)
   const pendingScroll = useRef(null)
   const activeId = navigation.selectedId || ''
