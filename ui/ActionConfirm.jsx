@@ -8,14 +8,14 @@ import { TickList } from './TickList.jsx'
 const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 
 // The confirm sheet for one of the owner's own actions on a PR (Open for review,
-// Merge): what it does, what GitHub shows right now, and one button. The X is
+// Merge; Request review may name several PRs in `pulls`): what it does, what GitHub shows right now, and one button. The X is
 // the only way out, so there is no Cancel; a finished action swaps it for Done.
 // `copy` is the words and the icon (see action-copy.js; `says` shows text the action will post, `disabled` keeps the button off while it is not ready); `onConfirm` runs the action and
 // returns the outcome the app's handlers already use ({ ok } | { alreadyHandled }
 // | { pending, error } | { error }). A { pending } outcome may have happened on GitHub: the sheet
 // first has the owner's view read GitHub again (`onUnconfirmed`, read-only), and its button stays
 // off for good, so another attempt can only start from that fresh read. Opened inside a ReviewDialog.
-export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed }) {
+export function ActionConfirm({ pr, pulls = null, copy, onConfirm, onClose, onDone, onUnconfirmed }) {
   const region = useRef(null)
   const titleId = useId()
   const [phase, setPhase] = useState('confirm')
@@ -48,7 +48,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
   const finished = typeof live.done === 'function' ? live.done(result) : live.done
   const selected = copy.choices?.options.find(option => option.key === picked)
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead icon={done ? 'check' : live.icon} title={done ? finished.title : live.title} titleId={titleId} pulls={[pr]} done={done}
+    <WindowHead icon={done ? 'check' : live.icon} title={done ? finished.title : live.title} titleId={titleId} pulls={pulls || [pr]} done={done}
       tools={done ? null : <CloseWindowButton disabled={working} onClick={onClose} />} />
     {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : <div className="co-rw-body">
       <ul className="co-rw-facts">{live.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.text}</span></li>)}</ul>

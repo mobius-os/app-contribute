@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, requestReviewMany, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
@@ -23,7 +23,7 @@ import { IgnoreReview } from './IgnoreReview.jsx'
 import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
 import { RunOnce } from './RunOnce.jsx'
-import { YOUR_INTENTS } from '../actions-menu.js'
+import { YOUR_INTENTS, requestReviewButton, requestReviewForMany } from '../actions-menu.js'
 import { loadPullReviewers } from '../pull-details.js'
 import { pendingReviewers } from '../reviewers.js'
 import { ACTION_COPY, approvalNote, methodToSend } from '../action-copy.js'
@@ -72,13 +72,15 @@ export function EmptyPulls({ scope, filter, query, hasNextPage, waiting = 0 }) {
 
 // GitHub-style list header: the count when nothing is selected, bulk actions
 // once something is. Selection never moves focus or interrupts browsing.
-function SelectionTray({ selection, decisions, busy, onClear, onReview, onAssign, visible, shown = visible.length, loading = false, onSelectVisible }) {
+function SelectionTray({ selection, decisions, capabilities, busy, onClear, onReview, onAssign, onRequestReview, visible, shown = visible.length, loading = false, onSelectVisible }) {
   const selected = selection.length
   const allVisible = visible.length > 0 && visible.every(pr => selection.some(item => prKey(item) === prKey(pr)))
+  const requestOffer = selected ? requestReviewForMany(decisions, selection, { capabilities }) : null
   return <div className="co-pr-box-head" role="group" aria-label="Pull request actions">
     <label className="co-pr-select"><input type="checkbox" checked={allVisible} onChange={onSelectVisible} aria-label="Select all visible pull requests" /></label>
     <strong className="co-pr-box-count">{selected ? `${selected} selected` : <><Icon name="pull" size={16} />{loading && !shown ? 'Open pull requests' : `${shown} open`}</>}</strong>
     {selected ? <div className="co-pr-box-actions">
+      {requestOffer ? <button className="co-btn" disabled={busy || selected > 20 || requestOffer.off} title={requestOffer.off ? requestOffer.reason : undefined} onClick={onRequestReview} aria-label="Request review on the selected PRs"><Icon name="plus" size={16} /><span>Request review</span></button> : null}
       <button className="co-btn" disabled={busy || selected > 20 || !selection.every(pr => mayAssign(pr.repository.viewerPermission))} onClick={onAssign} aria-label="Assign selected PRs to a person"><Icon name="person" size={16} /><span>Assign</span></button>
       <ActionsMenu variant="button" pulls={selection} decisions={decisions} disabled={selected > 20 || busy} onChoose={mode => onReview(selection, mode)} ariaLabel="Choose an action for the selected PRs" />
       <button className="co-btn co-btn-quiet co-btn-icon" aria-label="Clear selection" onClick={onClear}><Icon name="close" size={16} /></button>
@@ -219,13 +221,16 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [acting, setActing] = useState(null)
   // Request review's sheet reads, as it opens, who can be asked: the repository's people and who already was asked.
   const [candidates, setCandidates] = useState(null)
+  // The PRs a Request review over several already asked, so a retry after a partial failure skips them.
+  const askedPulls = useRef(new Set())
   useEffect(() => {
+    askedPulls.current = new Set()
     if (acting?.intent !== 'request_review') { setCandidates(null); return undefined }
     let alive = true
     async function read() {
       try {
-        const [people, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), loadPullReviewers(token, acting.pr)])
-        if (alive) setCandidates({ people, pending: pendingReviewers(asked.reviewers) })
+        const [people, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), acting.pulls ? null : loadPullReviewers(token, acting.pr)])
+        if (alive) setCandidates({ people, pending: asked ? pendingReviewers(asked.reviewers) : [] })
       } catch (error) {
         if (alive) setCandidates({ error: error.message || 'Could not load the people. Try again.' })
       }
@@ -515,6 +520,12 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   function toggle(pr) {
     setSelected(old => { const next = new Set(old); const key = prKey(pr); next.has(key) ? next.delete(key) : next.add(key); return next })
   }
+  // Request review over the PRs ticked in the list: one sheet, and each PR gets its own request.
+  function requestReviewSelection(pulls = selection) {
+    setAssigning(null)
+    const copies = pulls.map(pr => ({ ...pr, repository: { ...pr.repository } }))
+    setActing({ intent: 'request_review', pr: copies[0], pulls: copies.length > 1 ? copies : undefined })
+  }
   function assignSelection(pulls = selection, anchor = '') {
     setChoice(null)
     setAssigning(Object.assign(pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), { anchor }))
@@ -600,7 +611,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice) }),
     back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft'),
     close: ({ pr }) => pullAction(token, appId, pr, 'close'),
-    request_review: ({ pr, people }) => pullAction(token, appId, pr, 'request-review', { reviewers: people }),
+    request_review: ({ pr, pulls, people }) => pulls
+      ? requestReviewMany(token, appId, pulls, people, { approvedBy: item => standingOf(item).approvedBy, done: askedPulls.current })
+      : pullAction(token, appId, pr, 'request-review', { reviewers: people }),
     ask_rereview: ({ pr, people }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: people }),
     // The note is built from the same ticked people the sheet showed it for, so it is posted exactly as it was read.
     ask_approval: ({ pr, people }) => pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, standingOf(pr).askable.filter(item => people.includes(item.by))) }),
@@ -609,7 +622,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates })} onConfirm={({ choice, people }) => actionHandlers[acting.intent]({ ...acting, choice, people })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls })} onConfirm={({ choice, people }) => actionHandlers[acting.intent]({ ...acting, choice, people })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)
@@ -668,7 +681,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
     {loadError}
     <div className={'co-pr-box' + (selection.length ? ' has-selection' : '')}>
-    <SelectionTray selection={selection} decisions={selection.map(standingOf)} visible={selectableVisible} shown={data.hasNextPage ? data.total || visible.length : visible.length} loading={data.loading} busy={busy} onClear={() => setSelected(new Set())} onSelectVisible={() => setSelected(old => { const next = new Set(old); const all = selectableVisible.every(pr => next.has(prKey(pr))); selectableVisible.forEach(pr => all ? next.delete(prKey(pr)) : next.add(prKey(pr))); return next })} onReview={choose} onAssign={() => assignSelection()} />
+    <SelectionTray selection={selection} decisions={selection.map(standingOf)} capabilities={capabilities} onRequestReview={() => requestReviewSelection(selection)} visible={selectableVisible} shown={data.hasNextPage ? data.total || visible.length : visible.length} loading={data.loading} busy={busy} onClear={() => setSelected(new Set())} onSelectVisible={() => setSelected(old => { const next = new Set(old); const all = selectableVisible.every(pr => next.has(prKey(pr))); selectableVisible.forEach(pr => all ? next.delete(prKey(pr)) : next.add(prKey(pr))); return next })} onReview={choose} onAssign={() => assignSelection()} />
     {!assignAnchor ? assignPane : null}
     {relevantRuns.filter(run => !visibleKeys.has(runAnchor(run))).map(runPane)}
     {data.loading && !pulls.length ? <div className="co-pr-skel" role="status" aria-label="Loading pull requests">{[3, 2, 3].map((lines, index) => <Skeleton key={index} lines={lines} label="" />)}</div> : null}
@@ -681,6 +694,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       const assignees = pr.assignees?.nodes || []
       const comments = conversationCount(pr)
       const open = isOpenPull(pr)
+      const requestOffer = open ? requestReviewButton(standing, { capabilities }) : null
       return <ReviewFrame key={key} state={review.frame} inset={4} radius={10}><article className={'co-pr-row' + (selected.has(key) ? ' is-selected' : '') + (focusKey === key ? ' is-highlighted' : '') + (assignAnchor === key && task?.activeId === 'task:assign' ? ' is-assigning' : '')} data-pr={key}>
         <label className="co-pr-select"><input type="checkbox" checked={open && selected.has(key)} disabled={!open} onChange={() => toggle(pr)} aria-label={`Select ${pr.repository.nameWithOwner} #${pr.number}`} /></label>
         <PullStateIcon pr={pr} />
@@ -707,7 +721,12 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
         </div>
         <div className="co-pr-aside">
           {comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={16} />{comments}</span> : null}
-          {open && mayAssign(pr.repository.viewerPermission)
+          {open && requestOffer && !requestOffer.off
+            ? <>
+              {assignees.length ? <span className="co-gh-avatars" title={`Assigned to ${assignees.map(user => user.login).join(', ')}`}>{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : null}
+              <button className="co-btn co-btn-quiet co-pr-assign co-pr-request is-quiet" onClick={() => requestReviewSelection([pr])} aria-label={`Request review on PR ${pr.number}`}><Icon name="plus" size={15} /><span>Request review</span></button>
+            </>
+            : open && mayAssign(pr.repository.viewerPermission)
             ? <button className={'co-btn co-btn-quiet co-pr-assign' + (assignees.length ? '' : ' is-quiet')} onClick={() => assignSelection([pr], key)} aria-label={assignees.length ? `Assigned to ${assignees.map(user => user.login).join(', ')}. Change assignment for PR ${pr.number}` : `Assign PR ${pr.number}`} title={assignees.length ? assignees.map(user => user.login).join(', ') : undefined}>{assignees.length ? <span className="co-gh-avatars">{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : <><Icon name="person" size={15} /><span>Assign</span></>}</button>
             : assignees.length ? <span className="co-gh-avatars" title={assignees.map(user => user.login).join(', ')}>{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : null}
           {open ? <ActionsMenu pulls={[pr]} decisions={[standing]} record={recordsForPull(records, pr)[0]} capabilities={capabilities} disabled={busy} onChoose={mode => choose([pr], mode, key)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}

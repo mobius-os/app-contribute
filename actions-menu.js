@@ -46,6 +46,18 @@ export function requestReviewButton(decision, { capabilities } = {}) {
   return action && capabilities?.[OWN_BUTTON.request_review] === true ? { off: !action.enabled, reason: action.reason } : null
 }
 
+// The same for a selection of PRs (the tray beside Assign): every PR must be your own and able to ask, and in one repository,
+// because one list of people is offered for all of them.
+export function requestReviewForMany(decisions, pulls, { capabilities } = {}) {
+  const offers = decisions.map(decision => requestReviewButton(decision, { capabilities }))
+  if (capabilities?.[OWN_BUTTON.request_review] !== true) return null
+  if (offers.some(offer => !offer)) return { off: true, reason: 'Only your own PRs can ask for a review.' }
+  const stopped = offers.find(offer => offer.off)
+  if (stopped) return stopped
+  const repos = new Set(pulls.map(pr => pr.repository?.nameWithOwner?.toLowerCase()))
+  return repos.size > 1 ? { off: true, reason: 'Choose PRs of one repository.' } : { off: false, reason: '' }
+}
+
 function yourItems(decision, { record, capabilities }) {
   return decision.actions.filter(action => mayRunYourAction(action.id, { record, capabilities }))
     .map(action => asItem(action, YOUR_MENU[action.id]))

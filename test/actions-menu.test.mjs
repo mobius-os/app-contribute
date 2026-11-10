@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader, requestReviewButton } from '../actions-menu.js'
+import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader, requestReviewButton, requestReviewForMany } from '../actions-menu.js'
 import { standingFor } from '../pr-standing.js'
 
 const HEAD = 'b'.repeat(40)
@@ -120,4 +120,17 @@ test('Request review is offered on your own PR even before anyone reviewed, dimm
   const closed = requestReviewButton(standingFor({ pr: mine({ state: 'CLOSED' }), login: 'alex' }), { capabilities: caps })
   assert.deepEqual(closed, { off: true, reason: 'This PR is no longer open.' })
   assert.equal(requestReviewButton(standingFor({ pr: pull(), login: 'alex' }), { capabilities: caps }), null, 'only the author asks')
+})
+
+test('Request review over a selection needs every PR to be your own and open, in one repository, and the capability', () => {
+  const caps = { ...ALL, request_review_now: true }
+  const decisionOf = pr => standingFor({ pr, login: 'alex' })
+  const a = mine({ number: 1 }), b = mine({ number: 2 }), theirs = pull({ number: 3 })
+  assert.deepEqual(requestReviewForMany([a, b].map(decisionOf), [a, b], { capabilities: caps }), { off: false, reason: '' })
+  assert.equal(requestReviewForMany([a, b].map(decisionOf), [a, b], { capabilities: ALL }), null, 'a Möbius that cannot ask offers nothing')
+  assert.deepEqual(requestReviewForMany([a, theirs].map(decisionOf), [a, theirs], { capabilities: caps }), { off: true, reason: 'Only your own PRs can ask for a review.' })
+  const closed = mine({ number: 4, state: 'CLOSED' })
+  assert.deepEqual(requestReviewForMany([a, closed].map(decisionOf), [a, closed], { capabilities: caps }), { off: true, reason: 'This PR is no longer open.' })
+  const elsewhere = mine({ number: 5, repository: { nameWithOwner: 'o/other', viewerPermission: 'WRITE' } })
+  assert.deepEqual(requestReviewForMany([a, elsewhere].map(decisionOf), [a, elsewhere], { capabilities: caps }), { off: true, reason: 'Choose PRs of one repository.' })
 })

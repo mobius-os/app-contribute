@@ -119,7 +119,7 @@ window.fetch = async (url, options = {}) => {
   // The platform's GitHub review request to anyone the owner picks: the one public write of the Request review sheet. GitHub then lists them as pending.
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/request-review') {
     calls.reviewRequests.push(call.body)
-    const pending = (pulls[0].reviewRequests ||= { nodes: [] })
+    const pending = ((pulls.find(item => item.number === call.body.number) || pulls[0]).reviewRequests ||= { nodes: [] })
     for (const login of call.body.reviewers) { pending.nodes.push({ requestedReviewer: { __typename: 'User', login } }); pending.totalCount = pending.nodes.length; (window.reviewRequestEvents ||= []).push({ createdAt: new Date().toISOString(), requestedReviewer: { __typename: 'User', login } }) }
     return response({ state: 'requested', observed_head_sha: call.body.head_sha, repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha })
   }
@@ -2499,6 +2499,95 @@ window.runRequestReviewChecks = async () => {
   }
 }
 
+// The PR list of your own project: where Assign was, your own PRs offer Request review (Assign stays on PRs that are not yours), and
+// ticked PRs get one Request review in the tray, each with its own request.
+window.runRequestReviewListChecks = async () => {
+  const checks = []
+  const button = (label, scope = document) => [...scope.querySelectorAll('button')].find(node => text(node) === label)
+  const sideways = () => document.documentElement.scrollWidth <= window.innerWidth
+  const row = number => query('.co-pr-row[data-pr="owner/project#' + number + '"]')
+  const sheet = () => text(query('.co-review-window'))
+  // The side menu on a wide screen; on a phone the Projects chip opens the directory.
+  const openProject = async () => {
+    if (getComputedStyle(query('.co-rail')).display !== 'none') {
+      await until(() => query('.co-rail-item.is-project'), 'The project was not in the side menu')
+      await click(query('.co-rail-item.is-project'))
+    } else {
+      await click(query('.co-desk-chips-projects'))
+      await until(() => query('.co-source-row'), 'The project directory did not open')
+      await click(query('.co-source-row'))
+    }
+  }
+  const tick = async name => click([...document.querySelectorAll('.co-review-window input[type=checkbox]')].find(box => box.closest('label').textContent.includes(name)))
+  const facts = { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] } }
+  try {
+    reviewRuns.length = 0
+    respondChats.length = 0
+    calls.reviewRequests.length = 0
+    window.fixtureAssignees = ['reconnected-owner', 'teammate', 'second-reviewer', 'new-colleague']
+    window.fixtureCapabilities = { request_review_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
+    Object.assign(pulls[1], facts, { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } })
+    // A third PR that is someone else's: it keeps Assign, and no selection that includes it can ask.
+    pulls.push(pull(9, { ...facts, author: { login: 'someone-else' }, reviewRequests: { totalCount: 0, nodes: [] } }))
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
+    await until(() => query('.co-rail'), 'The Desk did not render')
+    await openProject()
+    await until(() => document.querySelectorAll('.co-pr-row').length === 3, 'The PR list did not show all three PRs: ' + text(query('main')).slice(0, 400))
+    // 1. Where Assign was, your own PRs offer Request review; the assignee of #8 stays visible beside it.
+    ensure(row(7).querySelector('[aria-label="Request review on PR 7"]') && !row(7).querySelector('[aria-label="Assign PR 7"]'), 'PR 7 offered: ' + [...row(7).querySelectorAll('.co-pr-aside button')].map(node => node.getAttribute('aria-label')).join(' | '))
+    ensure(row(8).querySelector('[aria-label="Request review on PR 8"]') && row(8).querySelector('.co-pr-aside .co-gh-avatars'), 'PR 8 lost its request button or its assignee')
+    ensure(sideways(), 'The list scrolls sideways')
+    checks.push({ name: 'your own PRs offer Request review where Assign was, and an assignee stays visible', status: 'pass' })
+    await captureShot('request-review-list')
+    // 2. One row: the sheet asks about that PR alone and sends one request.
+    await click(row(7).querySelector('[aria-label="Request review on PR 7"]'))
+    await until(() => query('.co-review-window input[type=checkbox]'), 'The row sheet did not list people: ' + sheet())
+    ensure(sheet().includes('Ask people to review #7?'), 'The row sheet said: ' + sheet())
+    await tick('teammate')
+    await click(button('Request review', query('.co-review-window')))
+    await until(() => calls.reviewRequests.length === 1, 'Nothing was sent for the row')
+    ensure(calls.reviewRequests[0].number === 7 && calls.reviewRequests[0].reviewers.join() === 'teammate', 'The row request was ' + JSON.stringify(calls.reviewRequests[0]))
+    await until(() => sheet().includes('Review requested'), 'The row sheet did not say it was done: ' + sheet())
+    await click(button('Done', query('.co-review-window')))
+    checks.push({ name: 'the row button asks for one PR and sends exactly one request', status: 'pass' })
+    // 3. Two PRs ticked: one Request review in the tray, each PR gets its own request.
+    await click(row(7).querySelector('input[type=checkbox]')); await click(row(8).querySelector('input[type=checkbox]'))
+    await until(() => button('Request review', query('.co-pr-box-head')), 'The tray offered no Request review')
+    ensure(!button('Request review', query('.co-pr-box-head')).disabled && button('Assign', query('.co-pr-box-head')), 'The tray buttons were wrong')
+    await captureShot('request-review-list-selected')
+    await click(button('Request review', query('.co-pr-box-head')))
+    await until(() => query('.co-review-window input[type=checkbox]'), 'The tray sheet did not list people')
+    ensure(sheet().includes('Ask people to review 2 PRs?') && sheet().includes('#7') && sheet().includes('#8'), 'The tray sheet said: ' + sheet())
+    const box = query('.co-review-window').getBoundingClientRect()
+    ensure(box.left >= 0 && box.right <= window.innerWidth && sideways(), 'The tray sheet ran off the screen')
+    await tick('new-colleague')
+    await captureShot('request-review-list-sheet')
+    await click(button('Request review', query('.co-review-window')))
+    await until(() => calls.reviewRequests.length === 3, 'The two requests were not sent: ' + calls.reviewRequests.length)
+    ensure(calls.reviewRequests.slice(1).map(item => item.number + ':' + item.reviewers.join()).join(' ') === '7:new-colleague 8:new-colleague', 'The requests were ' + JSON.stringify(calls.reviewRequests.slice(1)))
+    await until(() => sheet().includes('Review requested') && sheet().includes('2 PRs'), 'The tray sheet did not say it was done: ' + sheet())
+    await click(button('Done', query('.co-review-window')))
+    checks.push({ name: 'with two PRs ticked the tray asks once and each PR gets its own request', status: 'pass' })
+    // 4. A PR that is not yours keeps Assign, and a selection that includes it cannot ask.
+    ensure(row(7).querySelector('[aria-label="Request review on PR 7"]'), 'Your PR lost its button')
+    ensure(!row(9).querySelector('[aria-label^="Request review"]') && row(9).querySelector('[aria-label="Assign PR 9"]'), 'PR 9 offered: ' + [...row(9).querySelectorAll('.co-pr-aside button')].map(node => node.getAttribute('aria-label')).join(' | '))
+    await click(row(7).querySelector('input[type=checkbox]')); await click(row(9).querySelector('input[type=checkbox]'))
+    await until(() => button('Request review', query('.co-pr-box-head')), 'The tray offered no Request review for a mixed selection')
+    const mixed = button('Request review', query('.co-pr-box-head'))
+    ensure(mixed.disabled && mixed.title === 'Only your own PRs can ask for a review.', 'A mixed selection could ask: ' + mixed.disabled + ' / ' + mixed.title)
+    checks.push({ name: 'a PR that is not yours keeps Assign, and a selection that includes it cannot ask', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    delete window.fixtureAssignees
+    pulls.length = 2
+    Object.assign(pulls[1], { author: { login: 'owner' } })
+    window.fixtureCapabilities = undefined
+  }
+}
+
 // The whole app on a fresh page: a review the owner submits answers its request on
 // GitHub, so the Desk row leaves Review requests when the verdict posts, not at the
 // next Sync. Reads after that (the frame shown again, the hub's probe) keep it honest.
@@ -2835,7 +2924,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRequestReviewChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks']
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }].filter(size => !process.env.WORKSPACE_BROWSER_VIEWPORT || size.name === process.env.WORKSPACE_BROWSER_VIEWPORT)
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
       const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' })

@@ -134,7 +134,7 @@ fixed run brief and mandatory instructions.
 Every control says what it does for someone who has never used Contribute:
 "Make PRs from my edits" rather than "Prepare changes", **Sync with GitHub** with
 its last time written beside it rather than a silent refresh icon, "Mark ready for review" for
-an own draft, and labelled **Assign** and **Actions ▾** buttons on PR rows. An
+an own draft, and labelled **Request review** (on your own PRs; **Assign** on the others) and **Actions ▾** buttons on PR rows. An
 action shows feedback when used. Sync with GitHub asks GitHub read-only whether a
 repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
@@ -293,7 +293,7 @@ asks nobody for a review, so its person icon stays Assign's alone. Ask for re-re
 for people who reviewed before, and stays in the Actions menu. The Review tab lists *Requested reviewers*, one
 row each: who was asked, when ("Requested again" after an earlier review of theirs), and one current badge
 (Waiting, Waiting for another review, Approved, Changes requested, Commented, Dismissed). An assignee is never
-listed there.
+listed there. On the PR list the Request review button sits where Assign was on your own PRs (an assignee stays visible beside it), and ticking several PRs adds Request review to the tray: one sheet, one list of people, and each PR gets its own request that leaves out its author and whoever approved that version. A PR that fails says why; the others are still asked, and a retry asks only the PR that is left.
 
 **Who acts.** Pushing code, merging and changing a PR's status (ready, draft, closed)
 always wait for your own tap. A review verdict waits for your tap ("Draft for me"),

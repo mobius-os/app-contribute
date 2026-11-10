@@ -180,38 +180,42 @@ function askSheet(standing, meantFor, build) {
   return { ...build(ticked), people, forPicked: logins => build(pick(logins)) }
 }
 
-// Who Request review may offer: the repository's people, except the PR's author, a bot, anyone who already approved this
-// version and anyone whose request is still pending (they are named on the sheet instead).
-export function reviewCandidates(pr, standing, { people = [], pending = [] } = {}) {
-  const left = [pr?.author?.login, ...(standing?.approvedBy || []), ...pending]
+// Who Request review may offer: the repository's people, except the author of the PR(s), a bot, anyone who already approved
+// this version and anyone whose request is still pending (they are named on the sheet instead). Over several PRs only the
+// authors are left out here: who approved or is pending differs per PR, and each PR's own request leaves them out.
+export function reviewCandidates(pulls, standing, { people = [], pending = [] } = {}) {
+  const left = [...pulls.map(pr => pr?.author?.login), ...(standing?.approvedBy || []), ...pending]
   return people.filter(login => !login.endsWith('[bot]') && !left.some(other => sameLogin(other, login)))
 }
 
-// Request review: GitHub's usual review request to whoever you tick, whether or not they have reviewed before. A person who
-// did is shown with what is true of them. `candidates` is what the sheet read when it opened: { loading } | { error } |
-// { people, pending }. Assign is a different thing and the footnote says so: it makes nobody an assignee.
-export function requestReviewCopy(pr, { standing = null, candidates = null } = {}) {
+// Request review: GitHub's usual review request to whoever you tick, on one PR or on each of several, whether or not they
+// have reviewed before. A person who did is shown with what is true of them (one PR only). `candidates` is what the sheet
+// read when it opened: { loading } | { error } | { people, pending }. Assign is a different thing and the footnote says so.
+export function requestReviewCopy(pr, { standing = null, candidates = null, pulls = null } = {}) {
+  const many = pulls?.length > 1
+  const count = many ? pulls.length : 1
+  const where = many ? `${count} PRs` : `#${pr.number}`
   const loaded = !!candidates && !candidates.loading && !candidates.error
-  const options = loaded ? reviewCandidates(pr, standing, candidates).map(login => {
-    const before = (standing?.askable || []).find(item => sameLogin(item.by, login))
+  const options = loaded ? reviewCandidates(many ? pulls : [pr], many ? null : standing, candidates).map(login => {
+    const before = many ? null : (standing?.askable || []).find(item => sameLogin(item.by, login))
     return { key: login, label: login, detail: before ? WHY[before.reason].detail(before) : '', ticked: false }
   }) : []
   const build = picked => {
     const who = names(picked)
     return {
-      icon: 'plus', title: `Ask ${picked.length ? who : 'people'} to review #${pr.number}?`, confirm: NAMES.requestReview, working: 'Asking…',
+      icon: 'plus', title: `Ask ${picked.length ? who : 'people'} to review ${where}?`, confirm: NAMES.requestReview, working: 'Asking…',
       facts: [
         ...(candidates?.error ? [{ tone: 'bad', text: candidates.error }] : !loaded ? [{ tone: 'warn', text: 'Loading people…' }]
           : !options.length ? [{ tone: 'bad', text: 'Nobody else can be asked' }]
-            : [picked.length ? { tone: 'ok', text: `GitHub asks ${who} to review` } : { tone: 'bad', text: 'Pick at least one person' }]),
+            : [picked.length ? { tone: 'ok', text: `GitHub asks ${who} to review${many ? ` each of the ${count} PRs` : ''}` } : { tone: 'bad', text: 'Pick at least one person' }]),
         ...(loaded && candidates.pending?.length ? [{ tone: 'ok', text: `Already asked: ${names(candidates.pending)}` }] : []),
       ],
-      footnote: 'They get GitHub’s usual review request. It does not assign the PR to them, and nothing is posted in the conversation.',
+      footnote: `They get GitHub’s usual review request${many ? ' on each PR' : ''}. It does not assign ${many ? 'the PRs' : 'the PR'} to them, and nothing is posted in the conversation.`,
       disabled: !picked.length,
-      done: () => ({ title: 'Review requested', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to review it.` }),
+      done: outcome => ({ title: 'Review requested', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to review ${many ? where : 'it'}.${outcome?.skipped?.length ? ` Skipped ${outcome.skipped.map(number => '#' + number).join(', ')}: everyone you picked already approved ${outcome.skipped.length === 1 ? 'it' : 'them'}.` : ''}` }),
     }
   }
-  return { ...build([]), people: { label: 'Who should review it?', options }, forPicked: logins => build(options.map(option => option.key).filter(key => logins.includes(key))) }
+  return { ...build([]), people: { label: 'Who should review ' + (many ? 'them' : 'it') + '?', options }, forPicked: logins => build(options.map(option => option.key).filter(key => logins.includes(key))) }
 }
 
 // Ask for re-review: whoever you tick is asked to look again, with GitHub's usual review request.

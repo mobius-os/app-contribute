@@ -460,7 +460,7 @@ const readSheet = (extra = {}, from = { people, pending: ['sam'] }) => requestRe
 test('Request review offers everyone but the author, a bot, who approved this version and who is already asked', () => {
   const copy = readSheet()
   assert.deepEqual(copy.people.options.map(option => option.key), ['Bob', 'new-person', 'ReviewerOne'])
-  assert.deepEqual(reviewCandidates(pr({ author: { login: 'ALEX' } }), { approvedBy: ['kim'] }, { people, pending: ['SAM'] }), ['Bob', 'new-person', 'ReviewerOne'], 'whatever the case of a login')
+  assert.deepEqual(reviewCandidates([pr({ author: { login: 'ALEX' } })], { approvedBy: ['kim'] }, { people, pending: ['SAM'] }), ['Bob', 'new-person', 'ReviewerOne'], 'whatever the case of a login')
   assert.ok(copy.facts.some(fact => fact.text === 'Already asked: sam'), 'a pending request is named, not offered again')
   assert.ok(copy.people.options.every(option => option.ticked === false), 'nobody is ticked for you')
 })
@@ -529,4 +529,35 @@ test('Request review goes to its own platform route with who is asked, and reads
     globalThis.fetch = reply(409, { detail: 'The author of a pull request cannot be asked to review it.' })
     assert.deepEqual(await pullAction('t', 10, pr(), 'request-review', { reviewers: ['alex'] }), { error: 'The author of a pull request cannot be asked to review it.' })
   } finally { globalThis.fetch = previous }
+})
+
+test('Request review over several PRs words the sheet for all of them and offers everyone but their authors', () => {
+  const pulls = [pr({ number: 1, author: { login: 'alex' } }), pr({ number: 2, author: { login: 'alex' } }), pr({ number: 3, author: { login: 'alex' } })]
+  const copy = requestReviewCopy(pulls[0], { standing: { ...standing, approvedBy: ['Kim'] }, candidates: { people, pending: [] }, pulls })
+  assert.equal(copy.title, 'Ask people to review 3 PRs?')
+  assert.deepEqual(copy.people.options.map(option => option.key), ['Bob', 'Kim', 'sam', 'new-person', 'ReviewerOne'], 'approvers and the pending differ per PR, so each PR leaves them out itself')
+  assert.ok(copy.people.options.every(option => option.detail === ''), 'what is true of a reviewer is per PR, so not shown')
+  assert.equal(copy.people.label, 'Who should review them?')
+  const picked = copy.forPicked(['sam', 'Kim'])
+  assert.equal(picked.title, 'Ask Kim, sam to review 3 PRs?')
+  assert.equal(picked.facts[0].text, 'GitHub asks Kim, sam to review each of the 3 PRs')
+  assert.match(picked.footnote, /on each PR\. It does not assign the PRs to them/)
+  assert.deepEqual(picked.done({ skipped: [2] }), { title: 'Review requested', text: 'Kim, sam are asked to review 3 PRs. Skipped #2: everyone you picked already approved it.' })
+  assert.equal(requestReviewCopy(pulls[0], { candidates: { people }, pulls: [pulls[0]] }).title, 'Ask people to review #1?', 'one PR in a list reads as one PR')
+})
+
+test('the Request review window over several PRs lists them all', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR')
+  const { render } = await renderModule(`
+    import React from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { ActionConfirm } from './ui/ActionConfirm.jsx'
+    export const render = props => renderToStaticMarkup(React.createElement(ActionConfirm, props))
+  `)
+  const pulls = [pr({ number: 1, title: 'First' }), pr({ number: 2, title: 'Second' })]
+  const html = render({ pr: pulls[0], pulls, copy: requestReviewCopy(pulls[0], { candidates: { people }, pulls }), onConfirm: () => {}, onClose: () => {} })
+  assert.match(html, /<strong>2 PRs<\/strong>/)
+  assert.match(html, /<strong>#1<\/strong> First/)
+  assert.match(html, /<strong>#2<\/strong> Second/)
+  assert.match(html, /Ask people to review 2 PRs\?/)
 })

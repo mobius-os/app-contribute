@@ -2,6 +2,7 @@
 // review journey; a repository role never becomes an automatic merge grant.
 import { PR_FIELDS, fetchLiveStates } from './api.js'
 import { mayWrite } from './pr-machine.js'
+import { sameLogin } from './domain.js'
 
 export { PR_FIELDS } from './api.js'
 export const mayAssign = permission => ['TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN'].includes(permission)
@@ -351,6 +352,23 @@ export const pullAction = (token, appId, pr, action, extra = {}) => {
     code: write.code, words: write.words,
     receipt: result => result?.state === write.state && typeof result.observed_head_sha === 'string' ? { state: write.state, observedHead: result.observed_head_sha } : null,
   })
+}
+
+// Request review for several PRs at once: one request per PR, naming the ticked people who may be asked there (not its
+// author, not who approved this version). A PR asked on an earlier try (`done`, which this fills) is skipped, so a retry
+// after a partial failure asks nobody twice. { ok } when every PR is asked or has nobody left to ask, { pending } when GitHub
+// may have taken a request (read it back, never repeat), otherwise { error } naming the PRs that were refused.
+export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set() } = {}) {
+  const asked = [], skipped = [], refused = [], unsure = []
+  for (const pr of pulls.filter(item => !done.has(prKey(item)))) {
+    const askable = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
+    if (!askable.length) { skipped.push(pr.number); done.add(prKey(pr)); continue }
+    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: askable })
+    if (outcome.ok) { asked.push(pr.number); done.add(prKey(pr)) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
+  }
+  if (unsure.length) return { pending: true, error: `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.` }
+  if (refused.length) return { error: `Not asked: ${refused.join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
+  return { ok: true, state: 'requested', asked, skipped }
 }
 
 // Everyone a PR's repository lets work on it: the list Assign shows, read to its end (a few pages at most), which is also
