@@ -283,6 +283,10 @@ export const WORKSPACE_CSS = `
 .co-status-sub { color:var(--muted); font-size:var(--co-text-meta); }
 .co-status-actions { flex:0 0 auto; display:flex; gap:8px; }
 .co-status-actions .co-btn { gap:8px; padding:0 12px; }
+.co-prepared-tab > .co-inventory-note { margin:4px 0 12px; }
+.co-prepared-tab .co-run-list { border:1px solid var(--border); border-radius:var(--co-radius-panel); overflow:hidden; }
+.co-prepared-tab .co-run-quiet-row + .co-run-quiet-row { border-top:1px solid var(--border); }
+.co-prepared-back { margin:0 0 12px; }
 .co-workspace .co-pr-assignment { padding:0; background:none; border:0; border-radius:0; }
 .co-workspace .co-run { margin-top:0; }
 .co-workspace .co-public-work { margin-top:0; }
@@ -730,7 +734,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
  .co-rw-seen-card { transition:none; }
  input[type=checkbox].co-switch,input[type=checkbox].co-switch::after,.co-agent-menu-button > .co-icon:last-child { transition:none; }
 }
-/* Project tabs: one tab per job under the status card and Needs you. */
+/* Project tabs: one tab per job under the project controls. */
 .co-project-tabs { display:flex; gap:4px; margin:20px 0 0; border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; }
 .co-project-tabs::-webkit-scrollbar { display:none; }
 .co-project-tab { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:48px; padding:12px 14px; border:0; background:none; color:var(--muted); font:500 var(--co-text-body) var(--font); white-space:nowrap; cursor:pointer; }

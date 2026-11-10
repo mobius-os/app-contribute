@@ -40,6 +40,7 @@ import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { ReviewPlan } from './ui/ContributionCard.jsx'
@@ -401,6 +402,8 @@ function Fixture() {
       renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
+        edits={project.localFiles ? <ProjectEdits key={refreshKey} project={project} run={runFor(project)} loadProjectDiff={loadProjectDiff} onRefresh={retryAll} /> : null}
+        editsCount={project.localFiles || null}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={view => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project} scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal}
@@ -552,7 +555,7 @@ window.runWorkspaceChecks = async () => {
     const inventoryNavigationDepth = navigation.length
     await check('project tabs lead with All PRs, whose filter chips offer each view and change totals stay visible', async () => {
       const tabs=[...document.querySelectorAll('[role=tab]')].map(node => text(node).replace(/\d+$/, ''))
-      ensure(tabs.join('|')==='All PRs|Review requests|Agent runs','Project tabs drifted: '+tabs.join('|'))
+      ensure(tabs.join('|')==='All PRs|Prepared PRs|Review requests|Agent runs|Local changes1 file','Project tabs drifted: '+tabs.join('|'))
       ensure([...document.querySelectorAll('[role=tab]')][0].getAttribute('aria-selected')==='true','All PRs is not the default tab')
       const chips=[...query('.co-pr-filters').querySelectorAll('button')].map(node => text(node).replace(/\d+$/, '').trim())
       ensure(chips.join('|')==='All|Opened by me|Drafts|Failing checks|Bots|Unassigned|Assigned to me','PR filter choices drifted: '+chips.join('|'))
@@ -840,16 +843,20 @@ window.runWorkspaceChecks = async () => {
       await closeReview(); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
-      await inventory(); await click(button(opens))
+      await inventory(); await openTab('Prepared PRs')
+      await click(query('.co-prepared-tab .co-run-quiet-row'))
+      await until(() => button(opens), 'Prepared PR details did not offer publication')
+      await click(button(opens))
       await until(() => button(sends),'Publication confirmation missing')
       ensure(calls.publications.length===0,'Opening publication sent work')
       await click(button(sends))
-      await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
+      await until(() => button('Done') && text(query('.co-run-approval')).includes('Sent to GitHub'),'Publication outcome missing')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
-      ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
-      await until(() => button('Done') && text(query('.co-task-content')).includes('Sent to GitHub'),'Publication outcome missing')
       ensure(!button(sends) && !button(opens),'Settled publication remained actionable')
       await click(button('Done'))
+      await openTab('All PRs')
+      await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
+      originalList = query('.co-pr-list')
       ensure(query('input[aria-label="Select owner/project #9"]').getClientRects().length,'Published PR not selectable')
     })
     await check('dismissed work is discoverable without a link and only explicit Restore changes its local state', async () => {
@@ -869,7 +876,8 @@ window.runWorkspaceChecks = async () => {
       await until(()=>calls.restores.length===1 && !query('.co-run-fold.is-recent'),'Restore did not move exact record out of history')
       ensure(calls.restores[0]==='fixture-dismissed' && calls.publications.length===publications && mutationRequests().length===before,'Restore published work or restored another record')
       await inventory()
-      ensure(button(opens),'Restored record did not return to private preparation')
+      await openTab('Prepared PRs')
+      ensure(query('.co-prepared-tab .co-run-quiet-row'),'Restored record did not return to private preparation')
       await backToPrs()
     })
     await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
@@ -901,19 +909,18 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length
       ensure(calls.diffs.length===0,'Local source diff loaded before inspection')
       window.holdDiff=true; window.diffMode='error'
-      const local=()=>button('See the files')
+      const local=()=>button('Open Local changes')
       await click(local())
       await until(()=>window.releaseDiff && query('.co-project-diff-loading'),'Comparison loader missing')
       window.holdDiff=false; window.releaseDiff(); window.releaseDiff=null
       await until(()=>button('Could not load diffs · try again'),'Comparison error missing')
       window.diffMode='empty'; await click(button('Could not load diffs · try again'))
       await until(()=>text(query('.co-project-diff-empty')).includes('No changed files'),'Empty comparison missing')
-      await inventory(); window.diffMode='stale'; await click(local())
+      await backToPrs(); window.diffMode='stale'; await click(local())
       await until(()=>button('Project changed · check again'),'Stale comparison not distinguished')
       window.diffMode='ready'; await click(button('Project changed · check again'))
       await until(()=>text(query('.diff-view')).includes('local improvement'),'Fresh comparison did not recover')
-      await click(query('.co-position-details summary'))
-      ensure(text(query('.co-position-details')).includes('aaaaaaa') && text(query('.co-position-details')).includes('bbbbbbb'),'Compared versions missing')
+      ensure(query('[role="tab"][aria-selected="true"]')?.dataset.tab === 'edits', 'The file shortcut did not open Local changes')
       ensure(calls.diffs.every(call=>call.key==='app:fixture' && call.head===HEAD && call.base===BASE),'Comparison drifted to another source')
       ensure(mutationRequests().length===before && calls.starts.length===0,'Read-only comparison started work')
       await inventory()

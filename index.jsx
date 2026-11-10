@@ -1745,17 +1745,19 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     document.addEventListener('pointerdown', pointer, true)
     return () => { document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', pointer, true) }
   }, [])
-  // What the last Refresh found, shown under the page title.
+  // The first successful load and later explicit refreshes share one header history.
   const [refreshNote, setRefreshNote] = useState(null)
   async function refreshAll() {
     if (refreshingAll) return undefined
     setRefreshingAll(true)
     try {
       const outcome = await refreshEverything()
-      setRefreshNote({ outcome, at: new Date().toISOString() })
+      setRefreshNote(old => outcome?.ok && outcome?.upstream?.ok !== false
+        ? { at: new Date().toISOString(), failed: false }
+        : { at: old?.at || null, failed: true })
       return outcome
     } catch {
-      setRefreshNote({ outcome: null, at: new Date().toISOString() })
+      setRefreshNote(old => ({ at: old?.at || null, failed: true }))
       return null
     } finally { setRefreshingAll(false) }
   }
@@ -1766,7 +1768,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // later manual refresh never drops the app back to the opening screen.
   const [booted, setBooted] = useState(false)
   const bootReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady
-  useEffect(() => { if (bootReady) setBooted(true) }, [bootReady])
+  useEffect(() => {
+    if (!bootReady || booted) return
+    setBooted(true)
+    if (conn.state === 'connected') setRefreshNote(old => old || (sourceError ? { at: null, failed: true } : { at: new Date().toISOString(), failed: false }))
+  }, [bootReady, booted, conn.state, sourceError])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
@@ -1858,11 +1864,12 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       <style>{CSS}</style>
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
-          <SyncNote note={refreshNote} />
           <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label="Sync with GitHub">
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-label-long">{refreshingAll ? 'Syncing…' : 'Sync with GitHub'}</span>
-            <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? 'Syncing…' : 'Sync with GitHub'}</span>
+              <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+              <SyncNote note={refreshNote} />
+            </span>
           </button>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
@@ -1878,7 +1885,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus} desk={desk}
           onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}
-          onRetry={refreshAll} checks={upstreamChecks} attention={projectAttention} loadProjectDiff={loadProjectDiff}
+          onRetry={refreshAll} checks={upstreamChecks} attention={projectAttention}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))

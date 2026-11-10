@@ -80,7 +80,7 @@ test('the saved work title survives reopening without changing the legacy cycle 
   assert.equal(normalizeCycleState({ chat_id: 'work' }).title, undefined)
 })
 
-test('project controls state edits and GitHub status in plain words, with no Pull updates or competing merge button', async t => {
+test('project controls show actionable local changes but omit clean status rows and competing updates', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { render } = await renderModule(`
     import React from 'react'
@@ -98,7 +98,11 @@ test('project controls state edits and GitHub status in plain words, with no Pul
   assert.match(html, /Actions for Contribute/)
   assert.match(html, /2 files<\/strong> changed on this Möbius\./)
   assert.match(html, /Make PRs from local changes/)
-  assert.match(html, /Up to date<\/strong> at the last check\./)
+  assert.doesNotMatch(html, /Up to date<\/strong> at the last check\./)
+  assert.match(html, /aria-label="Open Local changes"/)
+  assert.match(html, /<svg[^>]*class="co-icon"/)
+  const clean = render({ ...props, project: { ...project, head_sha: project.base_sha, localFiles: 0, workingFiles: 0 } })
+  assert.doesNotMatch(clean, /No edits on this Möbius|Up to date at the last check/)
   // Settings and the App Store own updates; Contribute no longer starts its own pull.
   assert.doesNotMatch(html, /Pull updates|Start pull/)
   assert.doesNotMatch(html, /Bring accepted changes here/)

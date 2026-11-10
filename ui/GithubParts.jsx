@@ -49,10 +49,10 @@ export function labelColors(hex) {
   return vars
 }
 
-// What the header's sync last did, beside its button: when it finished, or that it failed.
+// The header keeps the last successful sync visible, even after a failed retry.
 export function SyncNote({ note }) {
-  if (!note) return null
-  return <span className="co-sync-note" role="status">{note.outcome?.ok ? <TimeAgo prefix="Checked " value={note.at} /> : 'Couldn’t reach GitHub'}</span>
+  if (!note?.at && !note?.failed) return null
+  return <span className="co-sync-note" role="status">{note.failed ? 'Couldn’t sync' : null}{note.at ? <TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /> : null}</span>
 }
 
 // Labels in a list are the same filled pills as on the PR page, "area: " dropped,

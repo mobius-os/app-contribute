@@ -12,12 +12,10 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
-import { feedbackPull } from '../desk.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   contributionTitle,
   findRunItemByRecord,
-  attentionListItems,
   isPublicFeedback,
   runPrimaryRecord,
   runUnitKey,
@@ -30,7 +28,6 @@ import { OpenSplitButton } from './OpenSplitButton.jsx'
 import { DEFAULT_STAGE, stageApplies, stageWords } from '../publication-stage.js'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { ProjectTabs } from './ProjectTabs.jsx'
-import { AttentionList } from './AttentionList.jsx'
 import { NAMES } from '../names.js'
 
 function itemProject(item) {
@@ -977,15 +974,6 @@ export function ContributionRun({
 
   function selectRunItem(item) { onSelect?.(item.id) }
 
-  // Feedback on a published PR reads best on the PR page itself; anything
-  // without a PR behind it keeps its saved decision card.
-  function openAttentionItem(item) {
-    const target = feedbackPull(item)
-    if (target && onOpenPull) onOpenPull(target)
-    else selectRunItem(item)
-  }
-
-
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review' && !isPublicFeedback(item))
   const working = run?.working || []
@@ -1002,13 +990,18 @@ export function ContributionRun({
   const history = [...(run?.recent || []), ...(run?.archive || [])]
   const publishItems = decisions.filter(item => item.kind === 'publish')
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
-  const ownerDecisions = attentionListItems(decisions)
   const preparedItems = [...privateItems, ...decisions.filter(item => item.kind === 'request')]
 
-  // What needs the owner opens by itself; it can still be folded away.
-  const needsYou = presentation === 'project'
-    ? <AttentionList items={ownerDecisions} heading={itemHeading} onSelect={openAttentionItem} />
-    : null
+  const preparedPrItems = decisions.filter(item => runUnitRecords(item).some(record => record?.type === 'pr' && record?.status === 'prepared'))
+  const preparedPrCount = new Set(preparedPrItems.flatMap(item => runUnitRecords(item).filter(record => record?.type === 'pr' && record?.status === 'prepared').map(record => record.id))).size
+  const otherPreparedItems = preparedItems.filter(item => !preparedPrItems.includes(item))
+  const otherPublishItems = publishItems.filter(item => !preparedPrItems.includes(item))
+  const preparedItemRef = useRef(null)
+  if (selected && preparedPrItems.some(item => item.id === selected.id)) preparedItemRef.current = selected
+  else if (selectedId !== 'task:send') preparedItemRef.current = null
+  const preparedActiveItem = preparedItemRef.current
+  const preparedSelected = !!preparedActiveItem
+  const preparedTabCount = preparedPrCount || (preparedSelected ? 1 : 0)
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
   const focus = (selected || missingTarget || missingSelection) ? (
@@ -1068,18 +1061,15 @@ export function ContributionRun({
 
   return (
     <section className="co-run" aria-label="Contributions">
-      {focus}
-      {!actionCount(publishItems) && !batchOwnership.send ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
+      {!preparedSelected ? focus : null}
+      {!actionCount(publishItems) && !batchOwnership.send && !batchOwnership['prepared-send'] ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
       {!readyCount(readyItems) && !batchOwnership.ready ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
-      {/* What needs the owner comes first, in one box that disappears when
-          there is nothing to act on; the project's status sits under it. */}
       <div className="co-decisions" aria-label="Ready for you">
-      {needsYou}
       <ExactBatchAction
         key="send"
         records={currentBatchRecords}
         onOwnershipChange={changeBatchOwnership}
-        items={publishItems}
+        items={presentation === 'project' ? otherPublishItems : publishItems}
         mode="send"
         publicationPreference={publicationPreference}
         githubState={githubState}
@@ -1100,14 +1090,23 @@ export function ContributionRun({
         onMarkReady={onMarkReady}
         onSelect={selectRunItem}
       />
-      {presentation === 'project' && preparedItems.length ? <details className="co-run-fold co-prepared-work" aria-label="Prepared work">
-        <summary><span>Prepared work</span><b>{preparedItems.length}</b><Icon name="chevron" size={14} /></summary>
-        <div className="co-run-list">{preparedItems.map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+      {presentation === 'project' && otherPreparedItems.length ? <details className="co-run-fold co-prepared-work" aria-label="Prepared work">
+        <summary><span>Prepared work</span><b>{otherPreparedItems.length}</b><Icon name="chevron" size={14} /></summary>
+        <div className="co-run-list">{otherPreparedItems.map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
       </details> : null}
       </div>
       {presentation === 'project' ? controls : null}
 
-      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} /> : null}
+      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedTabCount} forcedTab={preparedSelected ? 'prepared' : null} prepared={<section className="co-prepared-tab" aria-label="Prepared PRs">
+        {preparedSelected ? <>
+          <button type="button" className="co-btn co-btn-quiet co-prepared-back" onClick={() => task?.close()}><Icon name="left" size={16} />Back to prepared PRs</button>
+          {focus}
+          <ExactBatchAction key="prepared-send" records={currentBatchRecords} onOwnershipChange={(_, owned) => changeBatchOwnership('prepared-send', owned)} items={publishItems.filter(item => item.id === preparedActiveItem.id)} mode="send" publicationPreference={publicationPreference} githubState={githubState} newPrStage={newPrStage} onSend={onSend} onSendStack={onSendStack} onSelect={selectRunItem} />
+        </> : <>
+          <p className="co-inventory-note">Private pull requests waiting for you to inspect. Nothing has gone to GitHub.</p>
+          <div className="co-run-list">{preparedPrItems.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+        </>}
+      </section>} /> : null}
       {presentation !== 'project' ? renderPublicWork?.() : null}
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}
     </section>

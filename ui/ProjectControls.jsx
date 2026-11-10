@@ -37,17 +37,18 @@ const UPSTREAM_ICON = { ok: 'check', warn: 'refresh', muted: 'info' }
 
 function LocalLine({ project, run, task }) {
   const local = localChangeSentence(project)
+  if (!local.edits) return null
   return <StatusLine icon="edit" title="Local changes" strong={local.strong} text={local.text} sub={local.sub || null}>
-    {local.edits ? <>
+    <>
       <button type="button" className="co-btn" disabled={!run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={15} />Make PRs from local changes</button>
-      <button type="button" className="co-btn co-btn-icon" onClick={() => task?.open('task:files')} aria-label="See the files" title="See the files"><Icon name="file" size={16} /></button>
-    </> : null}
+      <button type="button" className="co-btn co-btn-icon" onClick={() => task?.openTab('edits')} aria-label="Open Local changes" title="Open Local changes"><Icon name="folder" size={16} /></button>
+    </>
   </StatusLine>
 }
 
 function UpstreamLine({ project, check }) {
   const line = projectUpstreamLine(project, check)
-  if (!line) return null
+  if (!line || line.tone === 'ok') return null
   const updater = line.update ? projectUpdater(project) : null
   const checked = check?.checkedAt ? <TimeAgo prefix="Checked " value={check.checkedAt} /> : 'Use Sync with GitHub for the latest.'
   return <StatusLine icon={UPSTREAM_ICON[line.tone]} title="Updates from GitHub" tone={line.tone} strong={line.strong} text={line.text} sub={updater ? null : checked}>
@@ -159,7 +160,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     <style>{CYCLE_CSS}</style>
-    {local ? <div className="co-project-position" aria-label="Local changes and GitHub">
+    {local && (localChangeSentence(project).edits || ['warn', 'muted'].includes(projectUpstreamLine(project, check)?.tone)) ? <div className="co-project-position" aria-label="Local changes and GitHub">
       <LocalLine project={project} run={run} task={task} />
       <UpstreamLine project={project} check={check} />
     </div> : null}
