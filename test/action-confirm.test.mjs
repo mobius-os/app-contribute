@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ACTION_COPY, APPROVAL_NOTE_LIMIT, allowedMergeMethods, approvalNote, askApprovalCopy, askRereviewCopy, mergeCopy, openForReviewCopy, methodToSend, postFindingsCopy } from '../action-copy.js'
+import { ACTION_COPY, APPROVAL_NOTE_LIMIT, allowedMergeMethods, approvalNote, askApprovalCopy, askRereviewCopy, mergeCopy, openForReviewCopy, methodToSend, postFindingsCopy, requestReviewCopy, reviewCandidates } from '../action-copy.js'
 import { isPersonalDraft } from '../domain.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
@@ -450,5 +450,83 @@ test('Ask for approval goes to the platform with who and the exact note, and rea
     assert.deepEqual(await pullAction('t', 10, pr(), 'ask-approval', { people: ['sam'], note }), { pending: true, error: 'GitHub may have posted the note. Check the pull request before trying again.' })
     globalThis.fetch = reply(409, { detail: 'Ask only people who looked again without approving: nobody.' })
     assert.deepEqual(await pullAction('t', 10, pr(), 'ask-approval', { people: ['sam'], note }), { error: 'Ask only people who looked again without approving: nobody.' })
+  } finally { globalThis.fetch = previous }
+})
+
+// Request review: anyone the repository lets be asked, whether or not they reviewed before.
+const people = ['alex', 'Bob', 'Kim', 'sam', 'new-person', 'dependabot[bot]', 'ReviewerOne']
+const readSheet = (extra = {}, from = { people, pending: ['sam'] }) => requestReviewCopy(pr({ author: { login: 'alex' }, ...extra }), { standing: { ...standing, approvedBy: ['Kim'] }, candidates: from })
+
+test('Request review offers everyone but the author, a bot, who approved this version and who is already asked', () => {
+  const copy = readSheet()
+  assert.deepEqual(copy.people.options.map(option => option.key), ['Bob', 'new-person', 'ReviewerOne'])
+  assert.deepEqual(reviewCandidates(pr({ author: { login: 'ALEX' } }), { approvedBy: ['kim'] }, { people, pending: ['SAM'] }), ['Bob', 'new-person', 'ReviewerOne'], 'whatever the case of a login')
+  assert.ok(copy.facts.some(fact => fact.text === 'Already asked: sam'), 'a pending request is named, not offered again')
+  assert.ok(copy.people.options.every(option => option.ticked === false), 'nobody is ticked for you')
+})
+
+test('Request review says what is true of someone who reviewed before, and nothing of a new person', () => {
+  const copy = readSheet()
+  const detail = key => copy.people.options.find(option => option.key === key).detail
+  assert.equal(detail('Bob'), 'Approved a1b2c3d; this version has new commits')
+  assert.equal(detail('ReviewerOne'), 'Commented on this version, has not approved')
+  assert.equal(detail('new-person'), '')
+})
+
+test('Request review words the sheet for whoever is ticked and refuses an empty pick', () => {
+  const copy = readSheet()
+  assert.equal(copy.title, 'Ask people to review #9?')
+  assert.equal(copy.disabled, true)
+  assert.deepEqual(copy.facts.map(fact => fact.text), ['Pick at least one person', 'Already asked: sam'])
+  const picked = copy.forPicked(['new-person', 'Bob'])
+  assert.equal(picked.title, 'Ask Bob, new-person to review #9?')
+  assert.equal(picked.disabled, false)
+  assert.equal(picked.facts[0].text, 'GitHub asks Bob, new-person to review')
+  assert.deepEqual(picked.done(), { title: 'Review requested', text: 'Bob, new-person are asked to review it.' })
+  assert.match(copy.footnote, /does not assign the PR to them/)
+  assert.equal(copy.confirm, 'Request review')
+  assert.equal(ACTION_COPY.request_review, requestReviewCopy)
+})
+
+test('Request review waits for the people list, shows why it failed, and says when nobody else can be asked', () => {
+  const loading = requestReviewCopy(pr(), { standing, candidates: { loading: true } })
+  assert.deepEqual([loading.disabled, loading.facts.map(fact => fact.text)], [true, ['Loading people…']])
+  assert.equal(requestReviewCopy(pr(), { standing, candidates: null }).disabled, true)
+  const failed = requestReviewCopy(pr(), { standing, candidates: { error: 'Could not load the people. Try again.' } })
+  assert.deepEqual([failed.disabled, failed.facts.map(fact => `${fact.tone}:${fact.text}`)], [true, ['bad:Could not load the people. Try again.']])
+  const alone = readSheet({}, { people: ['alex'], pending: [] })
+  assert.deepEqual([alone.people.options, alone.facts.map(fact => fact.text)], [[], ['Nobody else can be asked']])
+})
+
+test('the Request review sheet renders its people as unticked checkboxes with Request review as the button', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR')
+  const { render } = await renderModule(`
+    import React from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { ActionConfirm } from './ui/ActionConfirm.jsx'
+    export const render = props => renderToStaticMarkup(React.createElement(ActionConfirm, props))
+  `)
+  const html = render({ pr: pr(), copy: readSheet(), onConfirm: () => {}, onClose: () => {} })
+  assert.match(html, /<h4 class="co-rw-label">Who should review it\?<\/h4>/)
+  const boxes = html.match(/<input type="checkbox"[^>]*>/g)
+  assert.equal(boxes.length, 3)
+  assert.ok(boxes.every(box => !/checked=""/.test(box)))
+  assert.match(html, /<strong>new-person<\/strong>/)
+  assert.match(html, />Request review<\/button>/)
+})
+
+test('Request review goes to its own platform route with who is asked, and reads an unconfirmed write back', async () => {
+  const sent = []
+  const previous = globalThis.fetch
+  const reply = (status, body) => async (url, options) => { sent.push({ url, body: JSON.parse(options.body) }); return { ok: status < 400, status, json: async () => body } }
+  try {
+    globalThis.fetch = reply(200, { state: 'requested', observed_head_sha: 'abcdef0123456789' })
+    assert.deepEqual(await pullAction('t', 10, pr(), 'request-review', { reviewers: ['new-person'] }), { ok: true, state: 'requested', observedHead: 'abcdef0123456789' })
+    assert.equal(sent[0].url, '/api/github/contributions/10/pulls/request-review')
+    assert.deepEqual(sent[0].body, { repo: 'team/repo', number: 9, head_sha: 'abcdef0123456789', reviewers: ['new-person'] })
+    globalThis.fetch = reply(502, { detail: { code: 'reviewers_unconfirmed', message: 'GitHub may have asked for another review. Check the pull request before trying again.' } })
+    assert.deepEqual(await pullAction('t', 10, pr(), 'request-review', { reviewers: ['new-person'] }), { pending: true, error: 'GitHub may have asked for another review. Check the pull request before trying again.' })
+    globalThis.fetch = reply(409, { detail: 'The author of a pull request cannot be asked to review it.' })
+    assert.deepEqual(await pullAction('t', 10, pr(), 'request-review', { reviewers: ['alex'] }), { error: 'The author of a pull request cannot be asked to review it.' })
   } finally { globalThis.fetch = previous }
 })

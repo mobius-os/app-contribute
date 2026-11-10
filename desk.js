@@ -3,6 +3,7 @@
 // ui/DeskViews.jsx; everything here is testable without a DOM.
 import { checkSummary, prKey } from './collaboration.js'
 import { attentionListItems } from './run.js'
+import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { projectIsQuiet } from './source-map.js'
 
@@ -20,7 +21,6 @@ export const DESK_VIEWS = [
 export const FOLDED_VIEWS = { confirm: 'needs', edits: 'needs', merged: 'mine', work: 'runs', reviews: 'runs' }
 export const deskViewKey = key => FOLDED_VIEWS[key] || key
 
-const sameLogin = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
 
 // The next step on a PR the owner authored, in plain words. Passing checks are
 // never a review verdict; an approval on a draft still waits on Mark ready.

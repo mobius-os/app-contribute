@@ -329,7 +329,8 @@ export const mergePull = (token, appId, pr, { method = '' } = {}) => publicWrite
 })
 
 // The owner's own status change on one PR, at this exact version, once: `ready` (open a draft for
-// review), `draft` (back to draft), `close`, `request-reviewers` (ask for re-review) or `ask-approval` (a note asking
+// review), `draft` (back to draft), `close`, `request-review` (ask anyone to review), `request-reviewers` (ask for
+// re-review) or `ask-approval` (a note asking
 // reviewers who looked again to approve). Same outcome
 // shapes as mergePull. GitHub cannot pin a version on these writes, so the platform reports the head
 // it saw afterwards (observedHead) and the sheet says so if it moved. The receipt of each is the state
@@ -338,6 +339,7 @@ const STATUS_WRITE = {
   ready: { state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
   draft: { state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
   close: { state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
+  'request-review': { state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for the review. Check the pull request before trying again.' },
   'request-reviewers': { state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
   'ask-approval': { state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
 }
@@ -349,6 +351,20 @@ export const pullAction = (token, appId, pr, action, extra = {}) => {
     code: write.code, words: write.words,
     receipt: result => result?.state === write.state && typeof result.observed_head_sha === 'string' ? { state: write.state, observedHead: result.observed_head_sha } : null,
   })
+}
+
+// Everyone a PR's repository lets work on it: the list Assign shows, read to its end (a few pages at most), which is also
+// who GitHub lets be asked to review. Logins only; who may not be asked (the author, a bot, someone who approved this
+// version) is for the sheet to leave out.
+const PEOPLE_PAGES = 5
+export async function loadReviewPeople(token, appId, pr) {
+  const logins = []
+  for (let page = 1, seen = 0; page && seen < PEOPLE_PAGES; seen += 1) {
+    const next = await collaborationRequest(token, appId, `assignees?repo=${encodeURIComponent(pr.repository.nameWithOwner)}&page=${page}`)
+    logins.push(...(next.assignees || []).map(person => person.login).filter(Boolean))
+    page = next.next_page
+  }
+  return logins
 }
 
 // What a finished private review would say on GitHub, word for word, with the hash that binds the

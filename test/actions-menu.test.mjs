@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader } from '../actions-menu.js'
+import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader, requestReviewButton } from '../actions-menu.js'
 import { standingFor } from '../pr-standing.js'
 
 const HEAD = 'b'.repeat(40)
@@ -101,4 +101,23 @@ test('a reviewer who looked again without approving is asked to approve first, a
   assert.equal(model.you[0].rec, true)
   assert.equal(item(model, 'ask_rereview').off, false, 'anyone who reviewed can be asked again, even someone who looked at this version')
   assert.equal(item(menu(looked, { ...ALL, ask_approval_now: undefined }), 'ask_approval'), undefined, 'a Möbius that cannot post the note does not offer it')
+})
+
+test('Request review is its own button beside Actions, never a menu row, and it still opens the same sheet path', () => {
+  const caps = { ...ALL, request_review_now: true }
+  const standing = standingFor({ pr: mine(), login: 'alex' })
+  assert.ok(!ids(menu(mine(), caps).you).includes('request_review'), 'the menu keeps its own rows')
+  assert.ok(YOUR_INTENTS.has('request_review'), 'choosing it opens its sheet like any action of yours')
+  assert.deepEqual(requestReviewButton(standing, { capabilities: caps }), { off: false, reason: '' })
+  assert.equal(requestReviewButton(standing, { capabilities: ALL }), null, 'a Möbius that cannot ask for the review does not offer it')
+  assert.equal(requestReviewButton(standing, {}), null)
+  assert.equal(requestReviewButton(null, { capabilities: caps }), null)
+})
+
+test('Request review is offered on your own PR even before anyone reviewed, dimmed with the reason once it is closed, and absent on theirs', () => {
+  const caps = { ...ALL, request_review_now: true }
+  assert.equal(requestReviewButton(standingFor({ pr: mine(), login: 'alex' }), { capabilities: caps }).off, false)
+  const closed = requestReviewButton(standingFor({ pr: mine({ state: 'CLOSED' }), login: 'alex' }), { capabilities: caps })
+  assert.deepEqual(closed, { off: true, reason: 'This PR is no longer open.' })
+  assert.equal(requestReviewButton(standingFor({ pr: pull(), login: 'alex' }), { capabilities: caps }), null, 'only the author asks')
 })

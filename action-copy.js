@@ -2,6 +2,7 @@
 // and what it cannot undo. Pure, so the sheet states exactly what the PR's own
 // data says and the tests can hold it to that.
 import { checkSummary, reviewItemProgress } from './collaboration.js'
+import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 
 const names = list => list.join(', ')
@@ -179,6 +180,40 @@ function askSheet(standing, meantFor, build) {
   return { ...build(ticked), people, forPicked: logins => build(pick(logins)) }
 }
 
+// Who Request review may offer: the repository's people, except the PR's author, a bot, anyone who already approved this
+// version and anyone whose request is still pending (they are named on the sheet instead).
+export function reviewCandidates(pr, standing, { people = [], pending = [] } = {}) {
+  const left = [pr?.author?.login, ...(standing?.approvedBy || []), ...pending]
+  return people.filter(login => !login.endsWith('[bot]') && !left.some(other => sameLogin(other, login)))
+}
+
+// Request review: GitHub's usual review request to whoever you tick, whether or not they have reviewed before. A person who
+// did is shown with what is true of them. `candidates` is what the sheet read when it opened: { loading } | { error } |
+// { people, pending }. Assign is a different thing and the footnote says so: it makes nobody an assignee.
+export function requestReviewCopy(pr, { standing = null, candidates = null } = {}) {
+  const loaded = !!candidates && !candidates.loading && !candidates.error
+  const options = loaded ? reviewCandidates(pr, standing, candidates).map(login => {
+    const before = (standing?.askable || []).find(item => sameLogin(item.by, login))
+    return { key: login, label: login, detail: before ? WHY[before.reason].detail(before) : '', ticked: false }
+  }) : []
+  const build = picked => {
+    const who = names(picked)
+    return {
+      icon: 'plus', title: `Ask ${picked.length ? who : 'people'} to review #${pr.number}?`, confirm: NAMES.requestReview, working: 'Asking…',
+      facts: [
+        ...(candidates?.error ? [{ tone: 'bad', text: candidates.error }] : !loaded ? [{ tone: 'warn', text: 'Loading people…' }]
+          : !options.length ? [{ tone: 'bad', text: 'Nobody else can be asked' }]
+            : [picked.length ? { tone: 'ok', text: `GitHub asks ${who} to review` } : { tone: 'bad', text: 'Pick at least one person' }]),
+        ...(loaded && candidates.pending?.length ? [{ tone: 'ok', text: `Already asked: ${names(candidates.pending)}` }] : []),
+      ],
+      footnote: 'They get GitHub’s usual review request. It does not assign the PR to them, and nothing is posted in the conversation.',
+      disabled: !picked.length,
+      done: () => ({ title: 'Review requested', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to review it.` }),
+    }
+  }
+  return { ...build([]), people: { label: 'Who should review it?', options }, forPicked: logins => build(options.map(option => option.key).filter(key => logins.includes(key))) }
+}
+
 // Ask for re-review: whoever you tick is asked to look again, with GitHub's usual review request.
 export function askRereviewCopy(pr, { standing = null } = {}) {
   return askSheet(standing, standing?.rereviewFrom || [], picked => {
@@ -238,4 +273,4 @@ export function closeCopy(pr) {
 }
 
 // The sheet's words for each of the owner's own actions, by the PR machine's action id.
-export const ACTION_COPY = { open_for_review: openForReviewCopy, merge: mergeCopy, back_to_draft: backToDraftCopy, ask_rereview: askRereviewCopy, ask_approval: askApprovalCopy, close: closeCopy }
+export const ACTION_COPY = { open_for_review: openForReviewCopy, merge: mergeCopy, back_to_draft: backToDraftCopy, request_review: requestReviewCopy, ask_rereview: askRereviewCopy, ask_approval: askApprovalCopy, close: closeCopy }

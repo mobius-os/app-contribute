@@ -20,7 +20,8 @@
 //   - Only four things stop an action of yours: the PR cannot be read, it is closed or merged, an agent is already
 //     working on it, or something sent to GitHub is not confirmed. An action tied to a thing waits for that thing
 //     (a draft to send, a person to ask, a result to set aside). Asking works for anyone who reviewed or commented
-//     and has not approved this version; the sheet ticks the people each ask is meant for. Taking over someone
+//     and has not approved this version; the sheet ticks the people each ask is meant for. Request review is the one ask
+//     that waits for nobody: it names anyone, reviewed or not. Taking over someone
 //     else's PR stays for maintainers: it is Contribute's own rule, GitHub would let any writer push.
 //   - Only new commits bring their PR back for re-review; replies never do. A reviewer who only commented
 //     has not approved, however long they looked: a plain comment never lifts a change request on GitHub, and
@@ -230,6 +231,8 @@ const statusStops = facts => firstReason(readable(facts), stillOpen(facts), jobI
 // The two Ask actions need someone to name: anyone who reviewed or commented, except who already approved this version.
 const nobodyToAsk = d => (d.approvedAtHead.length ? 'Everyone who reviewed it has already approved this version.' : 'Nobody has reviewed this PR yet.')
 const askStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), d.askable.length ? '' : nobodyToAsk(d))
+// Request review asks anyone, so unlike the Ask actions it never waits for someone to have reviewed first.
+const requestStops = facts => firstReason(readable(facts), stillOpen(facts))
 const outboxIs = (d, state) => (d.outbox?.state === state ? '' : 'Nothing like that is waiting.')
 
 // Every action. `by` says who acts: an agent job, or your own tap (each behind a
@@ -256,6 +259,7 @@ export const ACTIONS = [
     when: (facts, d) => firstReason(readable(facts), d.result && !d.result.setAside && (facts.role === 'reviewer' || d.openFindings) ? '' : 'Nothing to set aside.', draftOwnsFindings(d)) },
   { id: 'open_for_review', by: 'you', roles: ['author'], title: NAMES.openForReview, when: statusStops },
   { id: 'back_to_draft', by: 'you', roles: ['author'], title: NAMES.backToDraft, when: statusStops },
+  { id: 'request_review', by: 'you', roles: ['author'], title: NAMES.requestReview, detail: 'Asks the people you pick to review it on GitHub.', when: requestStops },
   { id: 'ask_rereview', by: 'you', roles: ['author'], title: NAMES.askRereview, when: askStops },
   { id: 'ask_approval', by: 'you', roles: ['author'], title: d => (d.approvalFrom.length ? `Ask ${d.approvalFrom.join(', ')} to approve` : NAMES.askApproval), detail: 'Posts one short note on the PR.',
     when: askStops },

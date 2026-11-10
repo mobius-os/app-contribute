@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
+import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewPeople, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -127,6 +127,24 @@ test('batch assignment pins each head and reports partial failures without repla
   assert.match(result[1].error, /PR changed/)
   assert.deepEqual(calls.map(item => item.number), [1,2,3])
   assert.ok(calls.every(item => item.assignee === 'reviewer' && item.expected_head_sha === 'a'.repeat(40)))
+})
+
+test('the people Request review can offer are the repository’s people, read page by page to the end', async t => {
+  const asked = []
+  t.mock.method(globalThis, 'fetch', async url => {
+    asked.push(new URL(url, 'http://app').searchParams.get('page'))
+    const page = Number(asked.at(-1))
+    return new Response(JSON.stringify({ assignees: page === 1 ? [{ login: 'sam' }, { login: 'kim' }] : [{ login: 'bo' }, {}], next_page: page === 1 ? 2 : null }))
+  })
+  assert.deepEqual(await loadReviewPeople('test', 80, pull(1)), ['sam', 'kim', 'bo'])
+  assert.deepEqual(asked, ['1', '2'])
+})
+
+test('a repository with endless people is read for a few pages, not forever', async t => {
+  let reads = 0
+  t.mock.method(globalThis, 'fetch', async () => { reads += 1; return new Response(JSON.stringify({ assignees: [{ login: `p${reads}` }], next_page: reads + 1 })) })
+  assert.equal((await loadReviewPeople('test', 80, pull(1))).length, 5)
+  assert.equal(reads, 5)
 })
 
 test('merge option is enabled only for an entirely eligible exact selection', async t => {

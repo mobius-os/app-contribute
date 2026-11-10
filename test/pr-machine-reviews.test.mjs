@@ -32,6 +32,15 @@ test('the people ticked at first for a re-review are those who have not looked p
   assert.deepEqual([mixed.lookedAgain, mixed.rereviewFrom], [['sam'], ['kim']])
 })
 
+test('request review needs no earlier review where the Ask actions need one', () => {
+  const unreviewed = decide(facts([]))
+  assert.equal(action(unreviewed, 'request_review').enabled, true)
+  assert.equal(action(unreviewed, 'request_review').title, 'Request review')
+  assert.equal(action(unreviewed, 'ask_rereview').reason, 'Nobody has reviewed this PR yet.')
+  assert.equal(action(decide({ ...facts([]), lifecycle: 'closed' }), 'request_review').reason, 'This PR is no longer open.')
+  assert.equal(action(decide({ ...facts([], { author: 'sam' }), role: 'reviewer' }), 'request_review'), undefined, 'only the author asks')
+})
+
 test('anyone who only commented on this version can be asked to approve, whether or not they hold a change request', () => {
   const commented = decide(facts([comment('h2')]))
   assert.equal(commented.state, 'author.commented')

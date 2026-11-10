@@ -1,6 +1,7 @@
 // Read-only GitHub projection. No request here approves or mutates a PR.
 // Version-specific evidence is checked against the selected head AND base.
 import { parseUnifiedDiff } from './ui/diff/parseUnifiedDiff.js'
+import { reviewersOf } from './reviewers.js'
 
 export function pullPath(pr) {
   const repo = pr?.repository?.nameWithOwner
@@ -182,6 +183,17 @@ export async function loadAllPullActivity(token, pr, signal) {
 export async function loadAllPullThreads(token, pr, signal) {
   const { pages, partial } = await readEveryPage(after => loadPullThreads(token, pr, after, signal), null, page => page.nextCursor)
   return { threads: pages.flatMap(page => page.threads), partial }
+}
+// Who was asked to review this PR and where each review stands (reviewers.js words the rows). Review requests and
+// their "requested" events are GitHub's own record of asking; an assignee is not among them.
+export async function loadPullReviewers(token, pr, signal) {
+  const person = '__typename ... on User { login }'
+  const { data, errors } = await pullGraphRead(token, pr, `
+    reviewRequests(first:30) { nodes { requestedReviewer { ${person} } } }
+    reviews(last:100) { nodes { state submittedAt author { login } } }
+    timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ${person} } } } }`, {}, signal)
+  if (!data.reviewRequests || !data.timelineItems || !data.reviews) errors.push('Who was asked to review is unavailable.')
+  return { reviewers: reviewersOf(data), errors }
 }
 export async function loadPullRelated(token, pr, signal) {
   const { data, errors } = await pullGraphRead(token, pr, `

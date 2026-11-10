@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
@@ -24,6 +24,8 @@ import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
 import { RunOnce } from './RunOnce.jsx'
 import { YOUR_INTENTS } from '../actions-menu.js'
+import { loadPullReviewers } from '../pull-details.js'
+import { pendingReviewers } from '../reviewers.js'
 import { ACTION_COPY, approvalNote, methodToSend } from '../action-copy.js'
 import { projectUpdater } from '../updates.js'
 import { NAMES } from '../names.js'
@@ -215,6 +217,23 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [respondFailure, setRespondFailure] = useState(null)
   // One of the owner's own actions (Open for review, Merge) waiting on its confirm sheet.
   const [acting, setActing] = useState(null)
+  // Request review's sheet reads, as it opens, who can be asked: the repository's people and who already was asked.
+  const [candidates, setCandidates] = useState(null)
+  useEffect(() => {
+    if (acting?.intent !== 'request_review') { setCandidates(null); return undefined }
+    let alive = true
+    async function read() {
+      try {
+        const [people, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), loadPullReviewers(token, acting.pr)])
+        if (alive) setCandidates({ people, pending: pendingReviewers(asked.reviewers) })
+      } catch (error) {
+        if (alive) setCandidates({ error: error.message || 'Could not load the people. Try again.' })
+      }
+    }
+    setCandidates({ loading: true })
+    void read()
+    return () => { alive = false }
+  }, [acting?.intent, acting?.pr?.number, acting?.pr?.repository?.nameWithOwner])
   const [posting, setPosting] = useState(null)
   // A review's findings waiting on the owner's reason to set them aside.
   const [ignoring, setIgnoring] = useState(null)
@@ -581,6 +600,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice) }),
     back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft'),
     close: ({ pr }) => pullAction(token, appId, pr, 'close'),
+    request_review: ({ pr, people }) => pullAction(token, appId, pr, 'request-review', { reviewers: people }),
     ask_rereview: ({ pr, people }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: people }),
     // The note is built from the same ticked people the sheet showed it for, so it is posted exactly as it was read.
     ask_approval: ({ pr, people }) => pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, standingOf(pr).askable.filter(item => people.includes(item.by))) }),
@@ -589,7 +609,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice, people }) => actionHandlers[acting.intent]({ ...acting, choice, people })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates })} onConfirm={({ choice, people }) => actionHandlers[acting.intent]({ ...acting, choice, people })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)

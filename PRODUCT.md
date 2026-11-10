@@ -282,8 +282,18 @@ checked over every case and every combination of the facts that matter):
    else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
    to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
    a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
-   GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,
-   Set aside for a result, Answer the agent for a question.
+   GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone who reviewed,
+   Set aside for a result, Answer the agent for a question. Request review waits for nothing: it asks
+   anyone, whether or not they reviewed before.
+
+**Asking someone is not assigning them.** *Request review* is GitHub's review request: the PR page has a
+labelled button of its own beside Actions, and a sheet offers the repository's people (not you, a bot, someone
+who already approved this version, or someone already asked). *Assign* makes a person responsible for the PR and
+asks nobody for a review, so its person icon stays Assign's alone. Ask for re-review is the same GitHub request
+for people who reviewed before, and stays in the Actions menu. The Review tab lists *Requested reviewers*, one
+row each: who was asked, when ("Requested again" after an earlier review of theirs), and one current badge
+(Waiting, Waiting for another review, Approved, Changes requested, Commented, Dismissed). An assignee is never
+listed there.
 
 **Who acts.** Pushing code, merging and changing a PR's status (ready, draft, closed)
 always wait for your own tap. A review verdict waits for your tap ("Draft for me"),
@@ -296,7 +306,7 @@ which pushes the fixes, posts every reply, updates the description and asks for 
 re-review) · Finish it for me (stops before each push for your approval). Their PR:
 Review, which reads Re-review once you reviewed it, with an optional "Merge after I
 approve" switch · Take over, set apart, maintainers only, with a reason. Your own
-actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
+actions: Open for review, Back to draft, Request review, Ask for re-review, Ask for approval, Merge and Close, each
 behind a confirm sheet and each shown only where this Möbius can do it.
 
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
