@@ -176,6 +176,7 @@
     "same-work.js",
     "carried-approvals.js",
     "review-frame.js",
+    "review-pages.js",
     "pr_block.py",
     "review-prompts.js",
     "ui/ReviewPromptSettings.jsx",

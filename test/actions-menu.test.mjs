@@ -9,7 +9,7 @@ const checks = (state = 'SUCCESS', count = 2) => ({ commits: { nodes: [{ commit:
 const pull = (extra = {}) => ({
   number: 7, state: 'OPEN', isDraft: false, headRefOid: HEAD, baseRefName: 'main', mergeable: 'MERGEABLE',
   author: { login: 'sam' }, repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE' },
-  latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, ...checks(), ...extra,
+  latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, ...checks(), ...extra,
 })
 const mine = extra => pull({ author: { login: 'alex' }, ...extra })
 const ALL = { mark_ready_now: true, back_to_draft_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, close_now: true }

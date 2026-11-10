@@ -82,21 +82,29 @@ function derive(facts) {
     outbox,
     coveredBy: outbox?.covers ? outbox.kind : '',
   }
-  return { ...standing, askable: askablePeople(people, standing) }
+  return { ...standing, askable: askablePeople(facts, people, standing) }
 }
 
 // Who could be asked to look at this version: everyone who reviewed or commented, except those whose approval already
 // counts for it. `reason` is what is true of them (it words the public note), `commit` the version their review was of.
-function askablePeople(people, standing) {
+// The merge standing above reads only writers' opinions; people it does not read (a reviewer without write access) come
+// from `participants`, GitHub's newest review of everyone, and are worded from that review alone.
+function askablePeople(facts, people, standing) {
   const has = (list, name) => list.some(other => same(other, name))
   const REASONS = [['changes_here', 'CHANGES_REQUESTED', standing.changesAtHead], ['looked_again', 'CHANGES_REQUESTED', standing.lookedAgain],
     ['commented_here', 'COMMENTED', standing.commentedOnly], ['changes_older', 'CHANGES_REQUESTED', standing.changesOlder], ['approved_older', 'APPROVED', standing.approvedOlder]]
-  const everyone = [...new Map(people.map(review => [String(review.by).toLowerCase(), review.by])).values()]
+  const outside = (facts.participants || []).filter(review => !review.bot && !same(review.by, facts.author) && !people.some(other => same(other.by, review.by)))
+    .filter(review => !(review.state === 'APPROVED' && review.commit === facts.head))
+  const everyone = [...new Map([...people, ...outside].map(review => [String(review.by).toLowerCase(), review.by])).values()]
   return everyone.filter(name => !has(standing.approvedAtHead, name)).map(by => {
+    const own = outside.find(review => same(review.by, by))
+    if (own) return { by, reason: ownReason(own, facts.head), commit: own.commit }
     const [reason, state] = REASONS.find(([, , list]) => has(list, by)) || ['commented_older', 'COMMENTED']
     return { by, reason, commit: people.find(review => same(review.by, by) && review.state === state)?.commit || '' }
   })
 }
+const ownReason = (review, head) => (review.state === 'CHANGES_REQUESTED' ? (review.commit === head ? 'changes_here' : 'changes_older')
+  : review.state === 'APPROVED' ? 'approved_older' : review.commit === head ? 'commented_here' : 'commented_older')
 
 // Every state. turn: you | agent | other | none. `label` is the short chip on a row,
 // `headline` the line under a PR's title, `next` the highlighted action.
@@ -229,7 +237,10 @@ const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), 
 const statusStops = facts => firstReason(readable(facts), stillOpen(facts), jobIdle(facts))
 // The two Ask actions need someone to name: anyone who reviewed or commented, except who already approved this version.
 const nobodyToAsk = d => (d.approvedAtHead.length ? 'Everyone who reviewed it has already approved this version.' : 'Nobody has reviewed this PR yet.')
-const askStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), d.askable.length ? '' : nobodyToAsk(d))
+// A list of people that was not read whole is not offered: they cannot be added by hand. (A fact set with no `participants`
+// asks nobody beyond the reviews it lists; only the fact reader says null.)
+const unreadPeople = facts => (facts.participants === null ? 'Could not read everyone who reviewed this PR. Try again.' : '')
+const askStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), unreadPeople(facts), d.askable.length ? '' : nobodyToAsk(d))
 const outboxIs = (d, state) => (d.outbox?.state === state ? '' : 'Nothing like that is waiting.')
 
 // Every action. `by` says who acts: an agent job, or your own tap (each behind a

@@ -55,6 +55,17 @@ function reviewsOf(pr) {
 // leaves that unsaid, so they are never a reason to call the PR unread.
 const commentsOf = pr => (pr?.latestReviews?.nodes || []).filter(node => node?.state === 'COMMENTED').map(reviewOf)
 
+// Everyone who reviewed or commented, as GitHub's newest review of each person (writers or not: the merge standing
+// above counts only writers' opinions, and this is for asking people, not for deciding anything). Null when the list is
+// not the whole of it (its pages were not all read), so the Ask sheet never offers part of it. A review still
+// pending is not one yet.
+function participantsOf(pr) {
+  const connection = pr?.latestReviews
+  const nodes = connection?.nodes
+  if (!Array.isArray(nodes) || connection.pageInfo?.hasNextPage === true) return null
+  return nodes.filter(node => node?.state && node.state !== 'PENDING').map(reviewOf)
+}
+
 // Threads a person other than you spoke last in (a bot's thread is input, never
 // waiting on you). The PR's own conversation counts as one more such thread: a plain
 // comment is feedback too, until you answer it. A review that only comments, with words in it,
@@ -203,6 +214,7 @@ export function prFacts({ pr, login, runs = [], ignored = null, chats = [], resp
     // GitHub's own gate: a branch rule that still needs a review no approval here can satisfy.
     gate: pr?.reviewDecision === 'REVIEW_REQUIRED' ? 'review_required' : null,
     reviews: [...(own ? reviews || [] : withSentVerdict(reviews || [], fromRuns.sent, pr, login)), ...commentsOf(pr)],
+    participants: participantsOf(pr),
     myReview,
     openThreads: threads || 0,
     job: jobFor(fromRuns.job, chats, pr),
