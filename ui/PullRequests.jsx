@@ -581,17 +581,15 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice) }),
     back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft'),
     close: ({ pr }) => pullAction(token, appId, pr, 'close'),
-    ask_rereview: ({ pr }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }),
-    ask_approval: ({ pr }) => {
-      const { approvalFrom: people, lookedAgain: holding } = standingOf(pr)
-      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) })
-    },
+    ask_rereview: ({ pr, people }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: people }),
+    // The note is built from the same ticked people the sheet showed it for, so it is posted exactly as it was read.
+    ask_approval: ({ pr, people }) => pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, standingOf(pr).askable.filter(item => people.includes(item.by))) }),
   }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice }) => actionHandlers[acting.intent]({ ...acting, choice })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice, people }) => actionHandlers[acting.intent]({ ...acting, choice, people })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)

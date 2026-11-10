@@ -86,10 +86,10 @@ test('the checklist renders as real controls', async t => {
   const { render } = await renderModule(`
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
-    import { AddressChecklist } from './ui/AddressFeedback.jsx'
-    export const render = (name, props) => renderToStaticMarkup(React.createElement({ AddressChecklist }[name], props))
+    import { TickList } from './ui/TickList.jsx'
+    export const render = (name, props) => renderToStaticMarkup(React.createElement({ TickList }[name], props))
   `)
-  const checklist = render('AddressChecklist', { items: [{ key: 'changes', label: 'Changes requested by miljanm', detail: '2 reviews', checked: true }, { key: 'checks', label: '1 failing check', detail: '', checked: false }], onToggle: () => {} })
+  const checklist = render('TickList', { label: 'What it will address', items: [{ key: 'changes', label: 'Changes requested by miljanm', detail: '2 reviews', checked: true }, { key: 'checks', label: '1 failing check', detail: '', checked: false }], onToggle: () => {} })
   assert.match(checklist, /<input type="checkbox" checked=""/)
   assert.match(checklist, /Changes requested by miljanm/)
   assert.match(checklist, /<input type="checkbox"\/>|<input type="checkbox"[^>]*\/>/)
