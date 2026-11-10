@@ -42,7 +42,7 @@ export function openForReviewCopy(pr) {
       conflictFact(pr),
       { tone: 'ok', text: 'You can turn it back into a draft later' },
     ].filter(Boolean),
-    footnote: `Opens the version you are looking at (${short(pr.headRefOid)}). It does not ask anyone to review it. Nothing merges.`,
+    footnote: `Opens the version you are looking at (${short(pr.headRefOid)}). It does not ask anyone to review it, unless the repository has code owners. Nothing merges.`,
     // GitHub cannot pin a version on this write, so the platform reports the head it saw afterwards.
     done: outcome => ({
       title: NAMES.openForReview,

@@ -486,7 +486,7 @@ function ExactBatchAction({
           ? `Mark ${count === 1 ? 'this draft' : `${count} drafts`} ready for review?`
           : staged ? stageWords(stage).heading(count) : `Send ${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'}?`}</h3>
         <p id={descriptionId}>{mode === 'ready'
-          ? 'GitHub takes it out of draft. It does not ask anyone to review it. Nothing merges.'
+          ? 'GitHub takes it out of draft. It does not ask anyone to review it, unless the repository has code owners. Nothing merges.'
           : stageWords(stage).description}</p>
       </header>
       <ExactActionList
