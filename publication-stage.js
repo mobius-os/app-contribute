@@ -1,5 +1,5 @@
-// How a new pull request opens from Contribute: as a draft nobody is asked to
-// review yet, or ready for review. A shipped default of 'ready' keeps the
+// How a new pull request opens from Contribute: as a draft that is not ready
+// for review yet, or ready for review. A shipped default of 'ready' keeps the
 // product's documented normal publication (PRODUCT.md); an owner who works
 // draft-first sets 'draft' in Settings. Only a new PR on the owner's own GitHub
 // account has a choice: an update edits an existing PR, and a relay draft is
@@ -23,7 +23,7 @@ const WORDS = {
     onGithub: count => COUNTED(count) ? 'Open as draft on GitHub' : `Open ${count} as drafts on GitHub`,
     heading: count => `Open ${count} reviewed ${COUNTED(count) ? 'pull request as a draft' : 'pull requests as drafts'}?`,
     line: 'Open as a draft',
-    menu: 'Nobody is asked to review it yet.',
+    menu: 'Not ready for review yet.',
     icon: 'edit',
     description: 'New pull requests use your connected GitHub account and open as drafts, so they are not ready for review yet. Each line shows exactly where its change goes. Nothing merges.',
   },
