@@ -1,9 +1,10 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Thirteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Fourteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
+// runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that offers the owner grant: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -372,6 +373,7 @@ function Fixture() {
   }
   async function send(record) {
     calls.publications.push(structuredClone(record))
+    if (window.holdSend) await window.holdSend
     const shared = { ...record, status: 'open', number: 9, url: 'https://github.com/owner/project/pull/9' }
     pulls.push(pull(9, { title: record.title }))
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
@@ -397,7 +399,7 @@ function Fixture() {
   return <SyncHubContext.Provider value={hub}><div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     <button type="button" className="co-btn co-toolbar-refresh" onClick={syncFromHeader} disabled={syncing} aria-busy={syncing} aria-label="Sync with GitHub">Sync with GitHub</button>
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
-      loadProjectDiff={loadProjectDiff} onRetry={retryAll}
+      loadProjectDiff={loadProjectDiff}
       addProject={quiet => <RepositoryPicker quiet={quiet} token="fixture-only" connected onAdded={repositoryAdded} />}
       renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
@@ -844,12 +846,21 @@ window.runWorkspaceChecks = async () => {
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
       await inventory(); await openTab('Prepared PRs')
+      await captureShot('prepared-tab')
       await click(query('.co-prepared-tab .co-run-quiet-row'))
       await until(() => button(opens), 'Prepared PR details did not offer publication')
       await click(button(opens))
       await until(() => button(sends),'Publication confirmation missing')
       ensure(calls.publications.length===0,'Opening publication sent work')
+      // Browsing the tabs must not drop a confirmation, nor a send that is still running, nor its outcome.
+      await openTab('All PRs'); await openTab('Prepared PRs')
+      ensure(button(sends) && !button(opens),'A tab switch dropped the publication confirmation')
+      let release; window.holdSend = new Promise(resolve => { release = resolve })
       await click(button(sends))
+      await until(() => calls.publications.length===1 && text(query('.co-run-approval')).includes('Sending'),'The held publication did not show as sending')
+      await openTab('All PRs'); await openTab('Prepared PRs')
+      ensure(!button(opens) && !button(sends) && text(query('.co-run-approval')).includes('Sending') && calls.publications.length===1,'A tab switch dropped the pending publication or offered it again')
+      window.holdSend = null; release()
       await until(() => button('Done') && text(query('.co-run-approval')).includes('Sent to GitHub'),'Publication outcome missing')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
       ensure(!button(sends) && !button(opens),'Settled publication remained actionable')
@@ -2508,6 +2519,53 @@ window.runReviewRequestChecks = async () => {
   }
 }
 
+// The header's "Last synced" stands only on reads that came back: the review requests are one of them, on the first
+// load and on a manual Sync alike (the hub settles a failed read without throwing, so nothing else reports it).
+window.runSyncNoteChecks = async () => {
+  const checks = []
+  const note = () => query('.co-sync-note')?.textContent || ''
+  const syncButton = () => query('.co-toolbar-refresh')
+  const incomingReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeIncomingReviews')).length
+  const syncAgain = async () => {
+    await until(() => syncButton() && !syncButton().disabled, 'The Sync button never settled')
+    const before = incomingReads()
+    await click(syncButton())
+    await until(() => incomingReads() > before, 'Sync did not read the review requests')
+    await until(() => !syncButton().disabled, 'Sync did not finish')
+  }
+  try {
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]
+    window.failIncoming = true
+    await mountDeskApp()
+    await until(() => note(), 'The first load left no sync note')
+    await captureShot('sync-note-failed-read')
+    ensure(note() === 'Couldn’t sync', 'A first load whose review-request read failed said: ' + note())
+    ensure(syncButton().getAttribute('aria-describedby') === query('.co-sync-note').id && !query('.co-sync-note[role]'), 'The note is not the Sync button\'s description')
+    checks.push({ name: 'a first load whose review-request read failed does not say Last synced', status: 'pass' })
+    await syncAgain()
+    ensure(note() === 'Couldn’t sync', 'A Sync whose review-request read failed said: ' + note())
+    checks.push({ name: 'a manual Sync whose review-request read failed does not say Last synced', status: 'pass' })
+    window.failIncoming = false
+    await syncAgain()
+    await until(() => note().startsWith('Last synced'), 'A Sync that read everything did not say Last synced: ' + note())
+    checks.push({ name: 'a Sync that read everything says Last synced', status: 'pass' })
+    window.failIncoming = true
+    await syncAgain()
+    ensure(note().startsWith('Couldn’t sync · Last synced'), 'A failed retry lost the last successful time: ' + note())
+    checks.push({ name: 'a failed retry keeps the last successful time beside it', status: 'pass' })
+    // A phone header has no room for the long form: it keeps the failure and drops the time.
+    ensure(window.innerWidth > 480 || query('.co-sync-note').innerText.trim() === 'Couldn’t sync', 'The failure note grew past the button on a phone: ' + query('.co-sync-note').innerText)
+    checks.push({ name: 'on a phone a failed retry says only that it could not sync', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    window.failIncoming = false
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -2771,7 +2829,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks']
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }].filter(size => !process.env.WORKSPACE_BROWSER_VIEWPORT || size.name === process.env.WORKSPACE_BROWSER_VIEWPORT)
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
       const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' })

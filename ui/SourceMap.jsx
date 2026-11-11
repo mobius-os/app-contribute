@@ -186,7 +186,6 @@ export function SourceMap({
   conn,
   loading,
   error,
-  onRetry,
   renderActivity,
   addProject = null,
   onProjectOpenChange,

@@ -992,16 +992,10 @@ export function ContributionRun({
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
   const preparedItems = [...privateItems, ...decisions.filter(item => item.kind === 'request')]
 
+  // Prepared PRs are one row each in their own tab; opening a row selects it like any other
+  // decision. Publication stays with the one send bar below, so a tab switch never drops it.
   const preparedPrItems = decisions.filter(item => runUnitRecords(item).some(record => record?.type === 'pr' && record?.status === 'prepared'))
-  const preparedPrCount = new Set(preparedPrItems.flatMap(item => runUnitRecords(item).filter(record => record?.type === 'pr' && record?.status === 'prepared').map(record => record.id))).size
   const otherPreparedItems = preparedItems.filter(item => !preparedPrItems.includes(item))
-  const otherPublishItems = publishItems.filter(item => !preparedPrItems.includes(item))
-  const preparedItemRef = useRef(null)
-  if (selected && preparedPrItems.some(item => item.id === selected.id)) preparedItemRef.current = selected
-  else if (selectedId !== 'task:send') preparedItemRef.current = null
-  const preparedActiveItem = preparedItemRef.current
-  const preparedSelected = !!preparedActiveItem
-  const preparedTabCount = preparedPrCount || (preparedSelected ? 1 : 0)
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
   const focus = (selected || missingTarget || missingSelection) ? (
@@ -1061,15 +1055,15 @@ export function ContributionRun({
 
   return (
     <section className="co-run" aria-label="Contributions">
-      {!preparedSelected ? focus : null}
-      {!actionCount(publishItems) && !batchOwnership.send && !batchOwnership['prepared-send'] ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
+      {focus}
+      {!actionCount(publishItems) && !batchOwnership.send ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
       {!readyCount(readyItems) && !batchOwnership.ready ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
       <div className="co-decisions" aria-label="Ready for you">
       <ExactBatchAction
         key="send"
         records={currentBatchRecords}
         onOwnershipChange={changeBatchOwnership}
-        items={presentation === 'project' ? otherPublishItems : publishItems}
+        items={publishItems}
         mode="send"
         publicationPreference={publicationPreference}
         githubState={githubState}
@@ -1097,15 +1091,9 @@ export function ContributionRun({
       </div>
       {presentation === 'project' ? controls : null}
 
-      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedTabCount} forcedTab={preparedSelected ? 'prepared' : null} prepared={<section className="co-prepared-tab" aria-label="Prepared PRs">
-        {preparedSelected ? <>
-          <button type="button" className="co-btn co-btn-quiet co-prepared-back" onClick={() => task?.close()}><Icon name="left" size={16} />Back to prepared PRs</button>
-          {focus}
-          <ExactBatchAction key="prepared-send" records={currentBatchRecords} onOwnershipChange={(_, owned) => changeBatchOwnership('prepared-send', owned)} items={publishItems.filter(item => item.id === preparedActiveItem.id)} mode="send" publicationPreference={publicationPreference} githubState={githubState} newPrStage={newPrStage} onSend={onSend} onSendStack={onSendStack} onSelect={selectRunItem} />
-        </> : <>
-          <p className="co-inventory-note">Private pull requests waiting for you to inspect. Nothing has gone to GitHub.</p>
-          <div className="co-run-list">{preparedPrItems.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
-        </>}
+      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedPrItems.length} prepared={<section className="co-prepared-tab" aria-label="Prepared PRs">
+        <p className="co-inventory-note">Prepared on your Möbius for you to inspect. Open one to see what would be sent.</p>
+        <div className="co-run-list">{preparedPrItems.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
       </section>} /> : null}
       {presentation !== 'project' ? renderPublicWork?.() : null}
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}

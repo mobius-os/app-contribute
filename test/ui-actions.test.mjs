@@ -181,7 +181,8 @@ test('contribution details retain their project parent and refresh only source d
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
   assert.doesNotMatch(sourceMapSource, /<ProjectFileChanges|task:files/)
-  assert.match(appSource, /<ProjectEdits(?: key=\{sourceSnapshot\?\.generated_at\})? project=\{project\}/)
+  // A Sync that changed only uncommitted edits is read again: the diff has no other signal for it.
+  assert.match(appSource, /<ProjectEdits key=\{sourceSnapshot\?\.generated_at\} project=\{project\}/)
   assert.match(projectEditsSource, /initiallyOpenFirst/)
   assert.doesNotMatch(sourceMapSource, /Review file diffs|\+\{rows\.length - preview\.length\} more files/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
@@ -431,10 +432,14 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(refresh, /hub\.refresh\('ledger'\)/)
   assert.match(refresh, /reviewList\.syncPulls\(\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
-  assert.match(refresh, /return \{ ok: sourceOk && ledgerCurrentRef\.current, upstream \}/)
+  assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
   assert.match(appSource, /checks=\{upstreamChecks\}/)
   // The sync keeps its last successful time inside the header control, including on phones.
   assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
+  // A failed review-request read is a failed sync, on a manual Sync and on the first load alike (the hub settles it without throwing).
+  assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
+  assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
+  assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
   assert.match(appSource, /Sync with GitHub/)
   assert.match(appSource, /setRefreshNote\(old => outcome\?\.ok/)
   assert.match(appSource, /onClick=\{refreshAll\}/)

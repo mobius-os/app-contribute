@@ -347,17 +347,21 @@ test('SSR selecting a focused contribution retains the project inventory and his
     decisions: [privateWork], working: [work('Published work', 'public', 'open')],
     recent: [work('Accepted work', 'done', 'merged')], archive: [work('Historical work', 'archived', 'abandoned')],
   })
+  for (const selectedId of ['', privateWork.id, 'task:pulls', 'task:review']) {
+    // Selecting never hides inventory: All PRs keeps saved public work, Prepared PRs its list, My work its history.
+    const tabs = { all: ['Published work', 'Prepared PRs'], prepared: ['Private work'], mine: ['Accepted work', 'Historical work'] }
+    for (const [defaultTab, labels] of Object.entries(tabs)) {
+      const html = ui.render('ContributionRun', { run: current, selectedId, defaultTab }, { activeId: selectedId, host: null })
+      for (const label of labels) assert.match(html, new RegExp(label), `${label} remains listed on ${defaultTab} for ${selectedId}`)
+      assert.doesNotMatch(html, /This contribution moved|Archived proposals/)
+    }
+  }
   const all = ui.render('ContributionRun', { run: current, defaultTab: 'all' }, { host: null })
-  assert.match(all, /Published work/)
-  assert.match(all, /Prepared PRs/)
   assert.doesNotMatch(all, /<strong>Private work<\/strong>/)
-  const prepared = ui.render('ContributionRun', { run: current, defaultTab: 'prepared' }, { host: null })
-  assert.match(prepared, /Private work/)
-  const selected = ui.render('ContributionRun', { run: current, selectedId: privateWork.id }, { activeId: privateWork.id, host: null })
-  assert.match(selected, /Private work|Prepared PRs/)
-  assert.doesNotMatch(selected, /This contribution moved/)
-  const mine = ui.render('ContributionRun', { run: current, defaultTab: 'mine' }, { host: null })
-  for (const label of ['Accepted work', 'Historical work']) assert.match(mine, new RegExp(label))
+  // Opening the row selects it above the tabs, like any other decision; no tab holds a second copy of its detail.
+  const selected = ui.render('ContributionRun', { run: current, selectedId: privateWork.id, defaultTab: 'all' }, { activeId: privateWork.id, host: null })
+  assert.match(selected, /Prepared PRs/)
+  assert.match(selected, /co-task-content|co-run-focus-detail/)
 })
 
 test('SSR reviewed work waiting on a source check asks the owner, with the reason and the right action', async t => {

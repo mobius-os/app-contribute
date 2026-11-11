@@ -18,22 +18,25 @@ contribution. This app is the dashboard for that loop:
   There is no separate Reviews destination. All, **With local changes** and
   **Behind GitHub** filter the same searchable overview, where each project
   carries a Platform or App tag and apps with nothing to do fold away.
-- **To look at first** — a project opens on what needs you on its tracked
-  contributions, blockers before news. Each row names the reason (Merge
+- **Needs you holds the blockers** — the Needs you destination lists what needs
+  you on tracked contributions, blockers before news; a project page no longer
+  repeats them in a banner. Each row names the reason (Merge
   blocked, Checks failing, Changes requested, New feedback), the affected PR
   and its related group, and when it was detected; its button says what it
   opens. A blocker leaves the list once GitHub shows it resolved. A blocker
   pushed aside by a newer reason comes back, without a second push
   notification, while GitHub still shows it.
-- **One tab per job** — under To look at and the project's status, **All PRs**
-  (the default), **Review requests** and **Agent runs** (agent jobs, agent
+- **One tab per job** — under the project's controls, **All PRs**
+  (the default), **Prepared PRs** (private PRs waiting for you, one row each,
+  shown only while there are some), **Review requests** and **Agent runs** (agent jobs, agent
   reviews, agent activity and finished work) split the project by what the
   owner came to do. Saved public work the live list cannot show stays on All
   PRs, so an unreachable GitHub never hides it behind another tab.
 - **Task-first controls** — open a project to see its work list beside one
   contextual task, with a compact project switcher rather than another sidebar.
   The project's status says in plain words what is local ("2 files changed on
-  this Möbius") and how it compares with GitHub; **Make
+  this Möbius") only when files really differ, and how it compares with GitHub
+  only when an update or conflict needs a look; **Make
   PRs from local changes** is the main action and appears only when there are some.
   A permitted maintainer can choose **Follow through to merge** without granting
   unknown future public actions. Contribute does not update projects itself:
@@ -100,7 +103,7 @@ contribution. This app is the dashboard for that loop:
   Projects row reserves its space and reports its own refresh instead of
   making counts pop into the layout.
 - **Work list**, grouped:
-  - **To look at** — actual blockers and feedback, linked to their owning work.
+  - **Needs you** (its own destination) — actual blockers and feedback, linked to their owning work.
   - **Prepared proposals · not shared** — private drafts waiting on your go-ahead. Each card
     shows high-level review context first: repo, branch, diff stat, and
     summary. Open the card to review exactly what would go public: the action
@@ -178,8 +181,8 @@ only for the core and the one mode it is working in.
   and Agent runs, then a **Repositories** block of its own (More repositories,
   All repositories, **Add repository** last). The Needs you chips (To look at,
   Review, Merge, Fix, Agent runs) filter the list under them, and the badge is
-  their sum. Drafts ready to open are a quiet line; local changes are a banner
-  on each project page. On a phone the four views are one segmented bar.
+  their sum. Drafts ready to open are a quiet line; local changes are a status row
+  on a project page only while files really differ. On a phone the four views are one segmented bar.
 - **A next step on every PR.** A state line (Draft, In review, Approved, Merged)
   and one panel under the facts: a pill, the PR machine's own sentence and one
   filled button. On a phone the button pins to the foot of the page.
@@ -633,4 +636,4 @@ Chromium (`CHROMIUM_PATH` can name it), blocks external network traffic, and
 cleans up its temporary profile. Live permission, activation and source-chat
 navigation checks are separate; passing this fixture is not a public merge.
 
-**Sync with GitHub** renews source, contribution, PR and run status without pulling code, asks GitHub whether anything is new, and says when it last did beside the button. **Make PRs from local changes** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent jobs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its Project work row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.
+**Sync with GitHub** renews source, contribution, PR and run status without pulling code, asks GitHub whether anything is new, and says under the button when it last fully succeeded (a failed read, even of the review requests, says "Couldn’t sync" and keeps the last good time). **Make PRs from local changes** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent jobs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its Project work row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.

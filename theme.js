@@ -403,27 +403,6 @@ export const CSS = `
 .co-local-position strong { font-size: var(--co-text-meta); }
 .co-local-position span { color: var(--muted); font-size: var(--co-text-meta); line-height: 1.5; }
 
-.co-position-details { border-top: 1px solid var(--border); }
-.co-position-details > summary {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  min-height: 46px; padding: 4px 2px; list-style: none; cursor: pointer;
-  color: var(--muted); font-size: var(--co-text-meta); font-weight: 650;
-}
-.co-position-details > summary::-webkit-details-marker { display: none; }
-.co-position-details > summary .co-icon { transition: transform .16s ease; }
-.co-position-details[open] > summary .co-icon { transform: rotate(180deg); }
-.co-position-details dl { margin: 0 0 12px; }
-.co-position-details dl > div {
-  display: grid; grid-template-columns: minmax(92px, .45fr) minmax(0, 1fr);
-  gap: 12px; padding: 7px 2px;
-}
-.co-position-details dl > div + div { border-top: 1px solid var(--border); }
-.co-position-details dt { color: var(--muted); font-size: var(--co-text-meta); }
-.co-position-details dd { min-width: 0; margin: 0; text-align: right; }
-.co-position-details code {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text); font-family: var(--mono, var(--font)); font-size: var(--co-text-meta);
-}
 .co-source-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48dvh; color: var(--muted); }
 .co-source-loading > div { display: flex; flex-direction: column; gap: 3px; }
 .co-source-loading strong { color: var(--text); font-size: var(--co-text-meta); }
@@ -1443,6 +1422,7 @@ export const CSS = `
   .co-toolbar-check { width: 32px; padding: 0; justify-content: center; }
   /* Sync and Settings keep a word on a phone: an icon alone is not a label (DESIGN.md). */
   .co-toolbar .co-label-long { display: none; }
+  .co-sync-last { display: none; }
   .co-toolbar .co-label-short { display: inline; }
   .co-toolbar-refresh { min-width: 40px; justify-content: center; }
   .co-project-control { max-width: 108px; padding-inline: 8px; }

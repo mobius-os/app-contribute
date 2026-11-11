@@ -11,8 +11,8 @@ const BASE_TABS = [['all', 'All PRs'], ['requests', 'Review requests'], ['mine',
 // unreachable); it stays on All PRs so it is never hidden behind another tab.
 // Edits is a tab only while the project has edits to show (`edits` is its
 // content); the PR list stays mounted, and hidden, while it is open.
-export function ProjectTabs({ reviewCount = 0, renderPullRequests, inventory, myJobs, myWork, prepared = null, preparedCount = 0, edits = null, editsCount = null, defaultTab = 'all', forcedTab = null }) {
-  const [chosen, setTab] = useState(forcedTab || defaultTab)
+export function ProjectTabs({ reviewCount = 0, renderPullRequests, inventory, myJobs, myWork, prepared = null, preparedCount = 0, edits = null, editsCount = null, defaultTab = 'all' }) {
+  const [chosen, setTab] = useState(defaultTab)
   const task = useProjectTask()
   const [total, setTotal] = useState(null)
   const id = useId()
@@ -21,7 +21,6 @@ export function ProjectTabs({ reviewCount = 0, renderPullRequests, inventory, my
   const tab = TABS.some(([key]) => key === chosen) ? chosen : 'all'
   const counts = { all: total, prepared: preparedCount, requests: reviewCount, mine: null, edits: editsCount }
   useEffect(() => { if (task?.tabRequest) setTab(task.tabRequest.key) }, [task?.tabRequest])
-  useEffect(() => { if (forcedTab) setTab(forcedTab) }, [forcedTab])
   useEffect(() => { showOpenTab(list.current, list.current?.querySelector('[role="tab"][aria-selected="true"]')) }, [tab])
   function moveWithArrows(event) {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return

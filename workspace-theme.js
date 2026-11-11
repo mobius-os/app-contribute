@@ -286,7 +286,6 @@ export const WORKSPACE_CSS = `
 .co-prepared-tab > .co-inventory-note { margin:4px 0 12px; }
 .co-prepared-tab .co-run-list { border:1px solid var(--border); border-radius:var(--co-radius-panel); overflow:hidden; }
 .co-prepared-tab .co-run-quiet-row + .co-run-quiet-row { border-top:1px solid var(--border); }
-.co-prepared-back { margin:0 0 12px; }
 .co-workspace .co-pr-assignment { padding:0; background:none; border:0; border-radius:0; }
 .co-workspace .co-run { margin-top:0; }
 .co-workspace .co-public-work { margin-top:0; }

@@ -35,20 +35,14 @@ function StatusLine({ icon, title, tone = 'plain', strong, text, sub, children }
 
 const UPSTREAM_ICON = { ok: 'check', warn: 'refresh', muted: 'info' }
 
-function LocalLine({ project, run, task }) {
-  const local = localChangeSentence(project)
-  if (!local.edits) return null
+function LocalLine({ local, run, task }) {
   return <StatusLine icon="edit" title="Local changes" strong={local.strong} text={local.text} sub={local.sub || null}>
-    <>
-      <button type="button" className="co-btn" disabled={!run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={15} />Make PRs from local changes</button>
-      <button type="button" className="co-btn co-btn-icon" onClick={() => task?.openTab('edits')} aria-label="Open Local changes" title="Open Local changes"><Icon name="folder" size={16} /></button>
-    </>
+    <button type="button" className="co-btn" disabled={!run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={15} />Make PRs from local changes</button>
+    <button type="button" className="co-btn co-btn-icon" onClick={() => task?.openTab('edits')} aria-label="Open Local changes" title="Open Local changes"><Icon name="folder" size={16} /></button>
   </StatusLine>
 }
 
-function UpstreamLine({ project, check }) {
-  const line = projectUpstreamLine(project, check)
-  if (!line || line.tone === 'ok') return null
+function UpstreamLine({ project, line, check }) {
   const updater = line.update ? projectUpdater(project) : null
   const checked = check?.checkedAt ? <TimeAgo prefix="Checked " value={check.checkedAt} /> : 'Use Sync with GitHub for the latest.'
   return <StatusLine icon={UPSTREAM_ICON[line.tone]} title="Updates from GitHub" tone={line.tone} strong={line.strong} text={line.text} sub={updater ? null : checked}>
@@ -110,6 +104,12 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
     : STATUS_LABELS[cycle.phase] || 'Status unknown'
   const local = project.kind !== 'external'
   const changedFiles = localChangeSummary(project).changed
+  // A status row appears only when it has something to act on: edits, or an upstream that needs a look.
+  const edits = local ? localChangeSentence(project) : null
+  const upstream = local ? projectUpstreamLine(project, check) : null
+  const localLine = edits?.edits ? edits : null
+  const upstreamLine = ['warn', 'muted'].includes(upstream?.tone) ? upstream : null
+  const positionRows = localLine || upstreamLine
   // Starting a full merge cycle needs merge rights; seeing existing cycles never does.
   const cycleAction = contributionCycleAction(run, [project])
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
@@ -160,9 +160,9 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     <style>{CYCLE_CSS}</style>
-    {local && (localChangeSentence(project).edits || ['warn', 'muted'].includes(projectUpstreamLine(project, check)?.tone)) ? <div className="co-project-position" aria-label="Local changes and GitHub">
-      <LocalLine project={project} run={run} task={task} />
-      <UpstreamLine project={project} check={check} />
+    {positionRows ? <div className="co-project-position" aria-label="Local changes and GitHub">
+      {localLine ? <LocalLine local={localLine} run={run} task={task} /> : null}
+      {upstreamLine ? <UpstreamLine project={project} line={upstreamLine} check={check} /> : null}
     </div> : null}
     {local ? <SourceConversations project={project} appId={appId} token={token} /> : null}
     <TaskPane id="task:prepare" dock={false}>
