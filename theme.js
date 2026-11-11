@@ -1108,11 +1108,6 @@ export const CSS = `
   background: color-mix(in srgb, var(--green) 12%, var(--surface)); color: var(--green);
 }
 .co-run-primary > div { min-width: 0; }
-.co-run-primary small {
-  display: block; margin-bottom: 2px; color: var(--accent); font-size: var(--co-text-meta);
-  font-weight: 750; letter-spacing: .045em; text-transform: uppercase;
-}
-.co-run-primary.is-ready small { color: var(--green); }
 .co-run-primary strong { display: block; font-size: var(--co-text-body); line-height: 1.35; text-wrap: pretty; }
 .co-run-primary p { margin: 3px 0 0; color: var(--muted); font-size: var(--co-text-meta); line-height: 1.4; }
 .co-run-primary > .co-btn { min-width: 112px; }

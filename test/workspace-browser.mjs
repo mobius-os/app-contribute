@@ -584,6 +584,9 @@ async function chooseProject(name) {
 }
 window.runWorkspaceChecks = async () => {
   const checks = []
+  const savedPr = (id, number, title, repo = 'owner/project') => ({ id, type: 'pr', status: 'open', repo, number, title, summary: title,
+    url: 'https://github.com/' + repo + '/pull/' + number, plan: { action: 'pr', repo, title } })
+  const sharedWork = () => query('details[aria-label="Shared work"]')
   async function check(name, run) {
     await run()
     const page=query('.co-page')
@@ -603,6 +606,28 @@ window.runWorkspaceChecks = async () => {
       await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab][data-tab="edits"]'), 'Project did not settle')
       ensure(query('.co-workspace-inventory') && !query('.co-task-content'), 'Opening a project displayed task work')
       ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
+    })
+    await check('the prepared-PR bar keeps Open for review at its right edge and shows its whole menu', async () => {
+      const bar = query('.co-decisions > .co-run-primary'), split = bar?.querySelector('.co-split')
+      ensure(split && button('Open for review', split), 'Fixture: the prepared-PR bar no longer offers Open for review as a split button')
+      const more = split.querySelector('.co-split-more')
+      // The last visible button, not its wrapper: a stretched wrapper still ends at the edge while its buttons sit in the middle.
+      const edge = bar.getBoundingClientRect().right - more.getBoundingClientRect().right
+      await captureShot('prepared-bar')
+      ensure(edge <= 16, 'Open for review floats ' + Math.round(edge) + 'px inside the bar instead of sitting at its right edge')
+      await click(more)
+      await until(() => split.querySelector('[role=menuitem]'), 'The open-for-review menu did not open')
+      const items = [...split.querySelectorAll('[role=menuitem]')]
+      ensure(items.length === 2, 'Open for review lost one of its two ways to open')
+      items.at(-1).scrollIntoView({ block: 'nearest' }); await frame()
+      ensure(items.at(-1).getBoundingClientRect().bottom > bar.getBoundingClientRect().bottom, 'Fixture: the menu no longer reaches past the prepared-PR bar')
+      await captureShot('prepared-bar-menu')
+      for (const item of items) {
+        const rect = item.getBoundingClientRect()
+        ensure(item.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 6)), 'The bar clipped the open-for-review menu')
+      }
+      await click(more)
+      await until(() => !split.querySelector('[role=menuitem]'), 'The open-for-review menu did not close')
     })
     const originalInventory = query('.co-workspace-inventory'), originalRow = query('.co-pr-row')
     let originalList = query('.co-pr-list')
@@ -932,6 +957,40 @@ window.runWorkspaceChecks = async () => {
       await inventory()
       ensure(button(opens),'Restored record did not return to private preparation')
       await backToPrs()
+    })
+    await check('saved public PRs wait for the open-PR list before any of them counts as Shared work', async () => {
+      // A list opened for the first time: the saved PRs are in the records before the project is opened, so it is a fresh read.
+      await chooseProject('Other project')
+      window.setRecordsFixture(old => [...old, savedPr('fixture-listed', 7, 'Saved listed PR'), savedPr('fixture-shared', 99, 'Saved shared PR')])
+      window.holdPulls = true
+      await chooseProject('Fixture project')
+      // #7 is in the live list once it is read; #99 is not.
+      await until(() => window.releasePulls && query('.co-pr-skel'), 'The PR list did not start loading')
+      await captureShot('shared-work-while-loading')
+      ensure(!sharedWork(), 'Saved public PRs showed as Shared work while the list was still loading: ' + text(sharedWork()))
+      window.holdPulls = false; window.releasePulls(); window.releasePulls = null
+      await until(() => document.querySelectorAll('.co-pr-row').length >= 2 && sharedWork(), 'The list did not load, or the PR it does not show was not kept as Shared work')
+      await captureShot('shared-work-after-loading')
+      ensure(text(sharedWork()).includes('Saved shared PR') && !text(sharedWork()).includes('Saved listed PR'), 'Shared work should hold only the PR the list does not show: ' + text(sharedWork()))
+      window.setRecordsFixture(old => old.filter(record => !['fixture-listed', 'fixture-shared'].includes(record.id)))
+      await until(() => !sharedWork() && !window.releasePulls && !query('.co-pr-skel'), 'Removing the saved PRs did not settle')
+      originalList = query('.co-pr-list') // opening the project again mounted a new list
+    })
+    await check('a reload of a list that has been read keeps its Shared work, even when the list is empty', async () => {
+      window.emptyPulls = true
+      await click(checkButton())
+      await until(() => text(query('.co-pr-empty')).includes('No pull requests'), 'Empty inventory missing')
+      window.setRecordsFixture(old => [...old, savedPr('fixture-shared', 99, 'Saved shared PR')])
+      await until(() => sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Saved PR missing from Shared work beside an empty list')
+      window.holdPulls = true
+      await click(checkButton())
+      await until(() => window.releasePulls, 'The reload did not start')
+      await captureShot('shared-work-while-reloading')
+      ensure(sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Shared work emptied while an already-read list reloaded')
+      window.holdPulls = false; window.emptyPulls = false; window.releasePulls(); window.releasePulls = null
+      await until(() => document.querySelectorAll('.co-pr-row').length >= 2 && !query('.co-pr-skel'), 'The list did not reload')
+      window.setRecordsFixture(old => old.filter(record => record.id !== 'fixture-shared'))
+      await until(() => !sharedWork(), 'Removing the saved PR did not settle')
     })
     await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
       const before=mutationRequests().length
@@ -1798,6 +1857,15 @@ window.runWorkspaceChecks = async () => {
         window.fetch = original
         root.render(null)
       }
+    })
+    // The wait for the PR list must never hide saved public work the list will not show: with GitHub unreachable no read is pending.
+    await check('saved public PRs still show as Shared work when GitHub cannot be read', async () => {
+      root.render(<Fixture />)
+      await until(() => query('.co-source-row'), 'Project list did not render')
+      window.setConnectionFixture({ state: 'unknown' })
+      window.setRecordsFixture(old => [...old, savedPr('fixture-offline', 5, 'Saved PR while GitHub is unreachable', 'owner/other')])
+      await click([...document.querySelectorAll('.co-source-row')].find(node => text(node.querySelector('strong')) === 'Other project'))
+      await until(() => sharedWork() && text(sharedWork()).includes('Saved PR while GitHub is unreachable'), () => 'GitHub unreachable hid the saved public PR: ' + text(sharedWork()))
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
