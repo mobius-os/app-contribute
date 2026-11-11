@@ -319,9 +319,13 @@ and what cannot be undone. Where Möbius advertises `owner_confirm`, its own she
 one for Merge and the five status changes: one tap on the action, one tap to confirm, and
 **Merge options…** (only where the repository allows more than one way) to choose how it
 lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
-the same sheet first, so the owner's tap
-is proven by Möbius and not by the app's own frame; until the owner has confirmed, the app's
-own sheet only says it is waiting. A Möbius without it keeps the app's own sheets.
+the same sheet first, so the owner's tap is proven by Möbius and not by the app's own frame;
+until the owner has confirmed, the app's own sheet only says it is waiting. A Möbius without
+it keeps the app's own sheets, and that second path exists only until platform enforcement
+has shipped and been adopted: then it is removed and the app requires `owner_confirm`.
+Until then the top-level `"owner_confirm": true` in `mobius.json` is the opt-in switch: the platform
+enforces owner confirmation only for apps that declare it, and this app asks Möbius's sheet before each
+guarded tap and then repeats the same request unchanged.
 New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default
 (the shipped default is Ready, as the product states). A finished review that

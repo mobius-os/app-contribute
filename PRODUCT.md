@@ -175,6 +175,12 @@ the owner, and folds apps with nothing to do.
   fix, and Post get that sheet as a new confirm. Until the owner has confirmed on it, the
   app's own sheet only says it is waiting for that. A cancel sends nothing. A Möbius
   without it keeps the sheets above.
+- **Two paths, until platform enforcement ships.** The path without Möbius's sheet (the
+  app's own confirm sheets, and Post off) exists only until the platform enforces owner
+  confirmation and that has been adopted; then it is removed and the app requires
+  `owner_confirm`. Until then the manifest declaration `"owner_confirm": true` is the
+  opt-in switch: the platform enforces owner confirmation only for apps that declare it,
+  and this app does.
 - **Open as draft / Open for review** is one split button on the prepared-PR
   card; the arrow offers the other stage for that send. The stage is part of the
   exact approval, the confirmation text and the chat Send card (which freezes it

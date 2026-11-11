@@ -10,6 +10,7 @@
   "entry": "index.jsx",
   "offline_capable": true,
   "embeds_agent": true,
+  "owner_confirm": true,
   "capabilities": {
     "chat.blocks.passive": {
       "version": 1,
