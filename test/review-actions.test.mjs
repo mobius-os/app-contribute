@@ -103,3 +103,16 @@ test('only findings with nothing of theirs on GitHub can be posted', () => {
   assert.equal(postableFindings({ public_review: { state: 'unknown' } }), false, 'an attempt that may have gone out is never repeated')
   assert.equal(postableFindings(null), true)
 })
+
+test('Stop ends the whole run, so a batch says how many PRs it stops', () => {
+  const label = batch => reviewActionPlan({ tone: 'running', chat: true, stoppable: true, batch }).find(action => action.key === 'stop').label
+  assert.equal(label(1), 'Stop review')
+  assert.equal(label(undefined), 'Stop review', 'a run with no item count is one review')
+  assert.equal(label(3), 'Stop review of 3 PRs')
+})
+
+test('setting a finding aside has one name on the buttons: Set aside…, and Undo set aside to take it back', () => {
+  const labels = plan => plan.map(action => action.label)
+  assert.ok(labels(reviewActionPlan({ tone: 'findings', own: true, chat: true, can: everything })).includes('Set aside…'))
+  assert.deepEqual(labels(reviewActionPlan({ tone: 'ignored', chat: true, can: { undo: true } })), ['Undo set aside', 'Ask the reviewer something'])
+})

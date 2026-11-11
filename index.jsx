@@ -52,7 +52,6 @@ import {
   contributionStackDecision,
 } from './contribution-policy.js'
 import {
-  assignIncomingReview,
   fetchIncomingReviews,
   fetchGithubStatus,
   githubRemainingPoints,
@@ -157,7 +156,7 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
     <button type="button" className="co-btn" disabled={retrying} onClick={async () => {
       setRetrying(true)
       try { await onRetry?.() } finally { setRetrying(false) }
-    }}>{retrying ? 'Checking…' : 'Check GitHub again'}</button></section>
+    }}>{retrying ? 'Checking…' : NAMES.checkAgain}</button></section>
 }
 
 // Preflight rejection did not enter a public write. Keep it distinct from a
@@ -178,7 +177,7 @@ function stalePublicApproval() {
 function relayFromChatRefusal() {
   return {
     notAttempted: true,
-    error: 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.',
+    error: 'Möbius sends this contribution from its own account, and chat cannot do that from the copy you confirmed. Open Contribute to send it.',
     failure: { owner: 'owner', code: 'relay_not_inline' },
   }
 }
@@ -1147,7 +1146,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       return {
         notAttempted: true,
         error: current.submission_mode === 'mobius-bot'
-          ? 'Möbius relay drafts cannot request review from this connection yet.'
+          ? 'A draft sent from Möbius’s own account cannot be opened for review from this connection yet.'
           : 'This pull request is no longer a personal draft.',
         failure: { owner: 'owner', code: 'ready_not_available' },
       }
@@ -1202,7 +1201,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
     refreshReviewStatus()
     return {
-      error: outcome.error || 'Could not request review for this pull request.',
+      error: outcome.error || 'Could not open for review.',
       failure: outcome.failure,
     }
   }, [appId, token, applyRecordUpdates, refreshReviewStatus])
@@ -1321,37 +1320,6 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     saveAppSettings({ ...settings, autopilot_default: next })
   }, [])
 
-
-  const onAssignIncomingReview = useCallback(async (item) => {
-    const repo = item?.repository?.nameWithOwner || ''
-    const outcome = await assignIncomingReview({ appId, token, repo, number: item?.number })
-    if (!outcome.ok) return outcome
-    const started = await startAgentTask({
-      event: 'assign_and_review_incoming_pr',
-      title: `Review ${repo} #${item.number}`,
-      count: 1,
-      draft: [
-        `Thoroughly review ${item.url}.`,
-        '',
-        'The owner explicitly assigned this exact pull request to themselves from Contribute.',
-        'Inspect the complete current diff with expanding scope for correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
-        'Do not change the author’s branch. Prepare specific, actionable suggestions for sound findings and review again if the author updates it.',
-        'Do not submit a GitHub review or comment without the owner’s exact approval for that public action.',
-      ].join('\n'),
-    })
-    if (!started.ok) {
-      return {
-        ...started,
-        error: 'Assigned on GitHub, but the review chat did not start. Try again to resume it.',
-      }
-    }
-    // The assignment settled after any earlier incoming-review request began.
-    // Invalidate that request before hiding this row so its stale response
-    // cannot put the just-assigned review back into the queue.
-    hub.supersede('incoming')
-    setIncomingReviews((current) => current.filter((row) => row.url !== item.url))
-    return { ok: true }
-  }, [appId, token, startAgentTask, hub])
 
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
@@ -1627,8 +1595,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     records,
     reviewStatus,
     projects: sourceProjects,
-    incomingReviews: [],
-  }), [records, reviewStatus, sourceProjects, incomingReviews])
+  }), [records, reviewStatus, sourceProjects])
   const focusedRecord = records.find(record => record.id === reviewFocus?.recordId)
   const focusedProjectKey = sourceProjects.find(project =>
     recordsForProject(focusedRecord ? [focusedRecord] : [], project).length > 0)?.key || ''
@@ -1639,10 +1606,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     setProjectFocus({ key: focusedProjectKey, nonce: reviewFocus.nonce })
   }, [reviewFocus, focusedReviewReady, sourceLoading, focusedProjectKey])
 
+  // What the shared decision of each PR is read from besides the PR itself (pr-standing.js): the desk's
+  // counts and its rows decide from the same facts, so the numbers equal the rows.
+  const standingFacts = useMemo(() => ({ runs: reviewRuns, chats: respondChats, responses, ignored: ignoredReviews }), [reviewRuns, respondChats, responses, ignoredReviews])
   // What waits on the owner in each project: the same count its Needs you
   // card lists, so the rail and the card never disagree.
   const projectAttention = useMemo(() => Object.fromEntries(sourceProjects
-    .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, conn.login || '', reviewList.entries)])), [sourceProjects, records, reviewStatus, conn.login, reviewList.entries])
+    .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, conn.login || '', reviewList.entries, standingFacts)])), [sourceProjects, records, reviewStatus, conn.login, reviewList.entries, standingFacts])
   // The home's clickable counts: every number names a next step and its view.
   const deskCountsValue = useMemo(() => deskCounts({
     projects: sourceProjects,
@@ -1652,7 +1622,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     login: conn.login || '',
     reviews: reviewList.counts,
     reviewEntries: reviewList.entries,
-  }), [sourceProjects, contributionRun, incomingReviews, records, conn.login, reviewList.counts, reviewList.entries])
+    ...standingFacts,
+  }), [sourceProjects, contributionRun, incomingReviews, records, conn.login, reviewList.counts, reviewList.entries, standingFacts])
   const desk = {
     view: deskView,
     onView: setDeskView,
@@ -1680,7 +1651,6 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   function projectRun(project) {
     return project ? buildContributionRun({
       records: recordsForProject(records, project), reviewStatus, projects: [project],
-      incomingReviews: [],
     }) : contributionRun
   }
   // `intent` lets a desk row open the PR straight into a window ('fix' = Respond to feedback).
@@ -1859,10 +1829,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <SyncNote note={refreshNote} />
-          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label="Sync with GitHub">
+          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync}>
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-label-long">{refreshingAll ? 'Syncing…' : 'Sync with GitHub'}</span>
-            <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+            <span className="co-label-long">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+            <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.syncShort}</span>
           </button>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
@@ -1906,7 +1876,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
-              onAssignIncomingReview={onAssignIncomingReview} onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
+              onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
               focusReady={focusedReviewReady && !sourceLoading}
               onFocusConsumed={consumeReviewFocus}

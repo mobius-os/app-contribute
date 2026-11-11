@@ -525,6 +525,7 @@ test('a relay (mobius-bot) contribution is never confirmable from chat and is ne
   assert.deepEqual([h.action(KEY).confirming, h.action(KEY).open], [false, true])
   h.fire(KEY, 'confirm'); await tick()
   assert.equal(h.sends.length, 0)
+  assert.doesNotMatch(h.action(KEY).note, /relay/i, 'the note says who sends it, not how')
   assert.equal(localHold(prepared('ok')), '')
 })
 

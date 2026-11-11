@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Icon } from './Icons.jsx'
 
-// What GitHub will see, as one small icon beside a window's close button: amber
+// What GitHub will see, as one small labelled icon beside a window's close button: amber
 // when something reaches GitHub, green when nothing does. Hovering or focusing it
 // opens a themed card with the words; a tap pins the card open, because a touch
 // screen has no hover. The words stay in the page, so a screen reader reads them
-// as the button's description.
+// as the button's description. The icon sits last, next to the close button, so the card's arrow stays under it.
 export function SeenOnGithub({ tone, text }) {
   const root = useRef(null)
   const cardId = useId()
@@ -24,9 +24,9 @@ export function SeenOnGithub({ tone, text }) {
     setPinned(false)
   }
   return <span ref={root} className={'co-rw-seen ' + (quiet ? 'is-private' : 'is-public') + (pinned ? ' is-pinned' : '')} onKeyDown={dismiss}>
-    <button type="button" className="co-btn co-btn-quiet co-btn-icon is-toned co-rw-seen-btn" aria-label="Seen on GitHub" aria-describedby={cardId} aria-pressed={pinned} onClick={() => setPinned(value => !value)}>
-      <Icon name={quiet ? 'lock' : 'globe'} size={20} />
+    <button type="button" className="co-btn co-btn-quiet is-toned co-rw-seen-btn" aria-describedby={cardId} aria-pressed={pinned} onClick={() => setPinned(value => !value)}>
+      <span>What GitHub sees</span><Icon name={quiet ? 'lock' : 'globe'} size={20} />
     </button>
-    <span id={cardId} role="tooltip" className="co-rw-seen-card"><strong>Seen on GitHub:</strong> {text}</span>
+    <span id={cardId} role="tooltip" className="co-rw-seen-card"><strong>What GitHub sees:</strong> {text}</span>
   </span>
 }

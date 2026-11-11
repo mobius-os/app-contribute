@@ -39,7 +39,6 @@ const runRenderer = () => renderModule(`
       onSetAutopilot: noop,
       onWithdraw: noop,
       onConnectApp: noop,
-      onAssignIncomingReview: noop,
       onViewProject: noop,
       loadDiff: noop,
     })))
@@ -56,7 +55,6 @@ const runRenderer = () => renderModule(`
       onWithdraw: noop,
       onConnectApp: noop,
       onMarkReady: noop,
-      onAssignIncomingReview: noop,
       loadDiff: noop,
     }))
   }

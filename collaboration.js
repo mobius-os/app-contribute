@@ -198,7 +198,7 @@ export function reviewItemProgress(run, item, { own = null, ignored = null } = {
   const settled = SETTLED_ITEMS.has(item.state) || handedOver || dropped || waived
   const halted = !settled && HALTED_RUNS.has(run.execution_state)
   const waiting = !settled && run.execution_state === 'awaiting_owner'
-  const label = requested ? 'Changes requested' : handedOver ? 'Review posted' : dropped ? 'Verdict discarded' : waived ? 'Ignored'
+  const label = requested ? 'Changes requested' : handedOver ? 'Review posted' : dropped ? 'Verdict discarded' : waived ? 'Set aside'
     : halted ? 'Not finished' : REVIEW_STATE_NAMES[item.state] || item.state
   const turn = handedOver ? 'author' : settled ? 'none' : halted || waiting || OWNER_ITEM_STATES.has(item.state) ? 'owner' : 'agent'
   return { label, halted, waiting, settled, turn }
@@ -415,18 +415,36 @@ export function earlierReviewForPull(runs, pr) {
   return matches.sort((a, b) => Date.parse(b.run.created_at || '') - Date.parse(a.run.created_at || ''))[0] || null
 }
 
+// What each "Who sees the result?" choice grants (the review window's switch, ui/ReviewConfirmation.jsx).
+export const WHO_OPTIONS = {
+  private: { post_review: false, propose_verdict: false, agent_submits_verdict: false },
+  draft: { post_review: true, propose_verdict: true, agent_submits_verdict: false },
+  agent: { post_review: true, propose_verdict: true, agent_submits_verdict: true },
+}
+// "Draft for me" needs a Möbius that can post a review and propose its verdict.
+export const offersDraft = capabilities => capabilities?.post_review === true && capabilities?.propose_verdict === true
+
 // The PR machine's agent jobs (pr-machine.js) as the platform runs them. On your
 // own PR a review is only ever a private check; Finish it for me and Take over
 // are the same platform mode, told apart by whose PR it is (and Take over's reason).
 // A raw mode (a retry, a saved link) passes through with its own defaults.
-const PRIVATE = { post_review: false, propose_verdict: false, agent_submits_verdict: false }
+// Someone else's PR opens on "Draft for me" when `draftFirst` (the host offers it): a private review
+// ends with nothing to send. "Agent posts" is never a default.
 const REVIEW_INTENTS = {
-  review: { mode: 'review', options: PRIVATE },
-  check_my_pr: { mode: 'review', options: PRIVATE },
+  review: { mode: 'review', options: WHO_OPTIONS.private },
+  check_my_pr: { mode: 'review', options: WHO_OPTIONS.private },
   finish_it: { mode: 'review_fix_merge' },
   take_over: { mode: 'review_fix_merge' },
 }
-export function reviewIntent(choice) {
+// A Review tapped before the host's capabilities arrived opened on "Only me" and is marked `draftPending`. Once they are known the
+// window takes the draft default if the host offers it (the owner cannot have chosen yet: the choice appears with the capabilities).
+export function settleDraftDefault(choice, capabilities) {
+  if (!choice?.draftPending || !capabilities) return choice
+  const { draftPending, ...settled } = choice
+  return offersDraft(capabilities) ? { ...settled, options: WHO_OPTIONS.draft, request_id: crypto.randomUUID() } : settled
+}
+export function reviewIntent(choice, draftFirst = false) {
   const known = REVIEW_INTENTS[choice]
-  return known ? { intent: choice, ...known } : { mode: choice }
+  if (!known) return { mode: choice }
+  return { intent: choice, ...known, ...(choice === 'review' && draftFirst ? { options: WHO_OPTIONS.draft } : {}) }
 }

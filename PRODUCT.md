@@ -41,8 +41,10 @@ position. Agent work progresses in place; only actual questions need the owner.
 ## Capabilities and Constraints
 
 - Public GitHub actions always retain an exact owner approval checkpoint.
-- One approval may cover a mixed set of standalone and stacked pull requests,
-  but it must enumerate every exact public action and preserve stack order.
+- One approval may cover several pull requests, but it must enumerate every
+  exact public action. New work is prepared as independent pull requests against
+  the default branch, never as a stack; a stack that already exists is still
+  shown and sent in its order, with every action enumerated.
 - An all-clear review belongs to the exact reviewed version and becomes stale when that version changes.
 - Existing local and private work must be preserved during reconciliation.
 - Project status can establish source relationships, but it cannot always infer whether local differences are reusable, personal, or already covered. The UI must distinguish clear preparation candidates from work that needs sorting.
@@ -132,7 +134,7 @@ fixed run brief and mandatory instructions.
 ## Plain words (owner direction, 2026-10-26)
 
 Every control says what it does for someone who has never used Contribute:
-"Make PRs from my edits" rather than "Prepare changes", **Sync with GitHub** with
+"Make PRs from local changes" rather than "Prepare changes", **Sync with GitHub** with
 its last time written beside it rather than a silent refresh icon, "Mark ready for review" for
 an own draft, and labelled **Assign** and **Actions ▾** buttons on PR rows. An
 action shows feedback when used. Sync with GitHub asks GitHub read-only whether a
@@ -140,7 +142,7 @@ repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
 its steps, what GitHub will see and which model runs it before anything starts.
 A project opens on To look at (blockers before news, each with its reason, PR
-and detection time), then its status, then All PRs, Review requests and My work; the projects list tags Platform and App projects, says what waits on
+and detection time), then its status, then All PRs, Review requests and Agent runs; the projects list tags Platform and App projects, says what waits on
 the owner, and folds apps with nothing to do.
 
 ## Act where you are looking (owner direction, 2026-11-04)
@@ -193,7 +195,7 @@ the owner, and folds apps with nothing to do.
   until they fix it or set it aside.
 - **The Review tab answers instead of asking for a conversation.** A finished
   review that found problems offers **Fix these findings** (Respond to feedback with
-  the saved findings ticked), **Ignore…** (one reason, for this exact version,
+  the saved findings ticked), **Set aside…** (one reason, for this exact version,
   kept in Contribute, nothing posted, with Undo), **Review again** and **Ask the
   reviewer something** as a plain button. "Answer in review conversation" is
   only for a conversation that really asked something, and "Stop review" only
@@ -204,8 +206,9 @@ the owner, and folds apps with nothing to do.
   **Discard**. Post has Möbius's own sheet confirm the press, saves the owner's approval for
   exactly that answer and tells the chat to run one checked command; nothing is pushed or posted before it. **Post is off until
   Möbius can confirm it was the owner who pressed it** (an approval the agent could have
-  written itself proves nothing): the button is disabled with that reason on the card, and
-  the answer, Reply in chat and Discard keep working. The PR reads **Draft
+  written itself proves nothing): the Respond window says so before it starts, the button is
+  disabled with that reason on the card, and the answer, **Copy replies** (every reply with the
+  thread it answers), Reply in chat and Discard keep working. The PR reads **Draft
   to send** while the answer waits, **Sending** while it posts and **Not confirmed** if it
   stops part-way (a retry skips what already went out, and a reply that may have gone out
   is only looked for, never sent again). Right after Post the card says
@@ -217,15 +220,18 @@ the owner, and folds apps with nothing to do.
   pass builds on the first, so there is no picker), and once it starts the Review tab shows
   **Working on feedback** at once, with the old answer's Post held back, instead of after
   the next read.
-- **PR reviews** (side menu) lists the reviews the owner started, by project, in
-  two tabs: **In progress** (waiting on the owner first, then agents at work, then
-  anything stuck or unreadable) and **Done**. Every PR is read live, in batches of
+- **Agent runs** (side menu) lists the reviews the owner started and the saved agent
+  work, by project, in three tabs: **Waiting on you** (the owner's move first, then an
+  agent that stopped, then a PR GitHub did not answer for), **Running** and
+  **Finished** (only what is over). It opens on the first tab with rows, and a review
+  row opens its PR on its Review tab. Every PR is read live, in batches of
   25, when the list changes and again on every Sync with GitHub, so a closed PR is
   history, a pushed PR comes back as new commits (after a clear or approved review
   too, though on the owner's own PR it is only an older version), a stale finding
   is never counted as waiting on the owner, and a PR GitHub did not return reads
   **Couldn’t read** with Try again instead of being classified from older saved
-  data.
+  data. The rail shows how many agents are running; a run that waits on the owner
+  counts in Needs you.
 
 ## The PR machine: one decision for every screen and the server (owner direction, 2026-11-04)
 
@@ -312,8 +318,10 @@ fixed with its commit, not valid with the reason and an @mention, or out of scop
 never reviews again, and its result waits in the PR's Review tab until you press Post,
 which pushes the fixes, posts every reply, updates the description and asks for the
 re-review) · Finish it for me (stops before each push for your approval). Their PR:
-Review, which reads Re-review once you reviewed it, with an optional "Merge after I
-approve" switch · Take over, set apart, maintainers only, with a reason. Your own
+Review, which reads Re-review once you reviewed it and opens on "Draft for me" where this
+Möbius can post a review and propose its verdict (otherwise the private check), with an
+optional "Merge after I approve" switch that stays drawn, off and dimmed, with its reason
+where it cannot be turned on · Take over, set apart, maintainers only, with a reason. Your own
 actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
 behind a confirm sheet (Möbius's own, where it offers one) and each shown only where this Möbius can do it.
 

@@ -14,7 +14,11 @@ const sources = [...readdirSync(root).filter(name => /\.(js|jsx)$/.test(name)),
 const RETIRED = ['Mark ready', 'Review and send', 'Re-review', 'Start again', 'Source chat', 'Saved work',
   'Review chats', 'review conversation', 'Check my PR', 'Address feedback', 'Close PR', 'Contribution actions',
   'Contribution approval', 'Refresh PR list', 'Refresh checks', 'Refresh Contribute', 'Your edits', 'My work', 'PR reviews',
-  'To confirm', 'Merged this week', 'Make PRs from my edits']
+  'To confirm', 'Merged this week', 'Make PRs from my edits',
+  // One name per thing: set aside, discard, agent run, check again, open for review.
+  'Ignore…', 'Undo ignore', 'Don’t push', 'Check GitHub again', 'Check GitHub now', 'Stop workflow', 'Agent jobs', 'Agent job',
+  'Agent activity', 'Past jobs', 'Start fresh full merge cycle', 'Recorded version',
+  'Requesting review', 'Review requested', 'Not requested']
 
 // Screen text: a quoted string or JSX text. Comments may still name the old words.
 const screenText = line => !/^\s*(\/\/|\*|\/\*)/.test(line)
@@ -85,6 +89,14 @@ test('the app\'s repository list and its settings take their own names, not the 
   assert.match(rail, /<span>\{NAMES\.moreRepositories\}<\/span>/)
   assert.match(picker, /<span>\{NAMES\.addRepository\}<\/span>/)
   assert.match(read('ui/ConnectionCard.jsx'), /<h2>\{NAMES\.settings\}<\/h2>/)
+})
+
+test('one name per thing: agent run, Set aside…, Discard, Sync with GitHub for everything, Check again for one thing', () => {
+  assert.deepEqual([NAMES.agentRun, NAMES.agentRuns, NAMES.ignore, NAMES.discard, NAMES.sync, NAMES.checkAgain, NAMES.repositories],
+    ['Agent run', 'Agent runs', 'Set aside…', 'Discard', 'Sync with GitHub', 'Check again', 'Repositories'])
+  const reviewer = decide({ author: 'sam', head: 'h', lifecycle: 'open', checks: 'pass', mergeable: 'yes', permission: 'ADMIN', reviews: [],
+    openThreads: 0, myReview: null, job: null, result: null, outbox: null, readComplete: true, role: 'reviewer' })
+  assert.equal(reviewer.actions.find(action => action.id === 'set_aside').title, NAMES.ignore, 'the machine says Set aside… in the same words')
 })
 
 test('an icon means one thing: the sparkle marks agent work only, never the mixed Actions menu', () => {

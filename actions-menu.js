@@ -64,17 +64,18 @@ function agentItems(decision) {
 }
 
 // Several PRs at once: only a review (a private check on your own PRs) can run
-// as a batch, and only when every selected PR allows it.
-function batchItems(decisions) {
+// as a batch, and only when every selected PR allows it. The dimmed reason names the PR that blocks it.
+function batchItems(list, decisions) {
   const reasons = decisions.map(decision => decision.actions.find(action => ['review', 'check_my_pr'].includes(action.id))?.reason || '')
-  const reason = reasons.find(Boolean) || ''
+  const blocked = reasons.findIndex(Boolean)
+  const reason = blocked < 0 ? '' : `#${list[blocked].number}: ${reasons[blocked]}`
   return [{ intent: 'review', icon: 'review', title: 'Review each', detail: 'Your own PRs are only checked privately.', rec: false, off: !!reason, reason }]
 }
 
 // `decisions` line up with `pulls` (one machine decision each). Returns { header, headline, you, agent }.
 export function actionsMenuModel(pulls, decisions, { record = null, capabilities = null } = {}) {
   const list = (Array.isArray(pulls) ? pulls : []).filter(Boolean)
-  if (list.length !== 1) return { header: list.length ? { label: `${list.length} PRs`, text: 'selected' } : null, headline: '', you: [], agent: list.length ? batchItems(decisions) : [] }
+  if (list.length !== 1) return { header: list.length ? { label: `${list.length} PRs`, text: 'selected' } : null, headline: '', you: [], agent: list.length ? batchItems(list, decisions) : [] }
   const decision = decisions?.[0]
   if (!decision) return { header: pullHeader(list[0]), headline: '', you: [], agent: [] }
   return { header: pullHeader(list[0]), headline: decision.headline, you: withMergeOptions(yourItems(decision, { record, capabilities }), list[0], capabilities), agent: agentItems(decision) }

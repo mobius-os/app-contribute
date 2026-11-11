@@ -192,7 +192,7 @@ function ProjectGroup({ label, projects, selectedKey, onSelect, checks = {}, att
 function QuietProjects({ projects, onSelect, checks, searching }) {
   if (!projects.length) return null
   return <details className="co-quiet-projects" open={searching ? true : undefined}>
-    <summary><span>Apps with nothing to do</span><b>{projects.length}</b><Icon name="chevron" size={14} /></summary>
+    <summary><span>Repositories with nothing to do</span><b>{projects.length}</b><Icon name="chevron" size={14} /></summary>
     <ProjectGroup label="" projects={projects} selectedKey="" onSelect={onSelect} checks={checks} quiet />
   </details>
 }
@@ -211,7 +211,7 @@ function PullPageTask({ children }) {
 }
 
 function LoadingState() {
-  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong>Checking projects…</strong><span>Comparing local, shared, and prepared work.</span></div></div>
+  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong>Checking repositories…</strong><span>Comparing local, shared, and prepared work.</span></div></div>
 }
 
 export function SourceMap({
@@ -312,7 +312,7 @@ export function SourceMap({
     }
     if (outcome?.status !== 'owned') {
       projectNavRef.current = null
-      setNavigationError('Could not open this project. Try again.')
+      setNavigationError('Could not open this repository. Try again.')
       return
     }
     showProject(key)
@@ -375,7 +375,7 @@ export function SourceMap({
   const currentView = DESK_VIEWS.find(item => item.key === desk.view)
   const viewLabel = currentView?.heading || currentView?.label || NAMES.repositories
   return (
-    <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Project details">
+    <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Repository details">
       <div className="co-desk">
       <DeskRail view={desk.view} counts={desk.counts} projects={projects} attention={attention} selectedKey={selected} onView={openView} onOpenProject={openProjectFromRail} addProject={addProject?.(true)} />
       <div className="co-desk-pane">
@@ -386,7 +386,7 @@ export function SourceMap({
         </div>
       ) : (
       <>
-      {selectedProject ? <h2 className="co-visually-hidden">Project detail</h2> : (
+      {selectedProject ? <h2 className="co-visually-hidden">Repository detail</h2> : (
         <>
         <DeskChips view={desk.view} counts={desk.counts} projects={orderedProjects} onView={openView} />
         <header className="co-view-heading">
@@ -404,7 +404,7 @@ export function SourceMap({
         <div className="co-connect-banner" role="status">
           <div>
             <strong>Connect GitHub in Settings to contribute as yourself</strong>
-            <p>Your projects and saved reviews stay here. When you’re ready to send or review work on GitHub, go to Möbius Settings → Accounts → GitHub and connect your account there.</p>
+            <p>Your repositories and saved reviews stay here. When you’re ready to send or review work on GitHub, go to Möbius Settings → Accounts → GitHub and connect your account there.</p>
           </div>
           <button type="button" className="co-btn co-btn-primary" onClick={openGithubSettings}>Go to Settings</button>
         </div>
@@ -413,7 +413,7 @@ export function SourceMap({
         <div className="co-view-note">GitHub is unavailable. Local status and saved reviews remain visible.</div>
       ) : null}
       {error ? (
-        <div className="co-view-warning" role="status">Project status could not refresh. Saved contributions remain available.</div>
+        <div className="co-view-warning" role="status">Repository status could not refresh. Saved contributions remain available.</div>
       ) : null}
 
       {!selectedProject ? (
@@ -425,14 +425,14 @@ export function SourceMap({
         ) : (
         <>
           <div className="co-directory">
-          <FilterLine label="Filter projects" items={FILTERS.map(([key, label]) => ({ key, label, count: key === 'all' ? null : filterCounts[key] }))} active={filter} onPick={setFilter} />
-          <SearchField label="Find a project" value={query} onChange={setQuery} />
+          <FilterLine label="Filter repositories" items={FILTERS.map(([key, label]) => ({ key, label, count: key === 'all' ? null : filterCounts[key] }))} active={filter} onPick={setFilter} />
+          <SearchField label="Find a repository" value={query} onChange={setQuery} />
 
           {filtered.length === 0 ? (
             <div className="co-stage-empty">
               <Icon name={query.trim() ? 'review' : 'check'} size={20} />
-              <strong>{query.trim() ? 'No matching project' : filter === 'updates' ? 'Nothing is behind GitHub' : 'No projects with edits'}</strong>
-              <span>{query.trim() ? 'Try a project name or repository.' : filter === 'all' ? 'No projects are available.' : 'Choose All to see every project.'}</span>
+              <strong>{query.trim() ? 'No matching repository' : filter === 'updates' ? 'Nothing is behind GitHub' : 'No repositories with edits'}</strong>
+              <span>{query.trim() ? 'Try a repository name.' : filter === 'all' ? 'No repositories are available.' : 'Choose All to see every repository.'}</span>
             </div>
           ) : (
             <div className="co-project-index">

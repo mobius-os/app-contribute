@@ -7,7 +7,7 @@
 // the app can't see or write). The app reads it only to render state; every
 // action (Send grant, Pause/Resume, Retry) goes through a platform endpoint.
 // Shape:
-//   { enabled, granted_at, state: 'idle'|'responding', rounds_used,
+//   { enabled, granted_at, state: 'idle'|'responding'|'blocked', rounds_used,
 //     last_round?: { finished_at, outcome, summary }, rounds: [ ... ] }
 
 // Attention types the background loop can handle on its own. Anything else
@@ -43,6 +43,17 @@ export function isAutopilotResponding(rec) {
   return !!(block && block.enabled && block.state === 'responding')
 }
 
+// True when the platform stopped following this record (state 'blocked': the
+// agent handed it back) and keeps the grant until the owner resumes it. Nothing
+// works the record meanwhile, so it is never "being handled".
+export function isAutopilotBlocked(rec) {
+  const block = autopilotState(rec)
+  return !!(block && block.enabled && block.state === 'blocked')
+}
+
+// What a blocked record says when the agent left no note of its own.
+export const BLOCKED_REASON = 'The follow-up agent stopped and is waiting for you.'
+
 // Whether this kind of attention is work an agent can handle. This capability
 // is deliberately independent from the current autopilot grant: an ungranted
 // record still belongs to Contribute's one private run rather than becoming a
@@ -59,7 +70,7 @@ export function canAgentHandleAttention(rec) {
 // work; job.sh makes the same decision server-side to route to /respond.
 export function isActionableAttention(rec) {
   const block = autopilotState(rec)
-  return !!(block && block.enabled && canAgentHandleAttention(rec))
+  return !!(block && block.enabled && !isAutopilotBlocked(rec) && canAgentHandleAttention(rec))
 }
 
 // True when the record is waiting on the human (escalated). Leads the card with
@@ -79,6 +90,7 @@ export function autopilotNarration(rec) {
     const msg = rec.attention && rec.attention.message
     return msg ? String(msg) : 'Autopilot needs your input to continue.'
   }
+  if (isAutopilotBlocked(rec)) return BLOCKED_REASON
   if (block.state === 'responding') {
     return 'Autopilot is responding to a review — no action needed.'
   }
@@ -118,11 +130,4 @@ export function autopilotRounds(rec) {
       label: labelFor(round.outcome),
       summary: typeof round.summary === 'string' ? round.summary : '',
     }))
-}
-
-// Headlines for the autopilot-specific attention types (merged into the app's
-// PROBLEM_HEADLINES surface in domain.js).
-export const AUTOPILOT_HEADLINES = {
-  human_required: 'Autopilot needs your input to continue',
-  merge_conflict: 'This contribution needs a refresh to merge cleanly',
 }

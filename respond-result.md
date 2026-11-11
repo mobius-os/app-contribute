@@ -29,6 +29,7 @@ whose slug is `contribute`; the helper finds it in the database, like
 | `respond-results/<result id>.bundle` | the helper only | the commits as a Git bundle (absent when there are no commits) |
 | `respond-screenshots/<result id>/<name>` | the helper only | the PNG bytes of each screenshot (absent when there are none) |
 | `respond-decisions/<slug>.json` | the app only | the owner's decision about one result |
+| `respond-findings/<slug>.md` | the app only | the whole text of the saved review being answered, written when the Respond window starts; the brief names this file instead of quoting a cut of it (the agent only reads it) |
 
 One result per PR: saving again replaces it. Two writers never share a file, so nothing
 needs compare-and-swap. Every write is atomic (temporary file, then rename).
@@ -65,10 +66,11 @@ and `/api/owner-grants`).
   (Send again or Try again), which asks Möbius again.
 * **Off means.** `post` exits 3 and publishes nothing (no receipts, no state change, not even a lock
   file); `post --dry-run`, `save` and `show` work as before and spend nothing. In the app the Post
-  button is disabled with the reason on the card ("Post is off for now: Möbius cannot yet confirm it
-  was you who pressed it. The answer stays saved. Copy the replies to post them yourself, or use Reply
-  in chat."); Reply in chat and Discard (which publishes nothing) stay on; the answer, replies and
-  description stay readable.
+  button is disabled with the reason on the card ("Post is off on this Möbius: it cannot yet confirm that
+  it was you who pressed it. The answer stays saved. Use Copy replies to post the replies yourself, or
+  Reply in chat."); Copy replies puts every reply on the clipboard with the thread or comment it
+  answers; Reply in chat and Discard (which publishes nothing) stay on; the answer, replies and
+  description stay readable. The Respond window says the same before it starts.
 * **On means only that the first check passes.** The approval, the digest and the PR checks below stay
   exactly as they are and are the second check. The grant shows that the owner tapped Post in Möbius for
   this PR, result and digest, naming this chat, once, and that a run in that chat spent it. It does not

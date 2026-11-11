@@ -423,6 +423,8 @@ export async function loadCycleState(projectKey) {
   }
 }
 
+// Not called by the app (beginProjectCycle writes cycles): test/workspace.test.mjs seeds storage with it to prove
+// project keys stay isolated and digested.
 export async function saveCycleState(state, projectKey) {
   const normalized = normalizeCycleState(state)
   if (!normalized) return false
@@ -504,15 +506,6 @@ export async function updateCurrentCycle(projectKey, k, cid, facts = {}) {
     const receipt = await storage.durableWrite(key, next, { ifMatch: version })
     return receipt?.durability === 'synced'
   } catch { return false }
-}
-
-export async function clearCycleState() {
-  try {
-    await window.mobius.storage.remove(CYCLE_STATE)
-    return true
-  } catch {
-    return false
-  }
 }
 
 const SETTINGS_FILE = 'settings.json'

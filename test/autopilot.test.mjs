@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 
 import {
   ACTIONABLE_ATTENTION,
+  BLOCKED_REASON,
   HUMAN_REQUIRED,
   autopilotNarration,
   autopilotRounds,
   autopilotState,
   isActionableAttention,
+  isAutopilotBlocked,
   isAutopilotEnabled,
   isAutopilotResponding,
   needsHuman,
@@ -55,6 +57,21 @@ test('isActionableAttention gates on grant + type, excludes human_required', () 
     isActionableAttention({ attention: { type: 'changes_requested' } }),
     false,
   )
+})
+
+test('a blocked record is stopped: not responding, not actionable, narrated as stopped', () => {
+  const blocked = { enabled: true, state: 'blocked', last_round: { outcome: 'failed' } }
+  assert.equal(isAutopilotBlocked({ autopilot: blocked }), true)
+  assert.equal(isAutopilotBlocked({ autopilot: { ...blocked, enabled: false } }), false)
+  assert.equal(isAutopilotBlocked({ autopilot: { enabled: true, state: 'idle' } }), false)
+  assert.equal(isAutopilotBlocked({}), false)
+  assert.equal(isAutopilotResponding({ autopilot: blocked }), false)
+  // A newer event overwrote the escalation, but nothing is working it.
+  for (const type of ACTIONABLE_ATTENTION) {
+    assert.equal(isActionableAttention({ autopilot: blocked, attention: { type } }), false)
+  }
+  // Its last round failed, yet "will retry shortly" would be untrue: it is stopped.
+  assert.equal(autopilotNarration({ autopilot: blocked }), BLOCKED_REASON)
 })
 
 test('a comment from outside the repository is never autopilot work', () => {

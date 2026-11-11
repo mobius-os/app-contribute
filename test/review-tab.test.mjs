@@ -39,11 +39,11 @@ test('a PR nobody reviewed still has its Review tab and says so, without start b
   if (!html) return
   assert.match(html, /No review yet/)
   assert.match(html, /You haven’t made a review for this PR/)
-  assert.match(html, /Use Agent above to start one/)
-  // The Agent button above starts a review; the empty tab adds no second set of buttons.
+  assert.match(html, /Use Actions above to start one/)
+  // The Actions menu above starts a review; the empty tab adds no second set of buttons.
   assert.doesNotMatch(html, /<button/)
   const closed = await render(t, 'ReviewTab', { pr, status: null, readOnly: true })
-  assert.doesNotMatch(closed, /Use Agent above/, 'a closed PR offers no review')
+  assert.doesNotMatch(closed, /Use Actions above/, 'a closed PR offers no review')
 })
 
 test('a running review shows a smooth spinner, the clock, the version and Stop inside the comet frame', async t => {
@@ -81,15 +81,15 @@ test('a verdict GitHub never confirmed offers a read-only check on the card itse
   const html = await render(t, 'ReviewTab', { pr, status: unconfirmed, onCheck: () => {} })
   if (!html) return
   assert.match(html, /Verdict outcome needs checking/)
-  assert.match(html, /Check GitHub now/)
+  assert.match(html, />Check again</)
   assert.doesNotMatch(html, />Dismiss</, 'dismissing needs the owner decision handler')
   assert.match(html, /nothing will be sent again/)
   assert.match(html, /an hour after you submitted, it is dropped/)
   assert.doesNotMatch(html, /Request changes on GitHub|>Discard</, 'an unconfirmed verdict is never offered for sending again')
   assert.match(await render(t, 'ReviewTab', { pr, status: unconfirmed, onCheck: () => {}, onVerdict: () => {} }), />Discard</, 'with the owner decision handler it can be discarded')
-  assert.doesNotMatch(await render(t, 'ReviewTab', { pr, status: unconfirmed }), /Check GitHub now/, 'no handler, no button')
+  assert.doesNotMatch(await render(t, 'ReviewTab', { pr, status: unconfirmed }), /Check again/, 'no handler, no button')
   const posted = status('verdict_pending', { verdict_proposal: { id: 'p1', state: 'posted', event: 'REQUEST_CHANGES', url: 'https://github.com/team/repo/pull/9#pullrequestreview-5' } })
-  assert.doesNotMatch(await render(t, 'ReviewTab', { pr, status: posted, onCheck: () => {} }), /Check GitHub now/)
+  assert.doesNotMatch(await render(t, 'ReviewTab', { pr, status: posted, onCheck: () => {} }), /Check again/)
 })
 
 test('a verdict waiting for you offers Submit; on your own PR GitHub refuses it, so only Discard remains', async t => {
@@ -135,19 +135,17 @@ test('the PR page carries a fourth Review tab with its state, and opens on it wh
   assert.match(theirClear, /Review<span class="co-tab-dot is-success"/, 'a clean private review of their PR is settled: there is no verdict to send and nothing to set aside')
 })
 
-test('a PR that changed after its review says so, shows the old findings and offers to review this version', async t => {
+test('a PR that changed after its review says so and shows the old findings; starting over is the page’s one Review again button', async t => {
   const earlier = status('all_clear', { head_sha: 'b'.repeat(40), summary: 'No blockers at the old commit.' }, { state: 'complete', execution_state: 'completed' })
   const html = await render(t, 'ReviewTab', { pr, status: null, earlier, onStart: () => {} })
   if (!html) return
-  assert.match(html, /Checked bbbbbbb/)
-  assert.match(html, /before aaaaaaa/)
+  assert.match(html, /<h4>Checked the version of [^<]*\d\d:\d\d<\/h4><span class="co-review-version">bbbbbbb<\/span>/, 'the day first, the commit id small beside it')
+  assert.doesNotMatch(html, /before aaaaaaa|Checked bbbbbbb/)
   assert.match(html, /Nobody answered them/)
   assert.match(html, /No blockers at the old commit/)
-  assert.match(html, /<button type="button" class="co-btn">Review aaaaaaa<\/button>/, 'a secondary button naming the version it would review, so the page keeps one filled button')
-  assert.doesNotMatch(html, /co-btn-primary/)
+  assert.doesNotMatch(html, /Review aaaaaaa|Review again|co-btn-primary/, 'the page has one Review again button (the next step, or Actions): the card has none')
+  assert.deepEqual(html.match(/<button[^>]*>[^<]*<\/button>/g), ['<button type="button" class="co-btn co-btn-quiet">Open chat</button>'], 'only the conversation stays')
   assert.doesNotMatch(html, /You haven’t made a review/, 'an earlier review exists, so it was reviewed')
-  const closed = await render(t, 'ReviewTab', { pr, status: null, earlier, readOnly: true })
-  assert.doesNotMatch(closed, />Review again</)
 })
 
 test('a review whose request-changes verdict is posted reads as handed to the author, not as waiting on you', async t => {
@@ -168,20 +166,20 @@ test('a finished review that found problems offers what to do about them, never 
   const own = await render(t, 'ReviewTab', { pr, status: found, own: true, onStart: () => {}, onFix: () => {}, onIgnore: () => {} })
   if (!own) return
   assert.match(own, /<h4>Your check found problems<\/h4>/)
-  for (const label of ['Fix these findings', 'Ignore…', 'Review again', 'Ask the reviewer something']) assert.match(own, new RegExp(`>${label}<`), label)
+  for (const label of ['Fix these findings', 'Set aside…', 'Review again', 'Ask the reviewer something']) assert.match(own, new RegExp(`>${label}<`), label)
   assert.doesNotMatch(own, /Answer in chat|Stop review/)
   assert.match(own, /co-btn co-btn-primary">Fix these findings/, 'the fix is the one next step')
   // Someone else's PR has no fix to offer, and a closed PR offers nothing to start.
   const privateFound = status('needs_you', { summary: 'Three problems in the lost-reply path.' }, { state: 'needs_you', execution_state: 'completed', can_stop: true })
   const others = await render(t, 'ReviewTab', { pr, status: privateFound, own: false, onStart: () => {}, onFix: () => {}, onIgnore: () => {} })
   assert.doesNotMatch(others, /Fix these findings/)
-  assert.match(others, />Ignore…</)
+  assert.match(others, />Set aside…</)
   // Once your review is posted on someone else's PR, the move is theirs: only the question stays.
   const handedOver = await render(t, 'ReviewTab', { pr, status: found, own: false, onStart: () => {}, onFix: () => {}, onIgnore: () => {} })
   assert.match(handedOver, /<h4>Review posted<\/h4>/)
-  assert.doesNotMatch(handedOver, />Ignore…<|Fix these findings/)
+  assert.doesNotMatch(handedOver, />Set aside…<|Fix these findings/)
   const closed = await render(t, 'ReviewTab', { pr, status: found, own: true, readOnly: true, onStart: () => {}, onFix: () => {}, onIgnore: () => {} })
-  assert.doesNotMatch(closed, /Fix these findings|Ignore…|Review again/)
+  assert.doesNotMatch(closed, /Fix these findings|Set aside…|Review again/)
   assert.match(closed, />Ask the reviewer something</)
   // The tab dot is amber while it waits on you.
   const detail = await render(t, 'PullRequestDetail', { pr, status: found, cacheStore: { entries: {} }, review: { own: true } })
@@ -193,9 +191,9 @@ test('an ignored finding says so for this version, quietly, and can be taken bac
   const ignored = { [`team/repo#9@${'a'.repeat(40)}`]: { reason: 'Not a problem', at: '2026-11-04T10:00:00Z' } }
   const html = await render(t, 'ReviewTab', { pr, status: found, own: true, ignored, onStart: () => {}, onFix: () => {}, onIgnore: () => {}, onUndoIgnore: () => {} })
   if (!html) return
-  assert.match(html, /<h4>Ignored<\/h4>/)
-  assert.match(html, /Ignored: Not a problem\. Only for this version/)
-  assert.match(html, />Undo ignore</)
+  assert.match(html, /<h4>Set aside<\/h4>/)
+  assert.match(html, /Set aside: Not a problem\. Only for this version/)
+  assert.match(html, />Undo set aside</)
   assert.doesNotMatch(html, /Fix these findings|data-frame="verdict"/)
   const detail = await render(t, 'PullRequestDetail', { pr, status: found, cacheStore: { entries: {} }, review: { own: true, ignored } })
   assert.doesNotMatch(detail, /co-tab-dot is-waiting/)
@@ -275,7 +273,7 @@ test('a Respond conversation that waits on you has its own box with Answer in ch
   assert.match(html, /Respond to feedback on #9/)
   assert.match(html, /co-btn co-btn-primary">Answer in chat</)
   assert.match(html, /data-frame="verdict"/, 'the same amber frame the Desk gives this state')
-  assert.doesNotMatch(html, /No review yet|Use Agent above/, 'the Agent menu is off while an agent holds the PR, so this would be false')
+  assert.doesNotMatch(html, /No review yet|Use Actions above/, 'the Actions menu is off while an agent holds the PR, so this would be false')
 })
 
 test('a Respond conversation at work says so and offers its conversation', async t => {
@@ -295,7 +293,7 @@ test('an older saved review stays below the Respond box, and an earlier-version 
   assert.equal((html.match(/data-frame="verdict"/g) || []).length, 1, 'one box asks for you; the finished review below it stays plain')
   const earlier = { run: { id: 'r0', created_at: '2026-11-01T10:00:00Z', chat_id: 'old-chat' }, item: { repo: 'team/repo', number: 9, head_sha: 'c'.repeat(40), base_ref: 'main', summary: 'No blockers at the old commit.' } }
   const withEarlier = await render(t, 'ReviewTab', respondProps('needs_answer', { earlier }))
-  assert.ok(withEarlier.indexOf('Waiting for your answer') < withEarlier.indexOf('Checked ccccccc'))
+  assert.ok(withEarlier.indexOf('Waiting for your answer') < withEarlier.indexOf('Checked the version of'))
 })
 
 test('the Respond box appears only while that conversation holds the PR', async t => {
@@ -323,8 +321,9 @@ test('a fix waiting for Push is the one decision on the card, naming its commit 
   assert.match(html, /<h4>A fix is ready to push<\/h4>/)
   assert.match(html, /Pushes commit <code>eeeeeee<\/code> on top of <code>aaaaaaa<\/code>/)
   assert.match(html, /Push fix/)
-  assert.match(html, /Don’t push/)
-  for (const gone of ['Fix these findings', 'Ignore…', 'Review again', 'A repair is ready for you']) assert.doesNotMatch(html, new RegExp(gone), gone)
+  assert.match(html, />Discard</, 'turning a fix down is Discard, not a third word')
+  assert.doesNotMatch(html, /Don’t push/)
+  for (const gone of ['Fix these findings', 'Set aside…', 'Review again', 'A repair is ready for you']) assert.doesNotMatch(html, new RegExp(gone), gone)
 })
 
 test('your PR’s Review tab starts with where it is in its cycle', async t => {
@@ -333,6 +332,9 @@ test('your PR’s Review tab starts with where it is in its cycle', async t => {
   if (!html) return
   assert.match(html, /<li class="is-current" aria-current="step">Fix ready: push\?<\/li>/)
   assert.ok(html.indexOf('co-review-steps') < html.indexOf('A fix is ready to push'), 'the strip comes first')
+  // It carries a label of its own, and the list takes that name rather than "Where this PR is", which is the state line's.
+  assert.match(html, /<span class="co-review-steps-label" aria-hidden="true">Your next steps<\/span><ol class="co-review-steps" aria-label="Your next steps">/)
+  assert.doesNotMatch(html, /Where this PR is/)
 })
 
 test('an earlier check shows Answered only when the answer above took its findings on', async t => {

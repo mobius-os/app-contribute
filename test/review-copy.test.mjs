@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeWhenSafeBlocker, reviewSwitchHints, reviewWindowCopy, verdictCopy } from '../review-copy.js'
+import { mergeWhenSafeBlocker, reviewDate, reviewSwitchHints, reviewWindowCopy, sinceReviewLine, verdictCopy } from '../review-copy.js'
 
 test('a plain private review says nothing reaches GitHub and starts privately', () => {
   const copy = reviewWindowCopy({ mode: 'review', bindCurrentTarget: true })
@@ -42,7 +42,7 @@ test('a proposed verdict never posts or merges before the owner submits it', () 
   const review = reviewWindowCopy({ mode: 'review', posting: true, verdict: true })
   assert.equal(review.startLabel, 'Start review, draft a verdict for me')
   assert.match(review.publicEffect.text, /only the verdict you send, from your account/)
-  assert.ok(review.steps.some(step => /You send it, change it to a comment, or throw it away; nothing is posted before that/.test(step.text)))
+  assert.ok(review.steps.some(step => /You send it, change it to a comment, or discard it; nothing is posted before that/.test(step.text)))
   const merge = reviewWindowCopy({ mode: 'review_merge', posting: true, verdict: true, count: 2 })
   assert.equal(merge.startLabel, 'Start review, merge after your approval')
   assert.ok(merge.steps.some(step => /Only after you submit an approval/.test(step.text)))
@@ -122,4 +122,32 @@ test('each Agent menu job titles its own window', async () => {
   assert.equal(merge.steps.length, 5)
   assert.equal(reviewWindowCopy({ mode: 'review', intent: 'check_my_pr' }).title, 'Review')
   assert.equal(reviewWindowCopy({ mode: 'review' }).title, 'Review', 'a saved link or retry without a job')
+})
+
+test('the second step sends you to the PR’s Review tab, never to a private conversation', () => {
+  const one = reviewWindowCopy({ mode: 'review' }).steps.map(step => step.text)
+  assert.equal(one[1], 'Its findings appear on this PR’s Review tab.')
+  assert.equal(reviewWindowCopy({ mode: 'review', count: 3 }).steps[1].text, 'Its findings appear on each PR’s Review tab.')
+  for (const options of [{}, { posting: true, verdict: true }, { mode: 'review_merge' }]) {
+    assert.ok(reviewWindowCopy({ mode: 'review', ...options }).steps.every(step => !/private conversation/.test(step.text)))
+  }
+})
+
+test('the window is titled with the name of the action that opened it, Review again included', () => {
+  assert.equal(reviewWindowCopy({ mode: 'review', intent: 'review' }).title, 'Review')
+  assert.equal(reviewWindowCopy({ mode: 'review', intent: 'review', title: 'Review again' }).title, 'Review again')
+  assert.equal(reviewWindowCopy({ mode: 'review_fix_merge', intent: 'take_over', title: 'Review again' }).title, 'Take over', 'a takeover keeps its own name')
+})
+
+test('a re-review says how many commits are new since the last review, and still says what it knows without a count', () => {
+  const at = '2026-11-03T09:30:00Z'
+  const day = reviewDate(at)
+  assert.match(day, /3/)
+  assert.equal(sinceReviewLine({ count: 6, at }), `6 new commits since your review of ${day}.`)
+  assert.equal(sinceReviewLine({ count: 1, at }), `1 new commit since your review of ${day}.`)
+  assert.equal(sinceReviewLine({ count: 50, more: true, at }), `50+ new commits since your review of ${day}.`, 'a cut-short list is not a final count')
+  assert.equal(sinceReviewLine({ at }), `This PR changed since your review of ${day}.`, 'the count is unknown or none was found: the head moved all the same')
+  assert.equal(sinceReviewLine({ count: 2, at: 'unknown' }), '2 new commits since your review.', 'no usable date, no date')
+  assert.match(reviewDate(at, true), new RegExp(`^${day},\\s?\\d\\d:\\d\\d$`), 'with the time of day when asked')
+  assert.equal(reviewDate(undefined), '')
 })

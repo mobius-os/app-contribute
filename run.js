@@ -22,21 +22,34 @@ import {
   stackReadiness,
 } from './stack.js'
 import {
+  BLOCKED_REASON,
   canAgentHandleAttention,
   isActionableAttention,
+  isAutopilotBlocked,
   isAutopilotResponding,
   needsHuman,
 } from './autopilot.js'
 
 const REQUEST_TYPES = new Set(['issue', 'issue_comment', 'discussion_comment'])
 
+// Shown when a failed send left no message of its own.
+const SEND_FAILED = 'The last send did not go through.'
+
 // Ownership and capability are separate. Unknown attention remains a human
 // decision, while a known agent-handleable event belongs to the one private
 // run even when autopilot has not been granted for that pull request.
+// A stopped follow-up agent is the owner's to resume, whatever event it was
+// last handed: that event is not the reason the record waits.
 function requiresHumanAttention(record) {
-  return needsHuman(record) || (
+  return needsHuman(record) || isAutopilotBlocked(record) || (
     hasAttentionSignal(record) && !canAgentHandleAttention(record)
   )
+}
+
+function humanReason(record, fallback) {
+  const message = record?.attention?.message
+  if (!isAutopilotBlocked(record)) return message || fallback
+  return needsHuman(record) && message ? message : BLOCKED_REASON
 }
 
 function needsPrivateAttention(record) {
@@ -279,7 +292,6 @@ export function buildContributionRun({
   records = [],
   reviewStatus = { byId: {} },
   projects = [],
-  incomingReviews = [],
   recentLimit = 12,
 } = {}) {
   const safeRecords = (Array.isArray(records) ? records : []).filter(Boolean)
@@ -373,7 +385,7 @@ export function buildContributionRun({
       decisions.push(decision('public_attention', unit, byRepo, {
         record: human,
         label: contributionTitle(human),
-        detail: human?.attention?.message || `Public follow-up · ${recordRepo(human)}`,
+        detail: humanReason(human, `Public follow-up · ${recordRepo(human)}`),
       }))
       continue
     }
@@ -421,7 +433,7 @@ export function buildContributionRun({
       decisions.push(decision('public_attention', unit, byRepo, {
         record: human,
         label: contributionTitle(human),
-        detail: human?.attention?.message || `Your input is needed · ${recordRepo(human)}`,
+        detail: humanReason(human, `Your input is needed · ${recordRepo(human)}`),
       }))
     } else {
       decisions.push(decision('private_review', unit, byRepo, {
@@ -450,7 +462,7 @@ export function buildContributionRun({
   }
   for (const { unit, message } of failedSubmitUnits) {
     decisions.push(decision('private_review', unit, byRepo, {
-      detail: `${message || 'The earlier public result needs reconciliation.'} · ${unitRepo(unit)}`,
+      detail: `${message || SEND_FAILED} · ${unitRepo(unit)}`,
     }))
   }
   for (const unit of partition.checkingSource) {
@@ -472,18 +484,6 @@ export function buildContributionRun({
       label: contributionTitle(record),
       detail: `Finishing the local publication link · ${recordRepo(record)}`,
     }))
-  }
-
-  for (const item of Array.isArray(incomingReviews) ? incomingReviews : []) {
-    const repo = item?.repository?.nameWithOwner || ''
-    decisions.push({
-      id: `incoming:${item?.url || `${repo}#${item?.number || ''}`}`,
-      kind: 'incoming_review',
-      item,
-      project: byRepo.get(String(repo).toLowerCase()) || null,
-      label: item?.title || 'Incoming pull request',
-      detail: `${repo}${item?.number ? ` #${item.number}` : ''}`.trim(),
-    })
   }
 
   for (const record of requests) {
@@ -534,7 +534,7 @@ export function buildContributionRun({
   }
   for (const { unit, message } of failedSubmitUnits) {
     for (const record of runUnitRecords(unit)) {
-      repairReasons.set(record.id, message || 'The earlier public result needs reconciliation.')
+      repairReasons.set(record.id, message || SEND_FAILED)
     }
   }
   const privateRecords = prRecords

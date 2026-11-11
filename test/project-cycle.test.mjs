@@ -150,7 +150,7 @@ test('working motion is opt-in and reduced-motion collapses it', () => {
   assert.match(controls, /workflow\.stop/); assert.match(controls, /Cancel active work/); assert.match(controls, /'paused' \? 'Cancel paused work'/); assert.match(controls, /Follow through to merge/)
   assert.match(controls, /DateLabel value=\{cycle.startedAt\} prefix="Started "/)
   assert.match(controls, /disabled=\{!canStart/)
-  assert.match(controls, /Start fresh full merge cycle/)
+  assert.match(controls, /Start fresh full merge run/)
   assert.match(controls, /TaskPane id="task:cycle"/)
   assert.match(controls, /start\(fullCycleAction, cycleAgent\)/)
   assert.match(controls, /mayMerge\(project\.viewerPermission\) && cycleAction \? \{ \.\.\.cycleAction, merge: true \}/)

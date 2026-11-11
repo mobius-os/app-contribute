@@ -115,7 +115,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (item?.kind === 'mark_ready') {
     return githubState === 'connected'
       ? ''
-      : 'Reconnect GitHub in Möbius Settings → Accounts before requesting review for these drafts.'
+      : 'Reconnect GitHub in Möbius Settings → Accounts before opening these drafts for review.'
   }
   if (item?.kind !== 'publish') return ''
   const records = item?.unit?.type === 'stack'
@@ -244,7 +244,7 @@ export function batchRecordOutcome(record, current, outcome, mode) {
 }
 
 const PROGRESS_TEXT = {
-  ready: { working: 'Requesting review…', checking: 'Checking result…', 'not-attempted': 'Not requested', closed: 'Pull request closed', merged: 'Merged', done: 'Review requested' },
+  ready: { working: 'Opening for review…', checking: 'Checking result…', 'not-attempted': 'Not opened', closed: 'Pull request closed', merged: 'Merged', done: NAMES.openForReview },
   send: { working: 'Sending…', checking: 'Checking result…', 'not-attempted': 'Not sent', closed: 'Pull request closed', merged: 'Merged', done: 'Sent to GitHub' },
 }
 
@@ -282,7 +282,7 @@ function ExactActionList({
                 </span>
                 <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
                   || PROGRESS_TEXT[mode]?.[progress[record.id]]
-                  || (mode === 'ready' ? 'Request review' : publicationLine(record, publicationPreference, githubState, stage))}</em>
+                  || (mode === 'ready' ? NAMES.openForReview : publicationLine(record, publicationPreference, githubState, stage))}</em>
                 {meta ? <code>{meta.baseBranch} → {record?.plan?.branch || record?.branch}</code> : null}
                 {typeof onSelect === 'function' ? (
                   <button type="button" onClick={() => onSelect(item)}>Details</button>
@@ -518,39 +518,6 @@ function ExactBatchAction({
   )
 }
 
-function IncomingAction({ item, onAssign }) {
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
-  async function assign() {
-    setBusy(true)
-    setNote('')
-    const outcome = await onAssign?.(item)
-    if (!outcome?.ok) setNote(outcome?.error || 'Could not start this review.')
-    setBusy(false)
-  }
-  return (
-    <>
-      <button type="button" className="co-btn co-btn-primary co-run-row-action" disabled={busy} onClick={assign}>
-        {busy ? 'Assigning…' : 'Assign & review'}
-      </button>
-      {note ? <small className="co-run-row-error" role="status">{note}</small> : null}
-    </>
-  )
-}
-
-const STATE_LABELS = {
-  publish: 'Ready',
-  mark_ready: 'Review draft',
-  ready_attention: 'Review',
-  route_attention: 'Choose route',
-  check_attention: 'Source check',
-  public_attention: 'Needs you',
-  private_review: 'Review',
-  connecting: 'Finishing publication',
-  incoming_review: 'Incoming',
-  request: 'Review draft',
-}
-
 function decisionActionLabel(item) {
   return DECISION_ACTION_LABELS[item.kind] || 'Review'
 }
@@ -566,7 +533,6 @@ const DECISION_ACTION_LABELS = {
 function DecisionRow({
   item,
   onSelect,
-  onAssignIncomingReview,
 }) {
   return (
     <article className={'co-run-row is-' + item.kind}>
@@ -577,17 +543,13 @@ function DecisionRow({
           <small>{item.detail}</small>
         </span>
       </button>
-      {item.kind === 'incoming_review' ? (
-        <IncomingAction item={item.item} onAssign={onAssignIncomingReview} />
-      ) : (
-        <button
-          type="button"
-          className="co-btn co-run-row-action"
-          onClick={() => onSelect?.(item)}
-        >
-          {decisionActionLabel(item)}
-        </button>
-      )}
+      <button
+        type="button"
+        className="co-btn co-run-row-action"
+        onClick={() => onSelect?.(item)}
+      >
+        {decisionActionLabel(item)}
+      </button>
     </article>
   )
 }
@@ -690,7 +652,7 @@ function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
     setNote('')
     const outcome = await onMarkReady?.(record)
     if (!(outcome?.ok || outcome?.pending || outcome?.alreadyHandled)) {
-      setNote(outcome?.error || 'Could not request review for this pull request.')
+      setNote(outcome?.error || 'Could not open for review.')
     }
     setBusy(false)
   }
@@ -711,21 +673,6 @@ function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
       {record?.url ? <a className="co-review-link" href={record.url} target="_blank" rel="noopener noreferrer">Open pull request ↗</a> : null}
       <SourceChatChoices records={records} onFeedback={onFeedback} />
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
-    </section>
-  )
-}
-
-function IncomingFocus({ item, onAssignIncomingReview }) {
-  const pull = item?.item || {}
-  return (
-    <section className="co-run-focus-summary is-incoming_review">
-      <small>Incoming review</small>
-      <h3>{itemHeading(item)}</h3>
-      <p>{item.detail}</p>
-      <div className="co-run-focus-actions">
-        <IncomingAction item={pull} onAssign={onAssignIncomingReview} />
-        {pull.url ? <a className="co-btn" href={pull.url} target="_blank" rel="noopener noreferrer">Open on GitHub ↗</a> : null}
-      </div>
     </section>
   )
 }
@@ -797,16 +744,12 @@ export function FocusedItem({
   onSetAutopilot,
   onWithdraw,
   onMarkReady,
-  onAssignIncomingReview,
   onRefresh,
   loadDiff,
 }) {
   const records = runUnitRecords(item)
   if (['check_attention', 'checking_source'].includes(item.kind)) {
     return <CheckAttentionFocus item={item} reviewStatus={reviewStatus} onRefresh={onRefresh} onFeedback={onFeedback} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} />
-  }
-  if (item.kind === 'incoming_review') {
-    return <IncomingFocus item={item} onAssignIncomingReview={onAssignIncomingReview} />
   }
   if (item.kind === 'ready_attention') {
     return <ReadyAttentionFocus item={item} onMarkReady={onMarkReady} onFeedback={onFeedback} />
@@ -913,7 +856,6 @@ export function ContributionRun({
   onRestore,
   onSetAutopilot,
   onWithdraw,
-  onAssignIncomingReview,
   onRefresh,
   loadDiff,
   presentation = 'project',
@@ -1019,7 +961,7 @@ export function ContributionRun({
           <div className="co-run-empty">
             <Icon name="cycle" size={20} />
             <strong>This contribution moved</strong>
-            <span>The current run no longer contains that exact record. Sync, or open its source chat.</span>
+            <span>The current run no longer contains that exact record. {NAMES.sync}, or open its source chat.</span>
           </div>
         ) : (
           <FocusedItem
@@ -1032,7 +974,6 @@ export function ContributionRun({
             onSetAutopilot={onSetAutopilot}
             onWithdraw={onWithdraw}
             onMarkReady={onMarkReady}
-            onAssignIncomingReview={onAssignIncomingReview}
             onRefresh={onRefresh}
             loadDiff={loadDiff}
           />
@@ -1053,7 +994,7 @@ export function ContributionRun({
   // My work: agent jobs (above the PR list's agent reviews), then agent
   // activity and finished work, out of the PR list's way.
   const myWork = <>
-    {[[agentActivity, 'Agent activity'], [actionsInProgress, 'Actions in progress']].map(fold)}
+    {[[agentActivity, NAMES.agentRuns], [actionsInProgress, 'Actions in progress']].map(fold)}
     {history.length > 0 ? (
       <details className="co-run-fold is-recent">
         <summary><span>Finished and closed work</span><b>{history.length}</b><Icon name="chevron" size={14} /></summary>

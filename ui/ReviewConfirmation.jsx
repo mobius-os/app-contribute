@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { baseTip, mayMerge, prKey, takeoverBlocker } from '../collaboration.js'
+import { WHO_OPTIONS, baseTip, mayMerge, offersDraft, prKey, takeoverBlocker } from '../collaboration.js'
 import { isOwnPull } from '../pull-view.js'
-import { mergeWhenSafeBlocker, reviewSwitchHints, reviewWindowCopy } from '../review-copy.js'
+import { loadPullCommits } from '../pull-details.js'
+import { reviewMarker } from '../pull-commits.js'
+import { mergeWhenSafeBlocker, reviewSwitchHints, reviewWindowCopy, sinceReviewLine } from '../review-copy.js'
 import { focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
 import { ReviewPromptPreview } from './ReviewPromptSettings.jsx'
@@ -32,11 +34,7 @@ const WHO = [
   ['draft', 'Draft for me', 'It drafts approve, request changes or comment with its wording. Nothing is posted until you send it. It waits under Needs you.'],
   ['agent', 'Agent posts', 'It posts its verdict from your account: approve, request changes or comment. You allowed it here, for this review only.'],
 ]
-export const WHO_OPTIONS = {
-  private: { post_review: false, propose_verdict: false, agent_submits_verdict: false },
-  draft: { post_review: true, propose_verdict: true, agent_submits_verdict: false },
-  agent: { post_review: true, propose_verdict: true, agent_submits_verdict: true },
-}
+export { WHO_OPTIONS }
 function WhoSees({ who, agentAllowed, disabled, onChange }) {
   const choices = WHO.filter(([key]) => key !== 'agent' || agentAllowed)
   return <div className="co-rw-who">
@@ -59,6 +57,19 @@ function TakeoverReason({ value, disabled, onChange }) {
       onChange={event => onChange(event.target.value)} />
     <small>Posted on the PR as a comment from your account, so its author knows{value.trim() ? <>: “Taking this PR over: {value.trim()}”</> : '.'}</small>
   </label>
+}
+
+// What changed since the review you last ran on this PR: how many commits, counted the way the Commits tab counts them.
+// The line is true without the count (the PR's head moved), so a failed read only leaves the count out.
+function SinceReview({ token, pr, since }) {
+  const [seen, setSeen] = useState(null)
+  useEffect(() => {
+    const reading = new AbortController()
+    loadPullCommits(token, pr, null, reading.signal)
+      .then(data => setSeen({ count: reviewMarker(data.commits, since.head).newCount, more: data.hasMore }), () => {})
+    return () => reading.abort()
+  }, [token, prKey(pr), pr.headRefOid, since.head])
+  return <p className="co-rw-note" role="status">{sinceReviewLine({ ...seen, at: since.at })}</p>
 }
 
 function WhatHappens({ copy }) {
@@ -96,18 +107,17 @@ function ReviewSwitches({ choice, promptOptions, capabilities, onModeChange, onO
   const drafts = choice.pulls.some(pr => pr.isDraft)
   const mayMergeAll = choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission))
   const mergeBlocker = mergeWhenSafeBlocker({ drafts, mayMergeAll, notDrafting: who !== 'draft' })
-  const canDraft = !!onOptionsChange && capabilities?.post_review === true && capabilities?.propose_verdict === true
+  const canDraft = !!onOptionsChange && offersDraft(capabilities)
   const hints = reviewSwitchHints(choice.pulls.length)
   if (own === choice.pulls.length) return <OwnNote own={own} total={own} />
   const pick = key => {
     onOptionsChange({ ...promptOptions, ...choice.options, ...WHO_OPTIONS[key] })
     if (key !== 'draft' && granted.merge) onModeChange?.('review')
   }
-  // A switch that cannot be turned on is no switch: the reason is a plain line, so nothing looks available that is not.
+  // A switch that cannot be turned on stays drawn, off and dimmed, with its reason where the hint would be.
   const blocked = !granted.merge && !!mergeBlocker
-  const mergeSwitch = !onModeChange || choice.intent !== 'review' ? null : blocked
-    ? <p className="co-rw-option is-line"><strong>Merge after I approve</strong><small>{mergeBlocker}</small></p>
-    : <Switch checked={granted.merge} disabled={busy} label="Merge after I approve" detail={hints.merge}
+  const mergeSwitch = !onModeChange || choice.intent !== 'review' ? null
+    : <Switch checked={granted.merge} disabled={busy || blocked} label="Merge after I approve" detail={blocked ? mergeBlocker : hints.merge}
       onChange={checked => onModeChange(checked ? 'review_merge' : 'review')} />
   return <>
     {canDraft ? <WhoSees who={who} agentAllowed={capabilities?.agent_submits_verdict === true} disabled={busy || !promptOptions} onChange={pick} /> : null}
@@ -164,13 +174,14 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
   const ownOnly = own > 0 && own === choice.pulls.length
   // On your own PR the agent only checks, so the words describe a private review.
   const { posting, verdict, agentPosts } = takeover || ownOnly ? {} : publicChoice(choice, promptOptions, capabilities)
-  const copy = reviewWindowCopy({ mode: ownOnly ? 'review' : choice.mode, intent: ownOnly ? 'check_my_pr' : choice.intent, posting, verdict, agentPosts, count: choice.pulls.length, bindCurrentTarget })
+  const copy = reviewWindowCopy({ mode: ownOnly ? 'review' : choice.mode, intent: ownOnly ? 'check_my_pr' : choice.intent, title: choice.title, posting, verdict, agentPosts, count: choice.pulls.length, bindCurrentTarget })
   const postingUnavailable = choice.mode === 'review_merge' && !!capabilities && !(capabilities.post_review === true && capabilities.propose_verdict === true)
   const startBlocked = takeover && !!blocker
   return <section ref={confirmation} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
     <WindowHead icon={takeover ? 'takeover' : 'review'} title={copy.title} titleId={titleId} pulls={choice.pulls}
       tools={<><SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />{onCancel ? <CloseWindowButton onClick={onCancel} /> : null}</>} />
     <div className="co-rw-body">
+      {choice.since && token ? <SinceReview token={token} pr={choice.pulls[0]} since={choice.since} /> : null}
       {takeover && choice.intent === 'take_over' && onReasonChange ? <TakeoverReason value={choice.takeover_reason || ''} disabled={busy} onChange={onReasonChange} /> : null}
       {takeover
         ? <p className="co-rw-note">The agent fixes what it finds and stops before every push for your approval. It never merges: when it is clean, you merge.</p>
