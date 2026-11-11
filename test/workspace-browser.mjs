@@ -2436,7 +2436,8 @@ window.runAskApprovalChecks = async () => {
     ensure(hint().includes('second-reviewer left a comment'), 'The panel said: ' + hint())
     checks.push({ name: 'a comment on this version outranks an old approval: the PR reads Commented · not approved and asks the commenter', status: 'pass' })
     // 5. Where Möbius confirms the owner's taps on its own sheet (it advertises owner_confirm), that sheet is the one confirm: Merge is one tap on
-    // the action, the app draws no sheet of its own before it, Möbius is asked for exactly the request that is then sent, and a cancel sends nothing.
+    // the action, the app draws no confirm of its own (its sheet only waits, and says Merging… once Möbius has confirmed), Möbius is asked for exactly
+    // the request that is then sent, and a cancel sends nothing.
     // "Merge options…" is the way to choose how it lands first, and only where the repository allows more than one way. Without owner_confirm the
     // blocks above are the proof that nothing changed: the app's own sheet, and no request to the shell.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
@@ -2459,8 +2460,9 @@ window.runAskApprovalChecks = async () => {
     await click(menuItem('Merge'))
     await until(() => calls.grants.length === 1, 'Merge did not ask the shell')
     ensure(query('.co-review-window') && !query('.co-rw-facts') && !query('.co-rw-foot'), 'The app drew its own confirm while the shell’s sheet was open: ' + text(query('.co-review-window')))
+    ensure(text(query('.co-review-window')).includes(NAMES.waitingForMobius) && !text(query('.co-review-window')).includes('Merging…'), 'The app said Merging… before the owner confirmed: ' + text(query('.co-review-window')))
     ensure(calls.merges.length === 0, 'Merge was sent before the owner confirmed')
-    await captureShot('merge-one-tap-at-work')
+    await captureShot('merge-one-tap-waiting')
     window.releaseOwnerGrant(); window.holdOwnerGrant = null
     await until(() => calls.merges.length === 1, 'Merge was not sent once the owner confirmed')
     const mergeBody = { repo: 'owner/project', number: 7, head_sha: HEAD }
@@ -2469,7 +2471,7 @@ window.runAskApprovalChecks = async () => {
     ensure(calls.requests.findIndex(call => call.url.endsWith('/pulls/merge')) >= calls.grants[0].requestsBefore, 'The merge was sent before the shell was asked')
     await until(() => text(query('.co-review-window')).includes('Merged'), 'The sheet did not say it merged: ' + text(query('.co-review-window')))
     await click(button('Done'))
-    checks.push({ name: 'where Möbius confirms on its own sheet, Merge is one tap: no app sheet, the shell is asked for exactly the request, then it is sent', status: 'pass' })
+    checks.push({ name: 'where Möbius confirms on its own sheet, Merge is one tap: the app’s sheet only waits for it, the shell is asked for exactly the request, then it is sent', status: 'pass' })
     window.ownerGrantAnswer = false
     await openMenu()
     await click(menuItem('Merge'))

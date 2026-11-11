@@ -3,6 +3,7 @@ import { focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
 import { CloseWindowButton, WindowHead } from './WindowHead.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
+import { NAMES } from '../names.js'
 
 const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 
@@ -14,25 +15,27 @@ const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 // | { pending, error } | { error }). A { pending } outcome may have happened on GitHub: the sheet
 // first has the owner's view read GitHub again (`onUnconfirmed`, read-only), and its button stays
 // off for good, so another attempt can only start from that fresh read. Opened inside a ReviewDialog.
-// `autoConfirm`: Möbius confirms this action on its own sheet (owner-grant.js), so this one asks nothing: it opens already at work
-// and shows only the outcome. `onConfirm` may answer { cancelled } (the owner closed that sheet): nothing was sent, so this one
-// closes; where it did not open at work (Merge options…) it shows its own choices again.
-export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed, autoConfirm = false }) {
+// `viaShell`: Möbius confirms this action on its own sheet (owner-grant.js) before `onConfirm` sends anything. From the press until that
+// sheet is answered this one is in the empty phase 'asking' (a waiting line only); `onConfirm` is given `onConfirmed` to call when
+// the owner has confirmed, and only then does the sheet say it is at work. `onConfirm` may answer { cancelled } (the owner closed Möbius's
+// sheet): nothing was sent, so the choices come back. `autoConfirm` (with `viaShell`): the one tap on the action already was the owner's
+// press, so this sheet opens asking and runs `onConfirm` itself, and a cancel closes it.
+export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed, viaShell = false, autoConfirm = false }) {
   const region = useRef(null)
   const titleId = useId()
-  const [phase, setPhase] = useState(autoConfirm ? 'working' : 'confirm')
+  const [phase, setPhase] = useState(autoConfirm ? 'asking' : 'confirm')
   const [error, setError] = useState('')
   // An action with ways to do it (Merge: squash, merge commit, rebase) asks once, in the sheet.
   const [picked, setPicked] = useState(copy.choices?.value || '')
   const [result, setResult] = useState(null)
   useEffect(() => { focusActionRegion(region.current); if (autoConfirm) void confirm() }, [])
-  // Writing, or reading GitHub back after a write that could not be confirmed.
-  const working = phase === 'working' || phase === 'checking'
+  // Waiting for Möbius's sheet, writing, or reading GitHub back after a write that could not be confirmed.
+  const working = phase === 'asking' || phase === 'working' || phase === 'checking'
   async function confirm() {
-    setPhase('working'); setError('')
+    setPhase(viaShell ? 'asking' : 'working'); setError('')
     let outcome
     // A handler that throws never said whether the write reached GitHub.
-    try { outcome = await onConfirm({ choice: picked }) } catch { outcome = { pending: true, error: 'Lost contact with GitHub. Check the PR before trying again.' } }
+    try { outcome = await onConfirm({ choice: picked, onConfirmed: () => setPhase('working') }) } catch { outcome = { pending: true, error: 'Lost contact with GitHub. Check the PR before trying again.' } }
     if (outcome?.cancelled) { setPhase('confirm'); if (autoConfirm) onClose(); return }
     if (outcome?.ok || outcome?.alreadyHandled) { setResult(outcome); setPhase('done'); onDone?.(outcome); return }
     setError(outcome?.error || 'Could not complete this. Nothing changed.')
@@ -43,14 +46,14 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
     setPhase('unconfirmed')
   }
   const done = phase === 'done'
-  // The shell's sheet is the owner's view of what happens; until this action has an outcome this one shows only that it is at work.
-  const atWork = autoConfirm && phase === 'working'
+  // Möbius's sheet is the owner's view of what happens; until this action has an outcome this one shows only a line.
+  const lineOnly = viaShell && (phase === 'asking' || phase === 'working')
   const finished = typeof copy.done === 'function' ? copy.done(result) : copy.done
   const selected = copy.choices?.options.find(option => option.key === picked)
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
     <WindowHead icon={done ? 'check' : copy.icon} title={done ? finished.title : copy.title} titleId={titleId} pulls={[pr]} done={done}
       tools={done ? null : <CloseWindowButton disabled={working} onClick={onClose} />} />
-    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : atWork ? <div className="co-rw-body"><p role="status">{copy.working}</p></div> : <div className="co-rw-body">
+    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : lineOnly ? <div className="co-rw-body"><p role="status">{phase === 'asking' ? NAMES.waitingForMobius : copy.working}</p></div> : <div className="co-rw-body">
       <ul className="co-rw-facts">{copy.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.text}</span></li>)}</ul>
       {copy.says ? <details className="co-task-details" open><summary>{copy.says.label}</summary><MarkdownView markdown={copy.says.markdown} /></details> : null}
       {copy.choices ? <>
@@ -64,7 +67,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
       </> : null}
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
     </div>}
-    {atWork ? null : <footer className="co-rw-foot">
+    {lineOnly ? null : <footer className="co-rw-foot">
       {done ? null : <p>{copy.footnote}</p>}
       <div className="co-rw-actions">
         {done

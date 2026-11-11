@@ -320,7 +320,8 @@ one for Merge and the five status changes: one tap on the action, one tap to con
 **Merge options…** (only where the repository allows more than one way) to choose how it
 lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
 the same sheet first, so the owner's tap
-is proven by Möbius and not by the app's own frame. A Möbius without it keeps the app's own sheets.
+is proven by Möbius and not by the app's own frame; until the owner has confirmed, the app's
+own sheet only says it is waiting. A Möbius without it keeps the app's own sheets.
 New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default
 (the shipped default is Ready, as the product states). A finished review that

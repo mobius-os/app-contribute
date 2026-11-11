@@ -447,9 +447,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     if (YOUR_INTENTS.has(job) || job === MERGE_OPTIONS) {
       setAssigning(null)
       const record = recordsForPull(records, pulls[0])[0]
-      // Möbius's own sheet is the one confirm for a one-tap action; a personal draft opens through the app's own record, which it does not cover.
-      const oneTap = !!shellConfirm && job !== MERGE_OPTIONS && !(job === 'open_for_review' && isPersonalDraft(record))
-      setActing({ intent: job === MERGE_OPTIONS ? 'merge' : job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record, oneTap })
+      // Möbius's own sheet is the one confirm; a personal draft opens through the app's own record, which it does not cover. The tap on the
+      // action is the whole press (oneTap) unless the owner is to choose how it lands first.
+      const viaShell = !!shellConfirm && !(job === 'open_for_review' && isPersonalDraft(record))
+      setActing({ intent: job === MERGE_OPTIONS ? 'merge' : job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record, viaShell, oneTap: viaShell && job !== MERGE_OPTIONS })
       return
     }
     const { mode, intent, options } = reviewIntent(job)
@@ -591,21 +592,21 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // Each of your own actions runs the app's one guarded handler for it.
   const actionHandlers = {
     // A draft this app sent is marked ready through its saved record; any other draft of yours, by the platform's own action.
-    open_for_review: ({ pr, record }) => isPersonalDraft(record) ? (onOpenForReview ? onOpenForReview(record) : { error: 'Opening for review is not available here.' }) : pullAction(token, appId, pr, 'ready', {}, shellConfirm),
-    merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice), shellConfirm }),
-    back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft', {}, shellConfirm),
-    close: ({ pr }) => pullAction(token, appId, pr, 'close', {}, shellConfirm),
-    ask_rereview: ({ pr }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }, shellConfirm),
-    ask_approval: ({ pr }) => {
+    open_for_review: ({ pr, record, shell }) => isPersonalDraft(record) ? (onOpenForReview ? onOpenForReview(record) : { error: 'Opening for review is not available here.' }) : pullAction(token, appId, pr, 'ready', {}, shell),
+    merge: ({ pr, choice, shell }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice), ...shell }),
+    back_to_draft: ({ pr, shell }) => pullAction(token, appId, pr, 'draft', {}, shell),
+    close: ({ pr, shell }) => pullAction(token, appId, pr, 'close', {}, shell),
+    ask_rereview: ({ pr, shell }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }, shell),
+    ask_approval: ({ pr, shell }) => {
       const { approvalFrom: people, lookedAgain: holding } = standingOf(pr)
-      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) }, shellConfirm)
+      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) }, shell)
     },
   }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice }) => actionHandlers[acting.intent]({ ...acting, choice })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} autoConfirm={acting.oneTap} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)
