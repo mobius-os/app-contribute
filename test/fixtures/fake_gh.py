@@ -77,6 +77,11 @@ lowered = (path or "").lower()
 
 if method == "GET" and lowered == pull_path:
   head = pr["head_sha"] or remote_branch(pr["head_ref"])
+  lag = config.get("pull_lag")  # GitHub's PR record trails its branch: the next `reads` PR reads still show `sha`
+  if lag and lag["reads"] > 0 and head != lag["sha"]:
+    lag["reads"] -= 1
+    save_config()
+    head = lag["sha"]
   finish({"ok": True}, {
     "number": pr.get("reported_number") or pr["number"],
     "state": pr["state"],

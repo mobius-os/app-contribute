@@ -1188,6 +1188,37 @@ class PostTests(RespondWorld):
     self.assertEqual(len(self.gh_writes()), 1, "no second reply, no description, no re-review")
     self.assertRefused(self.post(result["id"]), 3, "The PR moved")
 
+  def test_a_pr_record_that_trails_our_own_push_is_waited_for_not_called_moved(self):
+    _, _, result = self.approved_result()
+    self.fake(pull_lag={"sha": self.base, "reads": 2})  # GitHub's PR still names the old head twice after the push
+    with mock.patch.object(respond, "PULL_HEAD_POLL_SECONDS", 0):
+      outcome = self.post(result["id"])
+    self.assertEqual(outcome.code, 0, outcome.err)
+    self.assertNotIn("The PR moved", outcome.err)
+    self.assertEqual(self.saved_result()["state"], "posted")
+    self.assertEqual(len(self.gh_writes()), 4, "both replies, the description and the review request")
+
+  def test_a_pr_record_still_trailing_after_the_wait_stops_with_the_push_kept_and_a_retry_finishes(self):
+    shas, _, result = self.approved_result()
+    self.fake(pull_lag={"sha": self.base, "reads": 1000})
+    with mock.patch.object(respond, "PULL_HEAD_SETTLE_SECONDS", 0), mock.patch.object(respond, "PULL_HEAD_POLL_SECONDS", 0):
+      first = self.post(result["id"])
+    self.assertRefused(first, 4, f"GitHub's PR still shows {self.base[:7]}")
+    stopped = self.saved_result()
+    self.assertEqual((stopped["state"], stopped["error"]["step"]), ("failed", "push"))
+    self.assertEqual(stopped["receipts"]["push"]["sha"], shas[1])
+    self.assertEqual(self.gh_writes(), [], "nothing after the push went out")
+    self.fake(pull_lag=None)  # GitHub has caught up
+    second = self.post(result["id"])
+    self.assertEqual(second.code, 0, second.err)
+    self.assertEqual(len(self.gh_writes()), 4)
+
+  def test_a_moved_pr_after_our_push_names_the_tip_we_pushed(self):
+    shas, _, result = self.approved_result()
+    self.fake(after_write={"at": 1, "pr": {"head_sha": "c" * 40}})
+    outcome = self.post(result["id"])
+    self.assertIn(f"GitHub's head is ccccccc but this post pushed {shas[1][:7]}", outcome.err)
+
   def test_a_pr_that_closes_after_the_replies_keeps_the_description_and_the_review_request_unsent(self):
     _, _, result = self.approved_result()
     self.fake(after_write={"at": 2, "pr": {"state": "closed"}})
