@@ -898,12 +898,12 @@ window.runWorkspaceChecks = async () => {
       await backToPrs()
     })
     await check('saved public PRs wait for the open-PR list before any of them counts as Shared work', async () => {
-      window.emptyPulls = true
-      await click(checkButton())
-      await until(() => text(query('.co-pr-empty')).includes('No pull requests'), 'Empty inventory missing')
-      window.emptyPulls = false; window.holdPulls = true
-      // #7 is in the live list once it is read; #99 is not.
+      // A list opened for the first time: the saved PRs are in the records before the project is opened, so it is a fresh read.
+      await chooseProject('Other project')
       window.setRecordsFixture(old => [...old, savedPr('fixture-listed', 7, 'Saved listed PR'), savedPr('fixture-shared', 99, 'Saved shared PR')])
+      window.holdPulls = true
+      await chooseProject('Fixture project')
+      // #7 is in the live list once it is read; #99 is not.
       await until(() => window.releasePulls && query('.co-pr-skel'), 'The PR list did not start loading')
       await captureShot('shared-work-while-loading')
       ensure(!sharedWork(), 'Saved public PRs showed as Shared work while the list was still loading: ' + text(sharedWork()))
@@ -913,6 +913,23 @@ window.runWorkspaceChecks = async () => {
       ensure(text(sharedWork()).includes('Saved shared PR') && !text(sharedWork()).includes('Saved listed PR'), 'Shared work should hold only the PR the list does not show: ' + text(sharedWork()))
       window.setRecordsFixture(old => old.filter(record => !['fixture-listed', 'fixture-shared'].includes(record.id)))
       await until(() => !sharedWork() && !window.releasePulls && !query('.co-pr-skel'), 'Removing the saved PRs did not settle')
+      originalList = query('.co-pr-list') // opening the project again mounted a new list
+    })
+    await check('a reload of a list that has been read keeps its Shared work, even when the list is empty', async () => {
+      window.emptyPulls = true
+      await click(checkButton())
+      await until(() => text(query('.co-pr-empty')).includes('No pull requests'), 'Empty inventory missing')
+      window.setRecordsFixture(old => [...old, savedPr('fixture-shared', 99, 'Saved shared PR')])
+      await until(() => sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Saved PR missing from Shared work beside an empty list')
+      window.holdPulls = true
+      await click(checkButton())
+      await until(() => window.releasePulls, 'The reload did not start')
+      await captureShot('shared-work-while-reloading')
+      ensure(sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Shared work emptied while an already-read list reloaded')
+      window.holdPulls = false; window.emptyPulls = false; window.releasePulls(); window.releasePulls = null
+      await until(() => document.querySelectorAll('.co-pr-row').length >= 2 && !query('.co-pr-skel'), 'The list did not reload')
+      window.setRecordsFixture(old => old.filter(record => record.id !== 'fixture-shared'))
+      await until(() => !sharedWork(), 'Removing the saved PR did not settle')
     })
     await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
       const before=mutationRequests().length

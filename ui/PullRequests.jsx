@@ -182,6 +182,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   sessionRef.current = session
   const task = useProjectTask()
   const [data, setData] = useState(session.data || { loading: true, error: '' })
+  // True once this list has finished a read, with an answer or an error. A reload after that keeps what the page already knows.
+  const [read, setRead] = useState(() => !!session.data)
   const [view, setView] = useState(() => session.view || emptyPullView())
   const viewRef = useRef(view)
   const generation = useRef(session.generation)
@@ -277,11 +279,12 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       const settled = { total: next.total, hasNextPage: next.hasNextPage, endCursor: next.endCursor, loading: false, error: '' }
       sessionRef.current.data = settled
       setData(settled)
+      setRead(true)
       // Absence from the open list is not closure: re-read a pinned destination.
       const focus = focusRef.current
       if (!cursor && focus && !inventory.includes(focus.key)) void readFocus(focus)
     } catch (error) {
-      if (id === request.current && alive.current) setData(old => ({ ...old, loading: false, error: error.message }))
+      if (id === request.current && alive.current) { setData(old => ({ ...old, loading: false, error: error.message })); setRead(true) }
     }
   }, [token, repo, publish, readFocus])
   // A linked run older than the capped recent list is kept as its own exact
@@ -347,8 +350,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     void onChanged?.()
   }, [postedKey, load, onChanged])
   // Which PRs this list shows, for the project page's saved public work. While the first read of the open PRs is pending that is not
-  // known (null), so a saved open PR is not offered as Shared work only to move into its row a moment later.
-  const unread = conn.state === 'connected' && data.loading && !pulls.length
+  // known (null), so a saved open PR is not offered as Shared work only to move into its row a moment later. Only the first read waits:
+  // a reload (Refresh, changed records) of a list that has been read, even an empty one, keeps its answer.
+  const unread = conn.state === 'connected' && !read
   useEffect(() => {
     task?.setPublicKeys(unread ? null : new Set(view.inventory))
     return () => task?.setPublicKeys(null)
