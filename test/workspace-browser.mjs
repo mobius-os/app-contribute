@@ -6,10 +6,10 @@
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
-// runRespondResultChecks (the whole app, on a Möbius that offers the owner grant: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
-// runRespondPostOffChecks (the whole app, on a Möbius without the owner grant: Post is off with its reason in words, at every width, and the rest of the card still works),
+// runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
+// runRespondPostOffChecks (the whole app, on a Möbius that does not confirm it: Post is off with its reason in words, at every width, and the rest of the card still works),
 // runRespondAgainChecks (the whole app: Respond again is delivered into the PR's existing conversation as a message),
-// runAskApprovalChecks (the whole app: a reviewer who looked again without approving is asked to approve with a note, and an approval of the same work carries over) and
+// runAskApprovalChecks (the whole app: a reviewer who looked again without approving is asked to approve with a note, an approval of the same work carries over, and where Möbius confirms the owner's taps on its own sheet Merge is one tap) and
 // runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent).
 // Run one with WORKSPACE_BROWSER_ONLY=runDeskFrameChecks (and one viewport with WORKSPACE_BROWSER_VIEWPORT=desktop), for example while
 // runWorkspaceChecks is red, so the Desk check can still show green.
@@ -80,7 +80,7 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], githubRetries: 0 }
+const calls = { exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], merges: [], grants: [], githubRetries: 0 }
 const values = new Map(), versions = new Map(), navigation = [], reviewRuns = [], respondChats = []
 let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
@@ -114,6 +114,7 @@ window.fetch = async (url, options = {}) => {
   const call = { url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null, at: Date.now() }
   calls.requests.push(call)
   // The platform's note asking reviewers who looked again to approve: the one public write of the Ask for approval sheet.
+  if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/merge') { calls.merges.push(call.body); return response({ state: 'merged', merge_sha: 'a'.repeat(40), repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/ask-approval') { calls.asks.push(call.body); return response({ state: 'asked', observed_head_sha: call.body.head_sha, repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
   // A conversation of the app: the platform returns the PR's existing one for its scope, and takes a message into any chat the app made.
   if (call.method === 'POST' && call.url === '/api/app-chats/start') { calls.appChatStarts.push(call.body); return response({ chat_id: 'respond-chat-fixture', outcome: 'reused' }) }
@@ -307,6 +308,17 @@ window.mobius = {
       return handle
     },
     back() { const handle = navigation.pop(); if (!handle) throw new Error('No owned navigation to go back'); handle.callbacks.onBack() },
+  },
+  // The shell's own confirm sheet, as the runtime gives it to a frame (window.mobius.ownerGrant.request): a scenario sets
+  // window.ownerGrantAnswer to false (the owner cancels) or an Error (the platform refuses), and may hold the answer with window.holdOwnerGrant.
+  ownerGrant: {
+    request: async (...args) => {
+      calls.grants.push({ args: structuredClone(args), requestsBefore: calls.requests.length })
+      await window.holdOwnerGrant
+      const answer = window.ownerGrantAnswer ?? true
+      if (answer instanceof Error) throw answer
+      return answer
+    },
   },
   chat: {
     start: async action => { calls.starts.push(structuredClone(action)); return { chatId: 'prepare-' + calls.starts.length } },
@@ -1500,6 +1512,50 @@ window.runWorkspaceChecks = async () => {
         root.render(null)
       }
     })
+    await check('a card reads the platform again at every write, so a binding lost after Confirm sends none of its units', async () => {
+      root.render(null)
+      await frame(); await frame()
+      values.clear()
+      // Two independent contributions: their sends run in parallel, each unit at its own write.
+      const records = ['lost-a', 'lost-b'].map(id => ({ ...prepared, id, updated_at: '2026-10-20T10:00:00Z', chat_id: 'fixture-chat',
+        plan: { ...prepared.plan, branch: 'fix/' + id, diff_sha256: 'd'.repeat(64), diff_stat: ' 1 file changed, 3 insertions(+), 1 deletion(-)' } }))
+      for (const record of records) values.set('contributions/' + record.id + '.json', structuredClone(record))
+      window.mobius.storage.listWithStatus = async () => ({ complete: true, entries: records.map(record => ({ type: 'file', name: record.id + '.json', content: structuredClone(record) })) })
+      window.fullAppConnected = true; window.fullAppBinding = true
+      const states = []
+      const realPost = window.postMessage
+      window.postMessage = (message, target) => message?.type === 'moebius:app-block-state' ? states.push(structuredClone(message)) : realPost.call(window, message, target)
+      const batchKey = 'chat-send-batch:' + batchHandle(['lost-a', 'lost-b'])
+      const card = () => states.at(-1)?.actions?.find(action => action.key === batchKey)
+      const fire = (name, nonce) => window.dispatchEvent(new MessageEvent('message', { source: window, origin: location.origin,
+        data: { type: 'moebius:app-block-action', sessionId: 'card-lost', key: batchKey, event: name, nonce } }))
+      const statusReads = () => calls.requests.filter(call => call.url === '/api/github/status').length
+      const before = calls.requests.length
+      try {
+        root.render(<ContributeApp appId="fixture-app" token="fixture-only" blockSession={{ sessionId: 'card-lost', generation: 7, features: ['row-state', 'rows-v2'], context: { chatId: 'fixture-chat', latest: true, intent: 'chat:contributions' }, actions: [{ key: batchKey, label: 'Contribute all' }], items: [{ intent: 'review:lost-a' }, { intent: 'review:lost-b' }] }} />)
+        await until(() => card() && !card().disabled, 'Card state was not published')
+        fire('activate', 'lost-n1')
+        // Wait on timers rather than animation frames: the hidden runtime mounts behind the card.
+        for (let i = 0; i < 150 && !card()?.confirming; i++) await new Promise(resolve => setTimeout(resolve, 100))
+        await until(() => card()?.confirming, 'Contribute did not become Confirm: ' + JSON.stringify(card()))
+        // The platform stops advertising the binding after Confirm opened, and nothing tells the app.
+        window.fullAppBinding = false
+        const readsBefore = statusReads()
+        fire('confirm', 'lost-n2')
+        const settledRefusal = () => {
+          const last = states.at(-1)
+          return !card()?.busy && !card()?.confirming && last?.rows?.length === 2 && last.rows.every(row => row.pill === 'Not sent') && last.checkpoint === null
+        }
+        await until(settledRefusal, () => 'A lost binding did not settle as refused: ' + JSON.stringify({ action: card(), rows: states.at(-1)?.rows,
+          checkpoint: states.at(-1)?.checkpoint, writes: calls.requests.slice(before).filter(call => call.method === 'POST').map(call => call.url) }))
+        ensure(statusReads() - readsBefore === 2, 'Each unit did not read the platform at its write: ' + (statusReads() - readsBefore))
+        ensure(!calls.requests.slice(before).some(call => call.method === 'POST'), 'An unbound send was made: ' + JSON.stringify(calls.requests.slice(before).filter(call => call.method === 'POST').map(call => call.url)))
+      } finally {
+        window.postMessage = realPost
+        window.fullAppBinding = false
+        root.render(null)
+      }
+    })
     await check('A card session without its items (an older Möbius) never offers Confirm', async () => {
       root.render(null)
       await frame(); await frame()
@@ -1997,7 +2053,7 @@ const savedResponse = (patch = {}) => ({ version: 1, id: 'r-3f9a1c2b04d5', repo:
   commits: [], files: [], bundle: null, digest: 'd'.repeat(64), receipts: { push: null, replies: [], description: null, rerequest: null }, error: null, ...patch })
 const RESPONSE_KEY = 'respond-results/owner__project__7.json', DECISION_KEY = 'respond-decisions/owner__project__7.json'
 window.runRespondResultChecks = async () => {
-  window.fixtureCapabilities = { review_fix_merge: false, post_review: false, owner_grant: true } // a Möbius that offers the owner grant: Post is on
+  window.fixtureCapabilities = { review_fix_merge: false, post_review: false, owner_confirm: true } // a Möbius that confirms Post on its own sheet: Post is on
   const checks = []
   const deskFrame = title => [...document.querySelectorAll('.co-frame')].find(node => text(node).includes(title))?.dataset.frame
   const button = label => [...document.querySelectorAll('button')].find(node => text(node) === label)
@@ -2024,6 +2080,8 @@ window.runRespondResultChecks = async () => {
     ensure(!reviewBody().includes('No review yet'), 'The tab still said No review yet')
     ensure(button(NAMES.postAnswer) && !button(NAMES.postAnswer).disabled, 'Post is not offered')
     checks.push({ name: 'a saved answer is a draft to send: the row, the panel and the Review tab all say so', status: 'pass' })
+    button(NAMES.postAnswer).scrollIntoView({ block: 'center' })
+    await captureShot('respond-post-on')
     // An answer that adds screenshots to the description shows them, read from the app's storage and checked against the digest the owner approves.
     {
       const canvas = document.createElement('canvas'); canvas.width = 480; canvas.height = 140
@@ -2105,6 +2163,7 @@ window.runRespondResultChecks = async () => {
     window.holdResponsesRead = true
     await click(button(NAMES.postAnswer))
     await until(() => values.get(DECISION_KEY)?.decision === 'approved', 'Post wrote no approval')
+    ensure(calls.grants.length === 1 && JSON.stringify(calls.grants[0].args) === JSON.stringify(['respond_post', {}, { repo: 'owner/project', number: 7, result_id: 'r-3f9a1c2b04d5', digest: 'd'.repeat(64), chat_id: 'respond-chat-fixture' }]), 'Post did not ask the shell for this answer and chat: ' + JSON.stringify(calls.grants))
     ensure(values.get(DECISION_KEY).result_id === 'r-3f9a1c2b04d5' && values.get(DECISION_KEY).digest === 'd'.repeat(64), 'The approval named another answer: ' + JSON.stringify(values.get(DECISION_KEY)))
     await until(() => calls.messages.length === 1, 'Post sent the chat nothing')
     const sent = calls.messages[0]
@@ -2186,6 +2245,8 @@ window.runRespondPostOffChecks = async () => {
     ensure(reviewBody().includes('Both points are answered.') && reviewBody().includes('A lost answer is unresolved'), 'The answer is no longer readable: ' + reviewBody())
     ensure(!button(NAMES.replyInChat).disabled && !button(NAMES.discard).disabled, 'Reply in chat or Discard was switched off with Post')
     checks.push({ name: 'without the owner grant Post is off with its reason in words, and the answer, Reply in chat and Discard stay', status: 'pass' })
+    button(NAMES.postAnswer).scrollIntoView({ block: 'center' })
+    await captureShot('respond-post-off')
     // The reason and the buttons fit the screen: at 390 px nothing is cut off or scrolls sideways.
     const note = [...document.querySelectorAll('.co-review-note')].find(node => text(node).startsWith(reason))
     const edge = node => node.getBoundingClientRect().right
@@ -2211,7 +2272,7 @@ window.runRespondPostOffChecks = async () => {
 // Respond again is delivered into the PR's conversation as a message: the platform hands back the conversation it already has for the
 // PR's scope without sending the job, so a plain start would only reopen it.
 window.runRespondAgainChecks = async () => {
-  window.fixtureCapabilities = { review_fix_merge: false, post_review: false, owner_grant: true } // a Möbius that offers the owner grant: the old answer's Post is held for the working chat, not by the gate
+  window.fixtureCapabilities = { review_fix_merge: false, post_review: false, owner_confirm: true } // a Möbius that confirms Post on its own sheet: the old answer's Post is held for the working chat, not by the gate
   const checks = []
   const button = label => [...document.querySelectorAll('button')].find(node => text(node) === label)
   const reviewBody = () => text(query('.co-pr-detail-body'))
@@ -2374,6 +2435,66 @@ window.runAskApprovalChecks = async () => {
     await until(() => pill() === 'Commented · not approved', 'A comment on this version did not outrank the old approval: ' + pill())
     ensure(hint().includes('second-reviewer left a comment'), 'The panel said: ' + hint())
     checks.push({ name: 'a comment on this version outranks an old approval: the PR reads Commented · not approved and asks the commenter', status: 'pass' })
+    // 5. Where Möbius confirms the owner's taps on its own sheet (it advertises owner_confirm), that sheet is the one confirm: Merge is one tap on
+    // the action, the app draws no confirm of its own (its sheet only waits, and says Merging… once Möbius has confirmed), Möbius is asked for exactly
+    // the request that is then sent, and a cancel sends nothing.
+    // "Merge options…" is the way to choose how it lands first, and only where the repository allows more than one way. Without owner_confirm the
+    // blocks above are the proof that nothing changed: the app's own sheet, and no request to the shell.
+    window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
+    const landable = { nameWithOwner: 'owner/project', viewerPermission: 'WRITE', squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: false }
+    const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
+    const openMenu = async () => { await click(query('[aria-label="Choose an action for PR 7"]')); await until(() => menuItems().length, 'The Actions menu did not open') }
+    await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
+    await openPage()
+    await openMenu()
+    ensure(menuItem('Merge') && !menuItem('Merge options…'), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
+    await captureShot('merge-menu-app-sheet')
+    window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true, owner_confirm: true }
+    await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
+    await openPage()
+    await openMenu()
+    const offered = menuItems().map(node => text(node.querySelector('strong')))
+    ensure(offered.indexOf('Merge options…') === offered.indexOf('Merge') + 1, 'Merge options… did not follow Merge: ' + offered.join(', '))
+    await captureShot('merge-menu-shell-sheet')
+    window.holdOwnerGrant = new Promise(resolve => { window.releaseOwnerGrant = resolve })
+    await click(menuItem('Merge'))
+    await until(() => calls.grants.length === 1, 'Merge did not ask the shell')
+    ensure(query('.co-review-window') && !query('.co-rw-facts') && !query('.co-rw-foot'), 'The app drew its own confirm while the shell’s sheet was open: ' + text(query('.co-review-window')))
+    ensure(text(query('.co-review-window')).includes(NAMES.waitingForMobius) && !text(query('.co-review-window')).includes('Merging…'), 'The app said Merging… before the owner confirmed: ' + text(query('.co-review-window')))
+    ensure(calls.merges.length === 0, 'Merge was sent before the owner confirmed')
+    await captureShot('merge-one-tap-waiting')
+    window.releaseOwnerGrant(); window.holdOwnerGrant = null
+    await until(() => calls.merges.length === 1, 'Merge was not sent once the owner confirmed')
+    const mergeBody = { repo: 'owner/project', number: 7, head_sha: HEAD }
+    ensure(JSON.stringify(calls.merges[0]) === JSON.stringify(mergeBody), 'The default tap sent ' + JSON.stringify(calls.merges[0]))
+    ensure(JSON.stringify(calls.grants[0].args) === JSON.stringify(['merge', {}, mergeBody]), 'The shell was asked for ' + JSON.stringify(calls.grants[0].args))
+    ensure(calls.requests.findIndex(call => call.url.endsWith('/pulls/merge')) >= calls.grants[0].requestsBefore, 'The merge was sent before the shell was asked')
+    await until(() => text(query('.co-review-window')).includes('Merged'), 'The sheet did not say it merged: ' + text(query('.co-review-window')))
+    await click(button('Done'))
+    checks.push({ name: 'where Möbius confirms on its own sheet, Merge is one tap: the app’s sheet only waits for it, the shell is asked for exactly the request, then it is sent', status: 'pass' })
+    window.ownerGrantAnswer = false
+    await openMenu()
+    await click(menuItem('Merge'))
+    await until(() => calls.grants.length === 2 && !query('.co-review-window'), 'The app’s sheet stayed after the owner cancelled the shell’s')
+    ensure(calls.merges.length === 1, 'A cancelled Merge was sent')
+    window.ownerGrantAnswer = new Error('GitHub says this PR cannot be merged yet.')
+    await openMenu()
+    await click(menuItem('Merge'))
+    await until(() => calls.grants.length === 3 && text(query('.co-review-window')).includes('GitHub says this PR cannot be merged yet.'), 'The platform’s sentence was not shown: ' + text(query('.co-review-window')))
+    ensure(calls.merges.length === 1, 'A refused Merge was sent')
+    await click(query('.co-review-window [aria-label="Close"]'))
+    checks.push({ name: 'a cancel sends nothing and closes; a refusal sends nothing and shows the platform’s sentence', status: 'pass' })
+    window.ownerGrantAnswer = undefined
+    await openMenu()
+    await click(menuItem('Merge options…'))
+    await until(() => query('.co-rw-rungs'), 'Merge options… did not show how it lands')
+    await click([...document.querySelectorAll('[role=radio]')].find(node => text(node).includes('Create a merge commit')))
+    ensure(text(query('.co-review-window .co-btn-primary')) === 'Merge', 'The sheet’s button did not name the chosen way: ' + text(query('.co-review-window .co-btn-primary')))
+    await captureShot('merge-options-sheet')
+    await click(query('.co-review-window .co-btn-primary'))
+    await until(() => calls.merges.length === 2, 'The chosen way was not sent')
+    ensure(calls.merges[1].method === 'merge' && JSON.stringify(calls.grants[3].args) === JSON.stringify(['merge', {}, calls.merges[1]]), 'The shell was asked for ' + JSON.stringify(calls.grants[3]?.args) + ' and the platform got ' + JSON.stringify(calls.merges[1]))
+    checks.push({ name: 'Merge options… lets the owner choose how it lands, then the shell confirms that exact choice', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
@@ -2381,6 +2502,7 @@ window.runAskApprovalChecks = async () => {
   } finally {
     delete window.compareAnswers
     window.fixtureCapabilities = undefined
+    window.ownerGrantAnswer = undefined; window.holdOwnerGrant = undefined
   }
 }
 

@@ -75,12 +75,17 @@ test('a decision is a durable write that only counts when the server accepted it
 })
 
 // Post: re-read, check what is on screen is what is saved, write the approval, then tell the chat.
-// These tests run on a Möbius that offers the owner grant; the tests of the gate itself, below, say otherwise out loud.
-const WITH_GRANT = { owner_grant: true }
+// These tests run on a Möbius that confirms Post on its own sheet; the tests of the gate itself, below, say otherwise out loud.
+// The shell's sheet, as the runtime gives it to a frame: it says what `sheet.next` says (true, false for a cancel, or an Error for a
+// refusal) and remembers what it was asked.
+const WITH_GRANT = { owner_confirm: true }
+const asked = []
+const sheet = { next: true }
+globalThis.window = { mobius: { ownerGrant: { request: async (...args) => { asked.push(args); if (sheet.next instanceof Error) throw sheet.next; return sheet.next } } } }
 const view = patch => ({ digest: example().digest, pr: pull(), chat: null, capabilities: WITH_GRANT, ...patch })
 const delivered = []
 const deliverOk = async (token, request) => { delivered.push({ token, request }); return { ok: true, chatId: request.chatId, outcome: 'sent' } }
-const reset = () => { delivered.length = 0 }
+const reset = () => { delivered.length = 0; asked.length = 0; sheet.next = true }
 
 test('Post writes the approval first, then sends the chat the one message, bound to the result', async () => {
   reset()
@@ -101,6 +106,22 @@ test('Post writes the approval first, then sends the chat the one message, bound
   assert.match(request.draft, /respond_result\.py post --pr owner\/repo#7 --id r-3f9a1c2b04d5/)
 })
 
+test('Post asks the shell first, bound to this answer and its chat; a cancel or a refusal writes nothing and sends nothing', async () => {
+  reset()
+  const { id, digest, chat_id } = example()
+  const sent = await approveResponse({ ...view(), slug: SLUG, token: 't', storage: fakeStorage(saved()), deliver: deliverOk })
+  assert.equal(sent.ok, true)
+  assert.deepEqual(asked, [['respond_post', {}, { repo: 'owner/repo', number: 7, result_id: id, digest, chat_id }]], 'identifiers only, the route body the helper will spend it for')
+  for (const [name, answer, error] of [['the owner closed the sheet', false, ''], ['the platform refused', new Error('That conversation was not found.'), 'That conversation was not found.']]) {
+    reset()
+    sheet.next = answer
+    const storage = fakeStorage(saved())
+    assert.deepEqual(await approveResponse({ ...view(), slug: SLUG, token: 't', storage, deliver: deliverOk }), { ok: false, error }, name)
+    assert.equal(storage.calls.some(call => call[0] === 'write'), false, `${name}: nothing was approved`)
+    assert.equal(delivered.length, 0, `${name}: the chat was told nothing`)
+  }
+})
+
 test('a post that stopped can be tried again, even though its own push moved the PR, and a resend is a new message', async () => {
   reset()
   const TIP = '2'.repeat(40)
@@ -116,9 +137,9 @@ test('a post that stopped can be tried again, even though its own push moved the
   assert.match(delivered[0].request.cid, /^respond-retry-/)
 })
 
-test('Post does nothing until the host offers an owner grant: no approval, no message, whatever else is true', async () => {
+test('Post does nothing until the host confirms it on its own sheet: no approval, no message, whatever else is true', async () => {
   reset()
-  const cases = { 'a Möbius without the grant': {}, 'the grant advertised as off': { owner_grant: false }, 'anything but a plain true': { owner_grant: 'yes' },
+  const cases = { 'a Möbius without the confirmation': {}, 'the confirmation advertised as off': { owner_confirm: false }, 'anything but a plain true': { owner_confirm: 'yes' },
     'capabilities not read yet, or unreadable': null, 'capabilities not passed': undefined }
   for (const [name, capabilities] of Object.entries(cases)) {
     for (const again of [false, true]) {
@@ -126,13 +147,14 @@ test('Post does nothing until the host offers an owner grant: no approval, no me
       const out = await approveResponse({ ...view({ capabilities }), slug: SLUG, token: 't', storage, again, deliver: deliverOk })
       assert.deepEqual(out, { ok: false, error: POST_OFF_REASON }, name)
       assert.deepEqual(storage.calls, [], `${name}: the storage was not even read`)
+      assert.deepEqual(asked, [], `${name}: and the shell was not asked`)
     }
   }
   assert.equal(delivered.length, 0)
   assert.match(POST_OFF_REASON, /^Post is off for now: Möbius cannot yet confirm it was you who pressed it\..*Reply in chat\.$/)
 })
 
-test('Discard needs no grant: it publishes nothing', async () => {
+test('Discard needs no confirmation: it publishes nothing', async () => {
   const storage = fakeStorage(saved())
   assert.deepEqual(await discardResponse({ slug: SLUG, digest: example().digest, storage }), { ok: true })
 })

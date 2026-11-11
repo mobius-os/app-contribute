@@ -304,8 +304,14 @@ export function reviewRunRequest(choice) {
 // GitHub: the connection dropped before the answer, a gateway or server error, an answer whose body
 // cannot be read (whatever its status) or a "success" that is not this action's receipt. That is
 // { pending }, never a plain failure the sheet would offer to retry and never a success it would claim. `receipt` turns the decoded answer
-// into the fields the sheet reads, or null when it is not this action's completion.
-async function publicWrite(token, appId, path, body, { code, words, receipt }) {
+// into the fields the sheet reads, or null when it is not this action's completion. With `shellConfirm` (owner-grant.js, askOwner) the
+// shell's own sheet comes first, for exactly the body about to be sent: a cancel or a refusal is the outcome and nothing is sent.
+// `onConfirmed` runs once the owner has nothing left to confirm, just before the request goes out, so the app's own sheet can say
+// "Merging…" only from then on.
+async function publicWrite(token, appId, path, body, { code, words, receipt, action, shellConfirm, onConfirmed }) {
+  const stopped = action && shellConfirm ? await shellConfirm(action, {}, body) : null
+  if (stopped) return stopped
+  onConfirmed?.()
   let result
   try {
     result = await collaborationRequest(token, appId, path, body)
@@ -319,12 +325,13 @@ async function publicWrite(token, appId, path, body, { code, words, receipt }) {
 
 // The owner's own Merge: this exact version, by the repository's allowed method.
 // Returns the outcome shape the confirm sheet already reads: { ok } | { pending }
-// (GitHub may have merged; read it back, never repeat) | { error }. The platform
+// (GitHub may have merged; read it back, never repeat) | { error } | { cancelled } (only with `shell.shellConfirm`: the owner closed Möbius's
+// sheet, nothing was sent). `shell` is { shellConfirm, onConfirmed } of publicWrite, passed through. The platform
 // re-checks everything at the moment of merging and refuses what GitHub refuses.
-export const mergePull = (token, appId, pr, { method = '' } = {}) => publicWrite(token, appId, 'pulls/merge', {
+export const mergePull = (token, appId, pr, { method = '', ...shell } = {}) => publicWrite(token, appId, 'pulls/merge', {
   repo: pr.repository.nameWithOwner, number: pr.number, head_sha: pr.headRefOid, ...(method ? { method } : {}),
 }, {
-  code: 'merge_unconfirmed', words: 'GitHub may have merged it. Check the pull request before trying again.',
+  action: 'merge', ...shell, code: 'merge_unconfirmed', words: 'GitHub may have merged it. Check the pull request before trying again.',
   receipt: result => ['merged', 'queued'].includes(result?.state) ? { state: result.state, mergeSha: result.merge_sha || '' } : null,
 })
 
@@ -334,19 +341,20 @@ export const mergePull = (token, appId, pr, { method = '' } = {}) => publicWrite
 // shapes as mergePull. GitHub cannot pin a version on these writes, so the platform reports the head
 // it saw afterwards (observedHead) and the sheet says so if it moved. The receipt of each is the state
 // it names, with that head; any other answer may still have reached GitHub.
+// `action` is the PR machine's id for it, which the platform's owner confirmation names too.
 const STATUS_WRITE = {
-  ready: { state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
-  draft: { state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
-  close: { state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
-  'request-reviewers': { state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
-  'ask-approval': { state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
+  ready: { action: 'open_for_review', state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
+  draft: { action: 'back_to_draft', state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
+  close: { action: 'close', state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
+  'request-reviewers': { action: 'ask_rereview', state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
+  'ask-approval': { action: 'ask_approval', state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
 }
-export const pullAction = (token, appId, pr, action, extra = {}) => {
+export const pullAction = (token, appId, pr, action, extra = {}, shell = {}) => {
   const write = STATUS_WRITE[action]
   return publicWrite(token, appId, `pulls/${action}`, {
     repo: pr.repository.nameWithOwner, number: pr.number, head_sha: pr.headRefOid, ...extra,
   }, {
-    code: write.code, words: write.words,
+    action: write.action, ...shell, code: write.code, words: write.words,
     receipt: result => result?.state === write.state && typeof result.observed_head_sha === 'string' ? { state: write.state, observedHead: result.observed_head_sha } : null,
   })
 }

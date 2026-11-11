@@ -166,6 +166,21 @@ the owner, and folds apps with nothing to do.
   GitHub again first, and its button stays off, so another attempt can only
   start from that fresh read. This holds for Merge, Open for review and Post to
   GitHub alike.
+- **Where Möbius confirms the owner's taps on its own sheet** (it advertises
+  `owner_confirm`), that sheet is the one confirm: Merge and the five status changes
+  are one tap on the action and one tap on Möbius's sheet, which names what happens
+  in Möbius's own words and cannot be pressed by the app or an agent. Merge lands the
+  way the repository prefers, and **Merge options…** (only where it allows more than
+  one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
+  fix, and Post get that sheet as a new confirm. Until the owner has confirmed on it, the
+  app's own sheet only says it is waiting for that. A cancel sends nothing. A Möbius
+  without it keeps the sheets above.
+- **Two paths, until platform enforcement ships.** The path without Möbius's sheet (the
+  app's own confirm sheets, and Post off) exists only until the platform enforces owner
+  confirmation and that has been adopted; then it is removed and the app requires
+  `owner_confirm`. Until then the manifest declaration `"owner_confirm": true` is the
+  opt-in switch: the platform enforces owner confirmation only for apps that declare it,
+  and this app does.
 - **Open as draft / Open for review** is one split button on the prepared-PR
   card; the arrow offers the other stage for that send. The stage is part of the
   exact approval, the confirmation text and the chat Send card (which freezes it
@@ -186,8 +201,8 @@ the owner, and folds apps with nothing to do.
 - **A saved Respond to feedback answer comes first on the Review tab**: each point and
   how it ended, the replies word for word, the new description, the commits and changed
   files, the tests, and what Post will do in order, with **Post**, **Reply in chat** and
-  **Discard**. Post saves the owner's approval for exactly that answer and tells the chat
-  to run one checked command; nothing is pushed or posted before it. **Post is off until
+  **Discard**. Post has Möbius's own sheet confirm the press, saves the owner's approval for
+  exactly that answer and tells the chat to run one checked command; nothing is pushed or posted before it. **Post is off until
   Möbius can confirm it was the owner who pressed it** (an approval the agent could have
   written itself proves nothing): the button is disabled with that reason on the card, and
   the answer, Reply in chat and Discard keep working. The PR reads **Draft
@@ -297,7 +312,7 @@ re-review) · Finish it for me (stops before each push for your approval). Their
 Review, which reads Re-review once you reviewed it, with an optional "Merge after I
 approve" switch · Take over, set apart, maintainers only, with a reason. Your own
 actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
-behind a confirm sheet and each shown only where this Möbius can do it.
+behind a confirm sheet (Möbius's own, where it offers one) and each shown only where this Möbius can do it.
 
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·
