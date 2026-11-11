@@ -9,11 +9,23 @@
 // The rules, in plain words:
 //   - Your role decides everything: your PR (author) or theirs (reviewer). An
 //     author never gets a public review action; an agent's check of your PR is private.
-//   - Merging needs an approval of this exact version by someone other than the
+//   - Ready to merge is an approval of this exact version by someone other than the
 //     author (bots never count), no change request still standing, checks that
 //     pass (or none exist), no conflicts, and nothing unconfirmed on its way out.
 //     An approval of an older commit still counts when the fact reader proved the PR's own
 //     change the same (`sameWork`, see same-work.js): a merge of the base is a new commit, not new work.
+//     That words the PR's standing and its highlighted next step (notReadyToMerge); it does not switch your own
+//     Merge off, and GitHub's merge rules refuse what cannot land. The agent's own unattended merge has no tap
+//     behind it, so the platform still asks it (not_ready_to_merge).
+//   - Four things stop an action of yours: the PR cannot be read, it is closed or merged, an agent is already
+//     working on it, or something sent to GitHub is not confirmed. Not every action is stopped by all four: an Ask
+//     stops for the first two (and for a list of people not read whole), Open for review, Back to draft and Close for
+//     the first three only (an unconfirmed send does not stop them), Merge for all four, and an agent job also while a
+//     draft owns the findings. The table below says which. An action tied to a thing waits for that thing
+//     (a draft to send, a person to ask, a result to set aside). Asking works for anyone who reviewed or commented
+//     and has not approved this version; the sheet ticks the people each ask is meant for (Ask for re-review lists only
+//     the people GitHub takes a review request for: those its writers-only opinions named). Taking over someone
+//     else's PR stays for maintainers: it is Contribute's own rule, GitHub would let any writer push.
 //   - Only new commits bring their PR back for re-review; replies never do. A reviewer who only commented
 //     has not approved, however long they looked: a plain comment never lifts a change request on GitHub, and
 //     a PR that needs an approval does not get one from it. Anyone who commented on this version can be
@@ -53,7 +65,7 @@ function derive(facts) {
   const commentedOnly = commentedAtHead.filter(name => ![...approvedAtHead, ...changesAtHead, ...changesOlder].some(other => same(other, name)))
   const carried = people.filter(review => approvedHere(review) && !atHead(review)).map(review => ({ by: review.by, commit: review.commit }))
   const approvedOlder = names(review => review.state === 'APPROVED' && !approvedHere(review))
-  return {
+  const standing = {
     approvedAtHead,
     approvedOlder,
     carried,
@@ -73,10 +85,36 @@ function derive(facts) {
     openFindings: result?.outcome === 'findings' && !result.setAside,
     outbox,
     coveredBy: outbox?.covers ? outbox.kind : '',
-    // A bot's change request is something to answer; its plain comment is only conversation, as it always was.
-    botFindings: (facts.reviews || []).some(review => review.bot && !['APPROVED', 'COMMENTED'].includes(review.state)),
   }
+  return { ...standing, askable: askablePeople(facts, people, standing) }
 }
+
+// Who could be asked to look at this version: everyone who reviewed or commented, except those whose approval already
+// counts for it. `reason` is what is true of them (it words the public note), `commit` the version their review was of.
+// The merge standing above reads only writers' opinions; people it does not read (a reviewer without write access) come
+// from `participants`, GitHub's newest review of everyone, and are worded from that review alone. A deleted account
+// ("ghost") and a review in no state the notes can word (dismissed) name nobody to ask. `requestable` is whether GitHub takes
+// a review request for them: only the people its writers-only opinions listed (a plain comment may be from anyone).
+const KNOWN_STATES = ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED']
+const OPINION_REASONS = ['changes_here', 'looked_again', 'changes_older', 'approved_older']
+const askableReview = (review, facts) => !review.bot && !same(review.by, facts.author) && !same(review.by, 'ghost') && KNOWN_STATES.includes(review.state)
+function askablePeople(facts, allPeople, standing) {
+  const people = allPeople.filter(review => askableReview(review, facts))
+  const has = (list, name) => list.some(other => same(other, name))
+  const REASONS = [['changes_here', 'CHANGES_REQUESTED', standing.changesAtHead], ['looked_again', 'CHANGES_REQUESTED', standing.lookedAgain],
+    ['commented_here', 'COMMENTED', standing.commentedOnly], ['changes_older', 'CHANGES_REQUESTED', standing.changesOlder], ['approved_older', 'APPROVED', standing.approvedOlder]]
+  const outside = (facts.participants || []).filter(review => askableReview(review, facts) && !allPeople.some(other => same(other.by, review.by)))
+    .filter(review => !(review.state === 'APPROVED' && review.commit === facts.head))
+  const everyone = [...new Map([...people, ...outside].map(review => [String(review.by).toLowerCase(), review.by])).values()]
+  return everyone.filter(name => !has(standing.approvedAtHead, name)).map(by => {
+    const own = outside.find(review => same(review.by, by))
+    if (own) return { by, reason: ownReason(own, facts.head), commit: own.commit, requestable: false }
+    const [reason, state] = REASONS.find(([, , list]) => has(list, by)) || ['commented_older', 'COMMENTED']
+    return { by, reason, commit: people.find(review => same(review.by, by) && review.state === state)?.commit || '', requestable: OPINION_REASONS.includes(reason) }
+  })
+}
+const ownReason = (review, head) => (review.state === 'CHANGES_REQUESTED' ? (review.commit === head ? 'changes_here' : 'changes_older')
+  : review.state === 'APPROVED' ? 'approved_older' : review.commit === head ? 'commented_here' : 'commented_older')
 
 // Every state. turn: you | agent | other | none. `label` is the short chip on a row,
 // `headline` the line under a PR's title, `next` the highlighted action.
@@ -157,7 +195,7 @@ function approvedStanding(facts) {
 // GitHub (`mine`) or kept private (`earlier`).
 function reviewerStanding(facts, d) {
   if (d.mineAtHead && d.mine.state === 'CHANGES_REQUESTED') return 'reviewer.waiting_author'
-  if (d.mineAtHead) return mergeBlocker(facts, d) ? 'reviewer.reviewed' : 'reviewer.mergeable'
+  if (d.mineAtHead) return notReadyToMerge(facts, d) ? 'reviewer.reviewed' : 'reviewer.mergeable'
   if (d.result) return d.result.setAside ? 'reviewer.kept_private' : 'reviewer.result_ready'
   if (d.mine || d.earlier) return 'reviewer.re_review'
   return facts.lifecycle === 'draft' ? 'reviewer.draft' : 'reviewer.to_review'
@@ -182,8 +220,9 @@ const draftOwnsFindings = d => (d.outbox?.covers ? OWNED_BY_DRAFT[d.outbox.state
 const stillOpen = facts => (['open', 'draft'].includes(facts.lifecycle) ? '' : 'This PR is no longer open.')
 const readable = facts => (facts.lifecycle === 'unknown' || facts.readComplete === false ? 'This PR could not be read. Try again.' : '')
 
-// Why Merge cannot run, in order; '' when it may.
-export function mergeBlocker(facts, d = derive(facts)) {
+// Why this PR is not ready to merge, in order; '' when it is. It words the PR's standing (Ready to merge, the highlighted
+// next step); Merge itself is offered whenever its stops below allow, whatever this says.
+export function notReadyToMerge(facts, d = derive(facts)) {
   const standing = [...d.changesAtHead, ...d.changesOlder]
   return firstReason(
     readable(facts),
@@ -199,23 +238,34 @@ export function mergeBlocker(facts, d = derive(facts)) {
   )
 }
 
-const somethingToAnswer = (facts, d) => d.openFindings || d.changesAtHead.length || facts.openThreads > 0
-  || facts.checks === 'fail' || facts.mergeable === 'conflict' || d.botFindings
+// What stops one of your actions whatever the PR's review standing is: the PR cannot be read, it is closed or merged, an agent
+// is working on it, or something sent to GitHub is not confirmed. The rest (approvals, checks, rights) GitHub and the
+// platform refuse in their own words when the tap reaches them.
+const agentStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
+const takeOverStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), MAINTAINER.includes(facts.permission) ? '' : 'Only maintainers can take over someone else’s PR.', jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
+const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), nothingInFlight(d), jobIdle(facts))
+const statusStops = facts => firstReason(readable(facts), stillOpen(facts), jobIdle(facts))
+// The two Ask actions need someone to name: anyone who reviewed or commented, except who already approved this version.
+const nobodyToAsk = d => (d.approvedAtHead.length ? 'Everyone who reviewed it has already approved this version.' : 'Nobody has reviewed this PR yet.')
+// A list of people that was not read whole is not offered: they cannot be added by hand. (A fact set with no `participants`
+// asks nobody beyond the reviews it lists; only the fact reader says null.)
+const unreadPeople = facts => (facts.participants === null ? 'Could not read everyone who reviewed this PR. Try again.' : '')
+const askStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), unreadPeople(facts), d.askable.length ? '' : nobodyToAsk(d))
 const outboxIs = (d, state) => (d.outbox?.state === state ? '' : 'Nothing like that is waiting.')
 
 // Every action. `by` says who acts: an agent job, or your own tap (each behind a
 // confirm sheet). `when` returns '' when allowed, otherwise the reason it is not.
 export const ACTIONS = [
   { id: 'check_my_pr', by: 'agent', roles: ['author'], title: NAMES.review, detail: 'Private. Nothing is posted.',
-    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d)) },
+    when: agentStops },
   { id: 'respond', by: 'agent', roles: ['author'], title: NAMES.respond, detail: 'Answers every point, then one approval sheet for the pushes and replies.',
-    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d), somethingToAnswer(facts, d) ? '' : 'Nothing to respond to.') },
+    when: agentStops },
   { id: 'finish_it', by: 'agent', roles: ['author'], title: NAMES.finishIt, detail: 'Responds, checks and fixes. Stops for your approval before each push.',
-    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), mayWrite(facts.permission) ? '' : 'Needs write access to this repository.', jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d)) },
+    when: agentStops },
   { id: 'review', by: 'agent', roles: ['reviewer'], title: d => (d.mine || d.result || d.earlier ? NAMES.reviewAgain : NAMES.review), detail: 'Private, drafted for you, or posted by the agent if you allow it.',
-    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d)) },
+    when: agentStops },
   { id: 'take_over', by: 'agent', roles: ['reviewer'], title: NAMES.takeOver, detail: 'Maintainers only. Needs a reason, and says so on the PR. Each push needs your approval.',
-    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), MAINTAINER.includes(facts.permission) ? '' : 'Only maintainers can take over someone else’s PR.', jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d)) },
+    when: takeOverStops },
 
   { id: 'send_draft', by: 'you', roles: ['author', 'reviewer'], title: 'Send…', when: (facts, d) => outboxIs(d, 'drafted') },
   { id: 'check_github', by: 'you', roles: ['author', 'reviewer'], title: 'Check GitHub', when: (facts, d) => outboxIs(d, 'unconfirmed') },
@@ -225,16 +275,14 @@ export const ACTIONS = [
     when: (facts, d) => firstReason(readable(facts), d.result && !d.mineAtHead && !d.outbox ? '' : 'Review this version first.') },
   { id: 'set_aside', by: 'you', roles: ['author', 'reviewer'], title: 'Set aside…',
     when: (facts, d) => firstReason(readable(facts), d.result && !d.result.setAside && (facts.role === 'reviewer' || d.openFindings) ? '' : 'Nothing to set aside.', draftOwnsFindings(d)) },
-  { id: 'open_for_review', by: 'you', roles: ['author'], title: NAMES.openForReview, when: facts => firstReason(readable(facts), facts.lifecycle === 'draft' ? jobIdle(facts) : 'It is already open for review.') },
-  { id: 'back_to_draft', by: 'you', roles: ['author'], title: NAMES.backToDraft, when: facts => firstReason(readable(facts), facts.lifecycle === 'open' ? jobIdle(facts) : 'It is not open for review.') },
-  { id: 'ask_rereview', by: 'you', roles: ['author'], title: NAMES.askRereview,
-    when: (facts, d) => (d.rereview.length ? firstReason(readable(facts), stillOpen(facts))
-      : d.approvalFrom.length ? 'They already looked at this version. Ask them to approve.' : 'Nobody reviewed an older version.') },
+  { id: 'open_for_review', by: 'you', roles: ['author'], title: NAMES.openForReview, when: statusStops },
+  { id: 'back_to_draft', by: 'you', roles: ['author'], title: NAMES.backToDraft, when: statusStops },
+  { id: 'ask_rereview', by: 'you', roles: ['author'], title: NAMES.askRereview, when: askStops },
   { id: 'ask_approval', by: 'you', roles: ['author'], title: d => (d.approvalFrom.length ? `Ask ${d.approvalFrom.join(', ')} to approve` : NAMES.askApproval), detail: 'Posts one short note on the PR.',
-    when: (facts, d) => (d.approvalFrom.length ? firstReason(readable(facts), stillOpen(facts)) : 'Nobody has commented without approving.') },
-  { id: 'merge', by: 'you', roles: ['author', 'reviewer'], title: NAMES.merge, when: (facts, d) => mergeBlocker(facts, d) },
+    when: askStops },
+  { id: 'merge', by: 'you', roles: ['author', 'reviewer'], title: NAMES.merge, when: mergeStops },
   { id: 'close', by: 'you', roles: ['author', 'reviewer'], title: NAMES.closePr, detail: 'Asks you to confirm first.',
-    when: facts => firstReason(readable(facts), stillOpen(facts), facts.role === 'author' || mayWrite(facts.permission) ? '' : 'Needs write access.', jobIdle(facts)) },
+    when: statusStops },
   { id: 'retry', by: 'you', roles: ['author', 'reviewer'], title: 'Try again', when: facts => (readable(facts) ? '' : 'Already up to date.') },
   { id: 'open_job', by: 'you', roles: ['author', 'reviewer'], title: 'Answer the agent', when: facts => (facts.job?.state === 'needs_answer' ? '' : 'No question is waiting.') },
   { id: 'rerun_job', by: 'you', roles: ['author', 'reviewer'], title: (d, facts) => rerunName(facts.job?.kind), when: facts => (facts.job?.state === 'stalled' ? '' : 'Nothing has stalled.') },
@@ -252,10 +300,10 @@ function headlineFor(key, facts, d) {
 }
 
 // The one entry point: facts in, { role, state, turn, label, headline, next, jobKind, coveredBy, waitingOn, actions,
-// approvedBy, carriedFrom, lookedAgain, approvalFrom, rereviewFrom } out. `jobKind` is the kind of the PR's agent job ('' when none); `coveredBy` the kind of
+// approvedBy, carriedFrom, changesFrom, lookedAgain, approvalFrom, rereviewFrom, askable } out. `jobKind` is the kind of the PR's agent job ('' when none); `coveredBy` the kind of
 // draft that owns the open findings (repair, answer, verdict; '' when none). The rest name people: who approved this version (carriedFrom:
 // those of them whose approval is of an older commit with the same work, as { by, commit }), who looked again without approving, and whose
-// review is of an older version that they have not looked past.
+// review is of an older version that they have not looked past; changesFrom: who holds a change request, of this version or an older one; askable: everyone the Ask actions may name, as { by, reason, commit } (approvalFrom and rereviewFrom are the ones ticked at first).
 export function decide(facts) {
   const d = derive(facts)
   const key = stateOf(facts, d)
@@ -268,7 +316,7 @@ export function decide(facts) {
   const waitingOn = state.turn !== 'other' ? '' : facts.role === 'reviewer' ? facts.author || 'the author' : headlineWho(key, d).join(', ') || 'reviewers'
   const label = state.label.replace('{author}', facts.author || 'the author')
   return { role: facts.role, state: key, turn: state.turn, label, headline: headlineFor(key, facts, d), next: state.next || '', jobKind: facts.job?.kind || '', coveredBy: d.coveredBy, waitingOn, actions,
-    approvedBy: d.approvedAtHead, carriedFrom: d.carried, lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview }
+    approvedBy: d.approvedAtHead, carriedFrom: d.carried, changesFrom: [...d.changesAtHead, ...d.changesOlder], lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview, askable: d.askable }
 }
 
 export const actionOf = (decision, id) => decision.actions.find(action => action.id === id) || null

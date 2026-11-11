@@ -97,16 +97,20 @@ export const allowedMergeMethods = repository => Object.keys(MERGE_METHODS).filt
 export const methodToSend = (repository, choice) => (choice && choice !== allowedMergeMethods(repository)[0] ? choice : '')
 
 // Who approved this version (the PR machine's count: never the author, never a bot). An approval of an
-// older commit counts only when the PR's own change was proved the same since, and the sheet says so.
+// older commit counts only when the PR's own change was proved the same since, and the sheet says so. A change
+// request that still stands is told too: Merge is never switched off for it, so this sheet is where it shows.
 function approvalFacts(standing) {
   if (!standing) return []
   const approvedBy = standing.approvedBy || []
-  if (!approvedBy.length) return [{ tone: 'bad', text: 'Nobody but the author has approved this version' }]
+  const asking = standing.changesFrom || []
+  const holding = asking.length ? [{ tone: 'bad', text: `${names(asking)} asked for changes and hasn’t approved since` }] : []
+  if (!approvedBy.length) return [{ tone: 'bad', text: 'Nobody but the author has approved this version' }, ...holding]
   const carried = standing.carriedFrom || []
   const exact = approvedBy.filter(name => !carried.some(item => item.by.toLowerCase() === name.toLowerCase()))
   return [
     exact.length ? { tone: 'ok', text: `Approved at this version by ${names(exact)}` } : null,
     ...carried.map(item => ({ tone: 'ok', text: `Approved by ${item.by} on ${short(item.commit)}. The lines you added and removed have not changed since` })),
+    ...holding,
   ].filter(Boolean)
 }
 
@@ -152,38 +156,85 @@ export function backToDraftCopy(pr) {
   }
 }
 
-// Ask for re-review: the people whose review is of an older version are asked to look again.
-export function askRereviewCopy(pr, { standing = null } = {}) {
-  const people = standing?.rereviewFrom || []
-  return {
-    icon: 'person', title: `Ask ${people.length ? names(people) : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
-    facts: [{ tone: 'ok', text: people.length ? `GitHub asks ${names(people)} for a review of the new version` : 'Nobody reviewed an older version' }],
-    footnote: 'They get GitHub’s usual review request. Nothing is posted in the conversation.',
-    disabled: !people.length,
-    done: () => ({ title: 'Asked to look again', text: `${names(people)} ${people.length === 1 ? 'is' : 'are'} asked to look again.` }),
-  }
+// What is true of each person an Ask can name: a line under their name on the sheet, and a line of the public note.
+// `commit` is the version their review was of; a review of a commit that is gone (a force-push) has none, and the line then
+// says "an earlier version" without a hash.
+const at = item => (item.commit ? ` (\`${short(item.commit)}\`)` : '')
+const WHY = {
+  changes_here: { detail: () => 'Asked for changes on this version', note: () => 'your change request on this version is still open. GitHub holds it until you approve or dismiss it.' },
+  looked_again: { detail: () => 'Asked for changes earlier, then commented on this version; GitHub still holds the request', note: () => 'you left a comment on this version, but GitHub still holds your earlier change request until you approve or dismiss it.' },
+  commented_here: { detail: () => 'Commented on this version, has not approved', note: () => 'you left a comment on this version but have not approved it.' },
+  changes_older: { detail: item => `Asked for changes on ${item.commit ? short(item.commit) : 'an earlier version'}, has not looked since`, note: item => `your change request is on an earlier version${at(item)}. GitHub holds it until you approve or dismiss it.` },
+  approved_older: { detail: item => `Approved ${item.commit ? short(item.commit) : 'an earlier version'}; this version has new commits`, note: item => `you approved an earlier version${at(item)}; this one has new commits.` },
+  commented_older: { detail: item => `Commented on ${item.commit ? `${short(item.commit)}, ` : ''}an earlier version`, note: item => `you left a comment on an earlier version${at(item)}.` },
+}
+const HOLDS_A_REQUEST = ['changes_here', 'looked_again', 'changes_older']
+
+// The platform takes at most this many people in one ask (ReviewerRequest and ApprovalRequest); the sheet says so before the tap.
+export const MAX_ASKED = 15
+const TOO_MANY = { tone: 'bad', text: `Ask at most ${MAX_ASKED} people at once` }
+
+// The sheet for an Ask. Everyone the machine says may be asked and `pool` allows is listed with what is true of them, the people
+// this ask is meant for ticked. `build(picked)` words the sheet for whoever is ticked (askable people, in list order); the sheet
+// calls `forPicked` as the ticks change.
+function askSheet(standing, meantFor, build, pool = () => true) {
+  const askable = (standing?.askable || []).filter(pool)
+  const pick = logins => askable.filter(item => logins.some(login => login.toLowerCase() === item.by.toLowerCase()))
+  const ticked = pick(meantFor)
+  const people = { label: 'Who should I ask?', options: askable.map(item => ({ key: item.by, label: item.by, detail: WHY[item.reason].detail(item), ticked: ticked.includes(item) })) }
+  return { ...build(ticked), people, forPicked: logins => build(pick(logins)) }
 }
 
-// The one short note Ask for approval posts. Shown on the sheet and sent as it is, so it names only the people asked.
-// `holding` are the people among them whose change request from an earlier version still stands.
-export const approvalNote = (pr, people, holding = []) => `${people.map(login => `@${login}`).join(' ')} you left a comment on this version (\`${short(pr.headRefOid)}\`) but haven’t approved it. If your points are resolved, please approve.${holding.length ? ` GitHub still holds an earlier change request from ${names(holding)}; it lifts only when they approve or dismiss it.` : ''} Sent from Contribute.`
+// Ask for re-review: whoever you tick is asked to look again, with GitHub's usual review request.
+export function askRereviewCopy(pr, { standing = null } = {}) {
+  return askSheet(standing, standing?.rereviewFrom || [], picked => {
+    const who = names(picked.map(item => item.by))
+    return {
+      icon: 'person', title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
+      facts: [picked.length ? { tone: 'ok', text: `GitHub asks ${who} for a review of the new version` } : { tone: 'bad', text: 'Pick at least one person' },
+        ...(picked.length > MAX_ASKED ? [TOO_MANY] : [])],
+      footnote: 'They get GitHub’s usual review request. Nothing is posted in the conversation.',
+      disabled: !picked.length || picked.length > MAX_ASKED,
+      done: () => ({ title: 'Asked to look again', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to look again.` }),
+    }
+  // GitHub takes a review request only for someone with access to the repository: the people the machine read from GitHub's
+  // writers-only opinions (`requestable`). Someone who only commented may have none, and Ask for approval reaches them.
+  }, item => item.requestable)
+}
 
-// Ask for approval: a reviewer who only commented has not approved, and if they still hold a change request GitHub
-// lifts that only when they approve or dismiss it. The note says so, in public, from your account.
+// The platform refuses a longer note (ApprovalRequest.note); the sheet says so before the tap instead of after it.
+export const APPROVAL_NOTE_LIMIT = 1000
+
+// The one note Ask for approval posts. Shown on the sheet and sent as it is, so it names only the people asked,
+// each with what is true of them (a reviewer who only commented, one whose request is of an earlier version, and so on).
+export function approvalNote(pr, people) {
+  const mentions = people.map(person => `@${person.by}`).join(' ')
+  const lines = people.map(person => `- @${person.by} ${WHY[person.reason].note(person)}`)
+  return [`${mentions} there is a new version of this PR (\`${short(pr.headRefOid)}\`) that is not approved yet.`, lines.join('\n'),
+    'If your points are resolved, please approve. Sent from Contribute.'].join('\n\n')
+}
+
+// Ask for approval: a note on the PR, in public from your account, to whoever you tick. A change request that still stands
+// lifts only when they approve or dismiss it, and the note says so for those people.
 export function askApprovalCopy(pr, { standing = null } = {}) {
-  const people = standing?.approvalFrom || []
-  const holding = standing?.lookedAgain || []
-  return {
-    icon: 'person', title: `Ask ${people.length ? names(people) : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…',
-    facts: [
-      { tone: 'ok', text: people.length ? `${names(people)} left a comment on this version${holding.length ? `; GitHub still holds ${names(holding)}’s change request` : ' and has not approved'}` : 'Nobody has commented without approving' },
-      { tone: 'warn', text: 'The note is public on the PR, from your GitHub account' },
-    ],
-    says: people.length ? { label: 'The note that will be posted', markdown: approvalNote(pr, people, holding) } : null,
-    footnote: holding.length ? 'Posts exactly this note, once. Nothing else changes: only their approval, or dismissing their request, lifts it.' : 'Posts exactly this note, once. Nothing else changes.',
-    disabled: !people.length,
-    done: () => ({ title: 'Note posted', text: `${names(people)} ${people.length === 1 ? 'is' : 'are'} asked to approve.` }),
-  }
+  return askSheet(standing, standing?.approvalFrom || [], picked => {
+    const who = names(picked.map(item => item.by))
+    const note = approvalNote(pr, picked)
+    const tooLong = note.length > APPROVAL_NOTE_LIMIT
+    return {
+      icon: 'person', title: `Ask ${picked.length ? who : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…',
+      facts: [
+        picked.length ? { tone: 'ok', text: `${plural(picked.length, 'person', 'people')} will be asked` } : { tone: 'bad', text: 'Pick at least one person' },
+        ...(tooLong ? [{ tone: 'bad', text: 'The note is too long: ask fewer people' }] : []),
+        ...(picked.length > MAX_ASKED ? [TOO_MANY] : []),
+        { tone: 'warn', text: 'The note is public on the PR, from your GitHub account' },
+      ],
+      says: picked.length ? { label: 'The note that will be posted', markdown: note } : null,
+      footnote: picked.some(item => HOLDS_A_REQUEST.includes(item.reason)) ? 'Posts exactly this note, once. Nothing else changes: only their approval, or dismissing their request, lifts it.' : 'Posts exactly this note, once. Nothing else changes.',
+      disabled: !picked.length || tooLong || picked.length > MAX_ASKED,
+      done: () => ({ title: 'Note posted', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to approve.` }),
+    }
+  })
 }
 
 // Close without merging. It can be reopened on GitHub.

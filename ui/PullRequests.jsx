@@ -25,7 +25,7 @@ import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
 import { RunOnce } from './RunOnce.jsx'
 import { MERGE_OPTIONS, YOUR_INTENTS } from '../actions-menu.js'
-import { ACTION_COPY, approvalNote, methodToSend } from '../action-copy.js'
+import { ACTION_COPY, methodToSend } from '../action-copy.js'
 import { projectUpdater } from '../updates.js'
 import { NAMES } from '../names.js'
 import { SearchField } from './SearchField.jsx'
@@ -596,17 +596,15 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     merge: ({ pr, choice, shell }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice), ...shell }),
     back_to_draft: ({ pr, shell }) => pullAction(token, appId, pr, 'draft', {}, shell),
     close: ({ pr, shell }) => pullAction(token, appId, pr, 'close', {}, shell),
-    ask_rereview: ({ pr, shell }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }, shell),
-    ask_approval: ({ pr, shell }) => {
-      const { approvalFrom: people, lookedAgain: holding } = standingOf(pr)
-      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) }, shell)
-    },
+    ask_rereview: ({ pr, people, shell }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: people }, shell),
+    // The note is the one the sheet showed for the ticked people, so it is posted exactly as it was read.
+    ask_approval: ({ pr, people, note, shell }) => pullAction(token, appId, pr, 'ask-approval', { people, note }, shell),
   }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice, people, note, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)

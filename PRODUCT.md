@@ -249,13 +249,17 @@ someone else wrote it.
 checked over every case and every combination of the facts that matter):
 
 1. An author never gets a public review action. An agent's check of your PR is private.
-2. Merge needs an approval of this exact version by someone other than the author (a bot
+2. A PR is *ready to merge* with an approval of this exact version by someone other than the author (a bot
    never counts), no change request still standing (even on an older version), checks
    that pass or do not exist, no conflicts, nothing unconfirmed on its way to GitHub
    (a new commit does not settle it: it holds until reconciled, while a draft goes
    stale with its version), no agent job running, and no review GitHub itself still
    requires (a branch rule: "GitHub still needs a review"). GitHub asking for no review
-   is not an approval. An approval
+   is not an approval. Ready to merge
+   words the PR's standing and its highlighted next step; it does not switch your own Merge off
+   (owner direction, 2026-11-09: skip the formalities), and GitHub's merge rules still refuse what cannot
+   land. The agent's own unattended merge has no tap behind it, so the platform still asks the full
+   rule before it merges. The Merge sheet names who approved and who still holds a change request. An approval
    of an older commit still counts when the PR's own added and removed lines are the same:
    the fact readers compare each version with the base's current tip (`same-work.js` and
    `carried-approvals.js` in the app, `contribution_same_work.py` in the platform, held to
@@ -272,7 +276,12 @@ checked over every case and every combination of the facts that matter):
    A reviewer who only commented has not approved. With a change request still standing, GitHub lifts it
    only on their approval or a dismissal, so the PR reads *Looked again · not approved*; with none, it
    reads *Commented · not approved*. Either way the next step is Ask for approval, one note on the PR
-   naming only them, and it can be sent while their comment still waits for your answer. A review that
+   naming only them, and it can be sent while their comment still waits for your answer.
+   Both Ask actions open a checklist of everyone who reviewed or commented, except those who already
+   approved this version, with the people each ask is meant for ticked (owner direction, 2026-11-09).
+   The note says what is true of each person it names: commented on this version, a change request of
+   an earlier version, an approval of an earlier version. It must fit the platform's 1,000 characters,
+   and typed-in names are not offered. A review that
    only comments, with words in it, is feedback to answer like a comment in the PR's conversation: it
    reads *Feedback to answer* until you reply (a reply, or the Ask for approval note, answers it).
 4. One agent job per PR at a time. A job that stalled holds nothing. A Respond to
@@ -282,6 +291,17 @@ checked over every case and every combination of the facts that matter):
    read enables nothing that depends on it. That includes a list of reviews GitHub
    says goes on past the first page (30 writers): an opinion on the next page could
    be a change request, so the PR reads as not read.
+7. Four things stop an action of yours, and each action is stopped by the ones that apply to
+   it: the PR cannot be read, it is closed or merged, an agent is already working on it, or
+   something sent to GitHub is not confirmed (and a draft that deals with the findings owns
+   them until you send it or throw it away). The Ask actions stop only for the first two, and
+   for a list of people that was not read whole; Open for review, Back to draft and Close are
+   not stopped by an unconfirmed send; only the agent's jobs wait for a draft that owns the findings.
+   Nothing else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
+   to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
+   a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
+   GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,
+   Set aside for a result, Answer the agent for a question.
 
 **Who acts.** Pushing code, merging and changing a PR's status (ready, draft, closed)
 always wait for your own tap. A review verdict waits for your tap ("Draft for me"),
