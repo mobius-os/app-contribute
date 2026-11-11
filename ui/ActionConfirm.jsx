@@ -20,7 +20,8 @@ const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 // sheet is answered this one is in the empty phase 'asking' (a waiting line only); `onConfirm` is given `onConfirmed` to call when
 // the owner has confirmed, and only then does the sheet say it is at work. `onConfirm` may answer { cancelled } (the owner closed Möbius's
 // sheet): nothing was sent, so the choices come back. `autoConfirm` (with `viaShell`): the one tap on the action already was the owner's
-// press, so this sheet opens asking and runs `onConfirm` itself, and a cancel closes it.
+// press, so this sheet opens asking and runs `onConfirm` itself, and a cancel closes it. `onConfirm` also gets the ticked `people`
+// and the text the sheet showed for them (`note`): what is sent is what was read, not a rebuild of it.
 export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed, viaShell = false, autoConfirm = false }) {
   const region = useRef(null)
   const titleId = useId()
@@ -41,7 +42,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
     setPhase(viaShell ? 'asking' : 'working'); setError('')
     let outcome
     // A handler that throws never said whether the write reached GitHub.
-    try { outcome = await onConfirm({ choice: picked, people: pickedPeople, onConfirmed: () => setPhase('working') }) } catch { outcome = { pending: true, error: 'Lost contact with GitHub. Check the PR before trying again.' } }
+    try { outcome = await onConfirm({ choice: picked, people: pickedPeople, note: live.says?.markdown, onConfirmed: () => setPhase('working') }) } catch { outcome = { pending: true, error: 'Lost contact with GitHub. Check the PR before trying again.' } }
     if (outcome?.cancelled) { setPhase('confirm'); if (autoConfirm) onClose(); return }
     if (outcome?.ok || outcome?.alreadyHandled) { setResult(outcome); setPhase('done'); onDone?.(outcome); return }
     setError(outcome?.error || 'Could not complete this. Nothing changed.')

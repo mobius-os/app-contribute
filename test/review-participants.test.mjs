@@ -23,7 +23,7 @@ const by = decision => decision.askable.map(person => person.by)
 test('a reviewer without write access, who GitHub’s opinions leave out, can be asked', () => {
   const outside = pull({ latestReviews: { nodes: [review('dana', 'CHANGES_REQUESTED', OLD)] } })
   const decision = decideFor(outside)
-  assert.deepEqual(decision.askable, [{ by: 'dana', reason: 'changes_older', commit: OLD }])
+  assert.deepEqual(decision.askable, [{ by: 'dana', reason: 'changes_older', commit: OLD, requestable: false }])
   assert.equal(ask(decision, 'ask_approval').enabled, true)
   assert.equal(ask(decision, 'ask_rereview').enabled, true)
   assert.deepEqual(by(decideFor(pull({ latestReviews: { nodes: [review('dana', 'CHANGES_REQUESTED')] } }))), ['dana'])
@@ -91,4 +91,38 @@ test('a page that cannot be read is said so: nobody is offered from a list that 
     assert.match(ask(decision, id).reason, /Could not read everyone who reviewed/)
   }
   assert.equal(ask(decision, 'respond').enabled, true, 'the rest of your actions are untouched')
+})
+
+test('a deleted account and a review in no state the notes can word name nobody to ask', () => {
+  const decision = decideFor(pull({
+    latestOpinionatedReviews: { pageInfo: { hasNextPage: false }, nodes: [{ state: 'CHANGES_REQUESTED', author: null, commit: { oid: OLD } }] },
+    latestReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: null, commit: { oid: OLD } }, review('dana', 'DISMISSED', OLD), review('eli', 'COMMENTED', OLD)] },
+  }))
+  assert.deepEqual(by(decision), ['eli'], 'ghost (a deleted account) and a dismissed review are left out')
+})
+
+test('a review of a commit that a force-push removed can still be asked, with no commit named', () => {
+  const decision = decideFor(pull({ latestReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'dana', __typename: 'User' }, commit: null }] } }))
+  assert.deepEqual(decision.askable, [{ by: 'dana', reason: 'changes_older', commit: '', requestable: false }])
+})
+
+test('only people GitHub’s writers-only opinions named can be sent a review request', () => {
+  const decision = decideFor(pull({
+    latestOpinionatedReviews: { pageInfo: { hasNextPage: false }, nodes: [review('sam', 'CHANGES_REQUESTED', OLD), review('bob', 'APPROVED', OLD)] },
+    latestReviews: { nodes: [review('kim', 'COMMENTED'), review('dana', 'CHANGES_REQUESTED', OLD), review('sam', 'COMMENTED')] },
+  }))
+  const flags = Object.fromEntries(decision.askable.map(person => [person.by, person.requestable]))
+  assert.deepEqual(flags, { sam: true, bob: true, kim: false, dana: false }, 'a commenter or a reviewer GitHub’s opinions left out may have no access')
+})
+
+test('a change request with words in it is still feedback to answer after a push, until you reply', () => {
+  const words = (state, body = 'Please fix the race in X.') => ({ ...review('sam', state, OLD), body, submittedAt: '2026-11-05T12:00:00Z' })
+  const asked = pull({ latestOpinionatedReviews: { pageInfo: { hasNextPage: false }, nodes: [review('sam', 'CHANGES_REQUESTED', OLD)] }, latestReviews: { nodes: [words('CHANGES_REQUESTED')] } })
+  const decision = decideFor(asked)
+  assert.equal(decision.state, 'author.feedback', 'a push is no answer to points that were written down')
+  assert.equal(ask(decision, 'respond').enabled, true)
+  const answered = decideFor({ ...asked, comments: { nodes: [{ createdAt: '2026-11-05T13:00:00Z', author: { login: 'alex', __typename: 'User' } }] } })
+  assert.equal(answered.state, 'author.waiting_rereview', 'once you replied it waits on the reviewer again')
+  const bare = decideFor({ ...asked, latestReviews: { nodes: [words('CHANGES_REQUESTED', '')] } })
+  assert.equal(bare.state, 'author.waiting_rereview', 'a change request with nothing written is not feedback to answer')
 })

@@ -2365,7 +2365,7 @@ window.runAskApprovalChecks = async () => {
     await until(() => menuItems().length, 'The Actions menu did not open')
     const titles = menuItems().map(node => text(node.querySelector('strong')))
     ensure(titles[0] === 'Ask teammate to approve' && titles.includes('Ask for re-review'), 'The menu offered: ' + titles.join(', '))
-    ensure(menuItems().find(node => text(node.querySelector('strong')) === 'Ask for re-review').getAttribute('aria-disabled') === 'true' || menuItems().find(node => text(node.querySelector('strong')) === 'Ask for re-review').disabled, 'Ask for re-review was still offered to someone who already looked')
+    ensure(!menuItems().find(node => text(node.querySelector('strong')) === 'Ask for re-review').disabled && menuItems().find(node => text(node.querySelector('strong')) === 'Ask for re-review').getAttribute('aria-disabled') !== 'true', 'Ask for re-review was dimmed: your own asks stay on')
     await captureShot('ask-approval-menu')
     await click(menuItems()[0])
     await until(() => query('.co-review-window'), 'The confirm sheet did not open')
@@ -2379,8 +2379,10 @@ window.runAskApprovalChecks = async () => {
     await click(button('Ask for approval'))
     await until(() => calls.asks.length === 1, 'Nothing was sent to the platform')
     const asked = calls.asks[0]
-    ensure(asked.repo === 'owner/project' && asked.number === 7 && asked.head_sha === HEAD && asked.people.join() === 'teammate' && asked.note.startsWith('@teammate you left a comment on this version'), 'The platform got: ' + JSON.stringify(asked))
-    ensure(asked.note.match(/@[A-Za-z0-9-]+/g).join() === '@teammate', 'The note named someone who was not asked: ' + asked.note)
+    ensure(asked.repo === 'owner/project' && asked.number === 7 && asked.head_sha === HEAD && asked.people.join() === 'teammate' && asked.note.startsWith('@teammate there is a new version of this PR') && asked.note.includes('- @teammate you left a comment on this version'), 'The platform got: ' + JSON.stringify(asked))
+    ensure([...new Set(asked.note.match(/@[A-Za-z0-9-]+/g))].join() === '@teammate', 'The note named someone who was not asked: ' + asked.note)
+    // What was posted is what the sheet showed (markdown marks aside), not a rebuild of it.
+    ensure(asked.note.split('\n').filter(line => line.trim()).every(line => sheet.includes(line.replace(/\x60/g, '').replace(/^- /, '').trim())), 'The posted note is not the one the sheet showed: ' + asked.note)
     await until(() => text(query('.co-review-window')).includes('Note posted'), 'The sheet did not say the note was posted: ' + text(query('.co-review-window')))
     checks.push({ name: 'Ask for approval sends one note naming only the person asked, and says it was posted', status: 'pass' })
     // The longest GitHub login (39 characters) in the title, the sentence and the note must wrap, never push the screen sideways.
@@ -2403,6 +2405,20 @@ window.runAskApprovalChecks = async () => {
     ensure(longSheet.left >= 0 && longSheet.right <= window.innerWidth && sideways(), 'The sheet with a long login ran off the screen')
     await captureShot('ask-approval-long-login-sheet')
     checks.push({ name: 'the longest GitHub login wraps in the page, the menu and the sheet without pushing the screen sideways', status: 'pass' })
+    // Ask for re-review lists only people GitHub takes a request for (a writer whose request or approval stands), not someone who only commented.
+    const commenter = { login: 'kim', __typename: 'User' }
+    await mountDeskApp({ pullPatch: { ...OWN_LOOKED_AGAIN, latestReviews: { nodes: [{ state: 'COMMENTED', author: reviewer, commit: { oid: HEAD } }, { state: 'COMMENTED', author: commenter, commit: { oid: HEAD } }] } } })
+    await openPage()
+    await click(query('[aria-label="Choose an action for PR 7"]'))
+    await until(() => menuItems().length, 'The Actions menu did not open for the re-review ask')
+    await click(menuItems().find(node => text(node.querySelector('strong')) === 'Ask for re-review'))
+    await until(() => query('.co-review-window'), 'The re-review sheet did not open')
+    await captureShot('ask-rereview-sheet')
+    const asked2 = [...query('.co-review-window').querySelectorAll('.co-rw-check strong')].map(node => text(node))
+    ensure(asked2.join() === 'teammate', 'The re-review sheet offered: ' + asked2.join(', '))
+    const box2 = query('.co-review-window').getBoundingClientRect()
+    ensure(box2.left >= 0 && box2.right <= window.innerWidth && sideways(), 'The re-review sheet ran off the screen')
+    checks.push({ name: 'Ask for re-review lists the person GitHub holds a request for, not someone who only commented', status: 'pass' })
     // 2. An approval of an older commit whose work is the same carries over.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
     await mountDeskApp({ pullPatch: OWN_APPROVED_BEFORE })

@@ -291,10 +291,13 @@ checked over every case and every combination of the facts that matter):
    read enables nothing that depends on it. That includes a list of reviews GitHub
    says goes on past the first page (30 writers): an opinion on the next page could
    be a change request, so the PR reads as not read.
-7. Only four things stop an action of yours: the PR cannot be read, it is closed or merged,
-   an agent is already working on it, or something sent to GitHub is not confirmed (and a
-   draft that deals with the findings owns them until you send it or throw it away). Nothing
-   else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
+7. Four things stop an action of yours, and each action is stopped by the ones that apply to
+   it: the PR cannot be read, it is closed or merged, an agent is already working on it, or
+   something sent to GitHub is not confirmed (and a draft that deals with the findings owns
+   them until you send it or throw it away). The Ask actions stop only for the first two, and
+   for a list of people that was not read whole; Open for review, Back to draft and Close are
+   not stopped by an unconfirmed send; only the agent's jobs wait for a draft that owns the findings.
+   Nothing else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
    to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
    a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
    GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,

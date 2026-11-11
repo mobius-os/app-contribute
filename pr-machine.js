@@ -17,10 +17,14 @@
 //     That words the PR's standing and its highlighted next step (notReadyToMerge); it does not switch your own
 //     Merge off, and GitHub's merge rules refuse what cannot land. The agent's own unattended merge has no tap
 //     behind it, so the platform still asks it (not_ready_to_merge).
-//   - Only four things stop an action of yours: the PR cannot be read, it is closed or merged, an agent is already
-//     working on it, or something sent to GitHub is not confirmed. An action tied to a thing waits for that thing
+//   - Four things stop an action of yours: the PR cannot be read, it is closed or merged, an agent is already
+//     working on it, or something sent to GitHub is not confirmed. Not every action is stopped by all four: an Ask
+//     stops for the first two (and for a list of people not read whole), Open for review, Back to draft and Close for
+//     the first three only (an unconfirmed send does not stop them), Merge for all four, and an agent job also while a
+//     draft owns the findings. The table below says which. An action tied to a thing waits for that thing
 //     (a draft to send, a person to ask, a result to set aside). Asking works for anyone who reviewed or commented
-//     and has not approved this version; the sheet ticks the people each ask is meant for. Taking over someone
+//     and has not approved this version; the sheet ticks the people each ask is meant for (Ask for re-review lists only
+//     the people GitHub takes a review request for: those its writers-only opinions named). Taking over someone
 //     else's PR stays for maintainers: it is Contribute's own rule, GitHub would let any writer push.
 //   - Only new commits bring their PR back for re-review; replies never do. A reviewer who only commented
 //     has not approved, however long they looked: a plain comment never lifts a change request on GitHub, and
@@ -88,19 +92,25 @@ function derive(facts) {
 // Who could be asked to look at this version: everyone who reviewed or commented, except those whose approval already
 // counts for it. `reason` is what is true of them (it words the public note), `commit` the version their review was of.
 // The merge standing above reads only writers' opinions; people it does not read (a reviewer without write access) come
-// from `participants`, GitHub's newest review of everyone, and are worded from that review alone.
-function askablePeople(facts, people, standing) {
+// from `participants`, GitHub's newest review of everyone, and are worded from that review alone. A deleted account
+// ("ghost") and a review in no state the notes can word (dismissed) name nobody to ask. `requestable` is whether GitHub takes
+// a review request for them: only the people its writers-only opinions listed (a plain comment may be from anyone).
+const KNOWN_STATES = ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED']
+const OPINION_REASONS = ['changes_here', 'looked_again', 'changes_older', 'approved_older']
+const askableReview = (review, facts) => !review.bot && !same(review.by, facts.author) && !same(review.by, 'ghost') && KNOWN_STATES.includes(review.state)
+function askablePeople(facts, allPeople, standing) {
+  const people = allPeople.filter(review => askableReview(review, facts))
   const has = (list, name) => list.some(other => same(other, name))
   const REASONS = [['changes_here', 'CHANGES_REQUESTED', standing.changesAtHead], ['looked_again', 'CHANGES_REQUESTED', standing.lookedAgain],
     ['commented_here', 'COMMENTED', standing.commentedOnly], ['changes_older', 'CHANGES_REQUESTED', standing.changesOlder], ['approved_older', 'APPROVED', standing.approvedOlder]]
-  const outside = (facts.participants || []).filter(review => !review.bot && !same(review.by, facts.author) && !people.some(other => same(other.by, review.by)))
+  const outside = (facts.participants || []).filter(review => askableReview(review, facts) && !allPeople.some(other => same(other.by, review.by)))
     .filter(review => !(review.state === 'APPROVED' && review.commit === facts.head))
   const everyone = [...new Map([...people, ...outside].map(review => [String(review.by).toLowerCase(), review.by])).values()]
   return everyone.filter(name => !has(standing.approvedAtHead, name)).map(by => {
     const own = outside.find(review => same(review.by, by))
-    if (own) return { by, reason: ownReason(own, facts.head), commit: own.commit }
+    if (own) return { by, reason: ownReason(own, facts.head), commit: own.commit, requestable: false }
     const [reason, state] = REASONS.find(([, , list]) => has(list, by)) || ['commented_older', 'COMMENTED']
-    return { by, reason, commit: people.find(review => same(review.by, by) && review.state === state)?.commit || '' }
+    return { by, reason, commit: people.find(review => same(review.by, by) && review.state === state)?.commit || '', requestable: OPINION_REASONS.includes(reason) }
   })
 }
 const ownReason = (review, head) => (review.state === 'CHANGES_REQUESTED' ? (review.commit === head ? 'changes_here' : 'changes_older')

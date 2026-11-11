@@ -68,15 +68,15 @@ function participantsOf(pr) {
 
 // Threads a person other than you spoke last in (a bot's thread is input, never
 // waiting on you). The PR's own conversation counts as one more such thread: a plain
-// comment is feedback too, until you answer it. A review that only comments, with words in it,
-// is spoken in that conversation too (its points are no inline thread, and GitHub gives it no verdict).
+// comment is feedback too, until you answer it. A review with words in it, a change request as much as one that only
+// comments, is spoken in that conversation too (its points are no inline thread): a push alone does not answer it.
 // Whoever of the newest ten comments and those reviews spoke last among people decides, so a bot's
 // update after a reviewer's comment does not hide it. Null when the threads were not read, or are
 // only the last page of a longer list: a missed open thread would hide feedback and disable Respond.
 const waitsOnYou = (author, login) => !!author && !isBot(author) && lower(author.login) !== lower(login)
 const spokenAt = comment => Date.parse(comment?.createdAt || '') || 0
 const reviewWords = pr => (pr?.latestReviews?.nodes || [])
-  .filter(node => node?.state === 'COMMENTED' && node.body?.trim()).map(node => ({ author: node.author, createdAt: node.submittedAt }))
+  .filter(node => ['COMMENTED', 'CHANGES_REQUESTED'].includes(node?.state) && node.body?.trim()).map(node => ({ author: node.author, createdAt: node.submittedAt }))
 const lastPersonIn = comments => [...(comments || [])].sort((a, b) => spokenAt(a) - spokenAt(b)).filter(comment => !isBot(comment?.author)).at(-1)?.author
 function openThreadsOf(pr, login) {
   const connection = pr?.reviewThreads
