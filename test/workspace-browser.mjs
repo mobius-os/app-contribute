@@ -2414,7 +2414,7 @@ window.runRequestReviewChecks = async () => {
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
-    ensure(text(query('.co-next-step')).includes('Nobody asked yet') && text(query('.co-next-step')).includes('Use Request review'), 'The page still said it waits on reviewers: ' + text(query('.co-next-step')))
+    ensure(text(query('.co-next-step')).includes('Nobody asked yet'), 'The page still said it waits on reviewers: ' + text(query('.co-next-step')))
     ensure(![...query('.co-pr-detail-actions').querySelectorAll('button')].some(node => text(node) === 'Request review'), 'A Möbius that cannot ask for the review offered the button')
     ensure(query('.co-pr-detail-actions [aria-label="Assign"]'), 'Assign went missing on a Möbius without Request review')
     checks.push({ name: 'with nobody asked the PR says so instead of waiting on reviewers, and a Möbius whose platform cannot ask for the review yet shows no Request review button, and Assign stays', status: 'pass' })
@@ -2463,7 +2463,7 @@ window.runRequestReviewChecks = async () => {
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, assignees: { nodes: [{ login: 'assigned-only' }] },
       reviewRequests: { totalCount: 2, nodes: [{ requestedReviewer: { __typename: 'User', login: 'teammate' } }, { requestedReviewer: { __typename: 'User', login: 'new-colleague' } }] },
       reviews: { totalCount: 2, nodes: [{ state: 'COMMENTED', submittedAt: '2026-11-09T09:00:00Z', author: { login: 'teammate' } },
-        { state: 'APPROVED', submittedAt: '2026-11-09T10:00:00Z', author: { login: 'second-reviewer' } }] } } })
+        { state: 'APPROVED', submittedAt: '2026-11-09T10:00:00Z', commit: { oid: 'c'.repeat(40) }, author: { login: 'second-reviewer' } }] } } })
     window.reviewRequestEvents = [
       { createdAt: '2026-11-09T08:00:00Z', requestedReviewer: { __typename: 'User', login: 'teammate' } },
       { createdAt: '2026-11-09T09:30:00Z', requestedReviewer: { __typename: 'User', login: 'second-reviewer' } },
@@ -2473,11 +2473,12 @@ window.runRequestReviewChecks = async () => {
     await click([...document.querySelectorAll('.co-detail-tabs button')].find(node => text(node).startsWith('Review')))
     await until(() => query('.co-reviewers'), 'The Review tab did not list who was asked: ' + text(query('.co-pr-detail-body')))
     const rows = [...document.querySelectorAll('.co-reviewer')].map(node => text(node))
-    ensure(rows.length === 3 && rows[0].includes('new-colleague') && rows[0].includes('Waiting') && rows[1].includes('teammate') && rows[1].includes('Requested again') && rows[1].includes('Waiting for another review') && rows[2].includes('second-reviewer') && rows[2].includes('Approved'), 'The reviewers were: ' + rows.join(' || '))
+    ensure(rows.length === 3 && rows[0].includes('new-colleague') && rows[0].includes('Waiting') && rows[1].includes('teammate') && rows[1].includes('Requested again') && rows[1].includes('Waiting for another review') && rows[2].includes('second-reviewer') && rows[2].includes('Approved an older version'), 'The reviewers were: ' + rows.join(' || '))
     ensure(!text(query('.co-reviewers')).includes('assigned-only'), 'An assignee was listed as a reviewer')
     const card = query('.co-reviewers').getBoundingClientRect()
     ensure(card.left >= 0 && card.right <= window.innerWidth && sideways(), 'The reviewers card ran off the screen: ' + Math.round(card.left) + ' to ' + Math.round(card.right) + ' of ' + window.innerWidth)
     ensure([...document.querySelectorAll('.co-reviewer')].every(row => row.getBoundingClientRect().right <= window.innerWidth), 'A reviewer row ran off the screen')
+    query('.co-reviewers').scrollIntoView({ block: 'center' })
     await captureShot('requested-reviewers-review-tab')
     checks.push({ name: 'the Review tab lists who was asked with the day and one badge each, a new request after an earlier review reads as another review awaited, and an assignee is not listed', status: 'pass' })
     // 5. The longest GitHub login wraps instead of pushing the screen sideways.

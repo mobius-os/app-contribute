@@ -230,7 +230,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     async function read() {
       try {
         const [read, asked] = await Promise.all([loadReviewPeople(token, appId, acting.pr), acting.pulls ? null : loadPullReviewers(token, acting.pr)])
-        if (alive) setCandidates({ people: read.people, partial: read.partial, pending: asked ? pendingReviewers(asked.reviewers) : [] })
+        if (alive) setCandidates({ people: read.people, partial: read.partial, pending: asked ? pendingReviewers(asked.reviewers) : [], pendingUnread: !!asked?.errors.length })
       } catch (error) {
         if (alive) setCandidates({ error: error.message || 'Could not load the people. Try again.' })
       }
@@ -238,7 +238,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     setCandidates({ loading: true })
     void read()
     return () => { alive = false }
-  }, [acting?.intent, acting?.pr?.number, acting?.pr?.repository?.nameWithOwner])
+  }, [acting?.intent, acting?.pr?.number, acting?.pr?.repository?.nameWithOwner, token, appId])
   const [posting, setPosting] = useState(null)
   // A review's findings waiting on the owner's reason to set them aside.
   const [ignoring, setIgnoring] = useState(null)

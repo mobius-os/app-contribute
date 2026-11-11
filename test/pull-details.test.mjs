@@ -142,6 +142,7 @@ test('who was asked to review is read from GitHub’s review requests and their 
   assert.match(queries, /reviewRequests\(first:100, after:\$after\)/)
   assert.match(queries, /REVIEW_REQUESTED_EVENT/)
   assert.match(queries, /reviews\(first:100, after:\$after\)/)
+  assert.match(queries, /reviews\(first:100, after:\$after\) \{ pageInfo \{ hasNextPage endCursor \} nodes \{ state submittedAt commit \{ oid \} author/, 'each review names the version it was of')
   assert.doesNotMatch(queries, /last:/, 'a slice of the end of the history can hide the verdict that stands')
   assert.doesNotMatch(queries, /latestReviews/, 'GitHub’s latest reviews leave out anyone asked again')
   assert.doesNotMatch(queries, /assignees/)

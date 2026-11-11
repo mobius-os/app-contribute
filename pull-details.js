@@ -200,13 +200,13 @@ export async function loadPullReviewers(token, pr, signal) {
   const walk = (field, args, node) => readEveryPage(after => reviewersPage(token, pr, field, args, node, after, signal), null, page => page.nextCursor)
   const [requests, reviews, events] = await Promise.all([
     walk('reviewRequests', '', `requestedReviewer { ${REVIEWER_PERSON} }`),
-    walk('reviews', '', 'state submittedAt author { login }'),
+    walk('reviews', '', 'state submittedAt commit { oid } author { login }'),
     walk('timelineItems', ', itemTypes:[REVIEW_REQUESTED_EVENT]', `... on ReviewRequestedEvent { createdAt requestedReviewer { ${REVIEWER_PERSON} } }`),
   ])
   const nodes = read => read.pages.flatMap(page => page.nodes)
   const errors = [...new Set([requests, reviews, events].flatMap(read => read.pages.flatMap(page => page.errors)))]
   if (!errors.length && [requests, reviews, events].some(read => read.partial)) errors.push('Some of who was asked to review could not be read, so this list may be incomplete.')
-  return { reviewers: reviewersOf({ reviewRequests: { nodes: nodes(requests) }, reviews: { nodes: nodes(reviews) }, timelineItems: { nodes: nodes(events) } }), errors }
+  return { reviewers: reviewersOf({ reviewRequests: { nodes: nodes(requests) }, reviews: { nodes: nodes(reviews) }, timelineItems: { nodes: nodes(events) } }, pr.headRefOid), errors }
 }
 export async function loadPullRelated(token, pr, signal) {
   const { data, errors } = await pullGraphRead(token, pr, `

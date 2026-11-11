@@ -362,7 +362,7 @@ test('a PR nobody was asked to review says so, and an assignee does not count as
   assert.equal(nobody.state, 'author.waiting_review', 'it is still waiting: whose turn it is does not change')
   assert.equal(nobody.turn, 'other')
   assert.equal(nobody.label, 'Nobody asked yet')
-  assert.equal(nobody.headline, 'Your PR · nobody has been asked to review it on GitHub yet. Use Request review')
+  assert.equal(nobody.headline, 'Your PR · nobody has been asked to review it on GitHub yet', 'it names no button: a Möbius that cannot ask for the review yet has none')
   const asked = decideFor(mine({ reviewRequests: { totalCount: 2 } }))
   assert.deepEqual([asked.state, asked.label, asked.headline], ['author.waiting_review', 'Waiting on reviewers', 'Your PR · waiting on reviewers'])
 })
@@ -379,6 +379,15 @@ test('nobody asked rewords only the wait for a first review: a PR that has revie
   assert.notEqual(reviewed.label, 'Nobody asked yet')
   const theirs = decideFor(pull({ reviewRequests: { totalCount: 0 } }))
   assert.notEqual(theirs.label, 'Nobody asked yet')
+})
+
+test('someone who already looked is not "nobody": GitHub drops their request when they review, so a count of 0 says nothing then', () => {
+  const OLDER = 'e'.repeat(40)
+  // A plain comment is read from latestReviews, a verdict from latestOpinionatedReviews; each is of an older version here.
+  for (const extra of [{ latestReviews: { nodes: [opinion('Sam', 'COMMENTED', OLDER)] } }, { latestOpinionatedReviews: { nodes: [opinion('Sam', 'DISMISSED', OLDER)] } }]) {
+    const decision = decideFor(mine({ reviewRequests: { totalCount: 0 }, ...extra }))
+    assert.notEqual(decision.label, 'Nobody asked yet', JSON.stringify(extra))
+  }
 })
 
 test('the PR read carries the count of review requests and nothing about who they are', () => {

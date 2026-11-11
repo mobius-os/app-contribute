@@ -494,6 +494,7 @@ test('Request review waits for the people list, shows why it failed, and says wh
   assert.equal(requestReviewCopy(pr(), { standing, candidates: null }).disabled, true)
   const failed = requestReviewCopy(pr(), { standing, candidates: { error: 'Could not load the people. Try again.' } })
   assert.deepEqual([failed.disabled, failed.facts.map(fact => `${fact.tone}:${fact.text}`)], [true, ['bad:Could not load the people. Try again.']])
+  assert.ok(readSheet({}, { people, pending: [], pendingUnread: true }).facts.some(fact => fact.tone === 'warn' && fact.text.startsWith('Who was already asked could not be read in full')), 'a pending list that was not read in full says so')
   const capped = readSheet({}, { people, pending: [], partial: true })
   assert.ok(capped.facts.some(fact => fact.tone === 'warn' && fact.text.includes(`only the first ${people.length} are shown`)), 'a list cut short says so')
   const alone = readSheet({}, { people: ['alex'], pending: [] })
@@ -545,6 +546,7 @@ test('Request review over several PRs words the sheet for all of them and offers
   assert.equal(picked.facts[0].text, 'GitHub asks Kim, sam to review each of the 3 PRs')
   assert.match(picked.footnote, /on each PR\. It does not assign the PRs to them/)
   assert.deepEqual(picked.done({ skipped: [2] }), { title: 'Review requested', text: 'Kim, sam are asked to review 3 PRs. Skipped #2: everyone you picked already approved it.' })
+  assert.deepEqual(picked.done({ skipped: [1, 2, 3] }), { title: 'Nobody asked', text: 'Nobody was asked: everyone you picked already approved them.' }, 'when every PR was skipped, nobody was asked')
   assert.equal(requestReviewCopy(pulls[0], { candidates: { people }, pulls: [pulls[0]] }).title, 'Ask people to review #1?', 'one PR in a list reads as one PR')
 })
 

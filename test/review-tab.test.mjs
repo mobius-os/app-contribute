@@ -363,6 +363,17 @@ test('the Review tab lists who was asked, with the day and one badge each, ahead
   assert.doesNotMatch(html, /Assign/, 'assigning is not asking, so it is not shown here')
 })
 
+test('a reviewers read that came back partial says so, with or without rows, and never hides the card silently', async t => {
+  const errors = ['Some of who was asked to review could not be read, so this list may be incomplete.']
+  const withRows = await render(t, 'ReviewTab', { pr, status: null, reviewers: { loading: false, data: { reviewers: [asked('miljanm', 'approved', 'Approved', 'is-ready', '2026-11-09T09:15:00Z')], errors } }, onRetryReviewers: () => {} })
+  if (!withRows) return
+  assert.match(withRows, /Requested reviewers/)
+  assert.match(withRows, /role="alert">Some of who was asked to review could not be read, so this list may be incomplete\. <button class="co-btn">Try again<\/button>/)
+  const noRows = await render(t, 'ReviewTab', { pr, status: null, reviewers: { loading: false, data: { reviewers: [], errors } }, onRetryReviewers: () => {} })
+  assert.match(noRows, /may be incomplete/)
+  assert.doesNotMatch(noRows, /Requested reviewers/)
+})
+
 test('the Review tab says nothing about reviewers while they load or when nobody was asked, and offers a retry when the read failed', async t => {
   for (const reviewers of [{ loading: true }, { loading: false, data: { reviewers: [], errors: [] } }, undefined]) {
     const html = await render(t, 'ReviewTab', { pr, status: null, reviewers })

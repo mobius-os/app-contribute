@@ -3,10 +3,12 @@
 // submitted. Assigning someone is not asking them, so an assignee never appears here.
 
 // A pending request reads as waiting; one that follows an earlier review of theirs says so, and is never an approval.
+// An approval of an older version is not one of this version: the PR machine says "Approval is old", so the row does too.
 export const REVIEWER_STATUS = {
   waiting: { label: 'Waiting', tone: 'is-waiting' },
   waiting_again: { label: 'Waiting for another review', tone: 'is-waiting' },
   approved: { label: 'Approved', tone: 'is-ready' },
+  approved_old: { label: 'Approved an older version', tone: 'is-waiting' },
   changes: { label: 'Changes requested', tone: 'is-blocker' },
   commented: { label: 'Commented', tone: 'is-tone' },
   dismissed: { label: 'Dismissed', tone: '' },
@@ -32,9 +34,10 @@ function standingReviews(nodes) {
   return byPerson
 }
 
-// `data` is the PR as GitHub answers the read in pull-details.js (loadPullReviewers). Pending requests come first, then
+// `data` is the PR as GitHub answers the read in pull-details.js (loadPullReviewers); `head` is the version on screen, which
+// an approval has to be of (a review that names no commit is taken as current). Pending requests come first, then
 // the newest request first. Someone whose request was withdrawn without an answer is not listed.
-export function reviewersOf(data) {
+export function reviewersOf(data, head = '') {
   const pending = new Map((data?.reviewRequests?.nodes || []).map(node => personOf(node?.requestedReviewer)).filter(Boolean).map(person => [person.key, person]))
   const reviews = standingReviews(data?.reviews?.nodes)
   // The newest request of each person wins; a pending request the events no longer reach (a long thread) is listed undated.
@@ -52,7 +55,9 @@ export function reviewersOf(data) {
     // Reviewed before this request: the request is a fresh ask, not the first one.
     const earlier = !!mine && (!Number.isFinite(person.at) || mine.lastAt < person.at)
     const waiting = pending.has(person.key)
-    const status = waiting ? (earlier ? 'waiting_again' : 'waiting') : !earlier && ANSWERS[mine?.review.state]
+    const answer = !earlier && ANSWERS[mine?.review.state]
+    const older = answer === 'approved' && !!head && !!mine.review.commit?.oid && mine.review.commit.oid !== head
+    const status = waiting ? (earlier ? 'waiting_again' : 'waiting') : older ? 'approved_old' : answer
     if (!status) continue
     rows.push({ key: person.key, name: person.name, status, ...REVIEWER_STATUS[status], again: earlier, requestedAt: person.requestedAt, waiting, at: person.at })
   }

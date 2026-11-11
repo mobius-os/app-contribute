@@ -13,6 +13,17 @@ const pull = ({ pending = [], events = [], reviews = [] } = {}) => ({
 })
 const row = (rows, name) => rows.find(item => item.name === name)
 
+test('an approval of an older version is not shown as an approval of this one', () => {
+  const HEAD = 'a'.repeat(40), OLDER = 'b'.repeat(40)
+  const approved = (login, oid) => ({ ...reviewed(login, 'APPROVED', '2026-11-09T09:00:00Z'), commit: { oid } })
+  const rows = reviewersOf(pull({ events: [asked(user('sam'), '2026-11-09T08:00:00Z'), asked(user('kim'), '2026-11-09T08:00:00Z'), asked(user('bo'), '2026-11-09T08:00:00Z')],
+    reviews: [approved('sam', OLDER), approved('kim', HEAD), reviewed('bo', 'APPROVED', '2026-11-09T09:00:00Z')] }), HEAD)
+  assert.deepEqual(['sam', 'kim', 'bo'].map(name => [row(rows, name).status, row(rows, name).label, row(rows, name).tone]),
+    [['approved_old', 'Approved an older version', 'is-waiting'], ['approved', 'Approved', 'is-ready'], ['approved', 'Approved', 'is-ready']],
+    'a review that names no commit is taken as current, and without a head nothing is judged')
+  assert.equal(row(reviewersOf(pull({ events: [asked(user('sam'), '2026-11-09T08:00:00Z')], reviews: [approved('sam', OLDER)] })), 'sam').status, 'approved')
+})
+
 test('a request nobody has answered is waiting, with the day it was made', () => {
   const rows = reviewersOf(pull({ pending: [user('sam')], events: [asked(user('sam'), '2026-11-09T11:20:00Z')] }))
   assert.deepEqual(rows.map(({ name, status, label, tone, again, requestedAt }) => ({ name, status, label, tone, again, requestedAt })),
