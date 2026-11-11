@@ -48,11 +48,14 @@ test('publication copy describes automatic GitHub identity without picker langua
   assert.match(sourceMapSource, /\['updates', 'Behind GitHub'\]/)
 })
 
-test('incoming upstream work is flagged on the project list and sent to the place that updates it', () => {
+test('incoming upstream work is flagged on the project list and in the project screen\'s one warning row, and sent to the place that updates it', () => {
   const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
   const updatesSource = readFileSync(new URL('../updates.js', import.meta.url), 'utf8')
-  // The project screen carries no status rows; the list row flags the update (project-board.test.mjs).
-  assert.doesNotMatch(controlsSource, /projectUpstreamLine|projectUpdater|co-project-position/)
+  // The project screen carries no status rows, only one warning row for an update or a conflict (project-board.test.mjs).
+  assert.match(controlsSource, /projectUpstreamLine\(project, check\)/)
+  assert.match(controlsSource, /line\?\.tone !== 'warn'/)
+  assert.match(controlsSource, /line\.update \? projectUpdater\(project\) : null/)
+  assert.doesNotMatch(controlsSource, /co-project-position|co-status-/)
   assert.doesNotMatch(controlsSource, /Pull updates|Start pull|task:update/)
   // Settings owns Möbius updates and the App Store owns app updates.
   assert.match(updatesSource, /type: 'moebius:open-settings'/)

@@ -1874,7 +1874,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
 
             {project ? <GithubPullsUnavailable conn={conn} onRetry={refreshConnection} /> : null}
-            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
+            {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} check={upstreamChecks[project.key] || null} onStart={startAgentTask}>
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? view => renderPullRequests(project, navigation, view) : null}
               reviewRequestCount={project?.reviewRequests?.length || 0}

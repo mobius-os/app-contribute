@@ -80,7 +80,7 @@ test('the saved work title survives reopening without changing the legacy cycle 
   assert.equal(normalizeCycleState({ chat_id: 'work' }).title, undefined)
 })
 
-test('project controls hold the prepare pane only: no status rows, no Pull updates, no competing merge button', async t => {
+test('project controls hold the prepare pane, plus one GitHub row only while an update or conflict needs you; no Pull updates, no competing merge button', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { render } = await renderModule(`
     import React from 'react'
@@ -96,8 +96,19 @@ test('project controls hold the prepare pane only: no status rows, no Pull updat
   props.mergeRun = props.run
   const html = render(props)
   assert.match(html, /Actions for Contribute/)
-  // Local changes live in the Local changes tab and updates are flagged on the project list.
-  assert.doesNotMatch(html, /changed on this Möbius|Up to date<\/strong>|Local changes and GitHub|See the files/)
+  // Local changes live in the Local changes tab, and a quiet project has no GitHub row above its tabs.
+  assert.doesNotMatch(html, /changed on this Möbius|Up to date<\/strong>|Local changes and GitHub|See the files|co-upstream-warning/)
+  // A conflict or an incoming update is a row with the button to the place that applies it (an app: the App Store).
+  const conflicted = render({ ...props, project: { ...project, conflictFiles: 1 } })
+  assert.match(conflicted, /co-upstream-warning[\s\S]*An update from GitHub<\/strong> conflicts with your local changes\./)
+  assert.match(conflicted, /Open App Store/)
+  assert.match(render({ ...props, project: { ...project, kind: 'platform', semanticAvailable: true, incomingFiles: 2 } }), /2 files<\/strong> from GitHub are not on this Möbius yet\.[\s\S]*Open Settings/)
+  assert.match(render({ ...props, check: { newCommits: 1, checkedAt: 'now' } }), /1 new commit<\/strong> on GitHub since the last check\./)
+  assert.doesNotMatch(render({ ...props, check: { newCommits: 0, checkedAt: 'now' } }), /co-upstream-warning/)
+  // Quiet and neutral lines (up to date, not compared yet, files unreadable) are never rows.
+  for (const quiet of [{ sourceComparisonRequired: true }, { available: false }, { builtHere: true, conflictFiles: 1 }, { kind: 'external', conflictFiles: 1 }]) {
+    assert.doesNotMatch(render({ ...props, project: { ...project, ...quiet } }), /co-upstream-warning/, JSON.stringify(quiet))
+  }
   assert.match(html, /Make PRs from local changes/)
   // Settings and the App Store own updates; Contribute no longer starts its own pull.
   assert.doesNotMatch(html, /Pull updates|Start pull/)

@@ -395,13 +395,6 @@ export const CSS = `
 .co-project-files-toggle .co-icon { transition: transform .16s ease; }
 .co-project-files-toggle[aria-expanded="true"] .co-icon { transform: rotate(180deg); }
 
-.co-local-position {
-  display: flex; flex-direction: column; gap: 3px; margin-top: 14px;
-  padding: 13px 2px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-}
-.co-local-position strong { font-size: var(--co-text-meta); }
-.co-local-position span { color: var(--muted); font-size: var(--co-text-meta); line-height: 1.5; }
-
 .co-source-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48dvh; color: var(--muted); }
 .co-source-loading > div { display: flex; flex-direction: column; gap: 3px; }
 .co-source-loading strong { color: var(--text); font-size: var(--co-text-meta); }
