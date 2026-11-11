@@ -13,14 +13,14 @@ const result = (patch = {}) => normalizeResult({ ...example(), ...patch })
 const decision = (patch = {}) => normalizeDecision({ version: 1, result_id: 'r-3f9a1c2b04d5', digest: example().digest, decision: 'approved', at: '2026-11-06T09:30:00Z', ...patch })
 const entry = (state = 'ready', pairedDecision = null, patch = {}) => ({ slug: 'owner__repo__7', result: result({ state, ...patch }), decision: pairedDecision })
 
-test('the gate on Post is one capability of review-presets, offered only by a plain true and only where this page has the shell\'s sheet', () => {
+test('the gate on Post is one capability of review-presets, offered only by a plain true and only where this page has the request function', () => {
   assert.equal(OWNER_CONFIRM_CAPABILITY, 'owner_confirm', 'the platform advertises this name; the retired owner_grant is not it')
   const cases = [{}, { owner_confirm: false }, { owner_confirm: 'true' }, { owner_confirm: 1 }, { owner_grant: true }, { merge_now: true }, null, undefined]
   try {
     globalThis.window = { mobius: { ownerGrant: { request() {} } } }
     assert.equal(ownerConfirmOffered({ owner_confirm: true, merge_now: true }), true)
     for (const capabilities of cases) assert.equal(ownerConfirmOffered(capabilities), false, JSON.stringify(capabilities))
-    globalThis.window = { mobius: {} } // a stale tab on a shell without the sheet keeps today's path, and Post stays off
+    globalThis.window = { mobius: {} } // a page whose runtime has no request function keeps today's path, and Post stays off
     assert.equal(ownerConfirmOffered({ owner_confirm: true }), false)
   } finally { delete globalThis.window }
 })

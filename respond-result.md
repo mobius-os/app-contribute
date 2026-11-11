@@ -45,13 +45,15 @@ and `/api/owner-grants`).
   `GET /api/github/contributions/<app id>/review-presets`, the place the app already reads
   `merge_now` and the other host features. `true` means: Möbius draws its own confirm sheet for the
   owner's sensitive taps. (The older `owner_grant` key is retired and no Möbius advertises it.) Without
-  it, or on a page whose shell has no `ownerGrant.request`, Post is off.
+  it, or on a page without `window.mobius.ownerGrant.request`, Post is off.
 * **The app asks first.** `ownerConfirmOffered()` in `owner-grant.js` decides whether the card's Post,
   Send again and Try again are on (`ownerGrant` on `ResponseCard`, from `reviewProps` in
   `ui/PullRequests.jsx`). `approveResponse()` in `respond-flow.js`, after its own checks and before it
   writes the decision or tells the chat, asks Möbius to confirm action `respond_post` for
   `{repo, number, result_id, digest, chat_id}`: identifiers only, Möbius builds the words. A cancel
-  writes and sends nothing; a refusal shows the platform's sentence.
+  writes and sends nothing; a refusal shows the platform's sentence, and so does a request that times
+  out (the platform's ack and timeout make a tab whose shell code is older than the sheet fail fast this
+  way until it reloads).
 * **The helper spends it.** `post` spends the grant with `POST /api/owner-grants/consume`
   (`{app_id, action: "respond_post", body: {repo, number, result_id, digest}}`), through the
   platform's own `api` of `SCRIPTS_DIR/github_review.py` with the run's token; the chat is the one
