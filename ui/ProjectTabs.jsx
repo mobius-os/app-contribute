@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { showOpenTab } from './stripScroll.js'
-import { useProjectTask } from './TaskPane.jsx'
 
 const BASE_TABS = [['all', 'All PRs'], ['requests', 'Review requests'], ['mine', 'Agent runs']]
 
@@ -13,14 +12,12 @@ const BASE_TABS = [['all', 'All PRs'], ['requests', 'Review requests'], ['mine',
 // content); the PR list stays mounted, and hidden, while it is open.
 export function ProjectTabs({ reviewCount = 0, renderPullRequests, inventory, myJobs, myWork, prepared = null, preparedCount = 0, edits = null, editsCount = null, defaultTab = 'all' }) {
   const [chosen, setTab] = useState(defaultTab)
-  const task = useProjectTask()
   const [total, setTotal] = useState(null)
   const id = useId()
   const list = useRef(null)
   const TABS = [BASE_TABS[0], ...(preparedCount ? [['prepared', 'Prepared PRs']] : []), ...BASE_TABS.slice(1), ...(edits ? [['edits', 'Local changes']] : [])]
   const tab = TABS.some(([key]) => key === chosen) ? chosen : 'all'
   const counts = { all: total, prepared: preparedCount, requests: reviewCount, mine: null, edits: editsCount }
-  useEffect(() => { if (task?.tabRequest) setTab(task.tabRequest.key) }, [task?.tabRequest])
   useEffect(() => { showOpenTab(list.current, list.current?.querySelector('[role="tab"][aria-selected="true"]')) }, [tab])
   function moveWithArrows(event) {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return

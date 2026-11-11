@@ -86,7 +86,6 @@ const PATHS = {
   copy: <><rect x="9" y="9" width="11" height="11" rx="2.5" /><path d="M5 15V6a2 2 0 0 1 2-2h8" /></>,
   fix: <><path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3Z" /></>,
   file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /></>,
-  folder: <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
   reply: <><path d="M9 14 4 9l5-5" /><path d="M4 9h9a7 7 0 0 1 7 7v3" /></>,
   takeover: <><path d="M4 12h11" /><path d="m11 7 5 5-5 5" /><path d="M20 4v16" /></>,
   act: <><circle cx="12" cy="12" r="9" /><path d="M10.5 8.5 15.5 12l-5 3.5Z" /></>,

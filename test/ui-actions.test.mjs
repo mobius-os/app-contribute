@@ -48,11 +48,14 @@ test('publication copy describes automatic GitHub identity without picker langua
   assert.match(sourceMapSource, /\['updates', 'Behind GitHub'\]/)
 })
 
-test('incoming upstream work is surfaced at project level and sent to the place that updates it', () => {
+test('incoming upstream work is flagged on the project list and in the project screen\'s one warning row, and sent to the place that updates it', () => {
   const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
   const updatesSource = readFileSync(new URL('../updates.js', import.meta.url), 'utf8')
+  // The project screen carries no status rows, only one warning row for an update or a conflict (project-board.test.mjs).
   assert.match(controlsSource, /projectUpstreamLine\(project, check\)/)
+  assert.match(controlsSource, /line\?\.tone !== 'warn'/)
   assert.match(controlsSource, /line\.update \? projectUpdater\(project\) : null/)
+  assert.doesNotMatch(controlsSource, /co-project-position|co-status-/)
   assert.doesNotMatch(controlsSource, /Pull updates|Start pull|task:update/)
   // Settings owns Möbius updates and the App Store owns app updates.
   assert.match(updatesSource, /type: 'moebius:open-settings'/)
@@ -177,12 +180,11 @@ test('an assigned incoming review stays recoverable until its conversation start
   )
 })
 
-test('contribution details retain their project parent and refresh only source diffs', () => {
+test('contribution details retain their project parent; only the Local changes tab reads source diffs, again after each refresh', () => {
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
-  assert.doesNotMatch(sourceMapSource, /<ProjectFileChanges|task:files/)
-  // A Sync that changed only uncommitted edits is read again: the diff has no other signal for it.
-  assert.match(appSource, /<ProjectEdits key=\{sourceSnapshot\?\.generated_at\} project=\{project\}/)
+  assert.doesNotMatch(sourceMapSource, /ProjectFileChanges|task:files/)
+  assert.match(appSource, /<ProjectEdits key=\{sourceSnapshot\?\.generated_at\}/)
   assert.match(projectEditsSource, /initiallyOpenFirst/)
   assert.doesNotMatch(sourceMapSource, /Review file diffs|\+\{rows\.length - preview\.length\} more files/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
@@ -413,8 +415,7 @@ test('project chrome consolidates navigation, refresh, files, and preparation ch
   assert.doesNotMatch(sourceMapSource, /RefreshNote|refreshNote/)
   assert.doesNotMatch(sourceMapSource, /Refresh project status|Refresh projects/)
   assert.doesNotMatch(sourceMapSource, /Files, branch and versions <Icon/)
-  assert.match(controlsSource, /className="co-btn co-btn-icon" onClick=\{\(\) => task\?\.openTab\('edits'\)\} aria-label="Open Local changes" title="Open Local changes"><Icon name="folder" size=\{16\} \/>/)
-  assert.doesNotMatch(sourceMapSource, /task:files/)
+  assert.doesNotMatch(controlsSource, /See the files|task:files/)
 })
 
 test('private proposals have one actionable home without another merge workflow', () => {

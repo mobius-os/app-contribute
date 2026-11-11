@@ -42,8 +42,8 @@ function ProjectDetail({
   renderActivity,
   navigation,
 }) {
-  const [publicKeys, setPublicKeys] = useState(new Set())
-  const [tabRequest, setTabRequest] = useState(null)
+  // The open PRs the project's PR list shows; null until that list has been read.
+  const [publicKeys, setPublicKeys] = useState(null)
   const projectView = useRef(null)
   const pendingScroll = useRef(null)
   const activeId = navigation.selectedId || ''
@@ -63,8 +63,6 @@ function ProjectDetail({
     explicit: !!navigation.selectedId,
     open: id => preservingScroll(() => navigation.onSelect(id)),
     close: () => preservingScroll(navigation.onBack),
-    tabRequest,
-    openTab: key => { if (activeId) navigation.onBack(); setTabRequest({ key, nonce: crypto.randomUUID() }) },
   }
   return (
     <TaskContext.Provider value={task}>

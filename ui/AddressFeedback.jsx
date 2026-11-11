@@ -5,23 +5,11 @@ import { loadWorkflowOptions, previewWorkflow, reviewOptions } from '../review-p
 import { loadAllPullActivity, loadAllPullThreads } from '../pull-details.js'
 import { AgentModelSettings, ConversationAgent } from './AgentModelSettings.jsx'
 import { SeenOnGithub } from './SeenOnGithub.jsx'
+import { TickList } from './TickList.jsx'
 import { CloseWindowButton, WindowHead } from './WindowHead.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 import { focusActionRegion } from './TaskPane.jsx'
 import { NAMES } from '../names.js'
-
-// What was found, each with a tick. The owner unticks what the agent should
-// leave alone.
-export function AddressChecklist({ items, onToggle, disabled }) {
-  return <ul className="co-rw-checks" aria-label="What it will address">
-    {items.map(item => <li key={item.key}>
-      <label className="co-rw-check">
-        <input type="checkbox" checked={item.checked} disabled={disabled} onChange={event => onToggle(item.key, event.target.checked)} />
-        <span><strong>{item.label}</strong>{item.detail ? <small>{item.detail}</small> : null}</span>
-      </label>
-    </li>)}
-  </ul>
-}
 
 // The window behind Agent > Respond to feedback. It reads what the PR asks for, then sends an agent
 // conversation a written brief. There is one way to go: the agent saves a result, and the owner posts it from the Review tab.
@@ -91,7 +79,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       {state.phase === 'loading' ? <p className="co-rw-note" role="status">Reading the reviews and threads…</p> : null}
       {state.phase === 'error' ? <p className="co-rw-blocker" role="alert">Could not read this PR’s reviews and threads from GitHub. Close this and try again.</p> : null}
       {state.phase === 'ready' && !state.items.length ? <p className="co-rw-note">Nothing to address was found: no requested changes, open threads, failing checks or conflict. Use Review if you want a fresh look.</p> : null}
-      {state.items.length ? <AddressChecklist items={state.items} onToggle={toggle} disabled={busy} /> : null}
+      {state.items.length ? <TickList label="What it will address" items={state.items} onToggle={toggle} disabled={busy} /> : null}
       {state.partial && state.phase === 'ready' ? <p className="co-rw-note">Some of this PR’s feedback could not be read, so the list may be incomplete.</p> : null}
       <p className="co-rw-note co-rw-callout"><b>It does not review the PR again.</b> It answers only what is ticked, fixes it in a private copy and runs the tests.</p>
       <p className="co-rw-note co-rw-callout"><b>Then:</b> the answers, changed files and commits appear in this PR’s Review tab. Nothing is pushed or posted until you press <b>{NAMES.postAnswer}</b>.</p>

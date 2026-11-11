@@ -139,7 +139,7 @@ action shows feedback when used. Sync with GitHub asks GitHub read-only whether 
 repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
 its steps, what GitHub will see and which model runs it before anything starts.
-A project opens on its controls, a status row only when there is something to act on (local edits, or an update or conflict from GitHub), then All PRs, Prepared PRs (while there are some), Review requests and My work; blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
+A project opens on its tabs, with a GitHub row above them only when an update or conflict needs the owner: All PRs, Prepared PRs (while there are some), Review requests, My work and Local changes (while files differ); blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
 the owner, and folds apps with nothing to do.
 
 ## Act where you are looking (owner direction, 2026-11-04)
@@ -165,6 +165,21 @@ the owner, and folds apps with nothing to do.
   GitHub again first, and its button stays off, so another attempt can only
   start from that fresh read. This holds for Merge, Open for review and Post to
   GitHub alike.
+- **Where Möbius confirms the owner's taps on its own sheet** (it advertises
+  `owner_confirm`), that sheet is the one confirm: Merge and the five status changes
+  are one tap on the action and one tap on Möbius's sheet, which names what happens
+  in Möbius's own words and cannot be pressed by the app or an agent. Merge lands the
+  way the repository prefers, and **Merge options…** (only where it allows more than
+  one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
+  fix, and Post get that sheet as a new confirm. Until the owner has confirmed on it, the
+  app's own sheet only says it is waiting for that. A cancel sends nothing. A Möbius
+  without it keeps the sheets above.
+- **Two paths, until platform enforcement ships.** The path without Möbius's sheet (the
+  app's own confirm sheets, and Post off) exists only until the platform enforces owner
+  confirmation and that has been adopted; then it is removed and the app requires
+  `owner_confirm`. Until then the manifest declaration `"owner_confirm": true` is the
+  opt-in switch: the platform enforces owner confirmation only for apps that declare it,
+  and this app does.
 - **Open as draft / Open for review** is one split button on the prepared-PR
   card; the arrow offers the other stage for that send. The stage is part of the
   exact approval, the confirmation text and the chat Send card (which freezes it
@@ -185,8 +200,8 @@ the owner, and folds apps with nothing to do.
 - **A saved Respond to feedback answer comes first on the Review tab**: each point and
   how it ended, the replies word for word, the new description, the commits and changed
   files, the tests, and what Post will do in order, with **Post**, **Reply in chat** and
-  **Discard**. Post saves the owner's approval for exactly that answer and tells the chat
-  to run one checked command; nothing is pushed or posted before it. **Post is off until
+  **Discard**. Post has Möbius's own sheet confirm the press, saves the owner's approval for
+  exactly that answer and tells the chat to run one checked command; nothing is pushed or posted before it. **Post is off until
   Möbius can confirm it was the owner who pressed it** (an approval the agent could have
   written itself proves nothing): the button is disabled with that reason on the card, and
   the answer, Reply in chat and Discard keep working. The PR reads **Draft
@@ -233,13 +248,17 @@ someone else wrote it.
 checked over every case and every combination of the facts that matter):
 
 1. An author never gets a public review action. An agent's check of your PR is private.
-2. Merge needs an approval of this exact version by someone other than the author (a bot
+2. A PR is *ready to merge* with an approval of this exact version by someone other than the author (a bot
    never counts), no change request still standing (even on an older version), checks
    that pass or do not exist, no conflicts, nothing unconfirmed on its way to GitHub
    (a new commit does not settle it: it holds until reconciled, while a draft goes
    stale with its version), no agent job running, and no review GitHub itself still
    requires (a branch rule: "GitHub still needs a review"). GitHub asking for no review
-   is not an approval. An approval
+   is not an approval. Ready to merge
+   words the PR's standing and its highlighted next step; it does not switch your own Merge off
+   (owner direction, 2026-11-09: skip the formalities), and GitHub's merge rules still refuse what cannot
+   land. The agent's own unattended merge has no tap behind it, so the platform still asks the full
+   rule before it merges. The Merge sheet names who approved and who still holds a change request. An approval
    of an older commit still counts when the PR's own added and removed lines are the same:
    the fact readers compare each version with the base's current tip (`same-work.js` and
    `carried-approvals.js` in the app, `contribution_same_work.py` in the platform, held to
@@ -256,7 +275,12 @@ checked over every case and every combination of the facts that matter):
    A reviewer who only commented has not approved. With a change request still standing, GitHub lifts it
    only on their approval or a dismissal, so the PR reads *Looked again · not approved*; with none, it
    reads *Commented · not approved*. Either way the next step is Ask for approval, one note on the PR
-   naming only them, and it can be sent while their comment still waits for your answer. A review that
+   naming only them, and it can be sent while their comment still waits for your answer.
+   Both Ask actions open a checklist of everyone who reviewed or commented, except those who already
+   approved this version, with the people each ask is meant for ticked (owner direction, 2026-11-09).
+   The note says what is true of each person it names: commented on this version, a change request of
+   an earlier version, an approval of an earlier version. It must fit the platform's 1,000 characters,
+   and typed-in names are not offered. A review that
    only comments, with words in it, is feedback to answer like a comment in the PR's conversation: it
    reads *Feedback to answer* until you reply (a reply, or the Ask for approval note, answers it).
 4. One agent job per PR at a time. A job that stalled holds nothing. A Respond to
@@ -266,6 +290,17 @@ checked over every case and every combination of the facts that matter):
    read enables nothing that depends on it. That includes a list of reviews GitHub
    says goes on past the first page (30 writers): an opinion on the next page could
    be a change request, so the PR reads as not read.
+7. Four things stop an action of yours, and each action is stopped by the ones that apply to
+   it: the PR cannot be read, it is closed or merged, an agent is already working on it, or
+   something sent to GitHub is not confirmed (and a draft that deals with the findings owns
+   them until you send it or throw it away). The Ask actions stop only for the first two, and
+   for a list of people that was not read whole; Open for review, Back to draft and Close are
+   not stopped by an unconfirmed send; only the agent's jobs wait for a draft that owns the findings.
+   Nothing else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
+   to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
+   a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
+   GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,
+   Set aside for a result, Answer the agent for a question.
 
 **Who acts.** Pushing code, merging and changing a PR's status (ready, draft, closed)
 always wait for your own tap. A review verdict waits for your tap ("Draft for me"),
@@ -279,7 +314,7 @@ re-review) · Finish it for me (stops before each push for your approval). Their
 Review, which reads Re-review once you reviewed it, with an optional "Merge after I
 approve" switch · Take over, set apart, maintainers only, with a reason. Your own
 actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
-behind a confirm sheet and each shown only where this Möbius can do it.
+behind a confirm sheet (Möbius's own, where it offers one) and each shown only where this Möbius can do it.
 
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·

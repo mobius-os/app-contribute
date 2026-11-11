@@ -452,7 +452,7 @@ function ExactBatchAction({
         <span className="co-run-primary-mark" aria-hidden="true">
           <Icon name={mode === 'ready' ? 'review' : 'send'} size={19} />
         </span>
-        <div>
+        <div className="co-run-primary-text">
           <strong>{mode === 'ready'
             ? `${count === 1 ? 'Your draft is' : `${count} drafts are`} ready for review`
             : `${count} prepared ${count === 1 ? 'PR' : 'PRs'}`}</strong>
@@ -977,10 +977,11 @@ export function ContributionRun({
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review' && !isPublicFeedback(item))
   const working = run?.working || []
-  const visibleWorking = renderPublicWork ? working.filter(item => {
-    return !runUnitRecords(item).every(record => record?.type === 'pr' && ['open', 'draft'].includes(record.status)
-      && task?.publicKeys?.has(`${(record.repo || record.plan?.repo || '').toLowerCase()}#${record.number}`))
-  }) : working
+  // The PR list shows an open or draft PR itself, so saved work for it is Shared work only when the list does not show it. Until the
+  // list has been read (publicKeys is null) that is not known, and the saved PR waits instead of appearing here and then moving.
+  const listShows = record => record?.type === 'pr' && ['open', 'draft'].includes(record.status)
+    && (task?.publicKeys === null || task?.publicKeys?.has(`${(record.repo || record.plan?.repo || '').toLowerCase()}#${record.number}`))
+  const visibleWorking = renderPublicWork ? working.filter(item => !runUnitRecords(item).every(listShows)) : working
   // An open issue/PR is inventory, not evidence that an agent is working.
   const agentActivity = visibleWorking.filter(item => ['review_in_progress', 'autopilot'].includes(item.kind))
   const actionsInProgress = visibleWorking.filter(item => ['publishing', 'connecting', 'checking_source'].includes(item.kind))

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PR_FIELDS } from '../api.js'
 import { prFacts, respondChatOf } from '../pr-facts.js'
-import { decide } from '../pr-machine.js'
+import { decide, notReadyToMerge } from '../pr-machine.js'
 
 const HEAD = 'b'.repeat(40)
 const OLD = 'a'.repeat(40)
@@ -18,6 +18,8 @@ const mine = extra => pull({ author: { login: 'Alex' }, ...extra })
 const run = (item, extra = {}) => ({ id: 'r1', created_at: '2026-11-04T10:00:00Z', execution_state: 'completed', state: 'complete', mode: 'review',
   items: [{ repo: 'o/r', number: 7, head_sha: HEAD, base_ref: 'main', ...item }], ...extra })
 const decideFor = (pr, runs = [], ignored = null, chats = []) => decide(prFacts({ pr, login: 'alex', runs, ignored, chats }))
+// Merge is never switched off for review standing; this is what words it (Ready to merge, the highlighted step, the agent's own merge).
+const readinessFor = (pr, runs = []) => notReadyToMerge(prFacts({ pr, login: 'alex', runs }))
 
 test('your PR after you pushed fixes waits on the reviewer, not on you (bug 1)', () => {
   const decision = decideFor(mine({ reviewDecision: 'CHANGES_REQUESTED', latestOpinionatedReviews: { nodes: [opinion('Sam', 'CHANGES_REQUESTED', OLD)] } }))
@@ -31,22 +33,20 @@ test('missing check data is never green; no checks at all is (bug 2)', () => {
   assert.equal(decideFor(mine({ ...approved, ...rollup(null) })).state, 'author.approved')
 })
 
-test('Merge on your PR needs someone else’s approval of this version (bug 3)', () => {
-  const merge = decision => decision.actions.find(action => action.id === 'merge')
-  assert.equal(merge(decideFor(mine({ reviewDecision: null }))).reason, 'Nobody but the author has approved it yet.')
-  assert.equal(merge(decideFor(mine({ reviewDecision: 'APPROVED', latestOpinionatedReviews: { nodes: [opinion('Sam', 'APPROVED', OLD)] } }))).reason, 'The approval is for an older version.')
+test('your PR is ready to merge only with someone else’s approval of this version (bug 3)', () => {
+  assert.equal(readinessFor(mine({ reviewDecision: null })), 'Nobody but the author has approved it yet.')
+  assert.equal(readinessFor(mine({ reviewDecision: 'APPROVED', latestOpinionatedReviews: { nodes: [opinion('Sam', 'APPROVED', OLD)] } })), 'The approval is for an older version.')
 })
 
-test('GitHub’s own review gate keeps Merge off even when someone approved this version', () => {
-  const merge = decision => decision.actions.find(action => action.id === 'merge')
+test('GitHub’s own review gate keeps the PR from ready to merge even when someone approved this version', () => {
   // Someone other than the PR's author (Sam) approved it, at this version.
   const approved = reviewer => ({ latestOpinionatedReviews: { nodes: [opinion(reviewer, 'APPROVED')] } })
   for (const [pr, reviewer] of [[mine, 'Sam'], [pull, 'Bob']]) {
-    const gated = decideFor(pr({ ...approved(reviewer), reviewDecision: 'REVIEW_REQUIRED' }))
-    assert.deepEqual([merge(gated).enabled, merge(gated).reason], [false, 'GitHub still needs a review.'])
-    assert.notEqual(gated.state, 'author.approved', 'it is not "Merge it"')
-    assert.notEqual(gated.state, 'reviewer.mergeable')
-    for (const reviewDecision of ['APPROVED', null, undefined]) assert.equal(merge(decideFor(pr({ ...approved(reviewer), reviewDecision }))).enabled, true, String(reviewDecision))
+    const gated = pr({ ...approved(reviewer), reviewDecision: 'REVIEW_REQUIRED' })
+    assert.equal(readinessFor(gated), 'GitHub still needs a review.')
+    assert.notEqual(decideFor(gated).state, 'author.approved', 'it is not "Merge it"')
+    assert.notEqual(decideFor(gated).state, 'reviewer.mergeable')
+    for (const reviewDecision of ['APPROVED', null, undefined]) assert.equal(readinessFor(pr({ ...approved(reviewer), reviewDecision })), '', String(reviewDecision))
   }
   assert.match(decideFor(mine({ ...approved('Sam'), reviewDecision: 'REVIEW_REQUIRED' })).headline, /approved\. GitHub still needs a review\./)
 })
@@ -113,10 +113,10 @@ test('a verdict GitHub confirmed to this app counts before GitHub’s list catch
   assert.equal(decideFor(pull(), runs).state, 'reviewer.mergeable')
 })
 
-test('your own older change request still blocks Merge after a later plain comment', () => {
+test('your own older change request still keeps the PR from ready to merge after a later plain comment', () => {
   const pr = pull({ viewerLatestReview: { state: 'COMMENTED', commit: { oid: HEAD } },
     latestOpinionatedReviews: { nodes: [opinion('Alex', 'CHANGES_REQUESTED', OLD), opinion('Bob', 'APPROVED')] } })
-  assert.match(decideFor(pr).actions.find(action => action.id === 'merge').reason, /Alex asked for changes/)
+  assert.match(readinessFor(pr), /Alex asked for changes/)
 })
 
 test('a bot approval never counts, and an unread review list is unknown', () => {
@@ -242,9 +242,9 @@ test('a plain comment after your change request leaves the re-review yours', () 
   assert.equal(decideFor(pull({ viewerLatestReview: { state: 'PENDING', commit: { oid: HEAD } } })).state, 'reviewer.to_review', 'a pending review is not one yet')
 })
 
-test('a review from a deleted account, or of a commit that is gone, still blocks and never approves', () => {
+test('a review from a deleted account, or of a commit that is gone, still holds the PR back and never approves', () => {
   const pr = mine({ latestOpinionatedReviews: { nodes: [opinion('Bob', 'APPROVED'), { state: 'CHANGES_REQUESTED', author: null, commit: null }] } })
-  assert.match(decideFor(pr).actions.find(action => action.id === 'merge').reason, /ghost asked for changes/)
+  assert.match(readinessFor(pr), /ghost asked for changes/)
   const gone = mine({ latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'Bob', __typename: 'User' }, commit: null }] } })
   assert.equal(decideFor(gone).state, 'author.approval_stale')
 })

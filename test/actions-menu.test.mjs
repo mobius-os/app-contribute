@@ -9,7 +9,7 @@ const checks = (state = 'SUCCESS', count = 2) => ({ commits: { nodes: [{ commit:
 const pull = (extra = {}) => ({
   number: 7, state: 'OPEN', isDraft: false, headRefOid: HEAD, baseRefName: 'main', mergeable: 'MERGEABLE',
   author: { login: 'sam' }, repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE' },
-  latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, ...checks(), ...extra,
+  latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, ...checks(), ...extra,
 })
 const mine = extra => pull({ author: { login: 'alex' }, ...extra })
 const ALL = { mark_ready_now: true, back_to_draft_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, close_now: true }
@@ -44,10 +44,12 @@ test('the highlighted choice is the machine’s next step, first in its group', 
   assert.equal(approved.you[0].rec, true)
 })
 
-test('Merge on your PR stays dimmed with the machine’s reason until someone else approves this version', () => {
-  assert.equal(item(menu(mine()), 'merge').reason, 'Nobody but the author has approved it yet.')
+test('Merge on your PR is on offer before anyone approves it; only an approved version highlights it', () => {
+  assert.equal(item(menu(mine()), 'merge').off, false)
+  assert.equal(item(menu(mine()), 'merge').rec, false)
   const old = mine({ latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'sam' }, commit: { oid: OLD } }] } })
-  assert.equal(item(menu(old), 'merge').reason, 'The approval is for an older version.')
+  assert.equal(item(menu(old), 'merge').off, false)
+  assert.equal(item(menu(old), 'merge').rec, false)
   assert.equal(item(menu(old), 'ask_rereview').off, false, 'you can ask them to look again')
 })
 
@@ -89,7 +91,7 @@ test('Close pull request is the one destructive row: red, apart, and last in You
   assert.equal(model.you.at(-1).rec, false, 'closing is never the recommended step')
 })
 
-test('a reviewer who looked again without approving is asked to approve first, with the re-review ask dimmed and explained', () => {
+test('a reviewer who looked again without approving is asked to approve first, and the re-review ask stays on offer', () => {
   const node = (state, oid) => ({ state, author: { login: 'sam', __typename: 'User' }, commit: { oid } })
   const looked = mine({ latestOpinionatedReviews: { nodes: [node('CHANGES_REQUESTED', OLD)] }, latestReviews: { nodes: [node('COMMENTED', HEAD)] } })
   const model = menu(looked)
@@ -97,6 +99,6 @@ test('a reviewer who looked again without approving is asked to approve first, w
   assert.equal(model.you[0].intent, 'ask_approval', 'the highlighted choice comes first')
   assert.equal(model.you[0].title, 'Ask sam to approve')
   assert.equal(model.you[0].rec, true)
-  assert.equal(item(model, 'ask_rereview').reason, 'They already looked at this version. Ask them to approve.')
+  assert.equal(item(model, 'ask_rereview').off, false, 'anyone who reviewed can be asked again, even someone who looked at this version')
   assert.equal(item(menu(looked, { ...ALL, ask_approval_now: undefined }), 'ask_approval'), undefined, 'a Möbius that cannot post the note does not offer it')
 })

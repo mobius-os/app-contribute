@@ -3,8 +3,8 @@
 
 An agent answering a PR's review feedback never publishes anything itself. `save`
 records the finished work for the owner to read in Contribute; `post` is the only
-command with public effects. It publishes only when the host offers an owner grant (the gate,
-below), and then re-checks the owner's approval and the PR first.
+command with public effects. It publishes only after it has spent the owner's one-time confirmation
+of this Post, made on Möbius's own sheet (the gate, below), and then it re-checks the owner's approval and the PR.
 
 The input of `save` is JSON: points, replies, description, rerequest, tests, and optionally screenshots
 (`[{"name": "before-desktop.png", "path": "/absolute/file.png", "alt": "one line"}]`, each shown in the
@@ -30,10 +30,11 @@ import subprocess
 import sys
 import tempfile
 from typing import Any, Iterator
+from urllib.error import HTTPError
 from urllib.parse import quote
 
 from agent_snapshot import find_ledger
-from review_prs import capabilities, find_app_id, load_core
+from review_prs import find_app_id, load_core
 import respond_screenshots as shots
 
 
@@ -43,9 +44,8 @@ EXIT_FAILED = 4  # `post` stopped part-way; its receipts keep what was done
 
 RESULT_VERSION = 1
 # THE GATE on `post` (respond-result.md, "The gate"). The agent can write the approval file itself, so a matching approval does not
-# show the owner pressed Post. `post` publishes only when this Möbius advertises an owner grant the agent cannot mint, as this
-# capability of review-presets. No Möbius does yet. The app holds the same name (respond-result.js, OWNER_GRANT_CAPABILITY).
-OWNER_GRANT_CAPABILITY = "owner_grant"
+# show the owner pressed Post. `post` publishes only after it has spent the grant that Möbius records when the owner taps Post on its
+# own sheet (spend_owner_grant); the app asks for that grant (respond-flow.js, approveResponse) for exactly this result and chat.
 GH_TIMEOUT = 60
 GIT_TIMEOUT = 300
 
@@ -116,14 +116,14 @@ class WriteRefused(CommandError):
   a dropped connection) leaves it unknown whether the write landed or still will."""
 
 
-def owner_grant_offered() -> bool:
-  """Whether this Möbius advertises the owner grant. Any failure to ask (no core, no network, an unexpected
-  answer) counts as no: Post is never allowed on a guess."""
-  try:
-    core = load_core()
-    return capabilities(core, find_app_id(core)).get(OWNER_GRANT_CAPABILITY) is True
-  except Exception:  # fail closed, whatever the reason
-    return False
+NOT_CONFIRMED = (
+  "The owner has not confirmed this Post in Möbius, or that confirmation was already used, so nothing was posted. "
+  "Ask the owner to press Post in Contribute, then run this again."
+)
+CANNOT_CONFIRM = (
+  "Post is off for now: this Möbius cannot yet confirm that the owner pressed it, and the approval file alone is not proof "
+  "because the agent can write it. Nothing was posted; post --dry-run still shows the plan."
+)
 
 
 # --- running programs -------------------------------------------------------------------
@@ -1097,19 +1097,30 @@ def print_plan(pull: PullRef, result: dict[str, Any]) -> None:
     print(f"  {number}. {line}")
 
 
-def require_owner_grant() -> None:
-  if not owner_grant_offered():
-    raise Refused(
-      "Post is off for now: this Möbius cannot yet confirm that the owner pressed it, and the approval file alone is not proof "
-      "because the agent can write it. Nothing was posted; post --dry-run still shows the plan."
-    )
+def spend_owner_grant(result: dict[str, Any]) -> None:
+  """Spend the owner's one-time confirmation of this Post, bound to this result and its digest (and to this chat, which Möbius
+  takes from this run's own token). Any refusal, or any failure to ask (no core, no network, an older Möbius without the route),
+  stops the post: it is never allowed on a guess."""
+  body = {"repo": result["repo"], "number": result["number"], "result_id": result["id"], "digest": result["digest"]}
+  try:
+    core = load_core()
+    core.api("/api/owner-grants/consume", method="POST",
+             data={"app_id": find_app_id(core), "action": "respond_post", "body": body})
+  except HTTPError as error:
+    raise Refused(NOT_CONFIRMED if error.code == 403 else CANNOT_CONFIRM) from error
+  except Exception as error:  # fail closed, whatever the reason
+    raise Refused(CANNOT_CONFIRM) from error
 
 
 def post_command(args: argparse.Namespace) -> int:
   pull = parse_pull(args.pr)
-  if not args.dry_run:
-    require_owner_grant()  # before anything is read or written: a refused post leaves no trace
   store = open_store()
+  if not args.dry_run:
+    # Before the lock, before any read of GitHub and before any write: a refused post leaves no trace. A result that is not the one
+    # named, or is already posted, is answered below and does not use up the owner's confirmation.
+    saved = load_result(store, pull)
+    if saved["id"] == args.id and saved["state"] != "posted":
+      spend_owner_grant(saved)
   # A dry run, or a PR with nothing saved, must leave no trace: not even a lock file.
   needs_lock = not args.dry_run and store.result_file(pull).exists()
   with locked(store, pull) if needs_lock else contextlib.nullcontext():
@@ -1142,7 +1153,7 @@ def build_parser() -> argparse.ArgumentParser:
   show = commands.add_parser("show", help="print the saved result without patches, and whether it is approved")
   show.add_argument("--pr", required=True, help="owner/repo#123")
   show.set_defaults(run=show_command)
-  post = commands.add_parser("post", help="publish the approved result: the only command that does (off until the host offers an owner grant)")
+  post = commands.add_parser("post", help="publish the approved result: the only command that does (needs the owner's confirmation in Möbius)")
   post.add_argument("--pr", required=True, help="owner/repo#123")
   post.add_argument("--id", required=True, help="the result id Contribute named")
   post.add_argument("--dry-run", action="store_true", help="check everything and print the plan, change nothing")

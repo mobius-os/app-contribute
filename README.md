@@ -31,13 +31,15 @@ contribution. This app is the dashboard for that loop:
   shown only while there are some), **Review requests** and **Agent runs** (agent jobs, agent
   reviews, agent activity and finished work) split the project by what the
   owner came to do. Saved public work the live list cannot show stays on All
-  PRs, so an unreachable GitHub never hides it behind another tab.
+  PRs, so an unreachable GitHub never hides it behind another tab. It appears
+  once the list has been read, so a PR the list is about to show never flashes
+  in there first.
 - **Task-first controls** — open a project to see its work list beside one
   contextual task, with a compact project switcher rather than another sidebar.
-  The project's status says in plain words what is local ("2 files changed on
-  this Möbius") only when files really differ, and how it compares with GitHub
-  only when an update or conflict needs a look; **Make
-  PRs from local changes** is the main action and appears only when there are some.
+  What is local ("2 files changed on this Möbius") and **Make PRs from local
+  changes** are in the **Local changes**
+  tab, which appears only while files really differ; GitHub gets a row above the
+  tabs only when an update or conflict needs a look.
   A permitted maintainer can choose **Follow through to merge** without granting
   unknown future public actions. Contribute does not update projects itself:
   when GitHub has updates it links to the place that applies them, Settings →
@@ -181,8 +183,8 @@ only for the core and the one mode it is working in.
   and Agent runs, then a **Repositories** block of its own (More repositories,
   All repositories, **Add repository** last). The Needs you chips (To look at,
   Review, Merge, Fix, Agent runs) filter the list under them, and the badge is
-  their sum. Drafts ready to open are a quiet line; local changes are a status row
-  on a project page only while files really differ. On a phone the four views are one segmented bar.
+  their sum. Drafts ready to open are a quiet line; local changes live in the
+  project's Local changes tab. On a phone the four views are one segmented bar.
 - **A next step on every PR.** A state line (Draft, In review, Approved, Merged)
   and one panel under the facts: a pill, the PR machine's own sentence and one
   filled button. On a phone the button pins to the foot of the page.
@@ -317,7 +319,19 @@ before writing, while the cron refresh falls back to a plain best-effort write.
 **Actions ▾** (on a PR row and its page) has a **You** group and an **Agent**
 group. **Open for review** (a draft this app sent) and **Merge** (where the
 platform advertises `merge_now`) each end in a confirm sheet naming what happens
-and what cannot be undone. New PRs open from one split button, **Open as draft**
+and what cannot be undone. Where Möbius advertises `owner_confirm`, its own sheet
+(outside the app's frame, `window.mobius.ownerGrant`, see `owner-grant.js`) replaces that
+one for Merge and the five status changes: one tap on the action, one tap to confirm, and
+**Merge options…** (only where the repository allows more than one way) to choose how it
+lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
+the same sheet first, so the owner's tap is proven by Möbius and not by the app's own frame;
+until the owner has confirmed, the app's own sheet only says it is waiting. A Möbius without
+it keeps the app's own sheets, and that second path exists only until platform enforcement
+has shipped and been adopted: then it is removed and the app requires `owner_confirm`.
+Until then the top-level `"owner_confirm": true` in `mobius.json` is the opt-in switch: the platform
+enforces owner confirmation only for apps that declare it, and this app asks Möbius's sheet before each
+guarded tap and then repeats the same request unchanged.
+New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default
 (the shipped default is Ready, as the product states). A finished review that
 found problems offers **Fix these findings**, **Ignore…** (one reason, for that
@@ -590,10 +604,11 @@ in `respond-results/<owner>__<repo>__<number>.json`. The PR's Review tab shows i
 **Post**, **Reply in chat** and **Discard**. Post writes the owner's approval
 (`respond-decisions/<slug>.json`) for that exact result and its digest, then tells the
 same chat to run `respond_result.py post`, the only command that publishes. **Post is off
-until the host can vouch for the owner's press**: an approval file is not proof, because the
-agent can write it, so Post works only on a Möbius that advertises the `owner_grant`
-capability (none does yet); until then the button is disabled with its reason and `post`
-refuses. Past that gate, `post` refuses unless the approval names this result, its content
+until Möbius confirms the owner's press**: an approval file is not proof, because the
+agent can write it, so Post works only on a Möbius that advertises `owner_confirm`: the app
+asks Möbius's own sheet first, and `post` spends the one-time grant that records the owner's
+tap before it reads or writes anything. Without it the button is disabled with its reason and
+`post` refuses. Past that gate, `post` refuses unless the approval names this result, its content
 is unchanged and the PR is still where the work was built; then it uploads any screenshots
 the answer attaches (to the repository's `mobius-screenshots` branch; the card lists each one
 on its own and Post stays off until it is on screen, so the owner has read every byte; an

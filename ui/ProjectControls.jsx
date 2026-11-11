@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { contributionCycleAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
-import { localChangeSentence, localChangeSummary, projectCycleIdentity, projectUpstreamLine } from '../source-map.js'
+import { localChangeSummary, projectCycleIdentity, projectUpstreamLine } from '../source-map.js'
 import { projectUpdater } from '../updates.js'
 import { Icon } from './Icons.jsx'
-import { TimeAgo } from './GithubParts.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
@@ -24,30 +23,17 @@ const CYCLE_CSS = `
 .co-task-progress .co-cycle-actions{margin:12px 0 0}
 `
 
-// One plain-language fact about the project, with its next step beside it.
-function StatusLine({ icon, title, tone = 'plain', strong, text, sub, children }) {
-  return <div className={'co-status-row is-' + tone} role="group" aria-label={title}>
-    <span className="co-status-icon" aria-hidden="true"><Icon name={icon} size={18} /></span>
-    <p className="co-status-text"><strong>{strong}</strong>{text}{sub ? <span className="co-status-sub"> {sub}</span> : null}</p>
-    {children ? <div className="co-status-actions">{children}</div> : null}
-  </div>
-}
-
-const UPSTREAM_ICON = { ok: 'check', warn: 'refresh', muted: 'info' }
-
-function LocalLine({ local, run, task }) {
-  return <StatusLine icon="edit" title="Local changes" strong={local.strong} text={local.text} sub={local.sub || null}>
-    <button type="button" className="co-btn" disabled={!run?.privateAction} onClick={() => task?.open('task:prepare')}><Icon name="prepare" size={15} />Make PRs from local changes</button>
-    <button type="button" className="co-btn co-btn-icon" onClick={() => task?.openTab('edits')} aria-label="Open Local changes" title="Open Local changes"><Icon name="folder" size={16} /></button>
-  </StatusLine>
-}
-
-function UpstreamLine({ project, line, check }) {
+// The project screen's only status row: shown while GitHub needs the owner (a conflict, files not here yet, new
+// commits since the last check) and nowhere else, so a quiet project opens straight on its tabs.
+function UpstreamWarning({ project, check }) {
+  const line = projectUpstreamLine(project, check)
+  if (line?.tone !== 'warn') return null
   const updater = line.update ? projectUpdater(project) : null
-  const checked = check?.checkedAt ? <TimeAgo prefix="Checked " value={check.checkedAt} /> : 'Use Sync with GitHub for the latest.'
-  return <StatusLine icon={UPSTREAM_ICON[line.tone]} title="Updates from GitHub" tone={line.tone} strong={line.strong} text={line.text} sub={updater ? null : checked}>
-    {updater ? <button type="button" className="co-btn" onClick={updater.open}><Icon name="settings" size={15} />{updater.label}</button> : null}
-  </StatusLine>
+  return <div className="co-upstream-warning" role="group" aria-label="Updates from GitHub">
+    <span className="co-upstream-warning-icon" aria-hidden="true"><Icon name="refresh" size={18} /></span>
+    <p><strong>{line.strong}</strong>{line.text}</p>
+    {updater ? <div className="co-upstream-warning-actions"><button type="button" className="co-btn" onClick={updater.open}><Icon name="settings" size={15} />{updater.label}</button></div> : null}
+  </div>
 }
 
 const STATUS_LABELS = {
@@ -104,12 +90,6 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
     : STATUS_LABELS[cycle.phase] || 'Status unknown'
   const local = project.kind !== 'external'
   const changedFiles = localChangeSummary(project).changed
-  // A status row appears only when it has something to act on: edits, or an upstream that needs a look.
-  const edits = local ? localChangeSentence(project) : null
-  const upstream = local ? projectUpstreamLine(project, check) : null
-  const localLine = edits?.edits ? edits : null
-  const upstreamLine = ['warn', 'muted'].includes(upstream?.tone) ? upstream : null
-  const positionRows = localLine || upstreamLine
   // Starting a full merge cycle needs merge rights; seeing existing cycles never does.
   const cycleAction = contributionCycleAction(run, [project])
   const fullCycleAction = mayMerge(project.viewerPermission) && cycleAction ? { ...cycleAction, merge: true } : null
@@ -160,10 +140,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     <style>{CYCLE_CSS}</style>
-    {positionRows ? <div className="co-project-position" aria-label="Local changes and GitHub">
-      {localLine ? <LocalLine local={localLine} run={run} task={task} /> : null}
-      {upstreamLine ? <UpstreamLine project={project} line={upstreamLine} check={check} /> : null}
-    </div> : null}
+    <UpstreamWarning project={project} check={check} />
     {local ? <SourceConversations project={project} appId={appId} token={token} /> : null}
     <TaskPane id="task:prepare" dock={false}>
       <h3>Make PRs from local changes</h3>

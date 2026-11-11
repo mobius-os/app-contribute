@@ -41,7 +41,7 @@ function sameWorkFor(token, pull, approvedCommit) {
 }
 
 const isPull = value => value && typeof value === 'object' && typeof value.headRefOid === 'string' && Array.isArray(value.latestOpinionatedReviews?.nodes)
-function pullsIn(value, found = [], depth = 0) {
+export function pullsIn(value, found = [], depth = 0) {
   if (!value || typeof value !== 'object' || depth > 6) return found
   if (isPull(value)) found.push(value)
   else Object.values(value).forEach(inner => pullsIn(inner, found, depth + 1))

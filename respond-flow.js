@@ -1,9 +1,10 @@
 // What Post and Discard do. Neither posts anything: Post writes the owner's approval and tells the chat to run the helper, which
 // checks the approval itself; Discard writes the decision that takes the answer off the PR. Post does nothing at all until the host
-// offers an owner grant (respond-result.js, THE GATE): an approval the agent could have written itself is not the owner's press.
+// confirms it on its own sheet (respond-result.js, THE GATE): an approval the agent could have written itself is not the owner's press.
 import { respondScope } from './address-feedback.js'
 import { clearDecision, readFreshResult, writeDecision } from './respond-store.js'
-import { ownerGrantOffered, POST_OFF_REASON, postMessage } from './respond-result.js'
+import { POST_OFF_REASON, postMessage } from './respond-result.js'
+import { askOwner, ownerConfirmOffered } from './owner-grant.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { NAMES } from './names.js'
 
@@ -35,12 +36,16 @@ const refused = delivery => Boolean(delivery.status || delivery.gone)
 // `again`: the first message may not have woken the chat, or the post stopped; a new message id, because the same id is a duplicate
 // the platform drops. The helper never posts a step twice, so a second message is harmless.
 export async function approveResponse({ slug, digest, pr, chat = null, token, storage, capabilities = null, again = false, deliver = deliverCycleMessage, now = here }) {
-  if (!ownerGrantOffered(capabilities)) return { ok: false, error: POST_OFF_REASON }
+  if (!ownerConfirmOffered(capabilities)) return { ok: false, error: POST_OFF_REASON }
   const current = await currentAnswer(slug, digest, storage)
   if (!current.ok) return current
   const { result } = current
   const reason = blocker(result, pr, chat)
   if (reason) return { ok: false, error: reason }
+  // The owner's press, proven on the shell's own sheet and bound to this answer and this chat; the helper spends it before it posts.
+  // A cancel writes and sends nothing.
+  const stopped = await askOwner('respond_post', {}, { repo: result.repo, number: result.number, result_id: result.id, digest: result.digest, chat_id: result.chat_id })
+  if (stopped) return { ok: false, error: stopped.error || '' }
   const written = await writeDecision(slug, { result_id: result.id, digest: result.digest, decision: 'approved', at: now() }, storage)
   if (!written.ok) return written
   const delivery = await deliver(token, { scope: respondScope(result.repo, result.number), cid: again ? `respond-retry-${result.id}-${Date.now()}` : `respond-post-${result.id}`, title: `Respond to feedback on #${result.number}`,
