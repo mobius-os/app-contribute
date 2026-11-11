@@ -318,8 +318,8 @@ and what cannot be undone. Where Möbius advertises `owner_confirm`, its own she
 (outside the app's frame, `window.mobius.ownerGrant`, see `owner-grant.js`) replaces that
 one for Merge and the five status changes: one tap on the action, one tap to confirm, and
 **Merge options…** (only where the repository allows more than one way) to choose how it
-lands first. Submitting or discarding a verdict, pushing or discarding a fix, starting a
-review whose agent may act in public, and Post ask the same sheet first, so the owner's tap
+lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
+the same sheet first, so the owner's tap
 is proven by Möbius and not by the app's own frame. A Möbius without it keeps the app's own sheets.
 New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default

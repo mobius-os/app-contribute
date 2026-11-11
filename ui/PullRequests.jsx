@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, startReviewRun, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
@@ -16,7 +16,7 @@ import { ReviewDialog } from './ReviewDialog.jsx'
 import { AddressFeedbackWindow } from './AddressFeedback.jsx'
 import { savedFindings } from '../address-feedback.js'
 import { responseView } from '../respond-result.js'
-import { ownerConfirmOffered, shellConfirmFor } from '../owner-grant.js'
+import { askOwner, ownerConfirmOffered } from '../owner-grant.js'
 import { approveResponse, discardResponse } from '../respond-flow.js'
 import { ReviewConfirmation } from './ReviewConfirmation.jsx'
 import { ActionConfirm } from './ActionConfirm.jsx'
@@ -224,7 +224,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // The platform's advertised workflows, remembered across launches.
   const [capabilities, setCapabilities] = useState(null)
   // Where Möbius confirms the owner's sensitive taps on its own sheet (owner-grant.js), the writes below ask it first; elsewhere null.
-  const shellConfirm = shellConfirmFor(capabilities)
+  const shellConfirm = ownerConfirmOffered(capabilities) ? askOwner : null
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const request = useRef(0)
@@ -464,8 +464,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     try {
       if (!resolved) throw new Error('The selected workflow is still being checked. Try again shortly.')
       const pulls = await liveSelection(token, choice.pulls)
-      const result = await startReviewRun(token, appId, reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }), shellConfirm)
-      if (!result) return
+      const result = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }))
       onRunPatched?.(result.run)
       void onRunsChanged?.()
       setChoice(null); setSelected(new Set())

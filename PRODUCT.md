@@ -172,7 +172,7 @@ the owner, and folds apps with nothing to do.
   in Möbius's own words and cannot be pressed by the app or an agent. Merge lands the
   way the repository prefers, and **Merge options…** (only where it allows more than
   one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
-  fix, starting a review whose agent may act in public, and Post get that sheet as a
+  fix, and Post get that sheet as a
   new confirm. A cancel sends nothing. A Möbius without it keeps the sheets above.
 - **Open as draft / Open for review** is one split button on the prepared-PR
   card; the arrow offers the other stage for that send. The stage is part of the

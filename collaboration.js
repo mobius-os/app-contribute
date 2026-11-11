@@ -299,19 +299,6 @@ export function reviewRunRequest(choice) {
   }
 }
 
-// A review whose agent may act in public (post its review, propose a verdict, or send one itself) is the one start the shell confirms
-// with the owner; a private review stays a single tap. Returns the platform's answer, or null when the owner cancelled; a refusal throws
-// the platform's sentence. Nothing is sent after either.
-const PUBLISHING_OPTIONS = ['post_review', 'propose_verdict', 'agent_submits_verdict']
-export async function startReviewRun(token, appId, request, shellConfirm = null) {
-  if (shellConfirm && PUBLISHING_OPTIONS.some(key => request.options?.[key] === true)) {
-    const stopped = await shellConfirm('review_start', {}, request)
-    if (stopped?.error) throw new Error(stopped.error)
-    if (stopped) return null
-  }
-  return collaborationRequest(token, appId, 'review-runs', request)
-}
-
 // A public write is only as true as its answer. Of the ways one can end, a decoded receipt for this
 // action proves it happened and a decoded 4xx proves it did not. Everything else may have reached
 // GitHub: the connection dropped before the answer, a gateway or server error, an answer whose body

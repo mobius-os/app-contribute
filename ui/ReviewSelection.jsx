@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { collaborationRequest, reviewRunRequest, startReviewRun } from '../collaboration.js'
-import { shellConfirmFor } from '../owner-grant.js'
+import { collaborationRequest, reviewRunRequest } from '../collaboration.js'
 import { inspectReviewSelection, loadReviewSelection } from '../review-selection.js'
 import { ReviewConfirmation } from './ReviewConfirmation.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
@@ -38,11 +37,8 @@ export function ReviewSelection({ selectionId, appId, token, onClose, onRunsChan
       const current = await loadReviewSelection(selectionId)
       if (JSON.stringify(current) !== JSON.stringify(state.request)) throw new Error('This proposal changed while you were reading it. Reopen the link before approving.')
       await inspectReviewSelection(token, current)
-      const started = await startReviewRun(token, appId, reviewRunRequest({ ...choice,
-        options:reviewOptions(resolved.options), agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }),
-      shellConfirmFor(resolved.capabilities))
-      if (!started) return
-      const { run } = started
+      const { run } = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice,
+        options:reviewOptions(resolved.options), agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }))
       setState(old => ({ ...old, choice: null, run }))
       void onRunsChanged?.()
     } catch (error) { setError(error.message) }

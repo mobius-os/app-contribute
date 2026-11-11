@@ -10,9 +10,6 @@ export const OWNER_CONFIRM_CAPABILITY = 'owner_confirm'
 export const ownerConfirmOffered = capabilities => capabilities?.[OWNER_CONFIRM_CAPABILITY] === true
   && typeof globalThis.window?.mobius?.ownerGrant?.request === 'function'
 
-// What a write sends to be confirmed first: askOwner where this page can use the shell's sheet, otherwise null (nothing is asked).
-export const shellConfirmFor = capabilities => (ownerConfirmOffered(capabilities) ? askOwner : null)
-
 // Ask the owner to confirm `action` on exactly this `scope` and `body` (the route's path parameters and its request body).
 // null: confirmed, so send the request. Otherwise the outcome to show instead, in the shape the action sheets already read:
 // { cancelled } (the owner closed the sheet, or this frame was not showing) or { error } (the platform's own sentence).

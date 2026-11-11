@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergePull, pullAction, startReviewRun } from '../collaboration.js'
+import { mergePull, pullAction } from '../collaboration.js'
 import { askOwner } from '../owner-grant.js'
 
 const HEAD = 'a'.repeat(40)
@@ -30,19 +30,6 @@ test('the shell is asked first for exactly the request that is then sent; a canc
     sheet.next = new Error('That pull request changed. Look at it again.')
     assert.deepEqual(await pullAction('t', 3, pr, 'close', {}, askOwner), { error: 'That pull request changed. Look at it again.' })
     assert.equal(order.filter(call => call[0] === 'fetch').length, 0, 'nothing was sent')
-
-    // A review start is confirmed only when its agent may act in public.
-    order.length = 0
-    sheet.next = true
-    const start = options => startReviewRun('t', 3, { request_id: 'r'.repeat(8), mode: 'review', options, items: [] }, askOwner)
-    await start({ post_review: false })
-    assert.deepEqual(order.map(call => call[0]), ['fetch'], 'a private review is one tap')
-    order.length = 0
-    await start({ post_review: true })
-    assert.deepEqual(order.map(call => call[0]), ['shell', 'fetch'])
-    assert.equal(order[0][1], 'review_start')
-    sheet.next = false
-    assert.equal(await start({ propose_verdict: true }), null)
 
     // Without the shell's sheet (a Möbius that does not offer it) nothing is asked and the request goes as before.
     order.length = 0
