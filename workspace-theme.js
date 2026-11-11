@@ -269,20 +269,13 @@ export const WORKSPACE_CSS = `
 .co-selection-page .co-board-actions { margin-top:24px; }
 @media(max-width:680px) { .co-selection-page { padding:20px; } }
 
-/* Project status under To look at: one box per fact, side by side when they
-   fit and stacked on a phone. The 1px gap over a border-coloured box draws the
-   divider in either layout. */
-.co-project-position { margin:12px 0 16px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); overflow:hidden; }
-.co-status-row { display:flex; align-items:center; gap:12px; min-height:56px; padding:8px 12px; }
-.co-status-row + .co-status-row { border-top:1px solid var(--border); }
-.co-status-icon { flex:0 0 auto; display:grid; place-items:center; width:36px; height:36px; border-radius:var(--co-radius-control); background:var(--surface-2,var(--bg)); color:var(--muted); }
-.co-status-row.is-ok .co-status-icon { color:var(--green); background:color-mix(in srgb,var(--green) 14%,transparent); }
-.co-status-row.is-warn .co-status-icon { color:var(--co-warn); background:color-mix(in srgb,var(--co-warn) 16%,transparent); }
-.co-status-text { flex:1; min-width:0; margin:0; font-size:var(--co-text-body); overflow-wrap:anywhere; }
-.co-status-text strong { font-weight:650; }
-.co-status-sub { color:var(--muted); font-size:var(--co-text-meta); }
-.co-status-actions { flex:0 0 auto; display:flex; gap:8px; }
-.co-status-actions .co-btn { gap:8px; padding:0 12px; }
+/* The project screen's one status row, shown only while an update from GitHub or a conflict needs the owner. */
+.co-upstream-warning { display:flex; align-items:center; gap:12px; min-height:56px; margin:12px 0 16px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
+.co-upstream-warning-icon { flex:0 0 auto; display:grid; place-items:center; width:36px; height:36px; border-radius:var(--co-radius-control); color:var(--co-warn); background:color-mix(in srgb,var(--co-warn) 16%,transparent); }
+.co-upstream-warning p { flex:1; min-width:0; margin:0; font-size:var(--co-text-body); overflow-wrap:anywhere; }
+.co-upstream-warning strong { font-weight:650; }
+.co-upstream-warning-actions { flex:0 0 auto; display:flex; gap:8px; }
+.co-upstream-warning-actions .co-btn { gap:8px; padding:0 12px; }
 .co-workspace .co-pr-assignment { padding:0; background:none; border:0; border-radius:0; }
 .co-workspace .co-run { margin-top:0; }
 .co-workspace .co-public-work { margin-top:0; }
@@ -316,9 +309,8 @@ export const WORKSPACE_CSS = `
  .co-projects-view { padding-top:8px; }
  .co-workspace-head { padding:0 0 6px; }
  .co-workspace-title p { margin-top:0; line-height:20px; }
- .co-project-position { margin:10px 0 8px; }
- .co-status-row { flex-wrap:wrap; padding-block:10px; }
- .co-status-actions { flex:1 0 100%; padding-left:48px; }
+ .co-upstream-warning { flex-wrap:wrap; gap:6px 10px; min-height:0; margin:10px 0 8px; padding:10px 12px; }
+ .co-upstream-warning-actions { flex:1 0 100%; padding-left:46px; }
  .co-public-work > .co-task-content { padding:16px; }
  .co-pr-detail-body { height:clamp(280px,42dvh,440px); }
 }
@@ -1089,9 +1081,6 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-desk-row-title { font-size:var(--co-text-body); line-height:1.38; }
  .co-branch-flow { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
  .co-attn-show, .co-attn-hide, .co-attn[open] .co-attn-hide { display:none; }
- .co-status-row { gap:6px 10px; min-height:0; padding:10px 12px; }
- .co-status-icon { width:32px; height:32px; }
- .co-status-actions { flex-basis:100%; padding-left:42px; }
  .co-pr-sticky { display:block; position:sticky; top:0; z-index:6; order:-3; height:0; margin-inline:-16px; }
  .co-pr-sticky > button { position:absolute; inset:0 0 auto 0; display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:0 16px; border:0; border-bottom:1px solid var(--border); background:var(--surface); color:var(--text); font:600 var(--co-text-body) var(--font); text-align:left; cursor:pointer; opacity:0; visibility:hidden; transform:translateY(-6px); transition:opacity .14s ease-out,transform .14s ease-out,visibility 0s .14s; }
  .co-pr-sticky[data-shown=true] > button { opacity:1; visibility:visible; transform:none; transition-delay:0s; }

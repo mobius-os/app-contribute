@@ -152,9 +152,8 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 file<\/strong> changed on this Möbius\./)
-  assert.match(html, /Local changes and GitHub/)
-  assert.match(html, /See the files/)
+  // The local-change count, the files and the Make PRs button live in the Local changes tab, not above the tabs.
+  assert.doesNotMatch(html, /changed on this Möbius|Local changes and GitHub|See the files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
