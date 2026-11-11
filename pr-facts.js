@@ -213,6 +213,8 @@ export function prFacts({ pr, login, runs = [], ignored = null, chats = [], resp
     permission: pr?.repository?.viewerPermission || 'unknown',
     // GitHub's own gate: a branch rule that still needs a review no approval here can satisfy.
     gate: pr?.reviewDecision === 'REVIEW_REQUIRED' ? 'review_required' : null,
+    // How many review requests GitHub holds, when it was read: an assignee is not one.
+    asked: Number.isInteger(pr?.reviewRequests?.totalCount) ? pr.reviewRequests.totalCount : undefined,
     reviews: [...(own ? reviews || [] : withSentVerdict(reviews || [], fromRuns.sent, pr, login)), ...commentsOf(pr)],
     participants: participantsOf(pr),
     myReview,

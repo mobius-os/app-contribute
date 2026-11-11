@@ -15,7 +15,9 @@ export const AGENT_MENU = { check_my_pr: 'review', respond: 'reply', finish_it: 
 const YOUR_MENU = { open_for_review: 'send', back_to_draft: 'draft', ask_rereview: 'person', ask_approval: 'person', merge: 'merge', close: 'close' }
 // Each of your actions exists only where this Möbius can do it for you.
 const CAPABILITY = { open_for_review: 'mark_ready_now', back_to_draft: 'back_to_draft_now', ask_rereview: 'request_rereview_now', ask_approval: 'ask_approval_now', merge: 'merge_now', close: 'close_now' }
-export const YOUR_INTENTS = new Set(Object.keys(YOUR_MENU))
+// Request review asks anyone, not just people who reviewed, and has a button of its own beside Actions: no menu row.
+const OWN_BUTTON = { request_review: 'request_review_now' }
+export const YOUR_INTENTS = new Set([...Object.keys(YOUR_MENU), ...Object.keys(OWN_BUTTON)])
 // Not a machine action: Merge's way to choose how it lands first. It exists only where Möbius confirms Merge on its own sheet, which
 // has no such choice, so Merge itself lands the way the repository prefers; see withMergeOptions.
 export const MERGE_OPTIONS = 'merge_options'
@@ -42,6 +44,25 @@ const asItem = (action, icon) => ({ intent: action.id, icon, title: action.title
 // Whether this Möbius can run one of your own actions for you (the menu lists it, the next-step button offers it).
 export const mayRunYourAction = (id, { record, capabilities }) => !!YOUR_MENU[id]
   && (capabilities?.[CAPABILITY[id]] === true || (id === 'open_for_review' && isPersonalDraft(record)))
+
+// The Request review button of the PR page: absent where this Möbius cannot do it or the PR is not your own,
+// dimmed with the machine's reason where it cannot run now.
+export function requestReviewButton(decision, { capabilities } = {}) {
+  const action = decision?.actions?.find(item => item.id === 'request_review')
+  return action && capabilities?.[OWN_BUTTON.request_review] === true ? { off: !action.enabled, reason: action.reason } : null
+}
+
+// The same for a selection of PRs (the tray beside Assign): every PR must be your own and able to ask, and in one repository,
+// because one list of people is offered for all of them.
+export function requestReviewForMany(decisions, pulls, { capabilities } = {}) {
+  const offers = decisions.map(decision => requestReviewButton(decision, { capabilities }))
+  if (capabilities?.[OWN_BUTTON.request_review] !== true) return null
+  if (offers.some(offer => !offer)) return { off: true, reason: 'Only your own PRs can ask for a review.' }
+  const stopped = offers.find(offer => offer.off)
+  if (stopped) return stopped
+  const repos = new Set(pulls.map(pr => pr.repository?.nameWithOwner?.toLowerCase()))
+  return repos.size > 1 ? { off: true, reason: 'Choose PRs of one repository.' } : { off: false, reason: '' }
+}
 
 function yourItems(decision, { record, capabilities }) {
   return decision.actions.filter(action => mayRunYourAction(action.id, { record, capabilities }))

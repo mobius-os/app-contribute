@@ -2,6 +2,7 @@
 // review journey; a repository role never becomes an automatic merge grant.
 import { PR_FIELDS, fetchLiveStates } from './api.js'
 import { mayWrite } from './pr-machine.js'
+import { sameLogin } from './domain.js'
 
 export { PR_FIELDS } from './api.js'
 export const mayAssign = permission => ['TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN'].includes(permission)
@@ -336,7 +337,8 @@ export const mergePull = (token, appId, pr, { method = '', ...shell } = {}) => p
 })
 
 // The owner's own status change on one PR, at this exact version, once: `ready` (open a draft for
-// review), `draft` (back to draft), `close`, `request-reviewers` (ask for re-review) or `ask-approval` (a note asking
+// review), `draft` (back to draft), `close`, `request-review` (ask anyone to review), `request-reviewers` (ask for
+// re-review) or `ask-approval` (a note asking
 // reviewers who looked again to approve). Same outcome
 // shapes as mergePull. GitHub cannot pin a version on these writes, so the platform reports the head
 // it saw afterwards (observedHead) and the sheet says so if it moved. The receipt of each is the state
@@ -346,6 +348,7 @@ const STATUS_WRITE = {
   ready: { action: 'open_for_review', state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
   draft: { action: 'back_to_draft', state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
   close: { action: 'close', state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
+  'request-review': { action: 'request_review', state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for the review. Check the pull request before trying again.' },
   'request-reviewers': { action: 'ask_rereview', state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
   'ask-approval': { action: 'ask_approval', state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
 }
@@ -357,6 +360,53 @@ export const pullAction = (token, appId, pr, action, extra = {}, shell = {}) => 
     action: write.action, ...shell, code: write.code, words: write.words,
     receipt: result => result?.state === write.state && typeof result.observed_head_sha === 'string' ? { state: write.state, observedHead: result.observed_head_sha } : null,
   })
+}
+
+// Request review for several PRs at once: one request per PR, naming the ticked people who may be asked there (not its
+// author, not who approved this version). `done` (which this fills) holds each PR and person already asked on an earlier try,
+// so a retry after a partial failure asks only the pairs that are left, even when the ticks changed in between: nobody is
+// asked twice, and a newly ticked person is still asked on every PR. With `shell` ({ shellConfirm, onConfirmed }, as for any
+// public write) each PR's request is confirmed on Möbius's own sheet before it is sent, one sheet per PR, since the shell
+// confirms exactly one write; closing one stops the rest (nothing further is sent). { ok } when every PR is asked or has nobody
+// left to ask, { pending } when GitHub may have taken a request (read it back, never repeat), { cancelled } when the owner
+// closed the first sheet, otherwise { error } naming the PRs that were refused or left unasked.
+const askedPair = (pr, login) => `${prKey(pr)}@${String(login).toLowerCase()}`
+export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set(), shell = {} } = {}) {
+  const asked = [], skipped = [], refused = [], unsure = [], notAsked = []
+  for (const [index, pr] of pulls.entries()) {
+    const askable = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
+    if (!askable.length) { skipped.push(pr.number); continue }
+    const left = askable.filter(login => !done.has(askedPair(pr, login)))
+    if (!left.length) continue
+    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: left }, shell)
+    if (outcome.cancelled) {
+      notAsked.push(...pulls.slice(index).map(item => item.number))
+      break
+    }
+    if (outcome.ok) { asked.push(pr.number); left.forEach(login => done.add(askedPair(pr, login))) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
+  }
+  if (unsure.length) return { pending: true, error: `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.` }
+  if (notAsked.length) return asked.length || refused.length
+    ? { error: `You closed Möbius’s sheet. Not asked: ${[...notAsked.map(number => '#' + number), ...refused].join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
+    : { cancelled: true }
+  if (refused.length) return { error: `Not asked: ${refused.join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
+  return { ok: true, state: 'requested', asked, skipped }
+}
+
+// Everyone a PR's repository lets work on it: the list Assign shows, which is also who GitHub lets be asked to review.
+// Read to its end; a repository with more people than PEOPLE_PAGES pages (100 each) comes back `partial`, and the sheet says
+// so. Logins only; who may not be asked (the author, a bot, someone who approved this version) is for the sheet to leave out.
+const PEOPLE_PAGES = 30
+export async function loadReviewPeople(token, appId, pr) {
+  const people = []
+  let page = 1
+  for (let read = 0; page; read += 1) {
+    if (read === PEOPLE_PAGES) return { people, partial: true }
+    const next = await collaborationRequest(token, appId, `assignees?repo=${encodeURIComponent(pr.repository.nameWithOwner)}&page=${page}`)
+    people.push(...(next.assignees || []).map(person => person.login).filter(Boolean))
+    page = next.next_page
+  }
+  return { people, partial: false }
 }
 
 // What a finished private review would say on GitHub, word for word, with the hash that binds the

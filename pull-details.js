@@ -1,6 +1,7 @@
 // Read-only GitHub projection. No request here approves or mutates a PR.
 // Version-specific evidence is checked against the selected head AND base.
 import { parseUnifiedDiff } from './ui/diff/parseUnifiedDiff.js'
+import { reviewersOf } from './reviewers.js'
 
 export function pullPath(pr) {
   const repo = pr?.repository?.nameWithOwner
@@ -182,6 +183,30 @@ export async function loadAllPullActivity(token, pr, signal) {
 export async function loadAllPullThreads(token, pr, signal) {
   const { pages, partial } = await readEveryPage(after => loadPullThreads(token, pr, after, signal), null, page => page.nextCursor)
   return { threads: pages.flatMap(page => page.threads), partial }
+}
+// One page of one of the three lists the reviewers card is made of, oldest first, so the walk can follow it to the end.
+const REVIEWER_PERSON = '__typename ... on User { login }'
+async function reviewersPage(token, pr, field, args, node, after, signal) {
+  const { data, errors } = await pullGraphRead(token, pr, `${field}(first:100, after:$after${args}) { pageInfo { hasNextPage endCursor } nodes { ${node} } }`, { after }, signal)
+  const connection = data[field]
+  if (!connection) errors.push('Who was asked to review is unavailable.')
+  return { nodes: connection?.nodes || [], hasMore: connection?.pageInfo?.hasNextPage === true, nextCursor: connection?.pageInfo?.endCursor || null, errors }
+}
+// Who was asked to review this PR and where each review stands (reviewers.js words the rows). Review requests and
+// their "requested" events are GitHub's own record of asking; an assignee is not among them. Each list is read to its
+// end, because a status taken from a slice of the history can be wrong (a verdict hidden behind newer comments); when a
+// list could not be read to its end (a page failed, or it is longer than the page limit) the errors say so.
+export async function loadPullReviewers(token, pr, signal) {
+  const walk = (field, args, node) => readEveryPage(after => reviewersPage(token, pr, field, args, node, after, signal), null, page => page.nextCursor)
+  const [requests, reviews, events] = await Promise.all([
+    walk('reviewRequests', '', `requestedReviewer { ${REVIEWER_PERSON} }`),
+    walk('reviews', '', 'state submittedAt commit { oid } author { login }'),
+    walk('timelineItems', ', itemTypes:[REVIEW_REQUESTED_EVENT]', `... on ReviewRequestedEvent { createdAt requestedReviewer { ${REVIEWER_PERSON} } }`),
+  ])
+  const nodes = read => read.pages.flatMap(page => page.nodes)
+  const errors = [...new Set([requests, reviews, events].flatMap(read => read.pages.flatMap(page => page.errors)))]
+  if (!errors.length && [requests, reviews, events].some(read => read.partial)) errors.push('Some of who was asked to review could not be read, so this list may be incomplete.')
+  return { reviewers: reviewersOf({ reviewRequests: { nodes: nodes(requests) }, reviews: { nodes: nodes(reviews) }, timelineItems: { nodes: nodes(events) } }, pr.headRefOid), errors }
 }
 export async function loadPullRelated(token, pr, signal) {
   const { data, errors } = await pullGraphRead(token, pr, `

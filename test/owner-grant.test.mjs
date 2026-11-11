@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergePull, pullAction } from '../collaboration.js'
+import { mergePull, pullAction, requestReviewMany } from '../collaboration.js'
 import { askOwner } from '../owner-grant.js'
 
 const HEAD = 'a'.repeat(40)
@@ -37,5 +37,40 @@ test('the shell is asked first for exactly the request that is then sent; a canc
     await mergePull('t', 3, pr)
     await pullAction('t', 3, pr, 'close')
     assert.deepEqual(order.map(call => call[0]), ['fetch', 'fetch'])
+  } finally { delete globalThis.window; globalThis.fetch = realFetch }
+})
+
+test('Request review is confirmed on the shell’s sheet too: one request, or one sheet for each PR of a batch', async () => {
+  const order = []
+  const realFetch = globalThis.fetch
+  const sheet = { answers: [] } // one answer per sheet: true confirmed, false the owner closed it
+  globalThis.window = { mobius: { ownerGrant: { request: async (action, extra, sent) => { order.push(['shell', action, sent.number, sent.reviewers]); return sheet.answers.shift() ?? true } } } }
+  globalThis.fetch = async (url, options) => { const sent = JSON.parse(options.body); order.push(['fetch', sent.number, sent.reviewers]); return new Response(JSON.stringify({ state: 'requested', observed_head_sha: HEAD })) }
+  const other = number => ({ ...pr, number, author: { login: 'owner-login' } })
+  const shell = { shellConfirm: askOwner, onConfirmed: () => order.push(['confirmed']) }
+  try {
+    assert.deepEqual(await pullAction('t', 3, pr, 'request-review', { reviewers: ['sam'] }, shell), { ok: true, state: 'requested', observedHead: HEAD })
+    assert.deepEqual(order, [['shell', 'request_review', 7, ['sam']], ['confirmed'], ['fetch', 7, ['sam']]], 'the machine’s action id, and exactly the body that is then sent')
+
+    order.length = 0
+    const batch = await requestReviewMany('t', 3, [other(1), other(2)], ['sam'], { shell })
+    assert.deepEqual(batch, { ok: true, state: 'requested', asked: [1, 2], skipped: [] })
+    assert.deepEqual(order.map(call => call.join(':')), ['shell:request_review:1:sam', 'confirmed', 'fetch:1:sam', 'shell:request_review:2:sam', 'confirmed', 'fetch:2:sam'], 'each PR is confirmed before it is sent')
+
+    // Closing the first sheet sends nothing; closing a later one stops the rest and says what was and was not asked, and a retry asks only what is left.
+    order.length = 0
+    sheet.answers = [false]
+    const done = new Set()
+    assert.deepEqual(await requestReviewMany('t', 3, [other(1), other(2)], ['sam'], { shell, done }), { cancelled: true })
+    assert.deepEqual(order.map(call => call[0]), ['shell'])
+    order.length = 0
+    sheet.answers = [true, false, true]
+    const stopped = await requestReviewMany('t', 3, [other(1), other(2), other(3)], ['sam'], { shell, done })
+    assert.deepEqual(stopped, { error: 'You closed Möbius’s sheet. Not asked: #2 · #3. Asked on #1.' })
+    assert.deepEqual(order.filter(call => call[0] === 'fetch').map(call => call[1]), [1], 'nothing is sent after the sheet was closed')
+    order.length = 0
+    const retry = await requestReviewMany('t', 3, [other(1), other(2), other(3)], ['sam'], { shell, done })
+    assert.deepEqual(retry, { ok: true, state: 'requested', asked: [2, 3], skipped: [] })
+    assert.deepEqual(order.filter(call => call[0] === 'fetch').map(call => call[1]), [2, 3], 'the PR already asked is not asked again')
   } finally { delete globalThis.window; globalThis.fetch = realFetch }
 })
