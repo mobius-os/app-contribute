@@ -379,7 +379,7 @@ class PostScreenshotTests(ScreenshotWorld):
   def test_a_post_the_gate_refuses_uploads_no_screenshot(self):
     _, result = self.saved_with_pictures()
     before = self.snapshot()
-    with mock.patch.dict(os.environ, {"FAKE_HOST_CAPABILITIES": "{}"}):  # a Möbius without the owner grant
+    with mock.patch.dict(os.environ, {"FAKE_HOST_CONSUME": "missing"}):  # a Möbius that cannot confirm the owner's press
       self.assertRefused(self.post(result["id"]), 3, "Post is off for now")
     self.assertEqual(self.assets.calls, [], "nothing was uploaded to the repository")
     self.assertEqual(self.snapshot(), before)

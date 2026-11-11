@@ -34,7 +34,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "respond-result.example.json"
 TOKEN = "TEST-TOKEN-that-must-never-be-printed"
 
 FAKE_GH = (Path(__file__).parent / "fixtures" / "fake_gh.py").read_text(encoding="utf-8")  # shared with respond-contract.test.mjs
-FAKE_HOST = Path(__file__).parent / "fixtures" / "fake_host"  # a Möbius core (SCRIPTS_DIR) that says what it offers; shared too
+FAKE_HOST = Path(__file__).parent / "fixtures" / "fake_host"  # a Möbius core (SCRIPTS_DIR) that answers the owner confirmation; shared too
 
 REPLY_WITH_AWKWARD_TEXT = (
   "@alex both findings were real \u2014 fixed \U0001F680 \u05e9\u05dc\u05d5\u05dd\r\n\r\n"
@@ -126,9 +126,9 @@ class RespondWorld(unittest.TestCase):
       "FAKE_GH_CONFIG": str(self.fake_config),
       "CHAT_ID": "chat-under-test",
       "GH_TOKEN": TOKEN,
-      # Every world but GateTests' posts on a Möbius that offers the owner grant; a test of the gate says otherwise, out loud.
+      # Every world but GateTests' posts on a Möbius where the owner confirmed it; a test of the gate says otherwise, out loud.
       "SCRIPTS_DIR": str(FAKE_HOST),
-      "FAKE_HOST_CAPABILITIES": json.dumps({"owner_grant": True}),
+      "FAKE_HOST_LOG": str(self.root / "consumed.jsonl"),
     }
     patcher = mock.patch.dict(os.environ, environment)
     patcher.start()
@@ -1275,66 +1275,71 @@ class PostTests(RespondWorld):
     self.assertEqual(self.saved_result()["state"], "failed")
 
 
-# --- the gate: no post until the host can vouch for the owner's press ------------------------------------------
+# --- the gate: no post until the owner's press is confirmed on Möbius's own sheet -----------------------------------
 
 
 class GateTests(RespondWorld):
-  """The agent can write the approval file itself, so `post` publishes only on a Möbius that advertises an owner
-  grant it cannot mint (capability `owner_grant`). Without it everything else keeps working."""
+  """The agent can write the approval file itself, so `post` publishes only after it has spent the owner's one-time confirmation,
+  made on Möbius's own sheet. Without it everything else keeps working."""
 
-  def host_says(self, capabilities) -> None:
-    os.environ["FAKE_HOST_CAPABILITIES"] = capabilities if isinstance(capabilities, str) else json.dumps(capabilities)
+  def host_answers(self, answer: str) -> None:
+    os.environ["FAKE_HOST_CONSUME"] = answer
 
-  def test_a_forged_approval_publishes_nothing_while_the_host_cannot_vouch_for_the_owner(self):
+  def consumed(self) -> list[dict]:
+    log = self.root / "consumed.jsonl"
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+  def test_a_forged_approval_publishes_nothing_while_the_owner_has_not_confirmed_the_post(self):
     _, _, result = self.approved_result()  # the approval is on disk, however it got there
     cases = [
-      ("a Möbius that does not advertise the grant", lambda: self.host_says({})),
-      ("the grant advertised as off", lambda: self.host_says({"owner_grant": False})),
-      ("anything but a plain true", lambda: self.host_says({"owner_grant": "yes"})),
-      ("an answer that cannot be read", lambda: self.host_says("{oops")),
-      ("no Möbius core to ask", lambda: os.environ.pop("SCRIPTS_DIR")),
+      ("the owner has not confirmed this Post in Möbius", lambda: self.host_answers("refused"), "has not confirmed this Post"),
+      ("a Möbius without the confirmation route", lambda: self.host_answers("missing"), "Post is off for now"),
+      ("no Möbius core to ask", lambda: os.environ.pop("SCRIPTS_DIR"), "Post is off for now"),
     ]
-    for name, arrange in cases:
+    for name, arrange, words in cases:
       with self.subTest(name):
         with mock.patch.dict(os.environ):
           arrange()
-          before = self.snapshot()
-          self.assertRefused(self.post(result["id"]), 3, "Post is off for now")
+          before, reads = self.snapshot(), len(self.gh_calls())
+          self.assertRefused(self.post(result["id"]), 3, words)
         self.assertEqual(self.snapshot(), before, "nothing changed, on disk or on GitHub")
+        self.assertEqual(len(self.gh_calls()), reads, "GitHub was not even read: the confirmation is spent first")
         stored = self.saved_result()
         self.assertEqual((stored["state"], stored["error"], stored["receipts"]["push"], stored["receipts"]["replies"]), ("ready", None, None, []))
         self.assertEqual(self.remote_branch(), self.base, "and nothing was pushed")
     self.assertEqual(self.gh_writes(), [])
 
-  def test_a_post_the_gate_refuses_leaves_no_trace_even_with_nothing_saved(self):
-    self.host_says({})
-    self.assertRefused(self.post("r-000000000000"), 3, "Post is off for now")
+  def test_a_post_with_nothing_saved_is_refused_and_leaves_no_trace(self):
+    self.assertRefused(self.post("r-000000000000"), 3, "No result is saved")
     self.assertFalse(self.app.exists())
 
-  def test_a_dry_run_still_shows_what_post_would_do_while_post_is_off(self):
+  def test_a_dry_run_still_shows_what_post_would_do_while_the_owner_has_not_confirmed(self):
     _, _, result = self.approved_result()
-    self.host_says({})
+    self.host_answers("refused")
     before = self.snapshot()
     outcome = self.post(result["id"], "--dry-run")
     self.assertEqual(outcome.code, 0, outcome.err)
     self.assertIn("Post would, in this order:", outcome.out)
     self.assertEqual(self.snapshot(), before)
+    self.assertEqual(self.consumed(), [], "a dry run publishes nothing, so it spends nothing")
 
-  def test_save_and_show_keep_working_while_post_is_off(self):
-    self.host_says({})
+  def test_save_and_show_keep_working_while_the_owner_has_not_confirmed(self):
+    self.host_answers("refused")
     outcome = self.save(self.input_for(self.two_commits()))
     self.assertEqual(outcome.code, 0, outcome.err)
     shown = self.cli("show", "--pr", PULL)
     self.assertEqual(shown.code, 0, shown.err)
     self.assertFalse(json.loads(shown.out)["approved"])
 
-  def test_the_approval_is_still_the_second_check_once_the_host_offers_the_grant(self):
+  def test_the_approval_is_still_the_second_check_once_the_owner_has_confirmed(self):
     shas = self.two_commits()
     self.assertEqual(self.save(self.input_for(shas)).code, 0)
     result = self.saved_result()
-    self.assertRefused(self.post(result["id"]), 3, "no decision is saved")  # the gate is open, the approval is missing
+    self.assertRefused(self.post(result["id"]), 3, "no decision is saved")  # the confirmation is spent, the approval is missing
     self.decide(result)
     self.assertEqual(self.post(result["id"]).code, 0)
+    asked = {"app_id": 7, "action": "respond_post", "body": {"repo": "owner/repo", "number": 7, "result_id": result["id"], "digest": result["digest"]}}
+    self.assertEqual(self.consumed(), [asked, asked], "one spend for each run, for exactly this result and digest")
 
 
 class ProgramTests(RespondWorld):

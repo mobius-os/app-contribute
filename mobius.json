@@ -126,6 +126,7 @@
     "review-steps.js",
     "review-list.js",
     "collaboration.js",
+    "owner-grant.js",
     "ui/PullRequests.jsx",
     "ui/AddressFeedback.jsx",
     "ui/ActionsMenu.jsx",

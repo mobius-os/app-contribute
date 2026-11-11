@@ -14,15 +14,18 @@ const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 // | { pending, error } | { error }). A { pending } outcome may have happened on GitHub: the sheet
 // first has the owner's view read GitHub again (`onUnconfirmed`, read-only), and its button stays
 // off for good, so another attempt can only start from that fresh read. Opened inside a ReviewDialog.
-export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed }) {
+// `autoConfirm`: Möbius confirms this action on its own sheet (owner-grant.js), so this one asks nothing: it opens already at work
+// and shows only the outcome. `onConfirm` may answer { cancelled } (the owner closed that sheet): nothing was sent, so this one
+// closes; where it did not open at work (Merge options…) it shows its own choices again.
+export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed, autoConfirm = false }) {
   const region = useRef(null)
   const titleId = useId()
-  const [phase, setPhase] = useState('confirm')
+  const [phase, setPhase] = useState(autoConfirm ? 'working' : 'confirm')
   const [error, setError] = useState('')
   // An action with ways to do it (Merge: squash, merge commit, rebase) asks once, in the sheet.
   const [picked, setPicked] = useState(copy.choices?.value || '')
   const [result, setResult] = useState(null)
-  useEffect(() => { focusActionRegion(region.current) }, [])
+  useEffect(() => { focusActionRegion(region.current); if (autoConfirm) void confirm() }, [])
   // Writing, or reading GitHub back after a write that could not be confirmed.
   const working = phase === 'working' || phase === 'checking'
   async function confirm() {
@@ -30,6 +33,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
     let outcome
     // A handler that throws never said whether the write reached GitHub.
     try { outcome = await onConfirm({ choice: picked }) } catch { outcome = { pending: true, error: 'Lost contact with GitHub. Check the PR before trying again.' } }
+    if (outcome?.cancelled) { setPhase('confirm'); if (autoConfirm) onClose(); return }
     if (outcome?.ok || outcome?.alreadyHandled) { setResult(outcome); setPhase('done'); onDone?.(outcome); return }
     setError(outcome?.error || 'Could not complete this. Nothing changed.')
     if (!outcome?.pending) { setPhase('confirm'); return }
@@ -39,12 +43,14 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
     setPhase('unconfirmed')
   }
   const done = phase === 'done'
+  // The shell's sheet is the owner's view of what happens; until this action has an outcome this one shows only that it is at work.
+  const atWork = autoConfirm && phase === 'working'
   const finished = typeof copy.done === 'function' ? copy.done(result) : copy.done
   const selected = copy.choices?.options.find(option => option.key === picked)
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
     <WindowHead icon={done ? 'check' : copy.icon} title={done ? finished.title : copy.title} titleId={titleId} pulls={[pr]} done={done}
       tools={done ? null : <CloseWindowButton disabled={working} onClick={onClose} />} />
-    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : <div className="co-rw-body">
+    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : atWork ? <div className="co-rw-body"><p role="status">{copy.working}</p></div> : <div className="co-rw-body">
       <ul className="co-rw-facts">{copy.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.text}</span></li>)}</ul>
       {copy.says ? <details className="co-task-details" open><summary>{copy.says.label}</summary><MarkdownView markdown={copy.says.markdown} /></details> : null}
       {copy.choices ? <>
@@ -58,13 +64,13 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
       </> : null}
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
     </div>}
-    <footer className="co-rw-foot">
+    {atWork ? null : <footer className="co-rw-foot">
       {done ? null : <p>{copy.footnote}</p>}
       <div className="co-rw-actions">
         {done
           ? <button type="button" className="co-btn co-btn-primary" onClick={onClose}>Done</button>
           : <button type="button" className="co-btn co-btn-primary" disabled={working || phase === 'unconfirmed' || copy.disabled === true} aria-busy={working} onClick={confirm}>{phase === 'checking' ? 'Checking GitHub…' : working ? copy.working : selected?.action || copy.confirm}</button>}
       </div>
-    </footer>
+    </footer>}
   </section>
 }

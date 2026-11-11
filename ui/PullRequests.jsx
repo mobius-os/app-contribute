@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, startReviewRun, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
@@ -15,7 +15,8 @@ import { ActionsMenu } from './ActionsMenu.jsx'
 import { ReviewDialog } from './ReviewDialog.jsx'
 import { AddressFeedbackWindow } from './AddressFeedback.jsx'
 import { savedFindings } from '../address-feedback.js'
-import { ownerGrantOffered, responseView } from '../respond-result.js'
+import { responseView } from '../respond-result.js'
+import { ownerConfirmOffered, shellConfirmFor } from '../owner-grant.js'
 import { approveResponse, discardResponse } from '../respond-flow.js'
 import { ReviewConfirmation } from './ReviewConfirmation.jsx'
 import { ActionConfirm } from './ActionConfirm.jsx'
@@ -23,7 +24,7 @@ import { IgnoreReview } from './IgnoreReview.jsx'
 import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
 import { RunOnce } from './RunOnce.jsx'
-import { YOUR_INTENTS } from '../actions-menu.js'
+import { MERGE_OPTIONS, YOUR_INTENTS } from '../actions-menu.js'
 import { ACTION_COPY, approvalNote, methodToSend } from '../action-copy.js'
 import { projectUpdater } from '../updates.js'
 import { NAMES } from '../names.js'
@@ -222,6 +223,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [resolved, setResolved] = useState(null)
   // The platform's advertised workflows, remembered across launches.
   const [capabilities, setCapabilities] = useState(null)
+  // Where Möbius confirms the owner's sensitive taps on its own sheet (owner-grant.js), the writes below ask it first; elsewhere null.
+  const shellConfirm = shellConfirmFor(capabilities)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const request = useRef(0)
@@ -441,7 +444,14 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // opens under the list header. `anchor` is only placement, never scope.
   function choose(pulls, job, anchor = '') {
     if (job === 'respond') { setAssigning(null); setAddressing({ pr: { ...pulls[0], repository: { ...pulls[0].repository } }, findings: savedFindings(statusFor(pulls[0]), ignoredReviews), response: responseView(responses, pulls[0]) }); return }
-    if (YOUR_INTENTS.has(job)) { setAssigning(null); setActing({ intent: job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record: recordsForPull(records, pulls[0])[0] }); return }
+    if (YOUR_INTENTS.has(job) || job === MERGE_OPTIONS) {
+      setAssigning(null)
+      const record = recordsForPull(records, pulls[0])[0]
+      // Möbius's own sheet is the one confirm for a one-tap action; a personal draft opens through the app's own record, which it does not cover.
+      const oneTap = !!shellConfirm && job !== MERGE_OPTIONS && !(job === 'open_for_review' && isPersonalDraft(record))
+      setActing({ intent: job === MERGE_OPTIONS ? 'merge' : job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record, oneTap })
+      return
+    }
     const { mode, intent, options } = reviewIntent(job)
     setResolved(null)
     task?.open('task:review')
@@ -454,7 +464,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     try {
       if (!resolved) throw new Error('The selected workflow is still being checked. Try again shortly.')
       const pulls = await liveSelection(token, choice.pulls)
-      const result = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }))
+      const result = await startReviewRun(token, appId, reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }), shellConfirm)
+      if (!result) return
       onRunPatched?.(result.run)
       void onRunsChanged?.()
       setChoice(null); setSelected(new Set())
@@ -465,12 +476,16 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     finally { setBusy(false) }
   }
   // One owner action on a run: ask the platform, then show the run it returns
-  // instead of any older read. Null when it failed (the error is shown).
-  async function runAction(run, action, body = {}) {
+  // instead of any older read. Null when it failed (the error is shown). `confirmAs` names the
+  // action Möbius's own sheet confirms first, for exactly this body: a cancel sends nothing, a refusal is shown.
+  async function runAction(run, action, body = {}, confirmAs = null) {
     if (busy) return null
     setBusy(true); setOwnRunError('')
     linkedEpoch.current++ // a linked read issued before the action cannot land after it
     try {
+      const stopped = confirmAs && shellConfirm ? await shellConfirm(confirmAs, { run_id: run.id }, body) : null
+      if (stopped?.error) { setOwnRunError(stopped.error); return null }
+      if (stopped) return null
       const result = await collaborationRequest(token, appId, `review-runs/${encodeURIComponent(run.id)}/${action}`, body)
       linkedEpoch.current++
       if (linkedRef.current?.id === run.id) setLinked(result.run)
@@ -486,13 +501,13 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // The owner's own submit or discard of one proposed verdict. The server
   // posts exactly the saved proposal, once; an agent can never do this.
   async function decideVerdict(run, item, proposal, decision, extra = {}) {
-    const result = await runAction(run, 'verdict', { repo: item.repo, number: item.number, head_sha: item.head_sha, proposal_id: proposal.id, decision, ...extra })
+    const result = await runAction(run, 'verdict', { repo: item.repo, number: item.number, head_sha: item.head_sha, proposal_id: proposal.id, decision, ...extra }, 'verdict')
     if (result?.verdict?.state === 'posted') onReviewPosted?.(item.repo, item.number)
     if (result?.merge_resumed === false) setOwnRunError('Approved on GitHub. Open the review chat and ask it to continue to the merge.')
   }
   // The owner's own Push or Don't push for fixes an agent prepared. The platform pushes exactly
   // that commit, once, and only if the branch has not moved; the agent never pushes by itself.
-  const decideRepair = (run, item, attempt, decision) => runAction(run, 'repairs/decision', { repo: item.repo, number: item.number, head_sha: item.head_sha, attempt_id: attempt.id, decision })
+  const decideRepair = (run, item, attempt, decision) => runAction(run, 'repairs/decision', { repo: item.repo, number: item.number, head_sha: item.head_sha, attempt_id: attempt.id, decision }, 'repair')
   function toggle(pr) {
     setSelected(old => { const next = new Set(old); const key = prKey(pr); next.has(key) ? next.delete(key) : next.add(key); return next })
   }
@@ -533,7 +548,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       onStart: job => choose([pr], job, prKey(pr)),
       onFix: onStartAgent ? () => choose([pr], 'respond', prKey(pr)) : undefined,
       response: answer,
-      ownerGrant: ownerGrantOffered(capabilities),
+      ownerGrant: ownerConfirmOffered(capabilities),
       respondBusy: respondBusy === prKey(pr),
       respondError: respondFailure?.key === prKey(pr) ? respondFailure.message : '',
       onPostResponse: answer && (again => answerAction(pr, () => approveResponse({ slug: answer.slug, digest: answer.result.digest, pr, chat: respondChatOf(respondChats, pr), token, capabilities, again }))),
@@ -577,21 +592,21 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // Each of your own actions runs the app's one guarded handler for it.
   const actionHandlers = {
     // A draft this app sent is marked ready through its saved record; any other draft of yours, by the platform's own action.
-    open_for_review: ({ pr, record }) => isPersonalDraft(record) ? (onOpenForReview ? onOpenForReview(record) : { error: 'Opening for review is not available here.' }) : pullAction(token, appId, pr, 'ready'),
-    merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice) }),
-    back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft'),
-    close: ({ pr }) => pullAction(token, appId, pr, 'close'),
-    ask_rereview: ({ pr }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }),
+    open_for_review: ({ pr, record }) => isPersonalDraft(record) ? (onOpenForReview ? onOpenForReview(record) : { error: 'Opening for review is not available here.' }) : pullAction(token, appId, pr, 'ready', {}, shellConfirm),
+    merge: ({ pr, choice }) => mergePull(token, appId, pr, { method: methodToSend(pr.repository, choice), shellConfirm }),
+    back_to_draft: ({ pr }) => pullAction(token, appId, pr, 'draft', {}, shellConfirm),
+    close: ({ pr }) => pullAction(token, appId, pr, 'close', {}, shellConfirm),
+    ask_rereview: ({ pr }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: standingOf(pr).rereviewFrom }, shellConfirm),
     ask_approval: ({ pr }) => {
       const { approvalFrom: people, lookedAgain: holding } = standingOf(pr)
-      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) })
+      return pullAction(token, appId, pr, 'ask-approval', { people, note: approvalNote(pr, people, holding) }, shellConfirm)
     },
   }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice }) => actionHandlers[acting.intent]({ ...acting, choice })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr) })} onConfirm={({ choice }) => actionHandlers[acting.intent]({ ...acting, choice })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} autoConfirm={acting.oneTap} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)

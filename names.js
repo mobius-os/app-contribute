@@ -38,6 +38,8 @@ export const NAMES = Object.freeze({
   requestChanges: 'Request changes',
   ignore: 'Ignore',
   merge: 'Merge',
+  // Where Möbius confirms Merge on its own sheet, the way it lands is chosen here first, only when the repository allows more than one.
+  mergeOptions: 'Merge options…',
   closePr: 'Close pull request',
   assign: 'Assign',
   askRereview: 'Ask for re-review',

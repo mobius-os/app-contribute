@@ -46,8 +46,8 @@ function buildWorld(t) {
   chmodSync(join(root, 'bin', 'gh'), 0o755)
   world.env = { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`, GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1',
     RESPOND_APP_DIR: world.app, RESPOND_GIT_REMOTE: world.remote, FAKE_GH_CONFIG: join(root, 'gh-config.json'), CHAT_ID: 'chat-under-test',
-    // A Möbius that offers the owner grant, so the post flow runs; the test of the gate below turns it off, out loud.
-    SCRIPTS_DIR: FAKE_HOST, FAKE_HOST_CAPABILITIES: JSON.stringify({ owner_grant: true }) }
+    // A Möbius where the owner confirmed the Post, so the post flow runs; the test of the gate below says otherwise, out loud.
+    SCRIPTS_DIR: FAKE_HOST }
   Object.assign(process.env, { GIT_CONFIG_GLOBAL: world.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: '1' })
   git(root, 'init', '-q', '--bare', world.remote)
   git(world.remote, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
@@ -149,14 +149,14 @@ test('what the helper saves is what the app reads, and Post posts exactly what t
   ], 'each reply reaches GitHub byte for byte, then the description, then the re-review')
 })
 
-test('on a Möbius without the owner grant Post publishes nothing even for an approved answer, while the dry run still shows the plan', async t => {
+test('on a Möbius that cannot confirm the owner pressed Post, it publishes nothing even for an approved answer, while the dry run still shows the plan', async t => {
   const world = buildWorld(t)
   finishWork(world)
   assert.equal(save(world).status, 0)
   const storage = folderStorage(world.app)
   const [{ slug, result }] = await loadResponses(storage)
   await writeDecision(slug, { result_id: result.id, digest: result.digest, decision: 'approved', at: '2026-11-06T09:30:00Z' }, storage)
-  world.env.FAKE_HOST_CAPABILITIES = '{}' // today's Möbius
+  world.env.FAKE_HOST_CONSUME = 'missing' // a Möbius without the confirmation route
   const refused = helper(world, ...postArgs(result))
   assert.equal(refused.status, 3, refused.stderr)
   assert.match(refused.stderr, /Post is off for now/)
