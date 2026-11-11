@@ -8,6 +8,7 @@
 // on res.ok and surface the server's error detail verbatim.
 
 import { markCarriedApprovals } from './carried-approvals.js'
+import { REVIEW_FIELDS, completeReviewers } from './review-pages.js'
 import { UNCONFIRMED_SUBMIT_CODES, uncertainPublication } from './domain.js'
 
 function authHeaders(token) {
@@ -269,7 +270,7 @@ export const PR_FIELDS = `id number title url state headRefOid headRefName baseR
   } } } } }
   reviewDecision mergeable
   latestOpinionatedReviews(first:30, writersOnly:true) { pageInfo { hasNextPage } nodes { state author { login __typename } commit { oid } } }
-  latestReviews(first:30) { nodes { state body submittedAt author { login __typename } commit { oid } } }
+  latestReviews(first:30) { pageInfo { hasNextPage endCursor } nodes { ${REVIEW_FIELDS} } }
   viewerLatestReview { state commit { oid } }
   reviewThreads(last:50) { pageInfo { hasPreviousPage } nodes { isResolved comments(last:1) { nodes { author { login __typename } } } } }`
 
@@ -282,6 +283,12 @@ export const githubRemainingPoints = () => githubPointsLeft
 // Every read of PRs passes through here, so every screen sees the same marks on an approval of an older
 // commit (whether the PR's own work is still the same: same-work.js) and decides alike.
 export async function fetchLiveStates(token, query) {
+  const data = await readGraphql(token, query)
+  return data ? await markCarriedApprovals(token, await completeReviewers(ask => readGraphql(token, ask), data)) : data
+}
+
+// One read-only GraphQL document: response.data, or null.
+async function readGraphql(token, query) {
   try {
     const r = await fetchRead('/api/github/graphql', {
       method: 'POST',
@@ -293,7 +300,7 @@ export async function fetchLiveStates(token, query) {
     const data = body && typeof body === 'object' ? body.data || null : null
     const left = data?.rateLimit?.remaining
     if (Number.isFinite(left)) githubPointsLeft = left
-    return data ? await markCarriedApprovals(token, data) : data
+    return data
   } catch {
     return null
   }

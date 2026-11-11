@@ -305,8 +305,14 @@ export function reviewRunRequest(choice) {
 // GitHub: the connection dropped before the answer, a gateway or server error, an answer whose body
 // cannot be read (whatever its status) or a "success" that is not this action's receipt. That is
 // { pending }, never a plain failure the sheet would offer to retry and never a success it would claim. `receipt` turns the decoded answer
-// into the fields the sheet reads, or null when it is not this action's completion.
-async function publicWrite(token, appId, path, body, { code, words, receipt }) {
+// into the fields the sheet reads, or null when it is not this action's completion. With `shellConfirm` (owner-grant.js, askOwner) the
+// shell's own sheet comes first, for exactly the body about to be sent: a cancel or a refusal is the outcome and nothing is sent.
+// `onConfirmed` runs once the owner has nothing left to confirm, just before the request goes out, so the app's own sheet can say
+// "Merging…" only from then on.
+async function publicWrite(token, appId, path, body, { code, words, receipt, action, shellConfirm, onConfirmed }) {
+  const stopped = action && shellConfirm ? await shellConfirm(action, {}, body) : null
+  if (stopped) return stopped
+  onConfirmed?.()
   let result
   try {
     result = await collaborationRequest(token, appId, path, body)
@@ -320,12 +326,13 @@ async function publicWrite(token, appId, path, body, { code, words, receipt }) {
 
 // The owner's own Merge: this exact version, by the repository's allowed method.
 // Returns the outcome shape the confirm sheet already reads: { ok } | { pending }
-// (GitHub may have merged; read it back, never repeat) | { error }. The platform
+// (GitHub may have merged; read it back, never repeat) | { error } | { cancelled } (only with `shell.shellConfirm`: the owner closed Möbius's
+// sheet, nothing was sent). `shell` is { shellConfirm, onConfirmed } of publicWrite, passed through. The platform
 // re-checks everything at the moment of merging and refuses what GitHub refuses.
-export const mergePull = (token, appId, pr, { method = '' } = {}) => publicWrite(token, appId, 'pulls/merge', {
+export const mergePull = (token, appId, pr, { method = '', ...shell } = {}) => publicWrite(token, appId, 'pulls/merge', {
   repo: pr.repository.nameWithOwner, number: pr.number, head_sha: pr.headRefOid, ...(method ? { method } : {}),
 }, {
-  code: 'merge_unconfirmed', words: 'GitHub may have merged it. Check the pull request before trying again.',
+  action: 'merge', ...shell, code: 'merge_unconfirmed', words: 'GitHub may have merged it. Check the pull request before trying again.',
   receipt: result => ['merged', 'queued'].includes(result?.state) ? { state: result.state, mergeSha: result.merge_sha || '' } : null,
 })
 
@@ -336,20 +343,21 @@ export const mergePull = (token, appId, pr, { method = '' } = {}) => publicWrite
 // shapes as mergePull. GitHub cannot pin a version on these writes, so the platform reports the head
 // it saw afterwards (observedHead) and the sheet says so if it moved. The receipt of each is the state
 // it names, with that head; any other answer may still have reached GitHub.
+// `action` is the PR machine's id for it, which the platform's owner confirmation names too.
 const STATUS_WRITE = {
-  ready: { state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
-  draft: { state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
-  close: { state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
-  'request-review': { state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for the review. Check the pull request before trying again.' },
-  'request-reviewers': { state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
-  'ask-approval': { state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
+  ready: { action: 'open_for_review', state: 'ready', code: 'ready_unconfirmed', words: 'GitHub may have marked it ready. Check the pull request before trying again.' },
+  draft: { action: 'back_to_draft', state: 'draft', code: 'draft_unconfirmed', words: 'GitHub may have turned it back into a draft. Check the pull request before trying again.' },
+  close: { action: 'close', state: 'closed', code: 'close_unconfirmed', words: 'GitHub may have closed it. Check the pull request before trying again.' },
+  'request-review': { action: 'request_review', state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for the review. Check the pull request before trying again.' },
+  'request-reviewers': { action: 'ask_rereview', state: 'requested', code: 'reviewers_unconfirmed', words: 'GitHub may have asked for another review. Check the pull request before trying again.' },
+  'ask-approval': { action: 'ask_approval', state: 'asked', code: 'approval_unconfirmed', words: 'GitHub may have posted the note. Check the pull request before trying again.' },
 }
-export const pullAction = (token, appId, pr, action, extra = {}) => {
+export const pullAction = (token, appId, pr, action, extra = {}, shell = {}) => {
   const write = STATUS_WRITE[action]
   return publicWrite(token, appId, `pulls/${action}`, {
     repo: pr.repository.nameWithOwner, number: pr.number, head_sha: pr.headRefOid, ...extra,
   }, {
-    code: write.code, words: write.words,
+    action: write.action, ...shell, code: write.code, words: write.words,
     receipt: result => result?.state === write.state && typeof result.observed_head_sha === 'string' ? { state: write.state, observedHead: result.observed_head_sha } : null,
   })
 }
@@ -357,20 +365,30 @@ export const pullAction = (token, appId, pr, action, extra = {}) => {
 // Request review for several PRs at once: one request per PR, naming the ticked people who may be asked there (not its
 // author, not who approved this version). `done` (which this fills) holds each PR and person already asked on an earlier try,
 // so a retry after a partial failure asks only the pairs that are left, even when the ticks changed in between: nobody is
-// asked twice, and a newly ticked person is still asked on every PR. { ok } when every PR is asked or has nobody left to ask,
-// { pending } when GitHub may have taken a request (read it back, never repeat), otherwise { error } naming the PRs that were refused.
+// asked twice, and a newly ticked person is still asked on every PR. With `shell` ({ shellConfirm, onConfirmed }, as for any
+// public write) each PR's request is confirmed on Möbius's own sheet before it is sent, one sheet per PR, since the shell
+// confirms exactly one write; closing one stops the rest (nothing further is sent). { ok } when every PR is asked or has nobody
+// left to ask, { pending } when GitHub may have taken a request (read it back, never repeat), { cancelled } when the owner
+// closed the first sheet, otherwise { error } naming the PRs that were refused or left unasked.
 const askedPair = (pr, login) => `${prKey(pr)}@${String(login).toLowerCase()}`
-export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set() } = {}) {
-  const asked = [], skipped = [], refused = [], unsure = []
-  for (const pr of pulls) {
+export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set(), shell = {} } = {}) {
+  const asked = [], skipped = [], refused = [], unsure = [], notAsked = []
+  for (const [index, pr] of pulls.entries()) {
     const askable = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
     if (!askable.length) { skipped.push(pr.number); continue }
     const left = askable.filter(login => !done.has(askedPair(pr, login)))
     if (!left.length) continue
-    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: left })
+    const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: left }, shell)
+    if (outcome.cancelled) {
+      notAsked.push(...pulls.slice(index).map(item => item.number))
+      break
+    }
     if (outcome.ok) { asked.push(pr.number); left.forEach(login => done.add(askedPair(pr, login))) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
   }
   if (unsure.length) return { pending: true, error: `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.` }
+  if (notAsked.length) return asked.length || refused.length
+    ? { error: `You closed Möbius’s sheet. Not asked: ${[...notAsked.map(number => '#' + number), ...refused].join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
+    : { cancelled: true }
   if (refused.length) return { error: `Not asked: ${refused.join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
   return { ok: true, state: 'requested', asked, skipped }
 }

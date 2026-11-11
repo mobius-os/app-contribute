@@ -123,7 +123,7 @@ function Steps({ result, status }) {
   </div>
 }
 
-// Why Post, Send again and Try again are off, or ''. The host's owner grant (the gate) comes before anything about the chat or the screenshots.
+// Why Post, Send again and Try again are off, or ''. Möbius's own confirmation (the gate) comes before anything about the chat or the screenshots.
 const postBlocker = (status, chat, ownerGrant, unseen) => (ownerGrant ? (status === 'ready' ? holdReason(chat) || imagesReason(unseen) : '') : POST_OFF_REASON)
 
 function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onPost, onDiscard, onRespondAgain }) {
@@ -147,7 +147,7 @@ function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onP
   </>
 }
 
-// `ownerGrant`: the host offers the grant that lets Post work (respond-result.js, THE GATE). Off unless the caller says it is on.
+// `ownerGrant`: Möbius confirms Post on its own sheet (respond-result.js, THE GATE; owner-grant.js). Off unless the caller says it is on.
 // `now` is the time the card judges "just sent" by (the tests set it).
 export function ResponseCard({ pr, response: view, chat = null, busy = false, error = '', readOnly = false, ownerGrant = false, now = Date.now(), onPost, onDiscard, onRespondAgain }) {
   const { status, result } = view

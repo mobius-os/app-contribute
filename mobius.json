@@ -10,6 +10,7 @@
   "entry": "index.jsx",
   "offline_capable": true,
   "embeds_agent": true,
+  "owner_confirm": true,
   "capabilities": {
     "chat.blocks.passive": {
       "version": 1,
@@ -127,6 +128,7 @@
     "reviewers.js",
     "review-list.js",
     "collaboration.js",
+    "owner-grant.js",
     "ui/PullRequests.jsx",
     "ui/AddressFeedback.jsx",
     "ui/ActionsMenu.jsx",
@@ -177,6 +179,7 @@
     "same-work.js",
     "carried-approvals.js",
     "review-frame.js",
+    "review-pages.js",
     "pr_block.py",
     "review-prompts.js",
     "ui/ReviewPromptSettings.jsx",

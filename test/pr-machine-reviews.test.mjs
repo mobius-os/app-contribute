@@ -63,10 +63,11 @@ test('anyone who reviewed or commented can be asked, except who approved this ve
   const decision = decide(facts([changes, comment('h2', { by: 'kim' }), approval({ by: 'bob', sameWork: false }), approval({ by: 'dana', commit: 'h2' }),
     { ...changes, by: 'eve', commit: 'h2' }, zed, { by: 'qa-bot', state: 'COMMENTED', commit: 'h2', bot: true }]))
   assert.deepEqual(decision.askable, [
-    { by: 'sam', reason: 'changes_older', commit: 'h1' }, { by: 'kim', reason: 'commented_here', commit: 'h2' }, { by: 'bob', reason: 'approved_older', commit: 'h1' },
-    { by: 'eve', reason: 'changes_here', commit: 'h2' }, { by: 'zed', reason: 'commented_older', commit: 'h1' }])
+    { by: 'sam', reason: 'changes_older', commit: 'h1', requestable: true }, { by: 'kim', reason: 'commented_here', commit: 'h2', requestable: false },
+    { by: 'bob', reason: 'approved_older', commit: 'h1', requestable: true }, { by: 'eve', reason: 'changes_here', commit: 'h2', requestable: true },
+    { by: 'zed', reason: 'commented_older', commit: 'h1', requestable: false }])
   const looked = decide(facts([changes, comment('h2')]))
-  assert.deepEqual(looked.askable, [{ by: 'sam', reason: 'looked_again', commit: 'h1' }], 'their change request still stands, and they looked again')
+  assert.deepEqual(looked.askable, [{ by: 'sam', reason: 'looked_again', commit: 'h1', requestable: true }], 'their change request still stands, and they looked again')
   assert.deepEqual(decide(facts([])).askable, [])
   assert.equal(action(decide(facts([])), 'ask_approval').reason, 'Nobody has reviewed this PR yet.')
   assert.equal(action(decide(facts([approval({ commit: 'h2' })])), 'ask_rereview').reason, 'Everyone who reviewed it has already approved this version.')

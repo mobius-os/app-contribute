@@ -5,6 +5,9 @@
 // in place, dimmed, with the machine's reason.
 import { checkSummary, conversationCount } from './collaboration.js'
 import { isPersonalDraft } from './domain.js'
+import { allowedMergeMethods } from './action-copy.js'
+import { ownerConfirmOffered } from './owner-grant.js'
+import { NAMES } from './names.js'
 
 // The agent jobs and your own actions the menu shows, by machine action id, in
 // their fixed order. Take over sits apart at the bottom: it is rare and deliberate.
@@ -15,6 +18,9 @@ const CAPABILITY = { open_for_review: 'mark_ready_now', back_to_draft: 'back_to_
 // Request review asks anyone, not just people who reviewed, and has a button of its own beside Actions: no menu row.
 const OWN_BUTTON = { request_review: 'request_review_now' }
 export const YOUR_INTENTS = new Set([...Object.keys(YOUR_MENU), ...Object.keys(OWN_BUTTON)])
+// Not a machine action: Merge's way to choose how it lands first. It exists only where Möbius confirms Merge on its own sheet, which
+// has no such choice, so Merge itself lands the way the repository prefers; see withMergeOptions.
+export const MERGE_OPTIONS = 'merge_options'
 export const AGENT_INTENTS = new Set(Object.keys(AGENT_MENU))
 
 // One line of facts about a PR: draft, checks and conflicts. Who approved what is the
@@ -64,6 +70,14 @@ function yourItems(decision, { record, capabilities }) {
     .sort((a, b) => Number(a.danger) - Number(b.danger) || Number(b.rec) - Number(a.rec))
 }
 
+// Right after Merge, and off for the same reason when Merge is off.
+function withMergeOptions(items, pr, capabilities) {
+  const at = items.findIndex(item => item.intent === 'merge')
+  if (at < 0 || !ownerConfirmOffered(capabilities) || allowedMergeMethods(pr.repository).length < 2) return items
+  const options = { ...items[at], intent: MERGE_OPTIONS, title: NAMES.mergeOptions, detail: 'Choose how it lands.', rec: false }
+  return items.toSpliced(at + 1, 0, options)
+}
+
 function agentItems(decision) {
   const items = decision.actions.filter(action => AGENT_MENU[action.id]).map(action => asItem(action, AGENT_MENU[action.id]))
   const rare = items.filter(item => item.intent === 'take_over')
@@ -84,5 +98,5 @@ export function actionsMenuModel(pulls, decisions, { record = null, capabilities
   if (list.length !== 1) return { header: list.length ? { label: `${list.length} PRs`, text: 'selected' } : null, headline: '', you: [], agent: list.length ? batchItems(decisions) : [] }
   const decision = decisions?.[0]
   if (!decision) return { header: pullHeader(list[0]), headline: '', you: [], agent: [] }
-  return { header: pullHeader(list[0]), headline: decision.headline, you: yourItems(decision, { record, capabilities }), agent: agentItems(decision) }
+  return { header: pullHeader(list[0]), headline: decision.headline, you: withMergeOptions(yourItems(decision, { record, capabilities }), list[0], capabilities), agent: agentItems(decision) }
 }

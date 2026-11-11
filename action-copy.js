@@ -158,22 +158,28 @@ export function backToDraftCopy(pr) {
 }
 
 // What is true of each person an Ask can name: a line under their name on the sheet, and a line of the public note.
-// `commit` is the version their review was of.
+// `commit` is the version their review was of; a review of a commit that is gone (a force-push) has none, and the line then
+// says "an earlier version" without a hash.
+const at = item => (item.commit ? ` (\`${short(item.commit)}\`)` : '')
 const WHY = {
   changes_here: { detail: () => 'Asked for changes on this version', note: () => 'your change request on this version is still open. GitHub holds it until you approve or dismiss it.' },
   looked_again: { detail: () => 'Asked for changes earlier, then commented on this version; GitHub still holds the request', note: () => 'you left a comment on this version, but GitHub still holds your earlier change request until you approve or dismiss it.' },
   commented_here: { detail: () => 'Commented on this version, has not approved', note: () => 'you left a comment on this version but have not approved it.' },
-  changes_older: { detail: item => `Asked for changes on ${short(item.commit)}, has not looked since`, note: item => `your change request is on an earlier version (\`${short(item.commit)}\`). GitHub holds it until you approve or dismiss it.` },
-  approved_older: { detail: item => `Approved ${short(item.commit)}; this version has new commits`, note: item => `you approved an earlier version (\`${short(item.commit)}\`); this one has new commits.` },
-  commented_older: { detail: item => `Commented on ${short(item.commit)}, an earlier version`, note: item => `you left a comment on an earlier version (\`${short(item.commit)}\`).` },
+  changes_older: { detail: item => `Asked for changes on ${item.commit ? short(item.commit) : 'an earlier version'}, has not looked since`, note: item => `your change request is on an earlier version${at(item)}. GitHub holds it until you approve or dismiss it.` },
+  approved_older: { detail: item => `Approved ${item.commit ? short(item.commit) : 'an earlier version'}; this version has new commits`, note: item => `you approved an earlier version${at(item)}; this one has new commits.` },
+  commented_older: { detail: item => `Commented on ${item.commit ? `${short(item.commit)}, ` : ''}an earlier version`, note: item => `you left a comment on an earlier version${at(item)}.` },
 }
 const HOLDS_A_REQUEST = ['changes_here', 'looked_again', 'changes_older']
 
-// The sheet for an Ask. Everyone the machine says may be asked is listed with what is true of them, the people this ask is
-// meant for ticked. `build(picked)` words the sheet for whoever is ticked (askable people, in list order); the sheet calls
-// `forPicked` as the ticks change.
-function askSheet(standing, meantFor, build) {
-  const askable = standing?.askable || []
+// The platform takes at most this many people in one ask (ReviewerRequest and ApprovalRequest); the sheet says so before the tap.
+export const MAX_ASKED = 15
+const TOO_MANY = { tone: 'bad', text: `Ask at most ${MAX_ASKED} people at once` }
+
+// The sheet for an Ask. Everyone the machine says may be asked and `pool` allows is listed with what is true of them, the people
+// this ask is meant for ticked. `build(picked)` words the sheet for whoever is ticked (askable people, in list order); the sheet
+// calls `forPicked` as the ticks change.
+function askSheet(standing, meantFor, build, pool = () => true) {
+  const askable = (standing?.askable || []).filter(pool)
   const pick = logins => askable.filter(item => logins.some(login => login.toLowerCase() === item.by.toLowerCase()))
   const ticked = pick(meantFor)
   const people = { label: 'Who should I ask?', options: askable.map(item => ({ key: item.by, label: item.by, detail: WHY[item.reason].detail(item), ticked: ticked.includes(item) })) }
@@ -228,12 +234,15 @@ export function askRereviewCopy(pr, { standing = null } = {}) {
     const who = names(picked.map(item => item.by))
     return {
       icon: 'person', title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
-      facts: [picked.length ? { tone: 'ok', text: `GitHub asks ${who} for a review of the new version` } : { tone: 'bad', text: 'Pick at least one person' }],
+      facts: [picked.length ? { tone: 'ok', text: `GitHub asks ${who} for a review of the new version` } : { tone: 'bad', text: 'Pick at least one person' },
+        ...(picked.length > MAX_ASKED ? [TOO_MANY] : [])],
       footnote: 'They get GitHub’s usual review request. Nothing is posted in the conversation.',
-      disabled: !picked.length,
+      disabled: !picked.length || picked.length > MAX_ASKED,
       done: () => ({ title: 'Asked to look again', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to look again.` }),
     }
-  })
+  // GitHub takes a review request only for someone with access to the repository: the people the machine read from GitHub's
+  // writers-only opinions (`requestable`). Someone who only commented may have none, and Ask for approval reaches them.
+  }, item => item.requestable)
 }
 
 // The platform refuses a longer note (ApprovalRequest.note); the sheet says so before the tap instead of after it.
@@ -260,11 +269,12 @@ export function askApprovalCopy(pr, { standing = null } = {}) {
       facts: [
         picked.length ? { tone: 'ok', text: `${plural(picked.length, 'person', 'people')} will be asked` } : { tone: 'bad', text: 'Pick at least one person' },
         ...(tooLong ? [{ tone: 'bad', text: 'The note is too long: ask fewer people' }] : []),
+        ...(picked.length > MAX_ASKED ? [TOO_MANY] : []),
         { tone: 'warn', text: 'The note is public on the PR, from your GitHub account' },
       ],
       says: picked.length ? { label: 'The note that will be posted', markdown: note } : null,
       footnote: picked.some(item => HOLDS_A_REQUEST.includes(item.reason)) ? 'Posts exactly this note, once. Nothing else changes: only their approval, or dismissing their request, lifts it.' : 'Posts exactly this note, once. Nothing else changes.',
-      disabled: !picked.length || tooLong,
+      disabled: !picked.length || tooLong || picked.length > MAX_ASKED,
       done: () => ({ title: 'Note posted', text: `${who} ${picked.length === 1 ? 'is' : 'are'} asked to approve.` }),
     }
   })

@@ -55,17 +55,28 @@ function reviewsOf(pr) {
 // leaves that unsaid, so they are never a reason to call the PR unread.
 const commentsOf = pr => (pr?.latestReviews?.nodes || []).filter(node => node?.state === 'COMMENTED').map(reviewOf)
 
+// Everyone who reviewed or commented, as GitHub's newest review of each person (writers or not: the merge standing
+// above counts only writers' opinions, and this is for asking people, not for deciding anything). Null when the list is
+// not the whole of it (its pages were not all read), so the Ask sheet never offers part of it. A review still
+// pending is not one yet.
+function participantsOf(pr) {
+  const connection = pr?.latestReviews
+  const nodes = connection?.nodes
+  if (!Array.isArray(nodes) || connection.pageInfo?.hasNextPage === true) return null
+  return nodes.filter(node => node?.state && node.state !== 'PENDING').map(reviewOf)
+}
+
 // Threads a person other than you spoke last in (a bot's thread is input, never
 // waiting on you). The PR's own conversation counts as one more such thread: a plain
-// comment is feedback too, until you answer it. A review that only comments, with words in it,
-// is spoken in that conversation too (its points are no inline thread, and GitHub gives it no verdict).
+// comment is feedback too, until you answer it. A review with words in it, a change request as much as one that only
+// comments, is spoken in that conversation too (its points are no inline thread): a push alone does not answer it.
 // Whoever of the newest ten comments and those reviews spoke last among people decides, so a bot's
 // update after a reviewer's comment does not hide it. Null when the threads were not read, or are
 // only the last page of a longer list: a missed open thread would hide feedback and disable Respond.
 const waitsOnYou = (author, login) => !!author && !isBot(author) && lower(author.login) !== lower(login)
 const spokenAt = comment => Date.parse(comment?.createdAt || '') || 0
 const reviewWords = pr => (pr?.latestReviews?.nodes || [])
-  .filter(node => node?.state === 'COMMENTED' && node.body?.trim()).map(node => ({ author: node.author, createdAt: node.submittedAt }))
+  .filter(node => ['COMMENTED', 'CHANGES_REQUESTED'].includes(node?.state) && node.body?.trim()).map(node => ({ author: node.author, createdAt: node.submittedAt }))
 const lastPersonIn = comments => [...(comments || [])].sort((a, b) => spokenAt(a) - spokenAt(b)).filter(comment => !isBot(comment?.author)).at(-1)?.author
 function openThreadsOf(pr, login) {
   const connection = pr?.reviewThreads
@@ -205,6 +216,7 @@ export function prFacts({ pr, login, runs = [], ignored = null, chats = [], resp
     // How many review requests GitHub holds, when it was read: an assignee is not one.
     asked: Number.isInteger(pr?.reviewRequests?.totalCount) ? pr.reviewRequests.totalCount : undefined,
     reviews: [...(own ? reviews || [] : withSentVerdict(reviews || [], fromRuns.sent, pr, login)), ...commentsOf(pr)],
+    participants: participantsOf(pr),
     myReview,
     openThreads: threads || 0,
     job: jobFor(fromRuns.job, chats, pr),

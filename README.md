@@ -314,7 +314,19 @@ before writing, while the cron refresh falls back to a plain best-effort write.
 **Actions ▾** (on a PR row and its page) has a **You** group and an **Agent**
 group. **Open for review** (a draft this app sent) and **Merge** (where the
 platform advertises `merge_now`) each end in a confirm sheet naming what happens
-and what cannot be undone. New PRs open from one split button, **Open as draft**
+and what cannot be undone. Where Möbius advertises `owner_confirm`, its own sheet
+(outside the app's frame, `window.mobius.ownerGrant`, see `owner-grant.js`) replaces that
+one for Merge and the five status changes: one tap on the action, one tap to confirm, and
+**Merge options…** (only where the repository allows more than one way) to choose how it
+lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
+the same sheet first, so the owner's tap is proven by Möbius and not by the app's own frame;
+until the owner has confirmed, the app's own sheet only says it is waiting. A Möbius without
+it keeps the app's own sheets, and that second path exists only until platform enforcement
+has shipped and been adopted: then it is removed and the app requires `owner_confirm`.
+Until then the top-level `"owner_confirm": true` in `mobius.json` is the opt-in switch: the platform
+enforces owner confirmation only for apps that declare it, and this app asks Möbius's sheet before each
+guarded tap and then repeats the same request unchanged.
+New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default
 (the shipped default is Ready, as the product states). A finished review that
 found problems offers **Fix these findings**, **Ignore…** (one reason, for that
@@ -501,8 +513,10 @@ intent is `chat:contributions`:
   **Fix in chat** (below), or **Open Contribute** where it cannot be. Confirm calls the
   same guarded Send handlers as the workspace and passes the confirmed snapshot
   as `expected_record(s)`; without that platform binding the card never sends,
-  including when the binding disappears between Confirm and the write. A set
-  that changes after the tap does not change what that Confirm sends.
+  including when the binding disappears between Confirm and the write: each
+  write reads the platform's status again first, and a read that fails counts
+  as no binding. A set that changes after the tap does not change what that
+  Confirm sends.
   Independent units are sent in parallel; a stack's layers in order. Only
   attempts whose outcome is unknown survive a reload, as a bounded checkpoint
   of ids, and lock their unit until a read shows the result. An unknown outcome
@@ -585,10 +599,11 @@ in `respond-results/<owner>__<repo>__<number>.json`. The PR's Review tab shows i
 **Post**, **Reply in chat** and **Discard**. Post writes the owner's approval
 (`respond-decisions/<slug>.json`) for that exact result and its digest, then tells the
 same chat to run `respond_result.py post`, the only command that publishes. **Post is off
-until the host can vouch for the owner's press**: an approval file is not proof, because the
-agent can write it, so Post works only on a Möbius that advertises the `owner_grant`
-capability (none does yet); until then the button is disabled with its reason and `post`
-refuses. Past that gate, `post` refuses unless the approval names this result, its content
+until Möbius confirms the owner's press**: an approval file is not proof, because the
+agent can write it, so Post works only on a Möbius that advertises `owner_confirm`: the app
+asks Möbius's own sheet first, and `post` spends the one-time grant that records the owner's
+tap before it reads or writes anything. Without it the button is disabled with its reason and
+`post` refuses. Past that gate, `post` refuses unless the approval names this result, its content
 is unchanged and the PR is still where the work was built; then it uploads any screenshots
 the answer attaches (to the repository's `mobius-screenshots` branch; the card lists each one
 on its own and Post stays off until it is on screen, so the owner has read every byte; an
