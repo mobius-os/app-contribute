@@ -56,11 +56,33 @@ test('Merge on your PR is on offer before anyone approves it; only an approved v
 test('your own actions appear only where this Möbius can do them', () => {
   assert.deepEqual(ids(menu(mine(), {}).you), [])
   assert.deepEqual(ids(menu(mine(), { merge_now: true }).you), ['merge'])
-  assert.deepEqual(ids(menu(mine()).you), ['open_for_review', 'back_to_draft', 'ask_rereview', 'ask_approval', 'merge', 'close'])
-  assert.deepEqual(ids(menu(mine(), { ...ALL, ask_approval_now: false }).you), ['open_for_review', 'back_to_draft', 'ask_rereview', 'merge', 'close'], 'the note is offered only where this Möbius can post it')
+  assert.deepEqual(ids(menu(mine()).you), ['back_to_draft', 'merge', 'close'], 'an open PR nobody reviewed: no Open for review, and nobody to ask')
+  assert.deepEqual(ids(menu(mine({ isDraft: true })).you), ['open_for_review', 'merge', 'close'], 'a draft goes the other way: Open for review, never Back to draft')
+  const reviewed = mine({ latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'sam', __typename: 'User' }, commit: { oid: HEAD } }] } })
+  assert.deepEqual(ids(menu(reviewed).you).sort(), ['ask_approval', 'ask_rereview', 'back_to_draft', 'close', 'merge'], 'once someone reviewed, both asks are offered')
+  assert.ok(!ids(menu(reviewed, { ...ALL, ask_approval_now: false }).you).includes('ask_approval'), 'the note is offered only where this Möbius can post it')
   assert.deepEqual(ids(menu(pull()).you), ['merge', 'close'], 'on their PR you may merge or close, never change its draft state')
   const appDraft = menu(mine({ isDraft: true }), {}, { status: 'draft', submission_mode: 'github' })
   assert.deepEqual(ids(appDraft.you), ['open_for_review'], 'a draft this app sent opens through its own record')
+})
+
+test('how Merge lands is a second choice on the Merge row, never a row of its own', () => {
+  const twoWays = mine({ repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE', squashMergeAllowed: true, rebaseMergeAllowed: true } })
+  assert.equal(item(menu(twoWays, { ...ALL, owner_confirm: true }), 'merge').side, undefined, 'without Möbius’s own sheet on this page, Merge’s window already asks')
+  // Möbius's own sheet is offered only where the host advertises it and the page can ask for it.
+  globalThis.window = { mobius: { ownerGrant: { request() {} } } }
+  try {
+    const model = menu(twoWays, { ...ALL, owner_confirm: true })
+    assert.ok(!ids(model.you).includes('merge_options'))
+    assert.deepEqual(item(model, 'merge').side, { intent: 'merge_options', title: 'Merge options…', detail: 'Choose how it lands.' })
+    assert.equal(item(menu(mine(), { ...ALL, owner_confirm: true }), 'merge').side, undefined, 'one way to land is no choice')
+  } finally { delete globalThis.window }
+})
+
+test('the menu carries the machine’s short label beside its sentence, for a menu that has room for one line', () => {
+  const model = menu(mine())
+  assert.equal(model.standing, 'Waiting on reviewers')
+  assert.equal(model.headline, 'Your PR · waiting on reviewers')
 })
 
 test('a batch offers one review of each, off when any PR cannot take it', () => {
@@ -80,6 +102,8 @@ test('every menu intent is a machine action, and the header says what GitHub sho
   for (const intent of [...AGENT_INTENTS, ...YOUR_INTENTS]) assert.ok(standingFor({ pr: mine(), login: 'alex' }).actions.some(action => action.id === intent) || standingFor({ pr: pull(), login: 'alex' }).actions.some(action => action.id === intent), intent)
   assert.deepEqual(pullHeader(pull({ isDraft: true, reviewDecision: 'APPROVED', ...checks('FAILURE', 1), mergeable: 'CONFLICTING' })),
     { label: '#7', text: 'draft · no reviews · 1 failing check · conflicts with main' }, 'GitHub’s approval summary is not repeated: the headline says who approved which version')
+  const draft = pull({ isDraft: true, ...checks('FAILURE', 1) })
+  assert.deepEqual(pullHeader(draft, standingFor({ pr: draft, login: 'alex' })), { label: '#7', text: '1 failing check' }, 'with a decision, its label or sentence says draft and who reviewed, so the facts do not repeat them')
 })
 
 test('Close pull request is the one destructive row: red, apart, and last in You, whatever the machine highlights', () => {

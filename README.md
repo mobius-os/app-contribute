@@ -190,9 +190,10 @@ only for the core and the one mode it is working in.
   Review, Merge, Fix, Review again) filter the list under them, and the badge is
   their sum. Drafts ready to open are a quiet line; local changes live in the
   project's Local changes tab. On a phone the four views are one segmented bar.
-- **A next step on every PR.** A state line (Draft, In review, Approved, Merged)
-  and one panel under the facts: a pill, the PR machine's own sentence and one
-  filled button. On a phone the button pins to the foot of the page.
+- **A next step on every PR.** The state badge says where an open PR stands
+  (In review, Approved, or its resting label), and one panel under the actions
+  holds a pill, the PR machine's own sentence and one filled button; a PR with
+  nothing to do draws no panel. On a phone the button pins to the foot of the page.
 - **Commits tab** after Comments, from one GraphQL read (`commits(first:50)`,
   cursor paging): grouped by day, each commit with title, authors (agent commits
   marked), time, size, the checks' result in words, short hash, **See changes**
@@ -348,7 +349,7 @@ platform advertises `merge_now`) each end in a confirm sheet naming what happens
 and what cannot be undone. Where Möbius advertises `owner_confirm`, its own sheet
 (outside the app's frame, `window.mobius.ownerGrant`, see `owner-grant.js`) replaces that
 one for Merge and the five status changes: one tap on the action, one tap to confirm, and
-**Merge options…** (only where the repository allows more than one way) to choose how it
+**Merge options…** (on the Merge row, only where the repository allows more than one way) to choose how it
 lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
 the same sheet first, so the owner's tap is proven by Möbius and not by the app's own frame;
 until the owner has confirmed, the app's own sheet only says it is waiting. A Möbius without

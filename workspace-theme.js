@@ -346,7 +346,6 @@ export const WORKSPACE_CSS = `
 .co-gh-avatar { display:inline-grid; place-items:center; flex:none; border-radius:50%; background:var(--surface-2,var(--surface)); color:var(--text); font-size:var(--co-text-meta); font-weight:600; box-shadow:0 0 0 2px var(--bg); }
 .co-gh-label { display:inline-block; padding:0 8px; border:1px solid var(--co-label-dark-edge,var(--border)); border-radius:var(--co-radius-round); background:var(--co-label-dark-bg,var(--surface-2,var(--surface))); color:var(--co-label-dark-fg,var(--text)); font-size:var(--co-text-chip); font-weight:500; line-height:20px; white-space:nowrap; }
 [data-theme="light"] .co-gh-label { border-color:var(--co-label-light-edge,var(--border)); background:var(--co-label-light-bg,var(--surface-2,var(--surface))); color:var(--co-label-light-fg,var(--text)); }
-.co-gh-labels { display:flex; flex-wrap:wrap; gap:4px; margin-top:10px; }
 .co-gh-state { display:inline-flex; color:var(--green); }
 .co-gh-state.is-draft { color:var(--muted); }
 .co-gh-state.is-merged { color:#a371f7; }
@@ -359,11 +358,12 @@ export const WORKSPACE_CSS = `
 .co-gh-checks.is-pending .co-icon { color:var(--co-warn); }
 .co-gh-pr-head { padding-right:36px; }
 .co-gh-pr-title { margin:0; font-size:var(--co-text-section); font-weight:500; line-height:1.35; overflow-wrap:anywhere; }
-.co-gh-pr-title > span { color:var(--muted); font-weight:400; }
+.co-gh-pr-title > span { margin-right:4px; font-weight:650; }
 .co-gh-pr-sub { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; margin-top:10px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-gh-pr-sub b { color:var(--text); font-weight:600; }
 .co-gh-pr-sub code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
 .co-branch-flow { display:inline-flex; align-items:center; gap:7px; min-width:0; }
+.co-gh-pr-sub .co-branch-flow { flex-direction:row; flex-wrap:wrap; margin:0; }
 .co-branch-flow code { overflow-wrap:anywhere; }
 .co-branch-flow .co-icon { flex:0 0 auto; color:var(--muted); }
 .co-tab-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
@@ -504,8 +504,16 @@ export const WORKSPACE_CSS = `
 .co-agent-menu-list button:hover,.co-agent-menu-list button:focus-visible { background:var(--surface-2,var(--surface)); outline:none; }
 .co-agent-menu-list .co-icon { flex:none; margin-top:2px; color:var(--muted); }
 .co-agent-menu-head { margin:0 0 4px; padding:8px 10px; border-bottom:1px solid var(--border); color:var(--muted); font-size:var(--co-text-meta); }
+.co-agent-menu-head p { margin:0; }
 .co-agent-menu-head b { color:var(--text); font-weight:650; }
-.co-agent-menu-standing { margin:0 0 6px; padding:0 10px 8px; color:var(--text); font-size:var(--co-text-meta); line-height:1.4; border-bottom:1px solid var(--border); }
+.co-agent-menu-head .co-agent-menu-standing { margin-top:4px; color:var(--text); line-height:1.4; }
+/* About six rows show; the rest scroll with no scrollbar, and the foot fades while more rows are below (the scroll fade at the end of this sheet). */
+.co-agent-menu-rows { max-height:min(344px,52dvh); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
+.co-agent-menu-rows::-webkit-scrollbar { display:none; }
+.co-agent-menu-pair { display:flex; align-items:stretch; gap:2px; }
+.co-agent-menu-pair > button:first-child { flex:1 1 auto; min-width:0; }
+.co-agent-menu-list .co-agent-menu-pair > .co-agent-menu-side { flex:none; width:44px; align-items:center; justify-content:center; padding:0; border-left:1px solid var(--border); border-radius:0 var(--co-radius-field) var(--co-radius-field) 0; }
+.co-agent-menu-list .co-agent-menu-side .co-icon { margin:0; transform:rotate(-90deg); }
 .co-rw-reason { display:grid; gap:6px; margin:0 0 14px; }
 .co-rw-reason textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:var(--co-radius-control); padding:10px 12px; resize:vertical; min-height:72px; }
 .co-rw-reason small { color:var(--muted); font-size:var(--co-text-meta); }
@@ -541,12 +549,6 @@ export const WORKSPACE_CSS = `
 .co-commit-side code { color:var(--muted); font:var(--co-text-meta) var(--mono,monospace); }
 .co-commit-seen { display:flex; align-items:center; gap:10px; padding:6px 14px; border-top:1px dashed var(--accent); color:var(--co-you-text); font-size:var(--co-text-meta); font-weight:600; background:var(--accent-dim,var(--surface-2)); }
 @media(max-width:680px) { .co-commit-side { width:100%; } }
-.co-state-line { display:flex; flex-wrap:wrap; gap:6px 4px; margin:12px 0 0; padding:0; list-style:none; font-size:var(--co-text-meta); color:var(--muted); }
-.co-state-line li { display:inline-flex; align-items:center; gap:4px; }
-.co-state-line li + li::before { content:'→'; margin-right:4px; color:var(--border); }
-.co-state-line li.is-done { color:var(--text); }
-.co-state-line li.is-current { color:var(--text); font-weight:700; }
-.co-state-line li.is-current::after { content:''; width:6px; height:6px; border-radius:50%; background:var(--accent); }
 /* The next step: pill, the machine's sentence, then the one filled button. */
 .co-next-step { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:12px 0 4px; padding:12px 14px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 .co-next-step .co-desk-chip { flex:0 0 auto; }
@@ -583,6 +585,9 @@ export const WORKSPACE_CSS = `
 @media(max-width:680px) {
   .co-agent-menu-scrim { display:block; position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
   .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(86dvh,640px); overflow-y:auto; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
+  .co-agent-menu-list { scrollbar-width:none; }
+  .co-agent-menu-list::-webkit-scrollbar { display:none; }
+  .co-agent-menu-rows { max-height:none; overflow:visible; }
   .co-agent-menu-list::before { content:''; display:block; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
   .co-agent-menu-list button:not(.co-agent-menu-cancel) { min-height:48px; margin:5px 0; border:1px solid var(--border); }
   .co-agent-menu-list button.is-rec { border-color:var(--accent); }
@@ -672,18 +677,19 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-steps span { padding-top:2px; }
 /* The tools are not boxes of their own, so the lock's hover card is placed against the head. */
 .co-rw-tools { display:contents; }
-.co-rw-seen { display:grid; order:-1; margin-bottom:6px; }
+.co-rw-seen { position:relative; display:grid; justify-items:center; }
 .co-rw-seen.is-public { --seen:var(--co-warn); }
 .co-rw-seen.is-private { --seen:var(--green); }
 /* The lock (green: nothing reaches GitHub) and the globe (amber: something does) keep their own colour over the quiet button's. */
 .co-rw-seen { --co-btn-tone:var(--seen); --co-btn-tone-fill:color-mix(in srgb,var(--seen) 14%,transparent); }
-/* The lock reads "What GitHub sees": it is the first line of the head, centred, and the card's arrow points at it from below. */
-.co-btn.co-rw-seen-btn { display:flex; gap:8px; padding:0 12px; cursor:help; }
-/* Anchored to the header, centred, one button plus a gap below the lock, with its arrow pointing at the lock's centre. */
-.co-rw-seen-card { position:absolute; z-index:3; top:calc(var(--rw-edge) + 4px + var(--co-control-height) + 6px); left:var(--rw-edge); right:var(--rw-edge); margin-inline:auto; width:min(300px,calc(100% - 2 * var(--rw-edge))); text-align:left; padding:12px 14px; border:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-radius:var(--co-radius-panel); background:var(--surface-2,var(--surface)); box-shadow:0 14px 36px rgba(0,0,0,.4); color:var(--text); font-size:var(--co-text-meta); line-height:1.5; opacity:0; visibility:hidden; transform:translateY(-4px); pointer-events:none; transition:opacity .14s ease,transform .14s ease,visibility 0s .14s; }
-.co-rw-seen-card::before { content:''; position:absolute; top:-6px; left:50%; margin-left:-5px; width:10px; height:10px; border-top:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-left:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); background:var(--surface-2,var(--surface)); transform:rotate(45deg); }
-.co-rw-seen-btn:focus-visible + .co-rw-seen-card,.co-rw-seen.is-pinned .co-rw-seen-card { opacity:1; visibility:visible; transform:none; transition-delay:0s; }
-@media (hover:hover) and (pointer:fine) { .co-rw-seen-btn:hover + .co-rw-seen-card { opacity:1; visibility:visible; transform:none; transition-delay:0s; } }
+/* "What GitHub sees" is the first line of the foot, centred. Its slow pulse says it can be opened; nothing is under way. */
+.co-btn.co-rw-seen-btn { display:flex; gap:8px; padding:0 12px; cursor:help; animation:co-seen-pulse 2.8s ease-in-out infinite; }
+@keyframes co-seen-pulse { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb,var(--seen) 0%,transparent); } 50% { box-shadow:0 0 0 6px color-mix(in srgb,var(--seen) 16%,transparent); } }
+/* The card opens above the label, centred on it, with its arrow pointing down at the label. */
+.co-rw-seen-card { position:absolute; z-index:3; bottom:calc(100% + 10px); left:50%; width:min(320px,100%); text-align:left; padding:12px 14px; border:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-radius:var(--co-radius-panel); background:var(--surface-2,var(--surface)); box-shadow:0 14px 36px rgba(0,0,0,.4); color:var(--text); font-size:var(--co-text-meta); line-height:1.5; opacity:0; visibility:hidden; transform:translate(-50%,4px); pointer-events:none; transition:opacity .14s ease,transform .14s ease,visibility 0s .14s; }
+.co-rw-seen-card::before { content:''; position:absolute; bottom:-6px; left:50%; margin-left:-5px; width:10px; height:10px; border-bottom:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-right:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); background:var(--surface-2,var(--surface)); transform:rotate(45deg); }
+.co-rw-seen-btn:focus-visible + .co-rw-seen-card,.co-rw-seen.is-pinned .co-rw-seen-card { opacity:1; visibility:visible; transform:translate(-50%,0); transition-delay:0s; }
+@media (hover:hover) and (pointer:fine) { .co-rw-seen-btn:hover + .co-rw-seen-card { opacity:1; visibility:visible; transform:translate(-50%,0); transition-delay:0s; } }
 .co-rw-facts { margin:0; padding:2px 14px; list-style:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
 .co-rw-facts li { display:grid; grid-template-columns:20px minmax(0,1fr); gap:10px; align-items:start; padding:10px 0; font-size:var(--co-text-body); line-height:1.45; }
 .co-rw-facts li + li { border-top:1px solid var(--border); }
@@ -730,10 +736,19 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-actions > .co-btn { flex:1 1 0; min-width:0; justify-content:center; }
 .co-rw-versions { margin:0; font-size:var(--co-text-meta); color:var(--muted); }
 .co-rw-versions p { margin:6px 0 0; }
+/* An agent window keeps one size, whatever is open inside it: the head and the foot stay put and the middle scrolls
+   without a scrollbar (its foot fades while more is below: the scroll fade at the end of this sheet). */
+.co-dialog:has(> .co-review-window.is-sized) { display:flex; height:min(780px,calc(100% - 40px)); overflow:hidden; }
+.co-dialog > .co-review-window.is-sized { flex:1 1 auto; display:flex; flex-direction:column; min-width:0; min-height:0; }
+.co-dialog > .co-review-window.is-sized > .co-rw-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; padding-bottom:20px; }
+.co-dialog > .co-review-window.is-sized > .co-rw-body::-webkit-scrollbar { display:none; }
+.co-dialog > .co-review-window.is-sized > .co-rw-body > * { flex-shrink:0; }
+.co-dialog > .co-review-window.is-sized > .co-rw-foot { position:static; margin-top:0; }
 .co-selection-page .co-review-window { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 @media(max-width:680px) {
  .co-dialog-backdrop { align-items:flex-end; padding:12px 12px max(22px,env(safe-area-inset-bottom)); }
  .co-dialog { width:100%; max-height:100%; }
+ .co-dialog:has(> .co-review-window.is-sized) { height:min(780px,100%); }
  .co-rw-head { --rw-edge:20px; }
   .co-rw-icon { width:40px; height:40px; }
  .co-rw-foot { margin-top:0; padding-top:14px; }
@@ -750,6 +765,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
  .co-dialog,.co-icon.is-spinning { animation:none; }
  .co-rw-seen-card { transition:none; }
  input[type=checkbox].co-switch,input[type=checkbox].co-switch::after,.co-agent-menu-button > .co-icon:last-child { transition:none; }
+ .co-btn.co-rw-seen-btn { animation:none; }
 }
 /* Project tabs: one tab per job under the project controls. */
 .co-project-tabs { display:flex; gap:4px; margin:20px 0 0; border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; }
@@ -965,7 +981,6 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-desk-row > .co-desk-attention-icon { margin-top:2px; color:var(--muted); }
 .co-desk-row > .co-desk-attention-icon.is-blocker { color:var(--danger); }
 .co-pr-detail .co-detail-tabs button { font-size:var(--co-text-body); }
-.co-desc-content > .co-branch-flow { margin:0 0 10px; }
 .co-file-tools { display:flex; align-items:center; gap:10px; margin:8px 0 6px; }
 .co-file-disclosure > summary { display:flex; align-items:center; gap:10px; }
 .co-file-name { flex:1; min-width:0; overflow-wrap:anywhere; }
@@ -1027,7 +1042,6 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 .co-projects-view:has(.co-pull-page), .co-root:has(.co-pull-page) .co-header { max-width:none; }
 .co-pr-detail { --co-read-width:1000px; }
 .co-pr-detail .co-next-step, .co-pr-detail .co-gh-description, .co-pr-detail .co-pr-feedback-flag, .co-pr-detail-body:not([data-tab="files"]) > * { max-width:var(--co-read-width); }
-.co-gh-labels { margin-top:8px; }
 /* The comet frame: a faint base frame, with one comet travelling along it while an agent works. */
 .co-frame { position:relative; border-radius:var(--frame-radius,12px); }
 .co-frame[data-frame="reviewing"] { background:color-mix(in srgb,var(--accent) 5%,transparent); }
@@ -1118,13 +1132,12 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-pr-detail .co-pr-title-num { display:none; }
  .co-pr-detail .co-pr-sub-num { display:inline; }
  .co-pull-page .co-gh-pr-title { margin-top:8px; font-size:var(--co-text-body); font-weight:600; line-height:1.32; letter-spacing:-.01em; }
- .co-pr-detail .co-gh-labels { margin-top:8px; }
  .co-pr-detail-actions { flex-wrap:wrap; margin:12px 0 10px; }
  .co-pr-detail .co-markdown { font-size:var(--co-text-body); line-height:1.5; }
  /* The PR description reads smaller on a phone than the rest of the page: 13px text, 12px code. Nothing else may use these two tokens. */
  .co-desc-content .co-markdown { font-size:var(--co-text-reading); line-height:1.5; }
  .co-desc-content .co-markdown h1,.co-desc-content .co-markdown h2,.co-desc-content .co-markdown h3 { font-size:var(--co-text-meta); }
- .co-desc-content .co-markdown code,.co-desc-content .co-branch-flow code { font-size:var(--co-text-code); }
+ .co-desc-content .co-markdown code { font-size:var(--co-text-code); }
  .co-gh-comment > .co-markdown, .co-gh-comment > div { padding:10px 12px; }
  .co-gh-comment > header { padding:6px 8px 6px 12px; }
  .co-pr-title { font-size:var(--co-text-body); line-height:1.38; }
@@ -1141,6 +1154,7 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-sticky-mark.is-news { color:var(--accent); }
 }
 @supports (animation-timeline: scroll()) {
+ .co-agent-menu-rows, .co-dialog > .co-review-window.is-sized > .co-rw-body { -webkit-mask-image:linear-gradient(180deg,#000 calc(100% - var(--co-fade-end)),transparent); mask-image:linear-gradient(180deg,#000 calc(100% - var(--co-fade-end)),transparent); animation:co-fade-end linear both; animation-timeline:scroll(self block); }
  @media(max-width:680px) {
   .co-project-tabs, .co-pr-filters, .co-pr-detail .co-detail-tabs { -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - var(--co-fade-end)),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - var(--co-fade-end)),transparent); animation:co-fade-end linear both; animation-timeline:scroll(self inline); }
  }

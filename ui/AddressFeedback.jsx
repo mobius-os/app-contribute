@@ -66,9 +66,9 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     } catch { setError('Could not start the agent. Try again.') }
     finally { setBusy(false) }
   }
-  const heading = (seen = null) => <WindowHead title="Respond to feedback" pulls={[pr]} tools={seen} />
+  const heading = <WindowHead title="Respond to feedback" pulls={[pr]} />
   if (started) return <section ref={root} tabIndex={-1} className="co-review-window" aria-label="Respond to feedback started">
-    {heading()}
+    {heading}
     <div className="co-rw-body">
       <p className="co-rw-note">{started.reused ? 'An agent is already working on this PR.' : 'The agent is on it.'} When it finishes, its answers, the changed files and the commits appear in this PR’s Review tab. Nothing is sent to GitHub{ownerGrant ? <> until you press <b>{NAMES.postAnswer}</b> there</> : ''}.</p>
     </div>
@@ -77,8 +77,8 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       <button type="button" className="co-btn co-btn-primary" onClick={() => { openAgentConversation(started.chatId); onClose() }}>Open the conversation</button>
     </div></footer>
   </section>
-  return <section ref={root} tabIndex={-1} className="co-review-window" aria-label="Respond to feedback">
-    {heading(<SeenOnGithub tone="private" text={`nothing. It works in a private copy; nothing goes out${ownerGrant ? ` until you press ${NAMES.postAnswer}` : ''}.`} />)}
+  return <section ref={root} tabIndex={-1} className="co-review-window is-sized" aria-label="Respond to feedback">
+    {heading}
     <div className="co-rw-body">
       {ownerGrant ? null : <p className="co-rw-blocker" role="status" data-post-off><b>Heads-up:</b> {NAMES.postAnswer} is off on this Möbius. The answer will wait in this PR’s Review tab, where you can copy the replies.</p>}
       <h4 className="co-rw-label">What should it address?</h4>
@@ -95,6 +95,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
           defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={next => { setAgent(next); return true }} />}
     </div>
     <footer className="co-rw-foot">
+      <SeenOnGithub tone="private" text={`nothing. It works in a private copy; nothing goes out${ownerGrant ? ` until you press ${NAMES.postAnswer}` : ''}.`} />
       <p>It reads the PR as it is now. If the PR changes while the agent works, it stops and tells you.</p>
       <div className="co-rw-actions">
         <button type="button" className="co-btn" disabled={busy} onClick={onClose}>{NAMES.cancel}</button>

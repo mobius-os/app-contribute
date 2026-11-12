@@ -2546,8 +2546,8 @@ window.runDeskListChecks = async () => {
     await captureShot('desk-my-prs-merged')
     await click(rowOf('Merged contribution').querySelector('button'))
     await until(() => query('.co-desk-back') && text(query('.co-pull-page')).includes('Merged contribution'), 'A merged row did not open its PR page')
-    await until(() => query('.co-next-hint'), 'The merged PR page shows no next-step line')
-    ensure(text(query('.co-next-hint')) === 'Merged' && !query('.co-next-step button:not(:disabled)'), 'The merged PR page said ' + text(query('.co-next-hint')) + ' and offered a next step')
+    await until(() => query('.co-pull-page .co-gh-badge.is-merged'), 'The merged PR page does not say Merged in its state badge')
+    ensure(text(query('.co-pull-page .co-gh-badge')) === 'Merged' && !query('.co-next-step'), 'The merged PR page said ' + text(query('.co-pull-page .co-gh-badge')) + ' and drew a next-step panel: ' + text(query('.co-next-step')))
     await captureShot('merged-pr-page')
     checks.push({ name: 'a merged row opens its PR page, with nothing left to do on it', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
@@ -3158,23 +3158,25 @@ window.runAskApprovalChecks = async () => {
     // 5. Where Möbius confirms the owner's taps on its own sheet (it advertises owner_confirm), that sheet is the one confirm: Merge is one tap on
     // the action, the app draws no confirm of its own (its sheet only waits, and says Merging… once Möbius has confirmed), Möbius is asked for exactly
     // the request that is then sent, and a cancel sends nothing.
-    // "Merge options…" is the way to choose how it lands first, and only where the repository allows more than one way. Without owner_confirm the
+    // "Merge options…" is the way to choose how it lands first: a second, smaller choice on the Merge row, and only where the repository allows more than one way. Without owner_confirm the
     // blocks above are the proof that nothing changed: the app's own sheet, and no request to the shell.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
     const landable = { nameWithOwner: 'owner/project', viewerPermission: 'WRITE', squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: false }
     const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
+    const mergeOptions = () => menuItem('Merge')?.parentElement.querySelector('.co-agent-menu-side')
     const openMenu = async () => { await click(query('[aria-label="Choose an action for PR 7"]')); await until(() => menuItems().length, 'The Actions menu did not open') }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    ensure(menuItem('Merge') && !menuItem('Merge options…'), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
+    ensure(menuItem('Merge') && !mergeOptions(), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
     await captureShot('merge-menu-app-sheet')
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true, owner_confirm: true }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    const offered = menuItems().map(node => text(node.querySelector('strong')))
-    ensure(offered.indexOf('Merge options…') === offered.indexOf('Merge') + 1, 'Merge options… did not follow Merge: ' + offered.join(', '))
+    ensure(mergeOptions()?.getAttribute('aria-label') === 'Merge options… Choose how it lands.' && !menuItem('Merge options…'), 'Merge options… is not a second choice on the Merge row: ' + menuItems().map(node => text(node.querySelector('strong')) || node.getAttribute('aria-label')).join(', '))
+    const rows = query('.co-agent-menu-rows'), fits = rows.scrollHeight <= rows.clientHeight
+    ensure(getComputedStyle(rows).scrollbarWidth === 'none' && (fits || getComputedStyle(rows).overflowY === 'auto' || window.innerWidth <= 680), 'The menu rows show a scrollbar or cannot scroll: ' + getComputedStyle(rows).scrollbarWidth + ' ' + getComputedStyle(rows).overflowY)
     await captureShot('merge-menu-shell-sheet')
     window.holdOwnerGrant = new Promise(resolve => { window.releaseOwnerGrant = resolve })
     await click(menuItem('Merge'))
@@ -3206,7 +3208,7 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'a cancel sends nothing and closes; a refusal sends nothing and shows the platform’s sentence', status: 'pass' })
     window.ownerGrantAnswer = undefined
     await openMenu()
-    await click(menuItem('Merge options…'))
+    await click(mergeOptions())
     await until(() => query('.co-rw-rungs'), 'Merge options… did not show how it lands')
     await click([...document.querySelectorAll('[role=radio]')].find(node => text(node).includes('Create a merge commit')))
     ensure(text(query('.co-review-window .co-btn-primary')) === 'Merge', 'The sheet’s button did not name the chosen way: ' + text(query('.co-review-window .co-btn-primary')))

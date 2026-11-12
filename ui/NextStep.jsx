@@ -1,14 +1,4 @@
-import { nextStepModel, stateLine } from '../next-step.js'
-
-// "Draft → In review → Approved → Merged": where this PR is on its way, from the PR's
-// own data. The current step carries aria-current, so it reads without colour.
-export function StateLine({ pr, decision }) {
-  const line = stateLine(pr, decision)
-  if (!line) return null
-  return <ol className="co-state-line" aria-label={`Where this PR is: ${line.current}`}>
-    {line.steps.map(step => <li key={step.label} className={(step.done ? 'is-done ' : '') + (step.current ? 'is-current' : '')} aria-current={step.current ? 'step' : undefined}>{step.label}</li>)}
-  </ol>
-}
+import { nextStepModel } from '../next-step.js'
 
 // What is true (a pill), the machine's own sentence, and the one filled button for the
 // next step (a question's pointer is a link that opens the Review tab, so it is reachable from any tab), together under the facts line. The Actions menu and the Review tab keep

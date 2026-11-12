@@ -171,8 +171,8 @@ the owner, and folds apps with nothing to do.
   `owner_confirm`), that sheet is the one confirm: Merge and the five status changes
   are one tap on the action and one tap on Möbius's sheet, which names what happens
   in Möbius's own words and cannot be pressed by the app or an agent. Merge lands the
-  way the repository prefers, and **Merge options…** (only where it allows more than
-  one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
+  way the repository prefers, and **Merge options…** (a second, smaller choice on the
+  Merge row, only where it allows more than one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
   fix, and Post get that sheet as a new confirm. Until the owner has confirmed on it, the
   app's own sheet only says it is waiting for that. A cancel sends nothing. A Möbius
   without it keeps the sheets above.
@@ -304,7 +304,9 @@ checked over every case and every combination of the facts that matter):
    not stopped by an unconfirmed send; only the agent's jobs wait for a draft that owns the findings.
    Nothing else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
    to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
-   a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
+   a draft, is a confirmed no-op). The Actions menu leaves out a row that would change nothing: it
+   lists Open for review only on a draft, Back to draft only on an open PR, and an Ask only once
+   there is someone to ask. An action that needs a thing waits for it: Send, Check
    GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,
    Set aside for a result, Answer the agent for a question.
 

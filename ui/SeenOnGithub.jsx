@@ -1,11 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Icon } from './Icons.jsx'
 
-// What GitHub will see, as one small labelled icon beside a window's close button: amber
-// when something reaches GitHub, green when nothing does. Hovering or focusing it
-// opens a themed card with the words; a tap pins the card open, because a touch
-// screen has no hover. The words stay in the page, so a screen reader reads them
-// as the button's description. The icon sits last, next to the close button, so the card's arrow stays under it.
+// What GitHub will see, as one small labelled icon at the foot of a window, right above its buttons: amber
+// when something reaches GitHub, green when nothing does. It pulses gently so it reads as something to open.
+// Hovering or focusing it opens a themed card above it with the words; a tap pins the card open, because a touch
+// screen has no hover. The words stay in the page, so a screen reader reads them as the button's description.
 export function SeenOnGithub({ tone, text }) {
   const root = useRef(null)
   const cardId = useId()
