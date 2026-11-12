@@ -365,25 +365,6 @@ export async function fetchChangeProbe(token, pulls) {
   return signatures
 }
 
-export async function assignIncomingReview({ appId, token, repo, number }) {
-  try {
-    const response = await fetch(
-      `/api/github/contributions/${encodeURIComponent(appId)}/assign-review`,
-      {
-        method: 'POST',
-        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo, number }),
-      },
-    )
-    if (!response.ok) {
-      return { ok: false, error: await responseDetail(response, 'Could not assign this review.') }
-    }
-    return { ok: true, data: await response.json() }
-  } catch {
-    return { ok: false, error: 'Could not confirm the assignment. Sync before trying again.' }
-  }
-}
-
 // Send button path: the platform claims the prepared PR record, recomputes the
 // actual branch diff, adapts it to a strictly-behind reusable fork without
 // changing that fork's default branch, pushes the topic branch, opens the PR on

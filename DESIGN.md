@@ -250,6 +250,7 @@ The four views are one segmented bar with every segment on screen, the word firs
 - **Don't** restore a split-pane workspace, parallel Reviews room, or bottom tray as the primary PR action.
 - **Don't** equate passing checks with a review verdict or queued work with merged work.
 - **Don't** start agent work merely from selecting a PR or assigning a person.
+- **Don't** use assignment to ask someone for a review, or assign the owner to a PR they only review: an assignee is the person responsible for the PR; a review request is a separate GitHub action.
 - **Don't** hide changed-version removal, scope drift, or ambiguous outcomes.
 - **Don't** shrink 14px metadata, 16px body copy, or 44px controls to fit the phone. The one exception is the PR description's reading text on a phone (13px, code 12px), by the owner's choice.
 - **Don't** invent fixed colors, fonts, icons, approval states, or product permissions outside the shell and implemented contract.

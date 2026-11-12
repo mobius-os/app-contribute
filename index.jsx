@@ -52,7 +52,6 @@ import {
   contributionStackDecision,
 } from './contribution-policy.js'
 import {
-  assignIncomingReview,
   fetchIncomingReviews,
   fetchGithubStatus,
   githubRemainingPoints,
@@ -1324,36 +1323,31 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [])
 
 
-  const onAssignIncomingReview = useCallback(async (item) => {
+  // Reviewing someone's PR never touches its GitHub assignees: an assignee is the person
+  // responsible for the PR, and a review request is a separate GitHub action.
+  const onReviewIncoming = useCallback(async (item) => {
     const repo = item?.repository?.nameWithOwner || ''
-    const outcome = await assignIncomingReview({ appId, token, repo, number: item?.number })
-    if (!outcome.ok) return outcome
     const started = await startAgentTask({
-      event: 'assign_and_review_incoming_pr',
+      event: 'review_incoming_pr',
       title: `Review ${repo} #${item.number}`,
       count: 1,
       draft: [
         `Thoroughly review ${item.url}.`,
         '',
-        'The owner explicitly assigned this exact pull request to themselves from Contribute.',
+        'The owner chose to review this exact pull request from Contribute. Nothing was assigned or posted on GitHub.',
         'Inspect the complete current diff with expanding scope for correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
         'Do not change the author’s branch. Prepare specific, actionable suggestions for sound findings and review again if the author updates it.',
         'Do not submit a GitHub review or comment without the owner’s exact approval for that public action.',
       ].join('\n'),
     })
-    if (!started.ok) {
-      return {
-        ...started,
-        error: 'Assigned on GitHub, but the review chat did not start. Try again to resume it.',
-      }
-    }
-    // The assignment settled after any earlier incoming-review request began.
-    // Invalidate that request before hiding this row so its stale response
-    // cannot put the just-assigned review back into the queue.
+    if (!started.ok) return started
+    // The review chat started after any earlier incoming-review read began.
+    // Invalidate that read before hiding this row so its stale response
+    // cannot put the row back into the queue.
     hub.supersede('incoming')
     setIncomingReviews((current) => current.filter((row) => row.url !== item.url))
     return { ok: true }
-  }, [appId, token, startAgentTask, hub])
+  }, [startAgentTask, hub])
 
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
@@ -1919,7 +1913,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
-              onAssignIncomingReview={onAssignIncomingReview} onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
+              onReviewIncoming={onReviewIncoming} onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
               focusReady={focusedReviewReady && !sourceLoading}
               onFocusConsumed={consumeReviewFocus}
