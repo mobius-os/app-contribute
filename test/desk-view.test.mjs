@@ -241,11 +241,11 @@ test('the new-dot legend shows only when a dot is on screen', () => {
   assert.match(css, /\.co-desk-pane:has\(\.co-desk-row \.co-newdot\) \.co-desk-legend \{ display:flex/)
 })
 
-test('the project status is one panel of equal rows, with real buttons and icons, never a text link', () => {
+test('the project screen has no status panel, only a warning row whose action is a real button, and no action is a text link', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-project-position \{ margin:12px 0 16px; border:1px solid var\(--border\); border-radius:var\(--co-radius-panel\);/)
-  assert.match(css, /\.co-status-row \{ display:flex; align-items:center; gap:12px; min-height:56px;/)
-  assert.match(css, /\.co-status-actions \.co-btn \{ gap:8px; padding:0 12px; \}/)
+  assert.doesNotMatch(css, /co-project-position|co-status-/)
+  assert.match(css, /\.co-upstream-warning \{ display:flex; align-items:center; gap:12px; min-height:56px;/)
+  assert.match(css, /\.co-upstream-warning-actions \.co-btn \{ gap:8px; padding:0 12px; \}/)
   assert.doesNotMatch(css, /co-link-action/)
 })
 
@@ -427,7 +427,13 @@ test('a row reads title, facts, labels, then pills, each on its own line, in lis
 
 test('the attention bar does not sit inside a second border', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-decisions:has\(> \.co-attn:only-child\) \{ border:0; overflow:visible; \}/)
+  assert.match(css, /\.co-decisions:has\(> \.co-attn:only-child\) \{ border:0; \}/)
+})
+
+test('the decisions box does not clip, so a menu can open past its bottom edge', () => {
+  const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  const box = css.match(/\n\.co-decisions \{[^}]*\}/)?.[0] || ''
+  assert.ok(box && !/overflow/.test(box), 'The box around the prepared-PR bar clips its open-for-review menu')
 })
 
 test('a row only counts as assigning while the picker pane is actually open', () => {

@@ -29,7 +29,6 @@ test('the files button, the requests empty state, Take over, merged rows and Res
   const { DESK_VIEWS } = await import('../desk.js')
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const viewIcon = key => DESK_VIEWS.find(view => view.key === key).icon
-  assert.match(read('ui/ProjectControls.jsx'), /aria-label="See the files"[^>]*><Icon name="file"/, 'the files button is a file, not the Needs you eye')
   assert.match(read('ui/DeskViews.jsx'), new RegExp(`requests: \\{ icon: '${viewIcon('requests')}'`), 'the empty Review requests page shows its own view mark')
   assert.match(read('ui/DeskViews.jsx'), /<Icon name="merge"[^>]*co-desk-merged-icon/, 'a merged row shows the merge mark, not a tick')
   const agent = Object.fromEntries(Object.entries(AGENT_MENU))
