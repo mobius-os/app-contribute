@@ -3,6 +3,7 @@
 // data says and the tests can hold it to that.
 import { checkSummary, reviewItemProgress } from './collaboration.js'
 import { NAMES } from './names.js'
+import { FOLLOW_MODE_WORDS, followState } from './autopilot.js'
 
 const names = list => list.join(', ')
 
@@ -247,5 +248,55 @@ export function closeCopy(pr) {
   }
 }
 
-// The sheet's words for each of the owner's own actions, by the PR machine's action id.
-export const ACTION_COPY = { open_for_review: openForReviewCopy, merge: mergeCopy, back_to_draft: backToDraftCopy, ask_rereview: askRereviewCopy, ask_approval: askApprovalCopy, close: closeCopy }
+// How following publishes a fix: the two ways the owner chooses between, each in one sentence.
+const FOLLOW_MODES = {
+  ask: { label: 'Ask me before each push', detail: 'The agent prepares each fix, and it reaches GitHub only when you press Update PR.' },
+  auto: { label: 'Push on its own', detail: 'The agent pushes each fix to the PR’s branch without asking you first.' },
+}
+const FOLLOW_PAUSED = { label: NAMES.pause, detail: 'Nothing is answered or pushed until you resume.' }
+// What the agent may and may not do while it follows, whichever way it pushes.
+const FOLLOW_FACTS = [
+  { tone: 'ok', text: 'It reacts to requested changes, failing checks and comments from project members' },
+  { tone: 'warn', text: 'It may reply on GitHub from your account' },
+  { tone: 'ok', text: 'It never merges' },
+  { tone: 'ok', text: 'It never opens a draft for review' },
+]
+
+// The choices of the Follow window, with the button each one leads to. The way things are now is marked `current`: it is
+// listed so the owner sees it, and confirming it would change nothing, so its button stays off. Ask-before-push is
+// offered only where this Möbius has it (or the PR already uses it).
+function followOptions(state, askMode) {
+  const now = state ? (state.paused ? 'paused' : state.mode) : ''
+  const action = !state ? NAMES.follow : state.paused ? NAMES.resume : NAMES.changeFollowing
+  const modes = Object.keys(FOLLOW_MODES).filter(key => key !== 'ask' || askMode || state?.mode === 'ask')
+  const options = modes.map(key => ({ key, ...FOLLOW_MODES[key], action, current: now === key }))
+  return state ? [...options, { key: 'paused', ...FOLLOW_PAUSED, action: NAMES.pause, current: now === 'paused' }] : options
+}
+
+function followDone(pr, outcome) {
+  if (outcome?.enabled === false) return { title: NAMES.followPaused, text: `Nothing on **#${pr.number}** is answered until you resume.` }
+  return { title: NAMES.following, text: outcome?.pushMode === 'ask' ? `**#${pr.number}** is followed. Each fix waits for your Update PR press.` : `**#${pr.number}** is followed. Fixes are pushed without asking you.` }
+}
+
+// Follow this PR: start following a PR that was sent, or change how it is followed (the other way to push, Pause, Resume).
+// `record` is Contribute's saved record of the PR, whose mirror says how it is followed now.
+export function followCopy(pr, { record = null, capabilities = null } = {}) {
+  const state = followState(record)
+  const options = followOptions(state, capabilities?.follow_ask_mode === true)
+  const now = !state ? [] : state.paused ? [{ tone: 'warn', text: 'Paused now' }] : [{ tone: 'ok', text: `Following now: ${FOLLOW_MODE_WORDS[state.mode].toLowerCase()}` }]
+  // With one way to push there is nothing to choose, so the sheet states it as a fact instead.
+  const only = options.length === 1 ? [{ tone: 'warn', text: 'It pushes each fix without asking you first' }] : []
+  return {
+    title: state ? `Change how #${pr.number} is followed?` : `Follow #${pr.number}?`,
+    confirm: state ? NAMES.changeFollowing : NAMES.follow,
+    working: 'Saving…',
+    workingTitle: state ? `Changing how #${pr.number} is followed` : `Starting to follow #${pr.number}`,
+    facts: [...now, ...FOLLOW_FACTS, ...only],
+    choices: options.length > 1 ? { label: state ? 'How should it be followed?' : 'When it has a fix', value: options.find(option => option.current)?.key || options[0].key, options } : null,
+    footnote: 'It stays on until you pause it or the PR is merged or closed.',
+    done: outcome => followDone(pr, outcome),
+  }
+}
+
+// The sheet's words for each of the owner's own actions, by the PR machine's action id (and `follow`, the menu's own row).
+export const ACTION_COPY = { follow: followCopy, open_for_review: openForReviewCopy, merge: mergeCopy, back_to_draft: backToDraftCopy, ask_rereview: askRereviewCopy, ask_approval: askApprovalCopy, close: closeCopy }

@@ -1276,21 +1276,19 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return outcome
   }, [appId, token, applyRecordUpdates, refreshReviewStatus])
 
-  // Pause / resume autopilot for one shipped PR. Platform endpoint (not a ledger
-  // write); on success we re-read that record so the mirrored autopilot block
-  // and any cleared human_required flag land in the feed.
-  const onSetAutopilot = useCallback(async (rec, enabled) => {
+  // Pause / resume following for one shipped PR, or (with `follow`: see api.js setAutopilot) start it or change how it
+  // pushes. Platform endpoint (not a ledger write); on success we re-read that record so the mirrored autopilot block
+  // and any cleared human_required flag land in the feed and on the PR page.
+  const onSetAutopilot = useCallback(async (rec, enabled, follow = {}) => {
     const outcome = await setAutopilot({
-      appId, token, recordId: rec.id, enabled,
+      appId, token, recordId: rec.id, enabled, ...follow,
     })
-    if (outcome.ok) {
-      try {
-        const fresh = await loadFreshContributionRecord(rec.id)
-        if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
-      } catch { /* the next refresh reconciles */ }
-      return { ok: true }
-    }
-    return { error: outcome.error || 'Could not update autopilot.' }
+    if (!outcome.ok) return outcome.cancelled ? outcome : { error: outcome.error || 'Could not update following.' }
+    try {
+      const fresh = await loadFreshContributionRecord(rec.id)
+      if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+    } catch { /* the next refresh reconciles */ }
+    return outcome
   }, [appId, token, applyRecordUpdates])
 
   const onChangeNewPrStage = useCallback(async (next) => {
@@ -1669,7 +1667,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token}
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
         runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
-        presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore}
+        presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
         records={recordsForProject(records, project)} onRecord={record => {
           setPullPage(null)
           if (project?.key) setProjectFocus({ key: project.key, nonce: crypto.randomUUID() })
@@ -1678,7 +1676,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
       runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
-      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore}
+      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
       onOpenPage={(pr, tab) => openPullPage(project, pr, tab)}
       focusPull={pullFocus?.number ? pullFocus : null} focusRun={pullFocus?.runId ? pullFocus : null} onFocusRelease={releasePullFocus}
       records={recordsForProject(records, project)} onRecord={record => {

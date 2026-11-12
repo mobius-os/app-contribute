@@ -124,7 +124,7 @@ window.fetch = async (url, options = {}) => {
   // The platform's note asking reviewers who looked again to approve: the one public write of the Ask for approval sheet.
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/merge') { calls.merges.push(call.body); return response({ state: 'merged', merge_sha: 'a'.repeat(40), repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
   // Resume on an escalated PR: the platform's autopilot route, the one existing way on.
-  if (call.method === 'POST' && /^\/api\/github\/contributions\/fixture-app\/[\w-]+\/autopilot$/.test(call.url)) { calls.autopilot.push({ url: call.url, ...call.body }); return response({ status: 'ok', enabled: call.body.enabled }) }
+  if (call.method === 'POST' && /^\/api\/github\/contributions\/fixture-app\/[\w-]+\/autopilot$/.test(call.url)) { calls.autopilot.push({ url: call.url, ...call.body }); window.onAutopilotPost?.(call.body); return response({ status: 'ok', enabled: call.body.enabled, push_mode: call.body.push_mode || window.followMode || 'auto' }) }
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/ask-approval') { calls.asks.push(call.body); return response({ state: 'asked', observed_head_sha: call.body.head_sha, repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
   // A conversation of the app: the platform returns the PR's existing one for its scope, and takes a message into any chat the app made.
   if (call.method === 'POST' && call.url === '/api/app-chats/start') { calls.appChatStarts.push(call.body); return response({ chat_id: 'respond-chat-fixture', outcome: 'reused' }) }
@@ -150,7 +150,7 @@ window.fetch = async (url, options = {}) => {
     if (window.fullAppSubmit && call.method === 'POST' && call.url.endsWith('/submit')) return response(window.fullAppSubmit(call))
     if (call.url === '/api/github/graphql' && call.method === 'POST') {
       if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
-      if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:'MERGED',isDraft:false}}})
+      if (call.body.query.includes('resource(url:')) return response({data:{r0:{__typename:'PullRequest',state:window.fixtureLiveState || 'MERGED',isDraft:false}}})
       if (call.body.query.includes('ContributeRepositories')) return response({data:{viewer:{repositories:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}}})
       // The Desk scenario asks the fixture PRs for review; everything else it reads falls through to the project mocks below.
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
@@ -3226,6 +3226,125 @@ window.runAskApprovalChecks = async () => {
   }
 }
 
+// The whole app, on a Möbius that can switch following on after a PR was sent (it advertises follow_after_send): the Actions menu
+// offers Follow this PR instead of Finish it for me, the window chooses how fixes are published, Möbius's own sheet confirms exactly the
+// body that is then sent, the PR page gets one quiet Following line with Pause and Resume, and the way it pushes can be changed.
+// On a Möbius without the capability nothing of this shows.
+window.runFollowChecks = async () => {
+  const checks = []
+  const menuItems = () => [...document.querySelectorAll('[role=menuitem]')]
+  const titles = () => menuItems().map(node => text(node.querySelector('strong')))
+  const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
+  const button = (label, scope = document) => [...scope.querySelectorAll('button')].find(node => text(node) === label)
+  const sideways = () => document.documentElement.scrollWidth <= window.innerWidth
+  const sent = { ...prepared, id: 'followed-record', status: 'open', number: 7, url: 'https://github.com/owner/project/pull/7' }
+  const target = { repo: 'owner/project', number: 7 }
+  const route = '/api/github/contributions/fixture-app/followed-record/autopilot'
+  let block = null
+  // What the platform's mirror would now say on the record, as the app re-reads it after each call.
+  window.onAutopilotPost = body => {
+    block = { enabled: body.enabled, state: 'idle', rounds_used: 0, rounds: [], push_mode: body.push_mode || block?.push_mode || 'auto' }
+    const record = { ...sent, autopilot: block }
+    values.set('contributions/followed-record.json', record)
+    window.deskRecords = [record]
+  }
+  const openPage = async () => {
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+    await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+    await until(() => query('.co-desk-back') && query('.co-pr-detail-actions'), 'The PR page did not open')
+  }
+  // The PR's record loads in the background after its page opens, so a menu opened at once may lack the row that depends on it: open it
+  // again until the row named is in it.
+  const openMenu = async (title = '') => {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await click(query('[aria-label="Choose an action for PR 7"]'))
+      await until(() => menuItems().length, 'The Actions menu did not open')
+      if (!title || menuItem(title)) return
+      await click(query('[aria-label="Choose an action for PR 7"]'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    throw new Error('The Actions menu never offered ' + title + ': ' + titles().join(', '))
+  }
+  const line = () => text(query('.co-follow-line'))
+  try {
+    reviewRuns.length = 0
+    respondChats.length = 0
+    // The fixture's live-state check answers merged unless told otherwise: this PR is open.
+    window.fixtureLiveState = 'OPEN'
+    // 1. A Möbius that cannot follow after Send: the menu and the page are as they were.
+    window.fixtureCapabilities = { merge_now: true, pr_machine: true }
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
+    await openPage()
+    await openMenu()
+    ensure(titles().includes('Finish it for me') && !titles().includes('Follow this PR') && !query('.co-follow-line'), 'Without follow_after_send the menu offered: ' + titles().join(', '))
+    checks.push({ name: 'without follow_after_send the menu keeps Finish it for me and nothing of following shows', status: 'pass' })
+    // 2. A Möbius that can: Follow this PR takes its place.
+    window.fixtureCapabilities = { merge_now: true, pr_machine: true, owner_confirm: true, follow_after_send: true, follow_ask_mode: true }
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
+    await openPage()
+    await openMenu('Follow this PR')
+    ensure(titles().includes('Follow this PR') && !titles().includes('Finish it for me'), 'The menu offered: ' + titles().join(', '))
+    await captureShot('follow-menu')
+    await click(menuItem('Follow this PR'))
+    await until(() => query('.co-review-window'), 'The Follow window did not open')
+    const sheet = text(query('.co-review-window'))
+    ensure(sheet.includes('Follow #7?') && sheet.includes('Ask me before each push') && sheet.includes('Push on its own') && sheet.includes('It never merges'), 'The window said: ' + sheet)
+    ensure(sideways(), 'The window scrolls the page sideways')
+    await captureShot('follow-window')
+    await click(query('.co-review-window .co-btn-primary'))
+    await until(() => calls.autopilot.length === 1, 'Following did not reach the platform: ' + text(query('.co-review-window')))
+    const start = { enabled: true, push_mode: 'ask', ...target }
+    ensure(JSON.stringify(calls.grants.at(-1).args) === JSON.stringify(['follow', { record_id: 'followed-record' }, start]), 'Möbius was asked for ' + JSON.stringify(calls.grants.at(-1)?.args))
+    ensure(JSON.stringify(calls.autopilot[0]) === JSON.stringify({ url: route, ...start }), 'The platform got ' + JSON.stringify(calls.autopilot[0]))
+    ensure(calls.requests.findIndex(call => call.url === route) >= calls.grants.at(-1).requestsBefore, 'Following was sent before Möbius was asked')
+    await click(button('Done'))
+    await until(() => query('.co-follow-line'), 'The PR page drew no Following line')
+    ensure(line().startsWith('Following') && line().includes('asks before each push') && button('Pause', query('.co-follow-line')), 'The line said: ' + line())
+    ensure(sideways(), 'The Following line scrolls the page sideways')
+    await captureShot('follow-line')
+    checks.push({ name: 'Follow this PR chooses how fixes are published, Möbius confirms exactly the body that is sent, and the page says Following', status: 'pass' })
+    // 3. Pause and Resume are the plain call: no sheet and no mode.
+    await click(button('Pause', query('.co-follow-line')))
+    await until(() => calls.autopilot.length === 2 && line().startsWith('Following paused'), 'Pause did not show: ' + line())
+    ensure(JSON.stringify(calls.autopilot[1]) === JSON.stringify({ url: route, enabled: false }) && calls.grants.length === 1, 'Pause sent ' + JSON.stringify(calls.autopilot[1]) + ' after ' + calls.grants.length + ' sheets')
+    await click(button('Resume', query('.co-follow-line')))
+    await until(() => calls.autopilot.length === 3 && line().startsWith('Following ·'), 'Resume did not show: ' + line())
+    ensure(JSON.stringify(calls.autopilot[2]) === JSON.stringify({ url: route, enabled: true }) && calls.grants.length === 1, 'Resume sent ' + JSON.stringify(calls.autopilot[2]))
+    checks.push({ name: 'Pause and Resume are the plain call, with no sheet and no mode', status: 'pass' })
+    // 4. Another way to push is new authority: it is confirmed again, and a cancel sends nothing.
+    await openMenu('Following')
+    ensure(titles().includes('Following') && !titles().includes('Follow this PR'), 'A followed PR offered: ' + titles().join(', '))
+    await click(menuItem('Following'))
+    await until(() => query('.co-review-window'), 'The Change window did not open')
+    ensure(text(query('.co-review-window')).includes('Change how #7 is followed?') && text(query('.co-review-window')).includes('Pause') && query('.co-review-window .co-btn-primary').disabled, 'The window said: ' + text(query('.co-review-window')))
+    await click([...document.querySelectorAll('.co-review-window [role=radio]')].find(node => text(node).includes('Push on its own')))
+    ensure(!query('.co-review-window .co-btn-primary').disabled && text(query('.co-review-window .co-btn-primary')) === 'Change', 'The button said: ' + text(query('.co-review-window .co-btn-primary')))
+    window.ownerGrantAnswer = false
+    await click(query('.co-review-window .co-btn-primary'))
+    await until(() => calls.grants.length === 2, 'Möbius was not asked to confirm the change')
+    ensure(calls.autopilot.length === 3, 'A cancelled change was sent')
+    // A cancel leaves the window on its choice, so the owner can pick again.
+    ensure(query('.co-review-window') && !query('.co-review-window .co-btn-primary').disabled && text(query('.co-review-window .co-btn-primary')) === 'Change', 'The window did not return to its choice: ' + text(query('.co-review-window')))
+    window.ownerGrantAnswer = undefined
+    await click(query('.co-review-window .co-btn-primary'))
+    await until(() => calls.autopilot.length === 4, 'The change did not reach the platform')
+    const change = { enabled: true, push_mode: 'auto', ...target }
+    ensure(JSON.stringify(calls.grants.at(-1).args) === JSON.stringify(['follow', { record_id: 'followed-record' }, change]) && JSON.stringify(calls.autopilot[3]) === JSON.stringify({ url: route, ...change }), 'The change sent ' + JSON.stringify(calls.autopilot[3]))
+    await click(button('Done'))
+    await until(() => line().includes('pushes on its own'), 'The line did not follow the change: ' + line())
+    checks.push({ name: 'another way to push is confirmed on Möbius’s sheet, a cancel sends nothing and leaves the choice open, and the line follows the change', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    delete window.onAutopilotPost
+    delete window.fixtureLiveState
+    window.fixtureCapabilities = undefined
+    window.ownerGrantAnswer = undefined
+  }
+}
+
 // The whole app on a fresh page: a review the owner submits answers its request on
 // GitHub, so the Desk row leaves Review requests when the verdict posts, not at the
 // next Sync. Reads after that (the frame shown again, the hub's probe) keep it honest.
@@ -3622,7 +3741,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

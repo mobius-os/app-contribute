@@ -28,7 +28,8 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
   const titleId = useId()
   const [phase, setPhase] = useState(autoConfirm ? 'asking' : 'confirm')
   const [error, setError] = useState('')
-  // An action with ways to do it (Merge: squash, merge commit, rebase) asks once, in the sheet.
+  // An action with ways to do it (Merge: squash, merge commit, rebase) asks once, in the sheet. A way marked `current`
+  // is how things already are (Follow): it is shown, and the button stays off while it is the one picked.
   const [picked, setPicked] = useState(copy.choices?.value || '')
   // An action that names people (Ask for approval, Ask for re-review) lists them with a tick each, and the sheet's words
   // follow the ticks: `copy.forPicked` words it for whoever is ticked, in the list's order.
@@ -88,7 +89,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
           ? <button type="button" className="co-btn co-btn-primary" onClick={onClose}>Done</button>
           : <>
             <button type="button" className="co-btn" disabled={working} onClick={onClose}>{phase === 'unconfirmed' ? 'Close' : NAMES.cancel}</button>
-            <button type="button" className="co-btn co-btn-primary" disabled={working || phase === 'unconfirmed' || live.disabled === true} aria-busy={working} onClick={confirm}>{phase === 'checking' ? <Shine>Checking GitHub…</Shine> : working ? <Shine>{live.working}</Shine> : selected?.action || live.confirm}</button>
+            <button type="button" className="co-btn co-btn-primary" disabled={working || phase === 'unconfirmed' || live.disabled === true || selected?.current === true} aria-busy={working} onClick={confirm}>{phase === 'checking' ? <Shine>Checking GitHub…</Shine> : working ? <Shine>{live.working}</Shine> : selected?.action || live.confirm}</button>
           </>}
       </div>
     </footer>}

@@ -548,8 +548,9 @@ def _attention_resolved(attention, check_state, mergeable, review_decision):
 
 
 # The platform's SETTLED_OUTCOMES (contribution_autopilot.py): rounds that
-# pushed, replied or marked the event handled.
-_SETTLED_ROUNDS = frozenset(("pushed", "replied", "handled"))
+# pushed, replied, marked the event handled, or (ask-before-push) prepared the
+# fix for the owner's Update PR press.
+_SETTLED_ROUNDS = frozenset(("pushed", "replied", "handled", "prepared"))
 
 
 def _round_answered(rec, key):

@@ -809,12 +809,25 @@ export async function markContributionReady({ appId, token, rec }) {
   }
 }
 
-// Pause / resume autopilot for one shipped PR. This is a platform endpoint, NOT
+// The body of the following toggle. Pause and Resume name only `enabled`. Starting to follow, or another push mode
+// (`pushMode`), is new authority: it also names the PR the owner is looking at, which the platform holds the record to.
+export function autopilotRequestBody({ enabled, pushMode = null, repo = null, number = null }) {
+  return pushMode ? { enabled: true, push_mode: pushMode, repo, number } : { enabled: !!enabled }
+}
+
+// Pause / resume following for one shipped PR, start it, or change how it pushes. This is a platform endpoint, NOT
 // a ledger write — the grant lives in a platform DB row the app can't edit, so
 // flipping the (display-only) ledger `autopilot` block could never actually stop
 // the loop. Resume also clears any human_required flag and resets the round and
-// failure counters. Returns { ok } or { error }.
-export async function setAutopilot({ appId, token, recordId, enabled }) {
+// failure counters. With `pushMode` the owner confirms first on Möbius's own sheet (`shellConfirm`: owner-grant.js
+// askOwner), for exactly the body then sent; `onConfirmed` runs once nothing is left to confirm.
+// Returns { ok, enabled, pushMode } (what the platform now holds), { error } (its own sentence when it refused) or
+// { cancelled } (the owner closed Möbius's sheet: nothing was sent).
+export async function setAutopilot({ appId, token, recordId, enabled, pushMode = null, repo = null, number = null, shellConfirm = null, onConfirmed = null }) {
+  const body = autopilotRequestBody({ enabled, pushMode, repo, number })
+  const stopped = pushMode && shellConfirm ? await shellConfirm('follow', { record_id: recordId }, body) : null
+  if (stopped) return stopped
+  onConfirmed?.()
   try {
     const r = await fetch(
       '/api/github/contributions/' +
@@ -823,13 +836,15 @@ export async function setAutopilot({ appId, token, recordId, enabled }) {
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !!enabled }),
+        body: JSON.stringify(body),
       }
     )
-    if (r.ok) return { ok: true }
-    let body = null
-    try { body = await r.json() } catch { body = null }
-    return { error: body?.detail || 'Could not update autopilot.' }
+    let answer = null
+    try { answer = await r.json() } catch { answer = null }
+    if (r.ok) return { ok: true, enabled: answer?.enabled ?? body.enabled, pushMode: answer?.push_mode || pushMode || '' }
+    // A refusal is the platform's own sentence, as it is (a few name a code beside it).
+    const detail = answer?.detail
+    return { error: (typeof detail === 'string' ? detail : detail?.message) || 'Could not update following.' }
   } catch {
     return { error: 'The response was lost. Try again in a moment.' }
   }

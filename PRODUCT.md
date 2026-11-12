@@ -316,13 +316,28 @@ unless you chose "Agent posts" for that review.
 fixed with its commit, not valid with the reason and an @mention, or out of scope; it
 never reviews again, and its result waits in the PR's Review tab until you press Post,
 which pushes the fixes, posts every reply, updates the description and asks for the
-re-review) · Finish it for me (stops before each push for your approval). Their PR:
+re-review) · Finish it for me (stops before each push for your approval; only on a Möbius that
+cannot follow a PR after it was sent, see Following below). Their PR:
 Review, which reads Re-review once you reviewed it and opens on "Draft for me" where this
 Möbius can post a review and propose its verdict (otherwise the private check), with an
 optional "Merge after I approve" switch that stays drawn, off and dimmed, with its reason
 where it cannot be turned on · Take over, set apart, maintainers only, with a reason. Your own
 actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
 behind a confirm sheet (Möbius's own, where it offers one) and each shown only where this Möbius can do it.
+
+**Following (owner direction, 2026-11-12).** A PR that Contribute sent can be *followed*: an agent answers
+requested changes, failing checks and comments from project members until the owner pauses it or the PR is merged
+or closed. It never merges and never opens a draft for review. The Settings switch **Follow sent PRs** is still the
+default for newly sent PRs; where Möbius advertises `follow_after_send`, the Agent group of Actions also has
+**Follow this PR** for an open PR of the owner's that has a Contribute record (not a stack member), and that row
+replaces **Finish it for me** in the menu. A stopped Finish it for me job still starts again from the next-step
+button, and a Möbius without the capability keeps the menu as it was. The row opens one window: two ways to publish
+a fix, **Ask me before each push** (the default, where Möbius advertises `follow_ask_mode`: the agent prepares the
+fix and it reaches GitHub only on the owner's existing **Update PR** press) and **Push on its own**, the facts of
+what the agent may do, and one button. Starting to follow and changing the way it pushes are confirmed on Möbius's
+own sheet; Pause and Resume are not, because they only use a permission the owner already gave. A followed PR's
+row reads **Following** with how it pushes (or Paused), the same window then offers the other way, Pause or Resume,
+and the PR page shows one quiet **Following** line under its facts with what the agent last did and Pause or Resume.
 
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·

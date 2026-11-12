@@ -362,6 +362,12 @@ export const WORKSPACE_CSS = `
 .co-gh-pr-title > span { color:var(--muted); font-weight:400; }
 .co-gh-pr-sub { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; margin-top:10px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-gh-pr-sub b { color:var(--text); font-weight:600; }
+/* The Following line: one quiet line under the facts, with Pause or Resume at its end. */
+.co-follow-line { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; margin-top:8px; color:var(--muted); font-size:var(--co-text-meta); }
+.co-follow-line p { display:flex; align-items:center; gap:6px; min-width:0; margin:0; }
+.co-follow-line b { color:var(--text); font-weight:600; }
+.co-follow-line svg { flex:none; }
+.co-follow-error { flex-basis:100%; color:var(--danger-text,var(--danger)); }
 .co-gh-pr-sub code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
 .co-branch-flow { display:inline-flex; align-items:center; gap:7px; min-width:0; }
 .co-branch-flow code { overflow-wrap:anywhere; }
@@ -1114,6 +1120,8 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(max-width:680px) {
  .co-pr-detail { display:flex; flex-direction:column; }
  .co-pr-detail .co-gh-pr-sub { order:-2; margin:2px 0 0; }
+ /* The facts sit above the title on a phone, and the Following line stays right under them. */
+ .co-pr-detail .co-follow-line { order:-2; margin:0; }
  .co-pr-detail .co-gh-pr-head { order:-1; padding-right:0; }
  .co-pr-detail .co-pr-title-num { display:none; }
  .co-pr-detail .co-pr-sub-num { display:inline; }
