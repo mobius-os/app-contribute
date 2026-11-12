@@ -100,6 +100,7 @@
     "review-followup.md",
     "ui/Icons.jsx",
     "ui/BatchAction.jsx",
+    "ui/ConfirmWindow.jsx",
     "ui/ConnectionCard.jsx",
     "ui/AgentModelSettings.jsx",
     "ui/MarkdownView.jsx",

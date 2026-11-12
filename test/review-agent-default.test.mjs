@@ -83,7 +83,7 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub will see is one icon beside Close, and the words stay in the page for a screen reader', async t => {
+test('what GitHub will see is one icon in the window’s corner, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
@@ -96,7 +96,7 @@ test('what GitHub will see is one icon beside Close, and the words stay in the p
   // The fix window says the same thing the same way.
   const fix = api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} })
   assert.match(fix, /co-rw-seen is-private/)
-  assert.equal((fix.match(/aria-label="Close"/g) || []).length, 1)
+  assert.equal((fix.match(/>Cancel<\/button>/g) || []).length, 1, 'and the fix window has one way out, Cancel')
 })
 
 test('Who sees the result sits on one row: the question on the left, the three choices on the right', async t => {
@@ -121,11 +121,11 @@ test('the dialog styles give the row, the steps and the hover card their room', 
 test('the hover card is anchored to the header and sized from the dialog, never the viewport', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
   const card = css.match(/\.co-rw-seen-card \{([^}]*)\}/)[1]
-  assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:20px; position:relative;/, 'the header is what the card is positioned against')
+  assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:28px; position:relative;/, 'the header is what the card is positioned against')
   assert.match(css, /\.co-rw-seen \{ display:grid; \}/, 'the icon wrapper is not a positioned ancestor')
-  assert.match(card, /right:var\(--rw-edge\); width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side')
+  assert.match(card, /right:10px; width:min\(300px,calc\(100% - 20px\)\)/, 'the card keeps the corner’s distance of room on each side')
   assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and header insets and clips the card on a narrow phone')
-  assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:16px;/, 'the narrow sheet has the smaller edge')
+  assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:20px;/, 'the phone card has the smaller edge')
 })
 
 test('a new Review or Fix window is started from the saved agent, and only when there is one', () => {

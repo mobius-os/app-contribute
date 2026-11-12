@@ -7,7 +7,8 @@ import { Icon } from './Icons.jsx'
 import { ReviewPromptPreview } from './ReviewPromptSettings.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
 import { SeenOnGithub } from './SeenOnGithub.jsx'
-import { CloseWindowButton, WindowHead } from './WindowHead.jsx'
+import { WindowHead } from './WindowHead.jsx'
+import { NAMES } from '../names.js'
 
 // Finish it for me and Take over promise to stop before every push for your approval and never to
 // merge. Only a Möbius that advertises the PR machine keeps that promise: an older one pushes without
@@ -168,8 +169,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
   const postingUnavailable = choice.mode === 'review_merge' && !!capabilities && !(capabilities.post_review === true && capabilities.propose_verdict === true)
   const startBlocked = takeover && !!blocker
   return <section ref={confirmation} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead icon={takeover ? 'takeover' : 'review'} title={copy.title} titleId={titleId} pulls={choice.pulls}
-      tools={<><SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />{onCancel ? <CloseWindowButton onClick={onCancel} /> : null}</>} />
+    <WindowHead title={copy.title} titleId={titleId} pulls={choice.pulls} tools={<SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />} />
     <div className="co-rw-body">
       {takeover && choice.intent === 'take_over' && onReasonChange ? <TakeoverReason value={choice.takeover_reason || ''} disabled={busy} onChange={onReasonChange} /> : null}
       {takeover
@@ -186,6 +186,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
     <footer className="co-rw-foot">
       <p>{copy.footnote}</p>
       <div className="co-rw-actions">
+        {onCancel ? <button type="button" className="co-btn" disabled={busy} onClick={onCancel}>{NAMES.cancel}</button> : null}
         <button type="button" className="co-btn co-btn-primary" disabled={busy || disabled || startBlocked} onClick={onConfirm}>{busy ? 'Starting…' : copy.startLabel}</button>
       </div>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}

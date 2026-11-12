@@ -6,7 +6,7 @@ import { loadAllPullActivity, loadAllPullThreads } from '../pull-details.js'
 import { AgentModelSettings, ConversationAgent } from './AgentModelSettings.jsx'
 import { SeenOnGithub } from './SeenOnGithub.jsx'
 import { TickList } from './TickList.jsx'
-import { CloseWindowButton, WindowHead } from './WindowHead.jsx'
+import { WindowHead } from './WindowHead.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 import { focusActionRegion } from './TaskPane.jsx'
 import { NAMES } from '../names.js'
@@ -61,7 +61,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     } catch { setError('Could not start the agent. Try again.') }
     finally { setBusy(false) }
   }
-  const heading = (seen = null) => <WindowHead icon="reply" title="Respond to feedback" pulls={[pr]} tools={<>{seen}<CloseWindowButton onClick={onClose} /></>} />
+  const heading = (seen = null) => <WindowHead title="Respond to feedback" pulls={[pr]} tools={seen} />
   if (started) return <section ref={root} tabIndex={-1} className="co-review-window" aria-label="Respond to feedback started">
     {heading()}
     <div className="co-rw-body">
@@ -90,6 +90,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     <footer className="co-rw-foot">
       <p>It reads the PR as it is now. If the PR changes while the agent works, it stops and tells you.</p>
       <div className="co-rw-actions">
+        <button type="button" className="co-btn" disabled={busy} onClick={onClose}>{NAMES.cancel}</button>
         <button type="button" className="co-btn co-btn-primary" disabled={busy || state.phase !== 'ready' || !ticked} onClick={start}>{busy ? 'Starting…' : response ? NAMES.respondAgain : 'Start'}</button>
       </div>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}

@@ -255,12 +255,13 @@ test('Möbius-bot withdrawal keeps the destructive action behind confirmation', 
     /submission_mode === 'mobius-bot'[\s\S]*?\['draft', 'open'\]\.includes\(rec\.status\)[\s\S]*?relay_contribution_id/,
   )
   assert.match(cardSource, /onClick=\{\(\) => \{ setNote\(''\); setConfirming\(true\) \}\}/)
-  assert.match(cardSource, /role="alertdialog"[\s\S]*?Confirm contribution withdrawal/)
-  assert.match(cardSource, /ref=\{keepRef\}[\s\S]*?>\s*Keep open\s*<\/button>/)
-  assert.match(
-    cardSource,
-    /className="co-btn co-btn-danger"[\s\S]*?onClick=\{withdraw\}/,
-  )
+  // The question is the shared confirm window: an alert dialog whose safe choice (Keep) has focus first and whose red button is the action.
+  assert.match(cardSource, /<ConfirmWindow\s+label="Confirm contribution withdrawal"[\s\S]*?keep="Keep open"[\s\S]*?confirm="Withdraw PR"[\s\S]*?onConfirm=\{withdraw\}/)
+  assert.match(cardSource, /<ConfirmWindow\s+label="Confirm dismissal"[\s\S]*?keep="Keep"[\s\S]*?onConfirm=\{dismiss\}/)
+  const confirmSource = readFileSync(new URL('../ui/ConfirmWindow.jsx', import.meta.url), 'utf8')
+  assert.match(confirmSource, /<ReviewDialog role="alertdialog" label=\{label\} onClose=\{onKeep\}>/, 'Escape or a click outside is Keep')
+  assert.match(confirmSource, /useEffect\(\(\) => \{ keepRef\.current\?\.focus\(\) \}, \[\]\)/)
+  assert.match(confirmSource, /ref=\{keepRef\} className="co-btn"[\s\S]*?className="co-btn co-btn-danger"[\s\S]*?onClick=\{onConfirm\}/)
 })
 
 test('lost single and stacked submit responses reconcile durable state', () => {
@@ -402,8 +403,8 @@ test('project status and essential controls remain visible with a readable type 
   assert.ok(sizes.every(size => size === 0 || size >= 14))
 })
 
-test('bottom work surfaces stay content-sized and avoid nested approval cards', () => {
-  assert.match(workspaceTheme, /\.co-workspace \.co-task-dock \{[^}]*top:auto;/)
+test('a docked work surface is a window over the page and avoids nested approval cards', () => {
+  assert.match(workspaceTheme, /\.co-dialog > \.co-task-dock \{[^}]*border:0; background:none;/, 'a docked action is a window: the dialog is its card')
   assert.match(workspaceTheme, /> \.co-run-approval \{[^}]*border:0;/)
 })
 

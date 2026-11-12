@@ -39,28 +39,24 @@ test('only a draft the owner opened with their own GitHub account can be opened 
   assert.equal(isPersonalDraft(null), false)
 })
 
-test('the confirm sheet has one close affordance and one button that names the result', async t => {
+test('the confirm sheet has one way out, Cancel, and one button that names the result', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR')
-  const { render, icon } = await renderModule(`
+  const { render } = await renderModule(`
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { ActionConfirm } from './ui/ActionConfirm.jsx'
-    import { Icon } from './ui/Icons.jsx'
     export const render = props => renderToStaticMarkup(React.createElement(ActionConfirm, props))
-    export const icon = name => renderToStaticMarkup(React.createElement(Icon, { name, size: 22 }))
   `)
   const html = render({ pr: pr(), copy: openForReviewCopy(pr()), onConfirm: () => {}, onClose: () => {} })
   assert.match(html, /<h3[^>]*>Open #9 for review\?<\/h3>/)
-  assert.match(html, /#9 Fix the thing/)
+  assert.match(html, /<p class="co-rw-eyebrow">team\/repo · #9<\/p>/)
+  assert.match(html, /<p class="co-rw-pr"><strong>Fix the thing<\/strong><\/p>/)
   assert.match(html, />Open for review<\/button>/)
-  assert.match(html, /aria-label="Close"/)
-  assert.doesNotMatch(html, />Cancel</, 'the X is the only way out')
+  assert.equal((html.match(/>Cancel<\/button>/g) || []).length, 1, 'Cancel is the one way out')
+  assert.doesNotMatch(html, /aria-label="Close"/, 'and there is no X beside it')
   assert.match(html, /You can turn it back into a draft later/)
-  // Each action's words name their own icon, so no caller can show Merge with the arrow of Open for review.
-  assert.ok(html.includes(icon('send')), 'open for review wears the send arrow')
   const merge = render({ pr: approved(), copy: mergeCopy(approved()), onConfirm: () => {}, onClose: () => {} })
-  assert.ok(merge.includes(icon('merge')), 'merge wears the merge icon')
-  assert.ok(!merge.includes(icon('send')), 'and not the arrow of another action')
+  assert.match(merge, /Merge #\d+ into/, 'each action names itself in its own title')
 })
 
 import { mergePull, postFindings, previewPostedFindings, pullAction } from '../collaboration.js'
@@ -324,7 +320,7 @@ test('the post sheet names what it posts, keeps its button off until the words a
   assert.match(html, /Three problems in the lost-reply path\./)
   assert.match(html, /<button[^>]*class="co-btn co-btn-primary"[^>]*>Post to GitHub<\/button>/)
   assert.doesNotMatch(html, /<button[^>]*co-btn-primary[^>]*disabled/, 'ready to post')
-  assert.doesNotMatch(html, />Cancel</)
+  assert.match(html, /<button type="button" class="co-btn">Cancel<\/button>/, 'Cancel is the one way out, and it is never off while nothing is being posted')
   assert.match(render({ pr: target, copy: loading, onConfirm() {}, onClose() {} }), /<button[^>]*co-btn-primary[^>]*disabled[^>]*>Post to GitHub/, 'the button waits for the words')
   assert.match(render({ pr: target, copy: refused, onConfirm() {}, onClose() {} }), /The pull request changed since you looked/)
 })

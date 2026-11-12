@@ -11,7 +11,7 @@ export function IgnoreReview({ pr, onPick, onClose }) {
   const titleId = useId()
   useEffect(() => { focusActionRegion(region.current) }, [])
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead icon="review" title="Ignore this review?" titleId={titleId} pulls={[pr]} tools={<CloseWindowButton onClick={onClose} />} />
+    <WindowHead title="Ignore this review?" titleId={titleId} pulls={[pr]} tools={<CloseWindowButton onClick={onClose} />} />
     <div className="co-rw-body">
       <h4 className="co-rw-label">Why?</h4>
       <div className="co-rw-reasons">{IGNORE_REASONS.map(reason => <button key={reason} type="button" className="co-rw-reason" onClick={() => onPick(reason)}>{reason}</button>)}</div>

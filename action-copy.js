@@ -32,7 +32,6 @@ const short = sha => String(sha || '').slice(0, 7)
 // is a separate review request), and the exact version is pinned by the platform's action.
 export function openForReviewCopy(pr) {
   return {
-    icon: 'send',
     title: `Open #${pr.number} for review?`,
     confirm: NAMES.openForReview,
     working: 'Opening…',
@@ -58,7 +57,6 @@ export function openForReviewCopy(pr) {
 // words have arrived (or when the platform refuses) the button stays off and the sheet says why.
 export function postFindingsCopy(pr, { preview = null, error = '', own = false } = {}) {
   const base = {
-    icon: 'globe',
     title: `Post this review on #${pr.number}?`,
     confirm: NAMES.postToGitHub,
     working: 'Posting…',
@@ -133,7 +131,6 @@ export function mergeCopy(pr, { status = null, ignored = null, method = '', stan
   const allowed = allowedMergeMethods(pr.repository)
   const chosen = allowed.includes(method) ? method : allowed[0] || ''
   return {
-    icon: 'merge',
     title: `Merge #${pr.number} into ${base}?`,
     confirm: chosen ? MERGE_METHODS[chosen].action : 'Merge',
     working: 'Merging…',
@@ -149,7 +146,7 @@ export function mergeCopy(pr, { status = null, ignored = null, method = '', stan
 // Back to draft: reviewers stop being asked; it can be opened again later.
 export function backToDraftCopy(pr) {
   return {
-    icon: 'draft', title: `Turn #${pr.number} back into a draft?`, confirm: NAMES.backToDraft, working: 'Turning it into a draft…',
+    title: `Turn #${pr.number} back into a draft?`, confirm: NAMES.backToDraft, working: 'Turning it into a draft…',
     facts: [{ tone: 'ok', text: 'Nothing merges, and no code changes' }, { tone: 'warn', text: 'GitHub shows it as a draft until you open it for review again' }],
     footnote: `For the version you are looking at (${short(pr.headRefOid)}).`,
     done: () => ({ title: NAMES.backToDraft, text: `#${pr.number} is a draft again.` }),
@@ -190,7 +187,7 @@ export function askRereviewCopy(pr, { standing = null } = {}) {
   return askSheet(standing, standing?.rereviewFrom || [], picked => {
     const who = names(picked.map(item => item.by))
     return {
-      icon: 'person', title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
+      title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
       facts: [picked.length ? { tone: 'ok', text: `GitHub asks ${who} for a review of the new version` } : { tone: 'bad', text: 'Pick at least one person' },
         ...(picked.length > MAX_ASKED ? [TOO_MANY] : [])],
       footnote: 'They get GitHub’s usual review request. Nothing is posted in the conversation.',
@@ -222,7 +219,7 @@ export function askApprovalCopy(pr, { standing = null } = {}) {
     const note = approvalNote(pr, picked)
     const tooLong = note.length > APPROVAL_NOTE_LIMIT
     return {
-      icon: 'person', title: `Ask ${picked.length ? who : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…',
+      title: `Ask ${picked.length ? who : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…',
       facts: [
         picked.length ? { tone: 'ok', text: `${plural(picked.length, 'person', 'people')} will be asked` } : { tone: 'bad', text: 'Pick at least one person' },
         ...(tooLong ? [{ tone: 'bad', text: 'The note is too long: ask fewer people' }] : []),
@@ -240,7 +237,7 @@ export function askApprovalCopy(pr, { standing = null } = {}) {
 // Close without merging. It can be reopened on GitHub.
 export function closeCopy(pr) {
   return {
-    icon: 'close', title: `Close #${pr.number} without merging?`, confirm: NAMES.closePr, working: 'Closing…',
+    title: `Close #${pr.number} without merging?`, confirm: NAMES.closePr, working: 'Closing…',
     facts: [{ tone: 'warn', text: 'Nothing merges. Reviewers stop being asked' }, { tone: 'ok', text: 'It can be reopened on GitHub' }],
     footnote: `For the version you are looking at (${short(pr.headRefOid)}).`,
     done: () => ({ title: 'Closed', text: `#${pr.number} is closed.` }),

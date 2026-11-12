@@ -439,8 +439,9 @@ const review = () => query('.co-review-window')
 const opens = stageWords('ready').action(1), sends = stageWords('ready').onGithub(1)
 // A PR page tab reads its name, then a count pill ("Comments2", "Files changed1"), so match on the name without the count.
 const detailTab = (name, root = query('.co-detail-tabs')) => [...root.querySelectorAll('button')].find(node => text(node).replace(/\d+$/, '') === name)
-// The window's one way out is the X in its header; it has no Cancel.
-const closeReview = () => click(review().querySelector('[aria-label="Close"]'))
+// The window's one way out is Cancel, the quiet button beside the action; it has no X.
+const cancelButton = window => window.querySelector('.co-rw-actions .co-btn:not(.co-btn-primary)')
+const closeReview = () => click(cancelButton(review()))
 // One Sync button for the whole app (the toolbar's), which re-reads GitHub for every project.
 const checkButton = () => query('.co-toolbar-refresh')
 const batchAction = () => [...document.querySelectorAll('.co-public-work .co-work-progress-row')].find(node => text(node).includes('Review or assign'))
@@ -934,6 +935,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => button(opens), 'Prepared PR details did not offer publication')
       await click(button(opens))
       await until(() => button(sends),'Publication confirmation missing')
+      await captureShot('send-window')
       ensure(calls.publications.length===0,'Opening publication sent work')
       // Browsing the tabs must not drop a confirmation, nor a send that is still running, nor its outcome.
       await openTab('All PRs'); await openTab('Prepared PRs')
@@ -1986,6 +1988,7 @@ window.runDeskFrameChecks = async () => {
     checks.push({ name: 'the Actions menu never starts its focus on a destructive choice', status: 'pass' })
     await click([...document.querySelectorAll('[role=menuitem]')].find(node => text(node.querySelector('strong')) === 'Review'))
     await until(() => review(), 'Review window did not open')
+    await captureShot('review-window')
     // The lock (green) or globe (amber) takes its colour from --seen: a quiet button's own colour must not win over it.
     const seen = review().querySelector('.co-rw-seen'), seenButton = seen?.querySelector('.co-rw-seen-btn')
     ensure(seenButton, 'The review window has no lock or globe')
@@ -2630,7 +2633,7 @@ window.runAskApprovalChecks = async () => {
     await click(menuItem('Merge'))
     await until(() => calls.grants.length === 3 && text(query('.co-review-window')).includes('GitHub says this PR cannot be merged yet.'), 'The platform’s sentence was not shown: ' + text(query('.co-review-window')))
     ensure(calls.merges.length === 1, 'A refused Merge was sent')
-    await click(query('.co-review-window [aria-label="Close"]'))
+    await click(cancelButton(query('.co-review-window')))
     checks.push({ name: 'a cancel sends nothing and closes; a refusal sends nothing and shows the platform’s sentence', status: 'pass' })
     window.ownerGrantAnswer = undefined
     await openMenu()
