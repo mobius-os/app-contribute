@@ -46,6 +46,8 @@ export const NAMES = Object.freeze({
   waitingForMobius: 'Waiting for your confirmation in Möbius…',
   closePr: 'Close pull request',
   assign: 'Assign',
+  requestReview: 'Request review',
+  requestAnotherReview: 'Request another review',
   askRereview: 'Ask for re-review',
   // Posts a note naming the reviewers who commented but have not approved (the PR machine's ask_approval).
   askApproval: 'Ask for approval',

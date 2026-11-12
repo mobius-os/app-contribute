@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assertPullVersion, loadAllPullActivity, loadAllPullThreads, loadPullDescription, loadPullFiles, loadPullActivity, pullPath } from '../pull-details.js'
+import { assertPullVersion, loadAllPullActivity, loadAllPullThreads, loadPullDescription, loadPullFiles, loadPullActivity, loadPullReviewers, pullPath } from '../pull-details.js'
 import { addressItems } from '../address-feedback.js'
 const pr = { number: 7, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main' }
 const detail = () => ({ head: {sha:pr.headRefOid}, base: {sha:pr.baseRefOid,ref:pr.baseRefName}, body: 'Description' })
@@ -115,4 +115,35 @@ test('reading stops at a page limit or a failed page and says the list is partia
   assert.equal(failedLater.partial, true)
   t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 404 }))
   await assert.rejects(loadAllPullThreads('fixture', pr))
+})
+
+test('who was asked to review is read from GitHub’s review requests and their events, never from assignees', async t => {
+  const calls = []
+  const asked = { __typename: 'User', login: 'sam' }
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push(JSON.parse(options.body))
+    return response({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName,
+      reviewRequests: { nodes: [{ requestedReviewer: asked }] }, reviews: { nodes: [] },
+      timelineItems: { nodes: [{ createdAt: '2026-11-09T11:20:00Z', requestedReviewer: asked }] } } } } })
+  })
+  const { reviewers, errors } = await loadPullReviewers('fixture', pr)
+  assert.deepEqual(reviewers.map(row => [row.name, row.status, row.requestedAt]), [['sam', 'waiting', '2026-11-09T11:20:00Z']])
+  assert.deepEqual(errors, [])
+  assert.match(calls[0].query, /reviewRequests\(first:30\)/)
+  assert.match(calls[0].query, /REVIEW_REQUESTED_EVENT/)
+  assert.match(calls[0].query, /reviews\(last:100\)/)
+  assert.doesNotMatch(calls[0].query, /latestReviews/, 'GitHub’s latest reviews leave out anyone asked again')
+  assert.doesNotMatch(calls[0].query, /assignees/)
+  assert.doesNotMatch(calls[0].query, /Team/, 'a team’s name needs a permission this app’s token lacks, and one refused field fails the whole read')
+  assert.deepEqual(calls[0].variables, { owner: 'team', name: 'repo', number: 7 })
+})
+
+test('who was asked is reported unavailable, not empty, when GitHub leaves out the requests, and a moved branch is stale', async t => {
+  const answer = fields => response({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName, ...fields } } } })
+  t.mock.method(globalThis, 'fetch', async () => answer({ reviews: { nodes: [] } }))
+  const partial = await loadPullReviewers('fixture', pr)
+  assert.deepEqual(partial.reviewers, [])
+  assert.deepEqual(partial.errors, ['Who was asked to review is unavailable.'])
+  t.mock.method(globalThis, 'fetch', async () => answer({ headRefOid: 'c'.repeat(40) }))
+  await assert.rejects(loadPullReviewers('fixture', pr), { code: 'stale' })
 })

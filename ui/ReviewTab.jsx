@@ -13,6 +13,7 @@ import { TimeAgo } from './GithubParts.jsx'
 import { RepairProposal, VerdictProposal, savedVersion } from './RunDetail.jsx'
 import { RunTag } from './RunTag.jsx'
 import { pointsAnswering } from '../respond-result.js'
+import { RequestedReviewers } from './RequestedReviewers.jsx'
 import { ReviewSteps } from './ReviewSteps.jsx'
 import { NAMES } from '../names.js'
 
@@ -64,6 +65,7 @@ const allowed = (standing, ...ids) => !!standing?.actions?.some(action => ids.in
 export function ReviewTab(props) {
   return <>
     <ReviewSteps standing={props.standing} itemState={props.status?.item?.state} />
+    <RequestedReviewers entry={props.reviewers} onRetry={props.onRetryReviewers} />
     <ReviewCards {...props} />
   </>
 }

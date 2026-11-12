@@ -20,6 +20,10 @@ const RETIRED = ['Mark ready', 'Review and send', 'Re-review', 'Start again', 'S
   'Agent activity', 'Past jobs', 'Start fresh full merge cycle', 'Recorded version',
   'Requesting review', 'Review requested', 'Not requested']
 
+// "Review requested" was the old done line of opening a draft; it now belongs to Request review (asking people), whose own sheet in
+// action-copy.js ends with it. Everywhere else it stays retired.
+const KEPT_FOR_REQUEST_REVIEW = { 'Review requested': ['action-copy.js'] }
+
 // Screen text: a quoted string or JSX text. Comments may still name the old words.
 const screenText = line => !/^\s*(\/\/|\*|\/\*)/.test(line)
 const quotedOrJsx = word => new RegExp(`(['"\`>]|\\. )${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
@@ -29,7 +33,7 @@ test('no retired name is left in screen text, so one meaning keeps one name', ()
   for (const file of sources) {
     readFileSync(new URL(file, root), 'utf8').split('\n').forEach((line, index) => {
       if (!screenText(line)) return
-      for (const word of RETIRED) if (quotedOrJsx(word).test(line)) found.push(`${file}:${index + 1} ${word}`)
+      for (const word of RETIRED) if (quotedOrJsx(word).test(line) && !KEPT_FOR_REQUEST_REVIEW[word]?.includes(file)) found.push(`${file}:${index + 1} ${word}`)
     })
   }
   assert.deepEqual(found, [])

@@ -136,7 +136,7 @@ fixed run brief and mandatory instructions.
 Every control says what it does for someone who has never used Contribute:
 "Make PRs from local changes" rather than "Prepare changes", **Sync with GitHub** with
 its last time written beside it rather than a silent refresh icon, "Mark ready for review" for
-an own draft, and labelled **Assign** and **Actions ▾** buttons on PR rows. An
+an own draft, and labelled **Request review** (on your own PRs; **Assign** on the others) and **Actions ▾** buttons on PR rows. An
 action shows feedback when used. Sync with GitHub asks GitHub read-only whether a
 repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
@@ -172,7 +172,8 @@ the owner, and folds apps with nothing to do.
   are one tap on the action and one tap on Möbius's sheet, which names what happens
   in Möbius's own words and cannot be pressed by the app or an agent. Merge lands the
   way the repository prefers, and **Merge options…** (only where it allows more than
-  one way) chooses first. Submitting or discarding a verdict, pushing or discarding a
+  one way) chooses first. Request review also chooses first, on the app's own sheet (whom to ask),
+  and Möbius's sheet then confirms exactly that. Submitting or discarding a verdict, pushing or discarding a
   fix, and Post get that sheet as a new confirm. Until the owner has confirmed on it, the
   app's own sheet only says it is waiting for that. A cancel sends nothing. A Möbius
   without it keeps the sheets above.
@@ -306,7 +307,18 @@ checked over every case and every combination of the facts that matter):
    to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
    a draft, is a confirmed no-op). An action that needs a thing waits for it: Send, Check
    GitHub and Discard for a draft, Ask for re-review and Ask for approval for someone to ask,
-   Set aside for a result, Answer the agent for a question.
+   Set aside for a result, Answer the agent for a question. Request review waits for nothing: it asks
+   anyone, whether or not they reviewed before.
+
+**Asking someone is not assigning them.** *Request review* is GitHub's review request: the PR page has a
+labelled button of its own beside Actions (a plain button; it steps aside once GitHub holds a review request, and
+Actions then offers *Request another review*), and a sheet offers the repository's people (not you, a bot, someone
+who already approved this version, or someone already asked). *Assign* makes a person responsible for the PR and
+asks nobody for a review, so its person icon stays Assign's alone. Ask for re-review is the same GitHub request
+for people who reviewed before, and stays in the Actions menu. The Review tab lists *Requested reviewers*, one
+row each: who was asked, when ("Requested again" after an earlier review of theirs), and one current badge
+(Waiting, Waiting for another review, Approved, Changes requested, Commented, Dismissed). An assignee is never
+listed there. On the PR list the Request review button sits where Assign was on your own PRs (an assignee stays visible beside it), and ticking several PRs adds Request review to the tray: one sheet, one list of people, and each PR gets its own request that leaves out its author and whoever approved that version. A PR that fails says why; the others are still asked, and a retry asks only the PR that is left.
 
 **Who acts.** Pushing code, merging and changing a PR's status (ready, draft, closed)
 always wait for your own tap. A review verdict waits for your tap ("Draft for me"),
@@ -321,12 +333,12 @@ Review, which reads Re-review once you reviewed it and opens on "Draft for me" w
 Möbius can post a review and propose its verdict (otherwise the private check), with an
 optional "Merge after I approve" switch that stays drawn, off and dimmed, with its reason
 where it cannot be turned on · Take over, set apart, maintainers only, with a reason. Your own
-actions: Open for review, Back to draft, Ask for re-review, Ask for approval, Merge and Close, each
+actions: Open for review, Back to draft, Request review, Ask for re-review, Ask for approval, Merge and Close, each
 behind a confirm sheet (Möbius's own, where it offers one) and each shown only where this Möbius can do it.
 
 **States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·
 Findings · Checks or conflicts · Feedback to answer · Waiting on re-review · Looked again,
-not approved · Commented, not approved · Approval is old · Waiting on reviewers · Approved (checks pending or unknown) · Ready to merge. Their
+not approved · Commented, not approved · Approval is old · Waiting on reviewers (reads *Nobody asked yet* while GitHub holds no review request: an assignee is not one) · Approved (checks pending or unknown) · Ready to merge. Their
 PR: Draft · To review · Review ready · Waiting on the author · New commits · review
 again · Reviewed · Kept private · Ready to merge.

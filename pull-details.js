@@ -1,6 +1,7 @@
 // Read-only GitHub projection. No request here approves or mutates a PR.
 // Version-specific evidence is checked against the selected head AND base.
 import { parseUnifiedDiff } from './ui/diff/parseUnifiedDiff.js'
+import { reviewersOf } from './reviewers.js'
 
 export function pullPath(pr) {
   const repo = pr?.repository?.nameWithOwner
@@ -187,6 +188,18 @@ export async function loadPullThreads(token, pr, after = null, signal) {
   return { threads: connection?.nodes?.filter(Boolean) || [], hasMore: connection?.pageInfo?.hasNextPage === true,
     nextCursor: connection?.pageInfo?.endCursor || null, errors }
 }
+// Who was asked to review this PR and where each review stands (reviewers.js words the rows). Review requests and
+// their "requested" events are GitHub's own record of asking; an assignee is not among them.
+export async function loadPullReviewers(token, pr, signal) {
+  const person = '__typename ... on User { login }'
+  const { data, errors } = await pullGraphRead(token, pr, `
+    reviewRequests(first:30) { nodes { requestedReviewer { ${person} } } }
+    reviews(last:100) { nodes { state submittedAt author { login } } }
+    timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ${person} } } } }`, {}, signal)
+  if (!data.reviewRequests || !data.timelineItems || !data.reviews) errors.push('Who was asked to review is unavailable.')
+  return { reviewers: reviewersOf(data), errors }
+}
+
 const FEEDBACK_PAGE_LIMIT = 20
 
 // A checklist is complete only when nothing was left unread, so these walk

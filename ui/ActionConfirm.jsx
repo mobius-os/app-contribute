@@ -10,7 +10,7 @@ import { Shine, Words } from './Shine.jsx'
 const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 
 // The confirm sheet for one of the owner's own actions on a PR (Open for review,
-// Merge): what it does, what GitHub shows right now, and two buttons: Cancel, the
+// Merge; Request review may name several PRs in `pulls`): what it does, what GitHub shows right now, and two buttons: Cancel, the
 // one way out, and the action. A finished action swaps both for Done.
 // `copy` is the words (see action-copy.js; `says` shows text the action will post, `disabled` keeps the button off while it is not ready); `onConfirm` runs the action and
 // returns the outcome the app's handlers already use ({ ok } | { alreadyHandled }
@@ -23,7 +23,7 @@ const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 // sheet): nothing was sent, so the choices come back. `autoConfirm` (with `viaShell`): the one tap on the action already was the owner's
 // press, so this sheet opens asking and runs `onConfirm` itself, and a cancel closes it. `onConfirm` also gets the ticked `people`
 // and the text the sheet showed for them (`note`): what is sent is what was read, not a rebuild of it.
-export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfirmed, viaShell = false, autoConfirm = false }) {
+export function ActionConfirm({ pr, pulls = null, copy, onConfirm, onClose, onDone, onUnconfirmed, viaShell = false, autoConfirm = false }) {
   const region = useRef(null)
   const titleId = useId()
   const [phase, setPhase] = useState(autoConfirm ? 'asking' : 'confirm')
@@ -61,7 +61,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
   const finished = typeof live.done === 'function' ? live.done(result) : live.done
   const selected = copy.choices?.options.find(option => option.key === picked)
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead title={done ? finished.title : atWork && live.workingTitle ? live.workingTitle : live.title} titleId={titleId} pulls={[pr]} done={done} />
+    <WindowHead title={done ? finished.title : atWork && live.workingTitle ? live.workingTitle : live.title} titleId={titleId} pulls={pulls || [pr]} done={done} />
     {done ? <div className="co-rw-body"><p className="co-rw-result" role="status"><Words text={finished.text} /></p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : lineOnly ? <div className="co-rw-body"><p className="co-rw-status" role="status"><Shine>{phase === 'asking' ? NAMES.waitingForMobius : live.working}</Shine></p></div> : <div className="co-rw-body">
       <ul className="co-rw-facts">{live.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.working ? <Shine>{fact.text}</Shine> : fact.text}</span></li>)}</ul>
       {copy.people ? <>

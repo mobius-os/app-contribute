@@ -130,6 +130,15 @@ export function Avatar({ login, size = 20 }) {
 
 export const REVIEW_DECISION = { CHANGES_REQUESTED: 'Changes requested', APPROVED: 'Approved', REVIEW_REQUIRED: 'Review required' }
 
+// A moment as "9 Nov" or, with `time`, "9 Nov · 12:20": the app's one way to write a date.
+export function DateLabel({ value, prefix = '', time = false }) {
+  if (!value || !Number.isFinite(Date.parse(value))) return null
+  const at = new Date(value)
+  const day = at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  const text = time ? `${day} · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : day
+  return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
+}
+
 /** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. */
 export function TimeAgo({ value, prefix = '' }) {
   const time = Date.parse(value)

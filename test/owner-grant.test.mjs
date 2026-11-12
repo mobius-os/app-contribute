@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergePull, pullAction } from '../collaboration.js'
+import { mergePull, pullAction, requestReviewMany } from '../collaboration.js'
 import { askOwner } from '../owner-grant.js'
 
 const HEAD = 'a'.repeat(40)
@@ -37,5 +37,28 @@ test('the shell is asked first for exactly the request that is then sent; a canc
     await mergePull('t', 3, pr)
     await pullAction('t', 3, pr, 'close')
     assert.deepEqual(order.map(call => call[0]), ['fetch', 'fetch'])
+  } finally { delete globalThis.window; globalThis.fetch = realFetch }
+})
+
+test('Request review is confirmed in Möbius’s sheet under its own action id, for one PR or for each of several; a cancel stops the rest', async () => {
+  const order = []
+  const realFetch = globalThis.fetch
+  const answers = [true, false] // the owner confirms the first PR's request and closes the sheet on the second
+  globalThis.window = { mobius: { ownerGrant: { request: async (...args) => { order.push(['shell', args[0], args[2].number]); return answers.shift() ?? true } } } }
+  globalThis.fetch = async (url, options) => { order.push(['fetch', JSON.parse(options.body).number]); return new Response(JSON.stringify({ state: 'requested', observed_head_sha: HEAD })) }
+  const other = { ...pr, number: 8 }
+  try {
+    const outcome = await requestReviewMany('t', 3, [pr, other, { ...pr, number: 9 }], ['sam'], { shell: { shellConfirm: askOwner } })
+    assert.deepEqual(outcome, { error: 'Asked on #7. You closed Möbius’s sheet before the rest, so nothing more was sent.' })
+    assert.deepEqual(order, [['shell', 'request_review', 7], ['fetch', 7], ['shell', 'request_review', 8]])
+
+    order.length = 0
+    answers.length = 0; answers.push(false)
+    assert.deepEqual(await requestReviewMany('t', 3, [pr, other], ['sam'], { shell: { shellConfirm: askOwner } }), { cancelled: true }, 'nothing asked yet: a plain cancel')
+    assert.deepEqual(order, [['shell', 'request_review', 7]])
+
+    order.length = 0
+    assert.deepEqual(await pullAction('t', 3, pr, 'request-review', { reviewers: ['sam'] }, { shellConfirm: askOwner }), { ok: true, state: 'requested', observedHead: HEAD })
+    assert.deepEqual(order, [['shell', 'request_review', 7], ['fetch', 7]])
   } finally { delete globalThis.window; globalThis.fetch = realFetch }
 })

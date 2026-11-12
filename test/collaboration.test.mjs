@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
+import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewPeople, requestReviewMany, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -127,6 +127,24 @@ test('batch assignment pins each head and reports partial failures without repla
   assert.match(result[1].error, /PR changed/)
   assert.deepEqual(calls.map(item => item.number), [1,2,3])
   assert.ok(calls.every(item => item.assignee === 'reviewer' && item.expected_head_sha === 'a'.repeat(40)))
+})
+
+test('the people Request review can offer are the repository’s people, read page by page to the end', async t => {
+  const asked = []
+  t.mock.method(globalThis, 'fetch', async url => {
+    asked.push(new URL(url, 'http://app').searchParams.get('page'))
+    const page = Number(asked.at(-1))
+    return new Response(JSON.stringify({ assignees: page === 1 ? [{ login: 'sam' }, { login: 'kim' }] : [{ login: 'bo' }, {}], next_page: page === 1 ? 2 : null }))
+  })
+  assert.deepEqual(await loadReviewPeople('test', 80, pull(1)), ['sam', 'kim', 'bo'])
+  assert.deepEqual(asked, ['1', '2'])
+})
+
+test('a repository with endless people is read for a few pages, not forever', async t => {
+  let reads = 0
+  t.mock.method(globalThis, 'fetch', async () => { reads += 1; return new Response(JSON.stringify({ assignees: [{ login: `p${reads}` }], next_page: reads + 1 })) })
+  assert.equal((await loadReviewPeople('test', 80, pull(1))).length, 5)
+  assert.equal(reads, 5)
 })
 
 test('merge option is enabled only for an entirely eligible exact selection', async t => {
@@ -372,4 +390,55 @@ test('the review clock of a run that pushed a fix starts when you pressed Push',
   const run = { created_at: '2026-11-06T13:46:00Z' }
   assert.equal(reviewStartedAt(run, { repair_attempts: [] }), '2026-11-06T13:46:00Z')
   assert.equal(reviewStartedAt(run, { repair_attempts: [{ state: 'pushed', decided_at: '2026-11-06T15:01:00Z' }, { state: 'discarded', decided_at: '2026-11-06T15:30:00Z' }] }), '2026-11-06T15:01:00Z')
+})
+
+// Request review over several PRs: one request each, naming only who may be asked there.
+const owned = (number, extra = {}) => ({ ...pull(number), author: { login: 'Alex' }, ...extra })
+const replyPerPr = answers => async (url, options) => {
+  const body = JSON.parse(options.body)
+  const answer = answers[body.number] || { status: 200, json: { state: 'requested', observed_head_sha: 'a'.repeat(40) } }
+  return new Response(JSON.stringify(answer.json), { status: answer.status })
+}
+
+test('Request review on several PRs sends each its own request, without the author or who approved that PR', async t => {
+  const sent = []
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sent.push({ url, body: JSON.parse(options.body) }); return new Response(JSON.stringify({ state: 'requested', observed_head_sha: 'a'.repeat(40) })) })
+  const approved = { 2: ['kim'] }
+  const outcome = await requestReviewMany('t', 80, [owned(1), owned(2)], ['alex', 'kim', 'sam'], { approvedBy: pr => approved[pr.number] || [] })
+  assert.deepEqual(outcome, { ok: true, state: 'requested', asked: [1, 2], skipped: [] })
+  assert.deepEqual(sent.map(item => [item.url, item.body.number, item.body.reviewers]), [
+    ['/api/github/contributions/80/pulls/request-review', 1, ['kim', 'sam']],
+    ['/api/github/contributions/80/pulls/request-review', 2, ['sam']]])
+})
+
+test('a PR with nobody left to ask is skipped, not an error, and is named in the result', async t => {
+  const calls = []
+  t.mock.method(globalThis, 'fetch', async (url, options) => { calls.push(JSON.parse(options.body).number); return new Response(JSON.stringify({ state: 'requested', observed_head_sha: 'a'.repeat(40) })) })
+  const outcome = await requestReviewMany('t', 80, [owned(1), owned(2)], ['kim'], { approvedBy: pr => (pr.number === 1 ? ['kim'] : []) })
+  assert.deepEqual(outcome, { ok: true, state: 'requested', asked: [2], skipped: [1] })
+  assert.deepEqual(calls, [2])
+})
+
+test('a refused PR names its reason, the others are still asked, and a retry asks only the PR that is left', async t => {
+  const calls = []
+  const answers = { 2: { status: 409, json: { detail: 'The author of a pull request cannot be asked to review it.' } } }
+  t.mock.method(globalThis, 'fetch', async (url, options) => { calls.push(JSON.parse(options.body).number); return replyPerPr(answers)(url, options) })
+  const done = new Set()
+  const first = await requestReviewMany('t', 80, [owned(1), owned(2), owned(3)], ['sam'], { done })
+  assert.deepEqual(first, { error: 'Not asked: #2: The author of a pull request cannot be asked to review it.. Asked on #1, #3.' })
+  assert.deepEqual(calls, [1, 2, 3])
+  delete answers[2]
+  calls.length = 0
+  const retry = await requestReviewMany('t', 80, [owned(1), owned(2), owned(3)], ['sam'], { done })
+  assert.deepEqual(calls, [2], 'who was already asked is not asked again')
+  assert.deepEqual(retry, { ok: true, state: 'requested', asked: [2], skipped: [] })
+})
+
+test('an unconfirmed request on one PR is read back, never repeated, and the others are still asked', async t => {
+  const calls = []
+  const answers = { 2: { status: 502, json: { detail: { code: 'reviewers_unconfirmed', message: 'GitHub may have asked.' } } } }
+  t.mock.method(globalThis, 'fetch', async (url, options) => { calls.push(JSON.parse(options.body).number); return replyPerPr(answers)(url, options) })
+  const outcome = await requestReviewMany('t', 80, [owned(1), owned(2), owned(3)], ['sam'])
+  assert.deepEqual(calls, [1, 2, 3])
+  assert.deepEqual(outcome, { pending: true, error: 'GitHub may have asked for the review on #2. Check it before trying again.' })
 })

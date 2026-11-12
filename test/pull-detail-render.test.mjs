@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CSS } from '../theme.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
+import { standingFor } from '../pr-standing.js'
 let renderer
 async function render(t, name, props) {
   if (!frontendModules) { t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR'); return null }
@@ -326,6 +327,24 @@ test('the Commits banner hands its Review again to the foot bar on a phone only 
   assert.match(html, /class="co-decision-bar"[^>]*>.*Review again/)
   const quiet = await render(t, 'PullRequestDetail', props(await render(t, 'decide', { ...facts, role: 'author', author: 'sam' })))
   assert.doesNotMatch(quiet, /co-commits-again is-pinned/)
+})
+
+test('your own PR page has a Request review button beside Actions, apart from the Assign icon, and theirs does not', async t => {
+  const mine = { number: 7, state: 'OPEN', author: { login: 'me' }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main',
+    url: 'https://github.com/team/repo/pull/7', latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }
+  const open = (pr, extra = {}) => render(t, 'PullRequestDetail', { pr, canAssign: true, onAssign: () => {}, onReview: () => {}, capabilities: { request_review_now: true },
+    review: { standing: standingFor({ pr, login: 'me' }) }, ...extra })
+  const html = await open(mine)
+  if (!html) return
+  const buttons = html.slice(html.indexOf('co-pr-detail-actions'))
+  assert.match(buttons, /Choose an action for PR 7[\s\S]*class="co-btn co-request-review"[^>]*>[\s\S]*Request review<\/button>[\s\S]*aria-label="Assign"/, 'Actions, then Request review, then the Assign icon')
+  assert.doesNotMatch(buttons.slice(0, buttons.indexOf('aria-label="Assign"')), /co-btn-primary/, 'a plain button: the filled colour is the next step’s alone')
+  assert.doesNotMatch(await open({ ...mine, reviewRequests: { totalCount: 1 } }), /co-request-review/, 'once someone is asked the button steps aside; Actions offers asking one more')
+  assert.doesNotMatch(buttons, /aria-label="Request review"/, 'it is a labelled button, not a bare icon')
+  assert.doesNotMatch(await open({ ...mine, author: { login: 'sam' } }), /Request review/, 'only the author asks')
+  assert.doesNotMatch(await open(mine, { capabilities: {} }), /Request review/, 'a Möbius that cannot ask does not offer it')
+  assert.doesNotMatch(await open(mine, { readOnly: true }), /Request review/)
+  assert.match(await open({ ...mine, state: 'CLOSED' }), /<button class="co-btn co-request-review" disabled="" title="This PR is no longer open\."/, 'dimmed, with the reason, once the PR is closed')
 })
 
 test('a saved escalation shows on the PR page with its reason as plain text and the existing Resume', async t => {
