@@ -76,6 +76,7 @@ export const NAMES = Object.freeze({
   cancel: 'Cancel',
   clearSearch: 'Clear search',
   showFullMessage: 'Show the full message',
+  seeChanges: 'See changes',
   viewOnGitHub: 'View on GitHub',
   settings: 'Contribute settings',
 

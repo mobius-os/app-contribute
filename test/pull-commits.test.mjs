@@ -92,20 +92,21 @@ const screens = () => (renderer ||= renderModule(`
   export const detail = props => renderToStaticMarkup(React.createElement(PullRequestDetail, props))
 `))
 
-test('the Commits tab shows title, authors, time, checks in words, short hash and a labelled Copy hash', async t => {
+test('the Commits tab shows title, authors, time, checks in words, and the short hash that copies itself', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { commits } = await screens()
   const list = [commit('a', { messageBody: 'Because of the thing.', authors: { nodes: [{ name: 'octocat', user: { login: 'octocat' } }, { name: 'Möbius Agent', user: { login: 'mobius-agent' } }] } }), commit('b', { statusCheckRollup: null })]
   const html = commits({ data: { commits: list, hasMore: false } })
   assert.match(html, /Commits on /)
-  assert.match(html, /<summary><strong class="co-commit-title">Commit a<span class="co-visually-hidden"> — Show the full message<\/span><\/strong>/, 'a commit with a message opens it from the title row')
-  assert.match(html, /<strong class="co-commit-title">Commit b<\/strong>/, 'a commit with no message body has a plain title, no button')
+  assert.match(html, /<button type="button" class="co-commit-title" data-commit="a{40}">Commit a<span class="co-visually-hidden"> — See changes: commit aaaaaaa<\/span><\/button>/, 'the title opens the commit\'s changes')
+  assert.match(html, /<button type="button" class="co-commit-toggle" aria-expanded="false" aria-controls="[^"]+" aria-label="Show the full message">/, 'a commit with a message has a chevron for it')
+  assert.equal((html.match(/co-commit-toggle/g) || []).length, 1, 'a commit with no message body has no chevron')
+  assert.doesNotMatch(html, /Because of the thing\./, 'the long message opens from its chevron, not before')
   assert.match(html, /octocat and mobius-agent committed <\/span><time/)
   assert.match(html, /checks pass/)
-  assert.match(html, /aria-label="Copy hash aaaaaaa"[^>]*>.*?<span>Copy hash<\/span>/)
-  assert.match(html, /aria-label="View on GitHub: commit aaaaaaa"/)
-  assert.match(html, /<code>aaaaaaa<\/code>/)
-  assert.match(html, /Because of the thing\./)
+  assert.match(html, /class="co-commit-hash co-tip" data-tip="Copy hash" aria-label="Copy hash aaaaaaa"[^>]*><code>aaaaaaa<\/code>/, 'the short hash is the Copy control')
+  assert.doesNotMatch(html, /<span>Copy hash<\/span>/, 'no separate Copy hash button')
+  assert.match(html, /aria-label="View on GitHub: commit aaaaaaa"[^>]*data-tip="View on GitHub"/)
   assert.match(html, /co-commit-agent/)
   assert.equal((html.match(/co-commit-checks/g) || []).length, 1, 'a commit with no result shows no check text')
   assert.doesNotMatch(html, /Last review covered|new commit/)
@@ -153,14 +154,16 @@ test('a commit row says how much it changed, and says nothing when GitHub cannot
   assert.equal(commitStats(null), null)
 })
 
-test('each commit opens inside the app: See changes beside View on GitHub, with its size in the row', async t => {
+test('each commit opens inside the app from its title, with one GitHub icon and its size in the row', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { commits, changesHead } = await screens()
   const html = commits({ data: { commits: [commit('a', { changedFilesIfAvailable: 7, additions: 132, deletions: 45 }), commit('b')], hasMore: false } })
-  assert.match(html, /<button type="button" class="co-btn" data-commit="a{40}" aria-label="See changes: commit aaaaaaa">See changes<\/button>/)
+  assert.match(html, /<button type="button" class="co-commit-title" data-commit="a{40}">Commit a<span class="co-visually-hidden"> — See changes: commit aaaaaaa<\/span><\/button>/)
+  assert.doesNotMatch(html, />See changes<\/button>/, 'no separate See changes button')
   assert.match(html, /7 files <b class="co-file-add">\+132<\/b> <b class="co-file-del">−45<\/b>/)
   assert.equal((html.match(/co-commit-stats/g) || []).length, 1, 'a commit GitHub cannot count shows no size')
-  assert.match(html, /aria-label="View on GitHub: commit aaaaaaa"/, 'View on GitHub stays as the way out')
+  assert.match(html, /aria-label="View on GitHub: commit aaaaaaa"/, 'View on GitHub stays as the way out, as an icon')
+  assert.doesNotMatch(html, /<span>View on GitHub<\/span>/, 'the GitHub link in a row is the icon alone')
   const head = changesHead({ commit: commit('a'), onBack: () => {} })
   assert.match(head, /Back to commits/)
   assert.match(head, /<code>aaaaaaa<\/code> Commit a/)

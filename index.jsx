@@ -80,6 +80,8 @@ import { SourceMap } from './ui/SourceMap.jsx'
 import { SyncHubContext, useDeskReviewRuns, useReviewList } from './ui/useReviewList.js'
 import { useRespondResults } from './ui/useRespondResults.js'
 import { SyncNote, SYNC_NOTE_ID } from './ui/GithubParts.jsx'
+import { syncFacts } from './sync-summary.js'
+import { useDeskSync } from './ui/useDeskSync.js'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { NAMES } from './names.js'
 import { BootProgress } from './ui/BootProgress.jsx'
@@ -93,7 +95,7 @@ import { collaborationRequest, discoverRepositories, discoverRepository } from '
 import { chatBlockTarget, validRecordId } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
-import { Shine } from './ui/Shine.jsx'
+import { Shine, Words } from './ui/Shine.jsx'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -1709,7 +1711,6 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     setRefreshKey(value => value + 1)
     return { ok: sourceOk && syncReadsCurrent(), upstream }
   }
-  const [refreshingAll, setRefreshingAll] = useState(false)
   // Whether the last input was the keyboard or a pointer. A row shows its
   // hover-only controls for keyboard focus, but a mouse user who closed a
   // picker must not be left with them showing (focus returning from a text
@@ -1722,33 +1723,23 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     document.addEventListener('pointerdown', pointer, true)
     return () => { document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', pointer, true) }
   }, [])
-  // The first successful load and later explicit refreshes share one header history.
-  const [refreshNote, setRefreshNote] = useState(null)
-  async function refreshAll() {
-    if (refreshingAll) return undefined
-    setRefreshingAll(true)
-    try {
-      const outcome = await refreshEverything()
-      setRefreshNote(old => outcome?.ok && outcome?.upstream?.ok !== false
-        ? { at: new Date().toISOString(), failed: false }
-        : { at: old?.at || null, failed: true })
-      return outcome
-    } catch {
-      setRefreshNote(old => ({ at: old?.at || null, failed: true }))
-      return null
-    } finally { setRefreshingAll(false) }
-  }
-
   // The workspace opens only once its first sync is complete — the saved
   // ledger, the project snapshot, the GitHub account and the review-request
   // inbox — so nothing visibly reloads right after it appears. Latched: a
   // later manual refresh never drops the app back to the opening screen.
   const [booted, setBooted] = useState(false)
+  // The first successful load and later explicit refreshes share one header history (ui/useDeskSync.js).
+  const { refreshingAll, refreshNote, setRefreshNote, syncResult, syncAll, markSynced } = useDeskSync({
+    refreshEverything, booted, connected: conn.state === 'connected', enabled: !sendOnly,
+    facts: syncFacts({ incoming: incomingReviews, counts: deskCountsValue, projects: sourceProjects, checks: upstreamChecks }),
+  })
+  const refreshAll = () => syncAll()
   const bootReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady
   useEffect(() => {
     if (!bootReady || booted) return
     setBooted(true)
     if (conn.state === 'connected') setRefreshNote(old => old || (!sourceError && syncReadsCurrent() ? { at: new Date().toISOString(), failed: false } : { at: null, failed: true }))
+    if (!sourceError && syncReadsCurrent()) markSynced()
   }, [bootReady, booted, conn.state, sourceError])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
@@ -1855,6 +1846,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
             reviewAgent={reviewAgent} onChangeReviewAgent={onChangeReviewAgent}
           />
         </Header>
+        <div className="co-sync-result-slot" role="status" aria-live="polite">
+          {syncResult ? <p key={syncResult.id} className="co-sync-result"><Icon name="check" size={16} className="co-sync-result-check" /><span><Words text={syncResult.text} /></span></p> : null}
+        </div>
       </div>
       <main ref={pageRef} className="co-page is-sources">
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}

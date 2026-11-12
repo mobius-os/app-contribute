@@ -310,7 +310,11 @@ test('wide collection and review views share centered guides on one continuous c
   assert.match(themeSource, /\.co-github-menu \{[^}]*max-width: 520px/)
   assert.doesNotMatch(themeSource, /radial-gradient|linear-gradient\(var\(--bg\), var\(--bg\)\)/)
   assert.doesNotMatch(themeSource, /\.co-root::before/)
-  assert.match(themeSource, /@media \(min-width: 900px\) \{[\s\S]*?\.co-header-shell \{ width: min\(100%, 1040px\); margin-inline: auto/)
+  // The header and the repository view start at one left edge on every screen (owner's choice, 2026-11-12): the old centred rail is gone.
+  assert.doesNotMatch(themeSource, /CenteredRail/)
+  const workspaceSource = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  assert.match(workspaceSource, /\.co-header \{ position:relative; width:100%; max-width:none; margin-inline:0;/)
+  assert.match(workspaceSource, /\.co-projects-view \{ width:100%; max-width:1400px; margin:0;/)
   assert.match(themeSource, /\.co-header-shell \{\s*flex: 0 0 auto; width: 100%; background: var\(--bg\);\s*\}/)
   assert.match(appSource, /<div className="co-header-shell">[\s\S]*?<\/div>\s*<main/)
   assert.doesNotMatch(themeSource, /\.co-page\.is-sources \{\s*width:/)
@@ -464,7 +468,9 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
   assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
   assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
-  assert.match(appSource, /setRefreshNote\(old => outcome\?\.ok/)
+  const syncSource = readFileSync(new URL('../ui/useDeskSync.js', import.meta.url), 'utf8')
+  assert.match(syncSource, /if \(outcome\?\.ok && outcome\?\.upstream\?\.ok !== false\) \{[\s\S]*?setRefreshNote\(\{ at: new Date\(\)\.toISOString\(\), failed: false \}\)/)
+  assert.match(syncSource, /else if \(!quiet\) setRefreshNote\(old => \(\{ at: old\?\.at \|\| null, failed: true \}\)\)/)
   assert.match(appSource, /onClick=\{refreshAll\}/)
 })
 
@@ -520,10 +526,10 @@ test('a running review is shown by the frame and the Review tab only: no Reviewi
   const menuSource = readFileSync(new URL('../ui/ActionsMenu.jsx', import.meta.url), 'utf8')
   const detailSource = readFileSync(new URL('../ui/PullRequestDetail.jsx', import.meta.url), 'utf8')
   // Tags for finished or waiting reviews stay; the one for a running review goes.
-  assert.match(pullsSource, /\{review\.chip \? <button className=\{'co-pr-agent-state'/)
+  assert.match(pullsSource, /\{review\.chip && !isDraftWord\(pr, review\.chip\) \? <button className=\{'co-pr-agent-state'/)
   // The desk row says the PR's decision in words, except while an agent works: then the frame alone says it.
   assert.match(deskSource, /const labelled = framed !== 'reviewing' && /)
-  assert.match(deskSource, /\(labelled \? \[decisionChip\(decision\)\] : \[\]\)/)
+  assert.match(deskSource, /\(labelled && !isDraftWord\(pr, decisionChip\(decision\)\) \? \[decisionChip\(decision\)\] : \[\]\)/, 'a draft row says Draft by its icon alone')
   assert.doesNotMatch(deskSource, /is-review/)
   assert.doesNotMatch(menuSource, /co-arc|is-active|active =/)
   assert.doesNotMatch(pullsSource, /<AgentMenu active=/)

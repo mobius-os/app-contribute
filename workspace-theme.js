@@ -1,14 +1,15 @@
 // Approved continuous project workspace. Theme remains owned by the shell.
 export const WORKSPACE_CSS = `
 .co-header-shell { width:100%; max-width:none; }
-.co-header { position:relative; width:100%; max-width:1192px; padding:8px 36px; border-bottom:0; }
+/* The header and the repository view start at the same left edge on every screen, so nothing slides sideways when a PR page opens. */
+.co-header { position:relative; width:100%; max-width:none; margin-inline:0; padding:8px 36px; border-bottom:0; }
 .co-header::after { content:''; position:absolute; left:44px; right:44px; bottom:0; height:1px; background:var(--border); }
 .co-title { font-size:var(--co-text-body); font-weight:600; letter-spacing:-.015em; }
 .co-brand-icon { width:34px; height:34px; }
 .co-header-back { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:6px 4px; border:0; background:none; color:var(--text); font:600 var(--co-text-body) var(--font); cursor:pointer; }
 .co-header-back:hover { color:var(--accent); }
 .co-page.is-sources { width:100%; max-width:none; padding:0; overflow:auto; }
-.co-projects-view { width:100%; max-width:1192px; margin:auto; padding:20px 36px 64px; }
+.co-projects-view { width:100%; max-width:1400px; margin:0; padding:20px 36px 64px; }
 .co-projects-view.is-focus { height:auto; }
 .co-project-layout { display:block; }
 .co-workspace { min-width:0; background:var(--bg); }
@@ -114,7 +115,8 @@ export const WORKSPACE_CSS = `
 .co-group-member { border-bottom:1px solid var(--border); padding:10px 0; }
 .co-group-member > summary { cursor:pointer; min-height:44px; font-size:var(--co-text-body); align-content:center; }
 .co-group-count { color:var(--muted); font-size:var(--co-text-meta); margin:6px 0; }
-.co-workspace input:not([type=checkbox]) { font-size:var(--co-text-body); min-height:44px; color:var(--text); background:var(--surface); padding:8px 12px; border:1px solid var(--border); border-radius:var(--co-radius-field); }
+/* The one search field draws its own box (.co-search); the typing area inside it must not get a second one from this general rule. */
+.co-workspace input:not([type=checkbox], .co-search input) { font-size:var(--co-text-body); min-height:44px; color:var(--text); background:var(--surface); padding:8px 12px; border:1px solid var(--border); border-radius:var(--co-radius-field); }
 .co-workspace input[type=checkbox] { width:18px; height:18px; accent-color:var(--accent); flex-shrink:0; }
 .co-workspace summary { min-height:44px; }
 .co-workspace :is(button,a,summary) { text-underline-offset:3px; }
@@ -518,15 +520,18 @@ export const WORKSPACE_CSS = `
 .co-commit { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; padding:12px 14px; }
 .co-commit + .co-commit, .co-commit-seen + .co-commit { border-top:1px solid var(--border); }
 .co-commit-main { flex:1 1 320px; min-width:0; }
-.co-commit-title { display:block; overflow-wrap:anywhere; font-size:var(--co-text-body); font-weight:600; }
-.co-commit-body > summary { display:flex; align-items:flex-start; min-height:var(--co-control-height); gap:10px; cursor:pointer; list-style:none; }
-.co-commit-body > summary::-webkit-details-marker { display:none; }
-.co-commit-body > summary .co-commit-title { flex:1; min-width:0; }
+.co-commit-head { display:flex; align-items:flex-start; gap:10px; }
+.co-commit-title { flex:1; min-width:0; display:flex; align-items:center; min-height:var(--co-control-height); padding:0; border:0; background:none; color:var(--text); font:600 var(--co-text-body)/1.4 var(--font); text-align:left; overflow-wrap:anywhere; cursor:pointer; }
+.co-commit-title:hover { color:var(--accent-text,var(--accent)); text-decoration:underline; text-underline-offset:3px; }
+.co-commit-title:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--co-radius-pill); }
+.co-commit-hash { display:inline-flex; align-items:center; gap:6px; min-height:var(--co-control-height); padding:0 8px; border:0; border-radius:var(--co-radius-field); background:none; color:var(--muted); cursor:pointer; }
+.co-commit-hash:hover,.co-commit-hash:focus-visible { background:var(--surface-2,var(--bg)); color:var(--text); }
+.co-commit-hash:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .co-commit-toggle { flex:none; display:grid; place-items:center; width:36px; height:36px; margin:-4px 0 0; border:1px solid var(--co-edge); border-radius:var(--co-radius-control); background:var(--surface); color:var(--text); }
 .co-commit-toggle > .co-icon { transition:transform .15s; }
-.co-commit-body[open] .co-commit-toggle { border-color:var(--accent); background:var(--accent-dim,var(--surface-2)); }
-.co-commit-body[open] .co-commit-toggle > .co-icon { transform:rotate(180deg); }
-.co-commit-body > div { margin:10px 0 8px; padding:10px 12px; border-left:3px solid var(--accent); border-radius:var(--co-radius-pill) var(--co-radius-control) var(--co-radius-control) var(--co-radius-pill); background:var(--bg); color:var(--muted); font-size:var(--co-text-meta); white-space:pre-wrap; overflow-wrap:anywhere; }
+.co-commit-toggle[aria-expanded=true] { border-color:var(--accent); background:var(--accent-dim,var(--surface-2)); }
+.co-commit-toggle[aria-expanded=true] > .co-icon { transform:rotate(180deg); }
+.co-commit-body { margin:10px 0 8px; padding:10px 12px; border-left:3px solid var(--accent); border-radius:var(--co-radius-pill) var(--co-radius-control) var(--co-radius-control) var(--co-radius-pill); background:var(--bg); color:var(--muted); font-size:var(--co-text-meta); white-space:pre-wrap; overflow-wrap:anywhere; }
 .co-commit-meta { display:flex; flex-wrap:wrap; align-items:center; gap:2px 10px; margin:4px 0 0; color:var(--muted); font-size:var(--co-text-meta); }
 .co-commit-agent { display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:var(--co-radius-pill); background:var(--accent-dim,var(--surface-2)); color:var(--co-you-text); font-weight:600; }
 .co-commit-stats { white-space:nowrap; font-variant-numeric:tabular-nums; }
@@ -705,9 +710,19 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
  .co-rw-head.is-done .co-rw-icon path { stroke-dasharray:24; stroke-dashoffset:24; animation:co-draw .32s .22s ease-out forwards; }
  .co-rw-head.is-done h3 { animation:co-rise .3s .12s ease-out both; }
  .co-rw-result { animation:co-rise .34s .3s ease-out both; }
+ .co-sync-result { animation:co-rise .3s ease-out both, co-fade-out .5s 5.5s ease-in forwards; }
+ .co-sync-result-check path { stroke-dasharray:24; stroke-dashoffset:24; animation:co-draw .32s .12s ease-out forwards; }
 }
 @keyframes co-pop { from { transform:scale(.5); opacity:0; } to { transform:none; opacity:1; } }
 @keyframes co-draw { to { stroke-dashoffset:0; } }
+/* What a Sync changed: one quiet line under the header that rises in with its check and fades out before it is removed. */
+.co-sync-result-slot { width:100%; padding-inline:36px; }
+.co-sync-result { display:flex; align-items:center; gap:8px; max-height:48px; margin:0; padding:8px 0 10px; overflow:hidden; color:var(--muted); font-size:var(--co-text-meta); line-height:1.4; }
+.co-sync-result b { color:var(--text); font-weight:700; font-variant-numeric:tabular-nums; }
+.co-sync-result-check { flex:none; color:var(--green-text, var(--green)); }
+@media(max-width:680px) { .co-sync-result-slot { padding-inline:18px; } }
+/* It fades and folds away, so what is under it moves up smoothly instead of jumping. */
+@keyframes co-fade-out { to { opacity:0; max-height:0; padding-block:0; } }
 @keyframes co-rise { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
 .co-split { position:relative; display:inline-flex; }
 .co-split .co-split-main { border-top-right-radius:0; border-bottom-right-radius:0; }
@@ -773,6 +788,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-pr-filters button[aria-pressed=true] { color:var(--text); background:var(--surface-2,var(--surface)); border-color:var(--border); }
 .co-pr-filters button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .co-pr-filter-count { color:var(--muted); font-variant-numeric:tabular-nums; }
+.co-pr-filters button.is-empty:not([aria-pressed=true]) { opacity:.55; }
 
 /* Projects list: what kind each project is, and quiet apps folded away. */
 .co-source-row-id { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -1022,10 +1038,10 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(prefers-reduced-motion:reduce) { .co-skel span { animation:none; } .co-workspace,.co-pull-page,.co-desk-envelopes,.co-directory,.co-stage-empty { animation:none; } }
 @media(prefers-reduced-motion:reduce) { .co-desc-title .co-icon,.co-commit-toggle > .co-icon { transition:none; } }
 .co-pull-page .co-gh-pr-title { font-size:var(--co-text-section); letter-spacing:-.015em; }
-/* A PR page grows with the pane, header and code included; the lists keep their reading column (1192px). Beside
-   the code, each tab's own content keeps a reading width, so a comment is never a 2000px line. */
-.co-projects-view:has(.co-pull-page), .co-root:has(.co-pull-page) .co-header { max-width:none; }
-.co-pr-detail { --co-read-width:1000px; }
+/* A PR page grows with the pane (the header never moves); the lists keep one reading column (about 960px) and so do the
+   PR page's reading tabs. Only Files changed uses the whole width, so a comment is never a 2000px line. */
+.co-projects-view:has(.co-pull-page) { max-width:none; }
+.co-pr-detail { --co-read-width:960px; }
 .co-pr-detail .co-next-step, .co-pr-detail .co-gh-description, .co-pr-detail .co-pr-feedback-flag, .co-pr-detail-body:not([data-tab="files"]) > * { max-width:var(--co-read-width); }
 .co-gh-labels { margin-top:8px; }
 /* The comet frame: a faint base frame, with one comet travelling along it while an agent works. */
