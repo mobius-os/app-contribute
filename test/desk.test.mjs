@@ -55,7 +55,7 @@ const pr = (number, extra = {}) => ({
 const opinion = (state, who = 'teammate') => ({ latestOpinionatedReviews: { nodes: [{ state, author: { login: who }, commit: { oid: HEAD } }] } })
 const approved = (extra = {}) => pr(2, { ...opinion('APPROVED'), ...extra })
 // A finished review of PR `number` at HEAD, as the saved runs list it.
-const reviewRun = (number, state = 'all_clear') => ({ id: `run-${number}`, created_at: '2026-11-03T22:00:00Z', state: 'complete', execution_state: 'completed', chat_id: 'c', items: [{ repo: 'o/r', number, head_sha: HEAD, state }] })
+const reviewRun = (number, state = 'all_clear', head = HEAD) => ({ id: `run-${number}`, created_at: '2026-11-03T22:00:00Z', state: 'complete', execution_state: 'completed', chat_id: 'c', items: [{ repo: 'o/r', number, head_sha: head, state }] })
 // The review list's row for a PR someone else wrote that the owner reviewed (a live read, classified as the page does).
 const reviewed = (number, live, runs = []) => {
   const item = { repo: 'o/r', number, title: `Review of ${number}` }
@@ -241,6 +241,44 @@ test('each PR counts once: a request, a card or an own PR already listed is not 
   const stopped = reviewed(2, pr(2, { author: { login: 'teammate' } }), [{ ...reviewRun(2, 'reviewing'), state: 'running', execution_state: 'failed' }])
   assert.equal(stopped.bucket, 'stalled')
   assert.equal(deskCounts({ reviewEntries: [stopped], login: 'owner' }).again, 1)
+})
+
+// The incoming PRs and the review list read GitHub on their own, so for a while they can show one PR at two versions.
+const NEWER = 'b'.repeat(40)
+
+test('a review that waits on you is not hidden by a PR list that is a version behind', () => {
+  // The PR list still has #7 at the old version (waiting on reviewers, so no row); the review list's newer read has findings at the new one.
+  const behind = pr(7)
+  const entry = reviewed(7, pr(7, { headRefOid: NEWER }), [reviewRun(7, 'needs_you', NEWER)])
+  assert.equal(standingFor({ pr: behind, login: 'owner' }).state, 'author.waiting_review')
+  assert.equal(entry.decision.state, 'author.findings')
+  assert.deepEqual(needsRows({ pulls: [behind], entries: [entry], login: 'owner' }).map(row => [row.step, row.entry?.id]), [['fix', 'o/r#7']])
+  // Every place that counts the rows counts it: the chips, the rail's number and the repository's own.
+  const counts = deskCounts({ incoming: [behind], login: 'owner', reviewEntries: [entry] })
+  assert.deepEqual([counts.fix, needsCount(counts)], [1, 1])
+  assert.equal(projectNeedsCount({ canonical_repo: 'o/r', incomingReviews: [behind], reviewRequests: [] }, [], 'owner', [entry]), 1)
+})
+
+test('a PR already listed as a row is not listed a second time for its review, at either version', () => {
+  const run = reviewRun(7, 'needs_you')
+  const entry = reviewed(7, pr(7), [run])
+  const rows = needsRows({ pulls: [pr(7)], entries: [entry], login: 'owner', facts: { runs: [run] } })
+  assert.deepEqual(rows.map(row => [row.step, !!row.pr, !!row.entry]), [['fix', true, false]], 'one row, the PR\'s own')
+  // Failing checks make the PR list's row at the old version; the review list's newer read of the same PR adds nothing.
+  const failing = pr(8, { commits: rollup(1, 2) })
+  const newer = reviewed(8, pr(8, { headRefOid: NEWER, commits: rollup(1, 2) }), [reviewRun(8, 'needs_you', NEWER)])
+  assert.deepEqual(needsRows({ pulls: [failing], entries: [newer], login: 'owner' }).map(row => [row.step, !!row.pr]), [['fix', true]])
+})
+
+test('a draft ready to open stays a quiet line, whether or not the PR list holds it, but findings on a newer version of it wait on you', () => {
+  const draft = pr(8, { isDraft: true })
+  const quiet = reviewed(8, draft, [reviewRun(8)])
+  assert.equal(quiet.decision.state, 'author.draft_ready')
+  assert.deepEqual(needsRows({ pulls: [draft], entries: [quiet], login: 'owner' }), [])
+  assert.deepEqual(needsRows({ pulls: [], entries: [quiet], login: 'owner' }), [])
+  assert.equal(needsCount(deskCounts({ incoming: [draft], login: 'owner', reviewEntries: [quiet] })), 0)
+  const found = reviewed(8, pr(8, { isDraft: true, headRefOid: NEWER }), [reviewRun(8, 'needs_you', NEWER)])
+  assert.deepEqual(needsRows({ pulls: [draft], entries: [found], login: 'owner' }).map(row => row.step), ['fix'])
 })
 
 test('a submitted review takes only its own PR out of the review requests', () => {

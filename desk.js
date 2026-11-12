@@ -105,13 +105,17 @@ export function needsRows({ requests = [], pulls = [], decisions = [], entries =
   const covered = feedbackPullKeys(items)
   const own = authoredPulls(pulls, login).filter(pr => !covered.has(pullKey(pr)))
   const decided = own.map(pr => ({ pr, decision: deskStanding(pr, login, facts) })).filter(({ decision }) => waitsOnYou(decision))
-  const listed = new Set([...covered, ...requests.map(pullKey), ...own.map(pullKey)])
+  // A run is left out only when its PR already is a row. The incoming PRs and the review list read GitHub separately, so a PR can
+  // read as "waiting on reviewers" here (no row) while the review list's newer read says its review waits on you: that run stays.
+  const listed = new Set([...covered, ...requests.map(pullKey), ...decided.map(({ pr }) => pullKey(pr))])
+  // A run's own decision, read from the newer PR, is held to the same rule as a PR's: a draft ready to open is a quiet line, not a row.
+  const runs = agentRunsWaiting(entries, listed).filter(entry => !entry.decision || waitsOnYou(entry.decision))
   return [
     ...requests.map(pr => ({ step: 'review', pr })),
     ...items.map(item => ({ step: 'look', item })),
     ...decided.map(({ pr, decision }) => ({ step: stepOf(decision), pr, decision })),
     // A Respond conversation has no decision of its own here, and it is always on your own PR.
-    ...agentRunsWaiting(entries, listed).map(entry => ({ step: entry.decision ? stepOf(entry.decision) : 'fix', entry })),
+    ...runs.map(entry => ({ step: entry.decision ? stepOf(entry.decision) : 'fix', entry })),
   ]
 }
 
