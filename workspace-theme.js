@@ -361,7 +361,7 @@ export const WORKSPACE_CSS = `
 .co-pr-open:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:var(--co-radius-pill); }
 .co-pr-meta { display:flex; align-items:center; flex-wrap:wrap; gap:2px 10px; margin-top:2px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-pr-meta > span { white-space:nowrap; }
-.co-pr-agent-state { display:inline-flex; align-items:center; gap:4px; min-height:28px; padding:0 8px; border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border)); border-radius:var(--co-radius-round); background:var(--accent-dim); color:var(--text); font:500 var(--co-text-meta) var(--font); cursor:pointer; }
+.co-pr-agent-state { display:inline-flex; align-items:center; gap:4px; min-height:28px; padding:0 8px; border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border)); border-radius:var(--co-radius-round); background:var(--accent-dim); color:var(--text); font:500 var(--co-text-chip) var(--font); cursor:pointer; }
 .co-pr-agent-state.needs-you { border-color:var(--co-warn); background:color-mix(in srgb,var(--co-warn) 16%,transparent); }
 .co-pr-agent-state.is-waiting { border-color:var(--border); background:transparent; color:var(--muted); }
 .co-pr-aside { display:flex; align-items:center; gap:2px; padding-top:2px; }
@@ -371,14 +371,14 @@ export const WORKSPACE_CSS = `
 .co-gh-avatars { display:inline-flex; align-items:center; }
 .co-gh-avatars > .co-gh-avatar + .co-gh-avatar { margin-left:-6px; }
 .co-gh-avatar { display:inline-grid; place-items:center; flex:none; border-radius:50%; background:var(--surface-2,var(--surface)); color:var(--text); font-size:var(--co-text-meta); font-weight:600; box-shadow:0 0 0 2px var(--bg); }
-.co-gh-label { display:inline-block; padding:0 8px; border:1px solid var(--co-label-dark-edge,var(--border)); border-radius:var(--co-radius-round); background:var(--co-label-dark-bg,var(--surface-2,var(--surface))); color:var(--co-label-dark-fg,var(--text)); font-size:var(--co-text-meta); font-weight:500; line-height:20px; white-space:nowrap; }
+.co-gh-label { display:inline-block; padding:0 8px; border:1px solid var(--co-label-dark-edge,var(--border)); border-radius:var(--co-radius-round); background:var(--co-label-dark-bg,var(--surface-2,var(--surface))); color:var(--co-label-dark-fg,var(--text)); font-size:var(--co-text-chip); font-weight:500; line-height:20px; white-space:nowrap; }
 [data-theme="light"] .co-gh-label { border-color:var(--co-label-light-edge,var(--border)); background:var(--co-label-light-bg,var(--surface-2,var(--surface))); color:var(--co-label-light-fg,var(--text)); }
 .co-gh-labels { display:flex; flex-wrap:wrap; gap:4px; margin-top:10px; }
 .co-gh-state { display:inline-flex; color:var(--green); }
 .co-gh-state.is-draft { color:var(--muted); }
 .co-gh-state.is-merged { color:#a371f7; }
 .co-gh-state.is-closed { color:var(--danger); }
-.co-gh-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border:1px solid var(--co-label-dark-edge,transparent); border-radius:var(--co-radius-round); background:var(--co-label-dark-bg,var(--surface-2)); color:var(--co-label-dark-fg,var(--text)); font-size:var(--co-text-meta); font-weight:500; white-space:nowrap; }
+.co-gh-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border:1px solid var(--co-label-dark-edge,transparent); border-radius:var(--co-radius-round); background:var(--co-label-dark-bg,var(--surface-2)); color:var(--co-label-dark-fg,var(--text)); font-size:var(--co-text-chip); font-weight:500; white-space:nowrap; }
 [data-theme="light"] .co-gh-badge { border-color:var(--co-label-light-edge,transparent); background:var(--co-label-light-bg,var(--surface-2)); color:var(--co-label-light-fg,var(--text)); }
 .co-gh-checks { display:inline-flex; align-items:center; gap:3px; font-variant-numeric:tabular-nums; }
 .co-gh-checks.is-success .co-icon { color:var(--green); }
@@ -422,7 +422,7 @@ export const WORKSPACE_CSS = `
 .co-gh-chat-link .co-icon { color:var(--muted); }
 .co-pr-detail .co-detail-tabs { display:flex; width:100%; gap:20px; margin:14px 0 0; border-bottom:1px solid var(--border); overflow-x:auto; }
 .co-pr-detail .co-detail-tabs button { display:inline-flex; align-items:center; gap:6px; flex:none; min-height:44px; font-size:var(--co-text-meta); }
-.co-tab-count { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); color:var(--text); font-size:var(--co-text-meta); line-height:20px; text-align:center; }
+.co-tab-count { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); color:var(--text); font-size:var(--co-text-chip); line-height:20px; text-align:center; }
 .co-pr-detail-body { max-height:min(60dvh,560px); overflow:auto; overscroll-behavior:contain; padding:14px 2px 6px; }
 .co-gh-comment { margin:0 0 14px; border:1px solid var(--border); border-radius:var(--co-radius-field); overflow:hidden; }
 .co-gh-comment > header { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:8px 14px; background:var(--surface); border-bottom:1px solid var(--border); color:var(--muted); font-size:var(--co-text-meta); }
@@ -498,7 +498,7 @@ export const WORKSPACE_CSS = `
 .co-attention-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .co-attention-main strong { font-size:var(--co-text-body); font-weight:600; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .co-attention-main small { color:var(--muted); font-size:var(--co-text-meta); line-height:1.45; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.co-attention-reason, .co-attn-tag { display:inline-block; margin-right:8px; padding:1px 8px; border-radius:var(--co-radius-round); background:color-mix(in srgb,var(--tone,var(--accent)) 14%,transparent); color:color-mix(in srgb,var(--tone,var(--accent)) 60%,var(--text)); font-size:var(--co-text-meta); font-weight:600; line-height:22px; }
+.co-attention-reason, .co-attn-tag { display:inline-block; margin-right:8px; padding:1px 8px; border-radius:var(--co-radius-round); background:color-mix(in srgb,var(--tone,var(--accent)) 14%,transparent); color:color-mix(in srgb,var(--tone,var(--accent)) 60%,var(--text)); font-size:var(--co-text-chip); font-weight:600; line-height:22px; }
 .co-attn-more { box-sizing:border-box; display:flex; align-items:center; gap:12px; width:100%; padding:0 12px; border-top:1px solid color-mix(in srgb,var(--accent) 16%,transparent); }
 .co-attn-more .co-icon { margin-inline:11px; }
 .co-desk-row > .co-desk-attention-icon { color:var(--tone,var(--muted)); }
@@ -746,7 +746,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-project-tab[aria-selected=true]::after { content:''; position:absolute; left:10px; right:10px; bottom:-1px; height:2px; border-radius:var(--co-radius-pill); background:var(--accent); }
 .co-project-tab:hover { color:var(--text); }
 .co-project-tab:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:var(--co-radius-field); }
-.co-tab-count { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); color:var(--muted); font-size:var(--co-text-meta); font-weight:600; line-height:22px; text-align:center; font-variant-numeric:tabular-nums; }
+.co-tab-count { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); color:var(--muted); font-size:var(--co-text-chip); font-weight:600; line-height:22px; text-align:center; font-variant-numeric:tabular-nums; }
 .co-tab-count.is-you { background:var(--accent-dim); color:var(--co-you-text); }
 .co-project-tabpanel { padding-top:16px; }
 .co-workspace .co-project-tabpanel > .co-public-work { margin-top:0; }
@@ -763,11 +763,11 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 
 /* Projects list: what kind each project is, and quiet apps folded away. */
 .co-source-row-id { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.co-source-tag { padding:0 8px; border:1px solid var(--border); border-radius:var(--co-radius-round); color:var(--muted); font-size:var(--co-text-meta); font-weight:500; line-height:22px; }
+.co-source-tag { padding:0 8px; border:1px solid var(--border); border-radius:var(--co-radius-round); color:var(--muted); font-size:var(--co-text-chip); font-weight:500; line-height:22px; }
 .co-quiet-projects { border-top:1px solid var(--border); }
 .co-quiet-projects > summary { display:flex; align-items:center; gap:10px; min-height:52px; padding:0 12px; color:var(--muted); font-size:var(--co-text-body); font-weight:500; list-style:none; cursor:pointer; }
 .co-quiet-projects > summary::-webkit-details-marker { display:none; }
-.co-quiet-projects > summary b { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); font-size:var(--co-text-meta); font-weight:600; line-height:22px; text-align:center; }
+.co-quiet-projects > summary b { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); font-size:var(--co-text-chip); font-weight:600; line-height:22px; text-align:center; }
 .co-quiet-projects > summary .co-icon { margin-left:auto; transition:transform .15s; }
 .co-quiet-projects[open] > summary .co-icon { transform:rotate(180deg); }
 .co-quiet-projects > summary:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:var(--co-radius-field); }
@@ -789,7 +789,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rail-item .co-icon { color:var(--muted); flex:0 0 auto; }
 .co-rail-item[aria-current] .co-icon { color:var(--accent); }
 .co-rail-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.co-rail-count { flex:0 0 auto; min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2); color:var(--text); font:600 var(--co-text-meta)/22px var(--font); text-align:center; }
+.co-rail-count { flex:0 0 auto; min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2); color:var(--text); font:600 var(--co-text-chip)/22px var(--font); text-align:center; }
 .co-rail-count.is-you { background:var(--accent-dim, var(--surface-2)); color:var(--co-you-text); }
 .co-rail-glyph { width:20px; height:20px; border-radius:var(--co-radius-pill); flex:0 0 auto; }
 .co-rail-views,.co-rail-projects { display:flex; flex-direction:column; gap:2px; }
@@ -845,9 +845,9 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-search input::placeholder { color:var(--muted); }
 .co-search input::-webkit-search-cancel-button { display:none; }
 .co-search:has(input:disabled) { opacity:.5; }
-/* The button is a full control tall and wide (44px); the field's 1px edge is taken back with a negative margin so the field stays 44px.
+/* The button is a full tap tall and wide (44px); the field's 1px edge and the tap's reach are taken back with a negative margin so the field stays one control tall.
    Only the 36px circle behind the 16px icon is drawn, so it looks as small as before and a thumb still hits it. */
-.co-search-clear { position:relative; isolation:isolate; flex:none; display:grid; place-items:center; width:var(--co-control-height); height:var(--co-control-height); margin:-1px 0; padding:0; border:0; background:none; color:var(--muted); cursor:pointer; }
+.co-search-clear { position:relative; isolation:isolate; flex:none; display:grid; place-items:center; width:var(--co-tap-height); height:var(--co-tap-height); margin:calc(-1px - var(--co-tap-reach)) 0; padding:0; border:0; background:none; color:var(--muted); cursor:pointer; }
 .co-search-clear::before { content:''; position:absolute; z-index:-1; inset:4px; border-radius:var(--co-radius-round); }
 .co-search-clear:hover,.co-search-clear:focus-visible { color:var(--text); outline:none; }
 .co-search-clear:hover::before,.co-search-clear:focus-visible::before { background:var(--surface-2,var(--bg)); }
@@ -887,7 +887,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-desk-row-main > .co-pr-labels, .co-desk-row-main > .co-row-pills { margin-top:0; }
 .co-desk-row-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-desk-order { font-variant-numeric:tabular-nums; }
-.co-desk-chip { padding:1px 8px; border-radius:var(--co-radius-pill); font-size:var(--co-text-meta); font-weight:600; background:var(--surface-2); color:var(--text); }
+.co-desk-chip { padding:1px 8px; border-radius:var(--co-radius-pill); font-size:var(--co-text-chip); font-weight:600; background:var(--surface-2); color:var(--text); }
 .co-desk-chip.is-you { background:var(--accent-dim, var(--surface-2)); color:var(--co-you-text); }
 .co-desk-chip.is-blocker { background:color-mix(in srgb, var(--danger, #f87171) 14%, transparent); color:var(--co-blocker-text); }
 .co-desk-chip.is-waiting { background:color-mix(in srgb, var(--co-warn,#b38235) 16%, transparent); color:var(--co-warn-text); }
@@ -1157,5 +1157,36 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(max-width:680px) {
  .co-desk-item.co-desk-row-split { grid-template-columns:minmax(0,1fr); grid-template-areas:"row" "note" "action"; padding:0 14px 12px; }
  .co-desk-item.co-desk-row-split > .co-desk-note { padding:0 0 10px 26px; }
+}
+/* ---- Compact on a phone (DESIGN.md, The Compact Phone Rule) ----
+   The sizes are the phone set of the token sheet in theme.js. This block takes the air out of the lists
+   and holds on to the two things that must not shrink with them: the tap area and the text you type. */
+@media(max-width:680px) {
+ .co-root { line-height:1.4; }
+ .co-root input:not([type=checkbox]),.co-root textarea,.co-root select { font-size:var(--co-text-entry); }
+ /* Drawn one control tall, tapped 44 tall: a box --co-tap-height tall, centred on the control, so it is 44 whatever the control's own
+    border is (an inset from the padding edge would fall short by it). An icon button is tapped 44 wide too. Every inset is given, so the
+    control's own alignment (a grid that centres its children) cannot move the box. :where() keeps the position at no weight, so a
+    button that already places itself keeps its own position. */
+ :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button,.co-desk-chips-projects) { position:relative; }
+ :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button,.co-desk-chips-projects)::before { content:''; position:absolute; inset:calc(50% - var(--co-tap-height) / 2) 0; }
+ .co-btn-icon::before { inset-inline:calc(50% - var(--co-tap-height) / 2); }
+ /* A tap box reaches --co-tap-reach past what is drawn, so what holds controls keeps twice that between them (the boxes meet and never cross, so
+    no control's drawn face is another's tap) and a scrolling box keeps that much inside its edge (it clips what reaches past). */
+ .co-desk-seg { row-gap:calc(2 * var(--co-tap-reach)); }
+ .co-rw-tools { gap:calc(2 * var(--co-tap-reach)); }
+ .co-pr-filters { padding-block:var(--co-tap-reach); }
+ .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b { line-height:20px; }
+ .co-desk-chips { margin-bottom:6px; padding:4px 0; }
+ .co-filter-line { margin:0 0 4px; }
+ .co-search { margin-bottom:10px; }
+ .co-desk-envelopes { gap:10px; }
+ .co-desk-row { padding:9px 12px; }
+ .co-desk-row-main { gap:3px; }
+ .co-pr-row { padding-top:6px; padding-bottom:6px; }
+ .co-source-row { min-height:0; padding:12px 4px; }
+ /* A repository's sentences are detail under its name, not a second headline. */
+ .co-source-row-facts { gap:2px; color:var(--muted); font-size:var(--co-text-meta); line-height:1.4; }
+ .co-quiet-projects > summary { min-height:44px; }
 }
 `

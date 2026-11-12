@@ -1,6 +1,6 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Seventeen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Eighteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runProjectWarningChecks (the project fixture: the project screen's one GitHub row shows only for a conflict or an update),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
@@ -14,7 +14,8 @@
 // runRespondPostOffChecks (the whole app, on a Möbius that does not confirm it: Post is off with its reason in words, at every width, and the rest of the card still works),
 // runRespondAgainChecks (the whole app: Respond again is delivered into the PR's existing conversation as a message),
 // runAskApprovalChecks (the whole app: a reviewer who looked again without approving is asked to approve with a note, an approval of the same work carries over, and where Möbius confirms the owner's taps on its own sheet Merge is one tap) and
-// runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent).
+// runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent),
+// runTapBoxChecks (the whole app: every compact control takes a full 44px tap, and no tap box covers another control's face).
 // Run one with WORKSPACE_BROWSER_ONLY=runDeskFrameChecks (and one viewport with WORKSPACE_BROWSER_VIEWPORT=desktop), for example while
 // runWorkspaceChecks is red, so the Desk check can still show green.
 // Actual app components, native Chromium DOM, and no live app/backend. The
@@ -468,6 +469,9 @@ const closeReview = () => click(review().querySelector('[aria-label="Close"]'))
 const checkButton = () => query('.co-toolbar-refresh')
 const batchAction = () => [...document.querySelectorAll('.co-public-work .co-work-progress-row')].find(node => text(node).includes('Review or assign'))
 const ensure = (condition, message) => { if (!condition) throw new Error(message) }
+// A 44px tap: a control is drawn 44 tall on a desktop and 38 on a phone with a 44px tap box around it, so ask where a tap 21px above and
+// below its middle lands (the drawn height says nothing about the tap).
+const tapsFortyFour = node => { const box = node.getBoundingClientRect(); return [-21, 21].every(reach => node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2 + reach))) }
 // CDP delivers the real browser key default; dispatchEvent would not toggle a
 // checkbox natively and must not be used as keyboard-selection evidence.
 const nativeSpace = () => new Promise((resolve, reject) => {
@@ -588,7 +592,7 @@ window.runProjectWarningChecks = async () => {
     ensure(text(row().querySelector('p')) === 'An update from GitHub conflicts with your local changes.', 'The warning read: ' + text(row()))
     ensure(row().compareDocumentPosition(query('[role=tablist]')) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not above the tabs')
     const action = button('Open App Store', row()), box = row().getBoundingClientRect(), actionBox = action.getBoundingClientRect()
-    ensure(Math.round(actionBox.height) >= 44 && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px')
+    ensure(tapsFortyFour(action) && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px drawn')
     ensure(box.left >= 0 && Math.round(box.right) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The row makes the page scroll sideways')
     const asked = []
     const listen = event => asked.push(event.data)
@@ -2146,6 +2150,120 @@ window.runDeskFrameChecks = async () => {
   }
 }
 
+// The whole app on a fresh page: every control drawn at the compact height (a phone's 38px, or an icon button's 38px width) is tapped a full 44px.
+// What a thumb lands on is the browser's answer, so this asks it (elementFromPoint) at the edges of what is drawn and at the edges of the 44px box
+// that has to be around it: a neighbour's tap area must not cover a control's face, a border or a box that clips must not cut the area short,
+// and a control narrower than 44px needs its width too. Desktop draws 44px, so there the same probes show nothing covers a face.
+window.runTapBoxChecks = async () => {
+  const checks = []
+  const TAP = 44
+  const INTERACTIVE = 'button, a[href], summary, [role=button], [role=tab], [role=menuitem], select'
+  const name = node => text(node) || node.getAttribute('aria-label') || node.className || node.tagName
+  const problems = []
+  const compactControls = (scope, drawn) => [...scope.querySelectorAll(INTERACTIVE)].filter(node => {
+    const box = node.getBoundingClientRect()
+    return box.width && box.height && (Math.round(box.height) === drawn || node.matches('.co-btn-icon'))
+  })
+  // A picture of the tap boxes: each compact control's 44px box drawn over the screen for the one capture (the PR's before and after pictures).
+  const shoot = async (name, scope = document) => {
+    const drawn = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--co-control-height'))
+    const overlays = compactControls(scope, drawn).map(node => {
+      const box = node.getBoundingClientRect(), cx = box.left + box.width / 2, cy = box.top + box.height / 2
+      const width = node.matches('.co-btn-icon') ? Math.max(box.width, TAP) : box.width, height = Math.max(box.height, TAP)
+      const overlay = document.createElement('div')
+      overlay.style.cssText = 'position:fixed;pointer-events:none;z-index:99999;box-sizing:border-box;border:1px solid rgba(220,40,40,.9);background:rgba(220,40,40,.14);left:' + (cx - width / 2) + 'px;top:' + (cy - height / 2) + 'px;width:' + width + 'px;height:' + height + 'px'
+      document.body.append(overlay)
+      return overlay
+    })
+    await captureShot(name)
+    overlays.forEach(overlay => overlay.remove())
+  }
+  // scope is the window on top when one covers the page: what is behind it cannot be tapped.
+  const tapBoxes = (label, scope = document) => {
+    const drawn = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--co-control-height'))
+    ensure(drawn > 0, 'The control height token is not readable')
+    const controls = compactControls(scope, drawn)
+    ensure(controls.length > 0, 'No control drawn ' + drawn + 'px tall on ' + label + ': the check would prove nothing')
+    for (const node of controls) {
+      node.scrollIntoView({ block: 'center', inline: 'center' })
+      const box = node.getBoundingClientRect(), cx = box.left + box.width / 2, cy = box.top + box.height / 2
+      // A control drawn short is tapped a full 44px tall. An icon button is tapped 44px wide too; a text button keeps the width its words
+      // give it, as it does on a desktop.
+      const width = node.matches('.co-btn-icon') ? Math.max(box.width, TAP) : box.width, height = Math.max(box.height, TAP)
+      const probes = {
+        'the top of what is drawn': [cx, box.top + 1], 'the bottom of what is drawn': [cx, box.bottom - 1],
+        'the left of what is drawn': [box.left + 1, cy], 'the right of what is drawn': [box.right - 1, cy],
+        'the top of its 44px box': [cx, cy - height / 2 + 1], 'the bottom of its 44px box': [cx, cy + height / 2 - 1],
+        'the left of its 44px box': [cx - width / 2 + 1, cy], 'the right of its 44px box': [cx + width / 2 - 1, cy],
+      }
+      for (const [where, [x, y]] of Object.entries(probes)) {
+        const hit = document.elementFromPoint(x, y), owner = hit && hit.closest(INTERACTIVE)
+        if (hit && (hit === node || node.contains(hit))) continue
+        problems.push(label + ': a tap at ' + where + ' of "' + name(node) + '" (' + Math.round(box.width) + 'x' + Math.round(box.height) + ') lands on ' +
+          (hit ? '"' + name(owner || hit) + '"' + (owner ? ' at ' + [owner.getBoundingClientRect().y, owner.getBoundingClientRect().height].map(Math.round) : '') : 'nothing'))
+      }
+    }
+    checks.push({ name: 'on ' + label + ', every compact control (' + controls.length + ') was probed for a full 44px tap and for a face no neighbour covers', status: 'pass' })
+  }
+  try {
+    reviewRuns.length = 0
+    // Windows slide and scale in; this harness never advances that, and a scaled box is not the box that is being measured.
+    const still = document.createElement('style')
+    still.textContent = '*,*::before,*::after { animation: none !important; transition: none !important; }'
+    document.head.append(still)
+    await mountDeskApp()
+    await until(() => query('.co-desk-row'), 'The Desk did not list the review request')
+    const phone = getComputedStyle(query('.co-desk-chips')).display !== 'none'
+    // A view of the Desk: a phone's wrapped bar holds the four views, a desktop's side menu holds them as rows.
+    const goTo = async (word, ready) => {
+      await click([...document.querySelectorAll(phone ? '.co-desk-seg button' : '.co-rail-item')].find(node => (node.getAttribute('aria-label') || text(node)).startsWith(word)), 'No ' + word + ' view')
+      await until(ready, 'The ' + word + ' view did not open')
+    }
+    tapBoxes('the Desk')
+    await shoot('tap-boxes-desk')
+    await goTo('My PRs', () => query('.co-pr-filters'))
+    tapBoxes('My PRs')
+    await shoot('tap-boxes-my-prs')
+    await goTo('Agent runs', () => query('.co-pr-filters'))
+    tapBoxes('Agent runs')
+    if (phone) {
+      // The All repositories button under the bar.
+      ensure(query('.co-desk-chips-projects'), 'The Desk has no All repositories button')
+      await click(query('.co-desk-chips-projects'))
+    } else await click(query('.co-rail-item.is-all'))
+    await until(() => query('.co-directory-add'), 'The All repositories list did not open')
+    tapBoxes('the All repositories list')
+    await click(query('.co-source-row'))
+    await until(() => document.querySelectorAll('.co-pr-row').length >= 1, 'The project did not open')
+    tapBoxes('a repository page')
+    // A selected PR brings the bar with Clear selection, an icon button beside Assign and Actions.
+    await click(query('input[aria-label="Select owner/project #7"]'))
+    await until(() => query('.co-pr-box-head [aria-label="Clear selection"]'), 'Selecting a PR did not offer Clear selection')
+    tapBoxes('a selection')
+    await click(query('.co-pr-box-head [aria-label="Clear selection"]'))
+    await click(query('.co-pr-open'))
+    await until(() => query('.co-detail-tabs'), 'The PR page did not open')
+    tapBoxes('a PR page')
+    // The review window: its lock and its close are two icon buttons side by side.
+    await click(query('[aria-label^="Choose an action for PR"]'))
+    await click([...document.querySelectorAll('[role=menuitem]')].find(node => text(node.querySelector('strong')) === 'Review'))
+    await until(() => review(), 'The review window did not open')
+    tapBoxes('the review window', review())
+    await shoot('tap-boxes-review-window', review())
+    await closeReview()
+    await until(() => !review(), 'The review window did not close')
+    await click(query('summary[aria-label$="Contribute settings"]'))
+    await until(() => query('[aria-label="Close settings"]'), 'Settings did not open')
+    tapBoxes('Settings', query('.co-settings-workspace'))
+    // Every screen is probed before anything fails, so one run lists every miss.
+    ensure(problems.length === 0, problems.length + ' taps miss:\n' + problems.join('\n'))
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  }
+}
+
 // Reading a PR page. A picture that is a file in the repository shows as a picture, read through the read-only GitHub route and
 // shown from a data: address; every other picture stays a labelled tile that links out, and the page never asks another host for
 // an image (the harness blocks the network and fails the scenario on any request). A failed check says why. One commit opens its own
@@ -2392,7 +2510,7 @@ window.runDeskListChecks = async () => {
     ensure(fix && text(fix) === 'Fix these findings' && !button.contains(fix), 'The row with findings offers no Fix these findings beside it')
     const [fixBox, rowBox, noteBox] = [fix, button, fixing.querySelector('.co-desk-note')].map(node => node.getBoundingClientRect())
     ensure(window.innerWidth > 680 ? fixBox.left >= rowBox.right - 1 : fixBox.top >= noteBox.bottom - 1 && fixBox.width > rowBox.width * 0.8, 'Fix these findings sits in the wrong place: ' + JSON.stringify([fixBox, rowBox, noteBox].map(box => [box.left, box.top, box.width, box.height].map(Math.round))))
-    ensure(Math.round(fixBox.height) >= 44 && fixBox.right <= window.innerWidth + 1, 'Fix these findings is not a control on the screen')
+    ensure(tapsFortyFour(fix) && fixBox.right <= window.innerWidth + 1, 'Fix these findings is not a control on the screen')
     checks.push({ name: 'a row\'s own answer sits beside it, or under it on a phone', status: 'pass' })
     // The saved note is one line, and Show more reveals all of it without opening the PR.
     const card = rowOf('Own change with a note')
@@ -2400,7 +2518,7 @@ window.runDeskListChecks = async () => {
     await until(() => card.querySelector('.co-desk-note button'), 'A long saved note has no Show more')
     ensure(line.getBoundingClientRect().height <= oneLine * 1.2, 'The note is ' + Math.round(line.getBoundingClientRect().height) + 'px tall, not one line of ' + Math.round(oneLine))
     const more = card.querySelector('.co-desk-note button')
-    ensure(text(more) === 'Show more' && Math.round(more.getBoundingClientRect().height) >= 44, 'Show more is not a 44px control: ' + Math.round(more.getBoundingClientRect().height))
+    ensure(text(more) === 'Show more' && tapsFortyFour(more), 'Show more is not a 44px control: ' + Math.round(more.getBoundingClientRect().height))
     await captureShot('desk-needs-you')
     await captureShot('desk-needs-you-fix', rowOf('Change with findings'))
     await click(more)
@@ -3509,7 +3627,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
