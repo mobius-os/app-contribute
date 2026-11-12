@@ -7,8 +7,8 @@ import { BUTTON_CSS } from './button-theme.js'
 // so a future library harvest can find them.
 export const CSS = `
 /* mobius-ui:Root v1 — app-owned copy; library candidate. */
-/* The one token sheet (DESIGN.md): 5 corner radii and 4 type sizes, none under
-   14 px. Every rule names a token, never a raw value (test/style-tokens.test.mjs). */
+/* The one token sheet (DESIGN.md): 5 corner radii and the type sizes. Every rule names a
+   token, never a raw value (test/style-tokens.test.mjs). A phone takes the compact set below. */
 :root {
   --co-radius-pill: 6px;      /* status pills and small chips */
   --co-radius-field: 8px;     /* inputs and inner boxes */
@@ -20,10 +20,16 @@ export const CSS = `
   --co-text-body: 16px;
   --co-text-section: 22px;
   --co-text-title: 28px;
-  /* The two sizes under the 14px floor: a PR description on a phone only (owner's choice, 2026-11-06; DESIGN.md). */
+  --co-text-chip: 14px;       /* status chips, tags and counts */
+  --co-text-entry: 16px;      /* text you type: an iPhone zooms the page on a field under 16px */
+  /* The two reading sizes: a PR description on a phone only (owner's choice, 2026-11-06; DESIGN.md). */
   --co-text-reading: 13px;
   --co-text-code: 12px;
   --co-control-height: 44px;
+  --co-tap-reach: 0px;        /* how far a control's tap area reaches past its drawn edge, above and below */
+  --co-icon-scale: 1;         /* every icon is drawn at its size times this */
+  /* The height a thumb gets: the drawn control plus its reach, 44px on every screen. */
+  --co-tap-height: calc(var(--co-control-height) + 2 * var(--co-tap-reach));
   /* The edge of a control that must read as a control on a dark phone screen: a plain --border is too faint. */
   --co-edge: color-mix(in srgb, var(--text) 32%, var(--border));
   /* "Your move" purple text on its tinted fill: the plain accent read 4.1:1 there; mixed
@@ -33,6 +39,20 @@ export const CSS = `
      colour, so its text reads 4.5:1 or better on every surface on its own tint in dark and in light. */
   --co-blocker-text: color-mix(in srgb, var(--danger, #f87171) 60%, var(--text));
   --co-ready-text: color-mix(in srgb, var(--green, #10b981) 60%, var(--text));
+}
+/* Compact on a phone (the owner's choice, 2026-11-11; DESIGN.md): one size down for text, chips at 12,
+   icons an eighth smaller, and controls drawn 38 tall that still take a 44 tall tap. */
+@media (max-width: 680px) {
+  :root {
+    --co-text-meta: 13px;
+    --co-text-body: 15px;
+    --co-text-section: 20px;
+    --co-text-title: 22px;
+    --co-text-chip: 12px;
+    --co-control-height: 38px;
+    --co-tap-reach: 3px;
+    --co-icon-scale: .875;
+  }
 }
 @media (max-width: 680px) { :root { --co-radius-window: 20px; } }
 .co-root {
@@ -50,6 +70,9 @@ export const CSS = `
   --co-warn-text: color-mix(in srgb, var(--co-warn) 60%, var(--text));
 }
 .co-root *, .co-root *::before, .co-root *::after { box-sizing: inherit; }
+/* An icon is drawn at its own size times the scale of the screen it is on (the token sheet above). zoom, not
+   transform, so the room it takes shrinks with it; no inline style, which a PR's own text must never carry. */
+.co-icon { zoom: var(--co-icon-scale); }
 .co-visually-hidden {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
