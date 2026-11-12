@@ -53,8 +53,8 @@ export const isPublicFeedback = item => item.kind === 'private_review'
   && ['open', 'draft'].includes(item.record?.status)
   && hasAttentionSignal(item.record)
 
-// Decisions that wait on the owner: the project's Needs you, Mark ready and
-// Send rows. Private review work and requests belong to Prepared work.
+// Decisions that wait on the owner, the rows of the Needs you destination (a project page
+// shows only its own Send and Mark ready bars). Private review work and requests belong to Prepared work.
 export const attentionListItems = (decisions = []) => decisions.filter(item => isPublicFeedback(item) || ![
   'publish', 'mark_ready', 'private_review', 'request',
 ].includes(item.kind))

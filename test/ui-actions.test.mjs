@@ -433,12 +433,16 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(refresh, /hub\.refresh\('ledger'\)/)
   assert.match(refresh, /reviewList\.syncPulls\(\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
-  assert.match(refresh, /return \{ ok: sourceOk && ledgerCurrentRef\.current, upstream \}/)
+  assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
   assert.match(appSource, /checks=\{upstreamChecks\}/)
-  // The sync says when it last ran, beside its own button, and is named for what it does.
-  assert.match(appSource, /<SyncNote note=\{refreshNote\} \/>\s*<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"/)
+  // The sync keeps its last successful time inside the header control, including on phones.
+  assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
+  // A failed review-request read is a failed sync, on a manual Sync and on the first load alike (the hub settles it without throwing).
+  assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
+  assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
+  assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
   assert.match(appSource, /Sync with GitHub/)
-  assert.match(appSource, /setRefreshNote\(\{ outcome, at: new Date\(\)\.toISOString\(\) \}\)/)
+  assert.match(appSource, /setRefreshNote\(old => outcome\?\.ok/)
   assert.match(appSource, /onClick=\{refreshAll\}/)
 })
 
@@ -452,7 +456,7 @@ test('GitHub is synced once per open: no hidden foreground re-sync, one explicit
 
 test('the workspace opens only after its first sync and never falls back to the boot screen', () => {
   assert.match(appSource, /const bootReady = ledgerReady && !sourceLoading && conn\.state !== 'checking'/)
-  assert.match(appSource, /if \(bootReady\) setBooted\(true\)/)
+  assert.match(appSource, /if \(!bootReady \|\| booted\) return\s*setBooted\(true\)/)
   // The opening screen names the same five reads bootReady waits for, so its progress cannot drift from it.
   assert.match(appSource, /<BootProgress ledgerReady=\{ledgerReady\} projectsReady=\{!sourceLoading\} accountReady=\{conn\.state !== 'checking'\}/)
   assert.match(appSource, /pullsReady=\{incomingReady\} runsReady=\{runsReady\}/)
@@ -530,9 +534,9 @@ test('an external image in GitHub markdown becomes a labelled link, never a brok
   assert.match(markdownSource, /linkExternalImages\(DOMPurify\.sanitize/)
 })
 
-test('To look at feedback on a published PR opens the PR page, not the saved card', () => {
-  assert.match(feedSource, /function openAttentionItem\(item\) \{\s*\n\s*const target = feedbackPull\(item\)/)
-  assert.match(feedSource, /onSelect=\{openAttentionItem\}/)
+test('project work leaves published feedback to the dedicated Needs you destination', () => {
+  assert.doesNotMatch(feedSource, /<AttentionList|openAttentionItem/)
+  assert.match(appSource, /renderActivity=\{\(project, navigation\) =>/)
 })
 
 test('the stale-feed note says offline only when the device is offline', () => {
@@ -560,8 +564,7 @@ test('feedback on a published pull request is news for the owner, not a private 
   assert.match(runSource, /export const isPublicFeedback = item => item\.kind === 'private_review'/)
   assert.match(feedSource, /privateItems = decisions\.filter\(item => item\.kind === 'private_review' && !isPublicFeedback\(item\)\)/)
   assert.match(runSource, /attentionListItems = \(decisions = \[\]\) => decisions\.filter\(item => isPublicFeedback\(item\) \|\| !\[/)
-  assert.match(feedSource, /ownerDecisions = attentionListItems\(decisions\)/)
-  assert.match(feedSource, /<AttentionList items=\{ownerDecisions\}/)
+  assert.doesNotMatch(feedSource, /ownerDecisions = attentionListItems\(decisions\)|<AttentionList items=\{ownerDecisions\}/)
 })
 
 

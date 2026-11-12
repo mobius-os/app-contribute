@@ -260,12 +260,13 @@ test('rail badges mark only what waits on you; information shows a quiet number'
   assert.match(running, /co-rail-total">2 running</)
 })
 
-test('the sync note says only when it last checked, or that GitHub could not be reached', () => {
+test('the sync note keeps the last successful time visible beside a failed retry, including on phones', () => {
   const guard = readFileSync(new URL('../ui/GithubParts.jsx', import.meta.url), 'utf8')
-  assert.match(guard, /note\.outcome\?\.ok \? <TimeAgo prefix="Checked " value=\{note\.at\} \/> : 'Couldn’t reach GitHub'/)
+  assert.match(guard, /note\.failed \? 'Couldn’t sync'/)
+  assert.match(guard, /Last synced /)
   const theme = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
-  // Beside the button on a wide header; a phone header has no room for it.
-  assert.match(theme, /\.co-toolbar \.co-label-long, \.co-sync-note \{ display: none; \}/)
+  assert.match(theme, /\.co-sync-copy \{ display:flex; flex-direction:column/)
+  assert.doesNotMatch(theme, /\.co-toolbar \.co-label-long, \.co-sync-note \{ display: none; \}/)
 })
 
 test('list labels are filled pills like the PR page, two at most, and a bot says bot', async t => {

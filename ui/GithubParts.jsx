@@ -49,10 +49,13 @@ export function labelColors(hex) {
   return vars
 }
 
-// What the header's sync last did, beside its button: when it finished, or that it failed.
+// The header keeps the last successful sync visible, even after a failed retry. It sits inside
+// the Sync button, so the button names it with aria-describedby (SYNC_NOTE_ID) instead of a live region.
+export const SYNC_NOTE_ID = 'co-sync-note'
 export function SyncNote({ note }) {
-  if (!note) return null
-  return <span className="co-sync-note" role="status">{note.outcome?.ok ? <TimeAgo prefix="Checked " value={note.at} /> : 'Couldn’t reach GitHub'}</span>
+  if (!note?.at && !note?.failed) return null
+  // After a failure the last good time follows on a wide header; a phone keeps only the failure, so the note never grows past the button.
+  return <span id={SYNC_NOTE_ID} className="co-sync-note">{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
 }
 
 // Labels in a list are the same filled pills as on the PR page, "area: " dropped,
