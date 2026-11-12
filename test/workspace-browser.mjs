@@ -2,7 +2,7 @@
 //      node test/workspace-browser.mjs
 // Fourteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
-// runProjectWarningChecks (the project fixture: the project screen's one GitHub row shows only for a conflict or an update),
+// runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
@@ -531,40 +531,32 @@ async function inventory() {
   const close=query('.co-inline-close')
   if (close) await click(close)
 }
-// The project screen has no status panel; its one GitHub row exists only while an update or a conflict needs the owner.
-window.runProjectWarningChecks = async () => {
+// The project screen has no status row of any kind: whatever GitHub has for the project, it opens straight on its tabs.
+window.runProjectScreenChecks = async () => {
   const checks = []
-  const row = () => query('.co-upstream-warning')
   const setFixture = fields => window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, ...fields } : project))
+  const githubNews = /from GitHub are not on this Möbius yet|conflicts with your local changes|Not compared|new commits? on GitHub|Open App Store|Open Settings/
+  const settle = async () => {
+    await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab]'), 'Project did not settle')
+    await frame(); await frame()
+  }
   try {
     await until(() => query('.co-source-row'), 'Project list did not render')
     await click(query('.co-source-row'))
-    await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab]'), 'Project did not settle')
-    await frame(); await frame()
-    await captureShot('project-clean')
-    ensure(!row(), 'A project with nothing from GitHub showed a row above its tabs')
-    checks.push({ name: 'a project with nothing from GitHub opens straight on its tabs', status: 'pass' })
-    setFixture({ conflictFiles: 1 })
-    await until(() => document.querySelectorAll('.co-pr-row').length === 2, 'Project did not settle after the conflict')
-    await frame(); await frame()
-    await captureShot('project-conflict')
-    await until(row, 'A conflict with GitHub showed no row above the tabs')
-    ensure(text(row().querySelector('p')) === 'An update from GitHub conflicts with your local changes.', 'The warning read: ' + text(row()))
-    ensure(row().compareDocumentPosition(query('[role=tablist]')) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not above the tabs')
-    const action = button('Open App Store', row()), box = row().getBoundingClientRect(), actionBox = action.getBoundingClientRect()
-    ensure(Math.round(actionBox.height) >= 44 && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px')
-    ensure(box.left >= 0 && Math.round(box.right) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The row makes the page scroll sideways')
-    const asked = []
-    const listen = event => asked.push(event.data)
-    window.addEventListener('message', listen)
-    await click(action)
-    await until(() => asked.length, 'Open App Store asked the host for nothing')
-    window.removeEventListener('message', listen)
-    ensure(asked[0]?.type === 'moebius:open-app' && asked[0].appId === 'store', 'Open App Store asked for ' + JSON.stringify(asked[0]))
-    checks.push({ name: 'a conflict with GitHub is one row above the tabs, with a button to the App Store', status: 'pass' })
-    setFixture({ conflictFiles: 0 })
-    await until(() => !row(), 'The row stayed after the conflict was gone')
-    checks.push({ name: 'the row goes when the conflict does', status: 'pass' })
+    await settle()
+    for (const [name, fields, label] of [
+      ['project-clean', {}, 'with nothing from GitHub'],
+      ['project-updates', { semanticAvailable: true, incomingFiles: 66 }, 'with files from GitHub that are not on this Möbius yet'],
+      ['project-conflict', { conflictFiles: 1 }, 'with an update from GitHub that conflicts with its local changes'],
+    ]) {
+      setFixture(fields)
+      await settle()
+      await captureShot(name)
+      ensure(!query('.co-upstream-warning') && !query('[aria-label="Updates from GitHub"]'), 'A project ' + label + ' showed a row above its tabs')
+      ensure(!githubNews.test(text(query('main'))), 'A project ' + label + ' said so on its screen: ' + text(query('main')).slice(0, 300))
+      ensure(document.documentElement.scrollWidth <= window.innerWidth, 'A project ' + label + ' makes the page scroll sideways')
+      checks.push({ name: 'a project ' + label + ' opens straight on its tabs', status: 'pass' })
+    }
     return { status: 'pass', checks }
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 2000) }
@@ -3037,7 +3029,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }].filter(size => !process.env.WORKSPACE_BROWSER_VIEWPORT || size.name === process.env.WORKSPACE_BROWSER_VIEWPORT)
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
       const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' })

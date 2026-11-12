@@ -269,13 +269,6 @@ export const WORKSPACE_CSS = `
 .co-selection-page .co-board-actions { margin-top:24px; }
 @media(max-width:680px) { .co-selection-page { padding:20px; } }
 
-/* The project screen's one status row, shown only while an update from GitHub or a conflict needs the owner. */
-.co-upstream-warning { display:flex; align-items:center; gap:12px; min-height:56px; margin:12px 0 16px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
-.co-upstream-warning-icon { flex:0 0 auto; display:grid; place-items:center; width:36px; height:36px; border-radius:var(--co-radius-control); color:var(--co-warn); background:color-mix(in srgb,var(--co-warn) 16%,transparent); }
-.co-upstream-warning p { flex:1; min-width:0; margin:0; font-size:var(--co-text-body); overflow-wrap:anywhere; }
-.co-upstream-warning strong { font-weight:650; }
-.co-upstream-warning-actions { flex:0 0 auto; display:flex; gap:8px; }
-.co-upstream-warning-actions .co-btn { gap:8px; padding:0 12px; }
 .co-prepared-tab > .co-inventory-note { margin:4px 0 12px; }
 .co-prepared-tab .co-run-list { border:1px solid var(--border); border-radius:var(--co-radius-panel); overflow:hidden; }
 .co-prepared-tab .co-run-quiet-row + .co-run-quiet-row { border-top:1px solid var(--border); }
@@ -312,8 +305,6 @@ export const WORKSPACE_CSS = `
  .co-projects-view { padding-top:8px; }
  .co-workspace-head { padding:0 0 6px; }
  .co-workspace-title p { margin-top:0; line-height:20px; }
- .co-upstream-warning { flex-wrap:wrap; gap:6px 10px; min-height:0; margin:10px 0 8px; padding:10px 12px; }
- .co-upstream-warning-actions { flex:1 0 100%; padding-left:46px; }
  .co-public-work > .co-task-content { padding:16px; }
  .co-pr-detail-body { height:clamp(280px,42dvh,440px); }
 }

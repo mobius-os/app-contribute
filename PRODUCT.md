@@ -139,7 +139,7 @@ action shows feedback when used. Sync with GitHub asks GitHub read-only whether 
 repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
 its steps, what GitHub will see and which model runs it before anything starts.
-A project opens on its tabs, with a GitHub row above them only when an update or conflict needs the owner: All PRs, Prepared PRs (while there are some), Review requests, My work and Local changes (while files differ); blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
+A project opens straight on its tabs, with no status row above them: All PRs, Prepared PRs (while there are some), Review requests, My work and Local changes (while files differ); blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
 the owner, and folds apps with nothing to do.
 
 ## Act where you are looking (owner direction, 2026-11-04)
