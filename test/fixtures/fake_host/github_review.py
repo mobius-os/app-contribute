@@ -1,6 +1,8 @@
 """A fake Möbius core (SCRIPTS_DIR/github_review.py) for the gate on `post`. It knows the app and answers the Post helper's
 `POST /api/owner-grants/consume`; FAKE_HOST_CONSUME says how ('refused': the owner has not confirmed, 403; 'missing': a Möbius without
 the route, 404; anything else spends the grant). FAKE_HOST_LOG, when set, is a file that receives each consume request as a JSON line.
+It also answers `GET /api/chats/<id>`: FAKE_HOST_CHAT says who started the chat ('owner': the owner did; 'unreadable': the lookup fails;
+anything else: Contribute did).
 Shared by test_respond_result.py, test_respond_screenshots.py and respond-contract.test.mjs."""
 import io
 import json
@@ -19,6 +21,11 @@ def api(path, *, method="GET", data=None, headers=None):
     if answer in ("refused", "missing"):
       raise HTTPError(path, 403 if answer == "refused" else 404, answer, {}, io.BytesIO(b"{}"))
     return {"consumed": True}
+  if path.startswith("/api/chats/"):
+    started_by = os.environ.get("FAKE_HOST_CHAT", "")
+    if started_by == "unreadable":
+      raise HTTPError(path, 500, "unreadable", {}, io.BytesIO(b"{}"))
+    return {"created_by_app_id": None if started_by == "owner" else 7}
   raise AssertionError(f"the gate asked for something it should not: {path}")
 
 

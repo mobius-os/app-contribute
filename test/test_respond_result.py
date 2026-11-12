@@ -547,6 +547,20 @@ class SaveTests(RespondWorld):
       self.assertEqual(self.save(self.input_for(shas), extra=["--chat-id", "chat-from-flag"]).code, 0)
     self.assertEqual(self.saved_result()["chat_id"], "chat-from-flag")
 
+  def test_save_refuses_a_chat_contribute_did_not_start_because_post_could_not_wake_it(self):
+    shas = self.two_commits()
+    with mock.patch.dict(os.environ, {"FAKE_HOST_CHAT": "owner"}):
+      self.assertRefused(self.save(self.input_for(shas)), 2, "was not started by Contribute")
+    self.assertFalse(self.app.exists())
+
+  def test_save_still_saves_with_a_warning_when_the_chat_owner_cannot_be_read(self):
+    shas = self.two_commits()
+    with mock.patch.dict(os.environ, {"FAKE_HOST_CHAT": "unreadable"}):
+      outcome = self.save(self.input_for(shas))
+    self.assertEqual(outcome.code, 0, outcome.err)
+    self.assertIn("could not check that Contribute started chat chat-under-test", outcome.err)
+    self.assertTrue(self.result_path.exists())
+
   def test_save_accepts_only_a_strict_pr_reference(self):
     shas = self.two_commits()
     for reference in ("owner/repo", "owner/repo#0", "owner/repo#01", "owner/repo#7 ", "../repo#7", "owner/..#7",
