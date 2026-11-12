@@ -401,7 +401,7 @@ test('existing pull-request stack prefixes use one exact update phase', () => {
 })
 
 test('sending a pull request stays concise instead of repeating publication narration', () => {
-  assert.match(cardSource, /sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)/)
+  assert.match(cardSource, /sending \? <Shine>Sending…<\/Shine> : \(isUpdate \? 'Send update' : 'Send PR'\)/)
   assert.doesNotMatch(cardSource, /Opening pull request/)
   assert.doesNotMatch(cardSource, /Pull request opened on GitHub for review/)
   assert.doesNotMatch(cardSource, /sendElapsed/)

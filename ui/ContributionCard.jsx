@@ -33,6 +33,7 @@ import { useScreenshots } from './useScreenshots.js'
 import { Icon } from './Icons.jsx'
 import { AgentHandoffButton } from './BatchAction.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 // One ledger row. Cards deliberately expose explicit targets only — the title
 // is the link on a linked PR/issue card, and prepared cards use their
@@ -686,7 +687,7 @@ function ReviewActions({
             {!reviewIncomplete && !submitFailed && typeof onSend === 'function' ? (
               <button
                 type="button"
-                className={'co-btn co-btn-primary co-send-btn' + (sending ? ' is-sending' : '')}
+                className="co-btn co-btn-primary co-send-btn"
                 disabled={sending}
                 onClick={send}
                 aria-busy={sending}
@@ -696,14 +697,7 @@ function ReviewActions({
                 title={isUpdate ? 'Send update' : 'Send PR'}
               >
                 <Icon name="send" />
-                <span className="co-action-label">
-                  <span>{sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
-                  {sending ? (
-                    <span className="co-action-label-sweep" aria-hidden="true">
-                      Sending…
-                    </span>
-                  ) : null}
-                </span>
+                {sending ? <Shine>Sending…</Shine> : (isUpdate ? 'Send update' : 'Send PR')}
               </button>
             ) : null}
           </>
@@ -791,7 +785,7 @@ function RestoreAction({ rec, onRestore }) {
         disabled={restoring}
         onClick={restore}
       >
-        {restoring ? 'Restoring…' : 'Restore'}
+        {restoring ? <Shine>Restoring…</Shine> : 'Restore'}
       </button>
       {note && (
         <p className="co-review-error" role="status" aria-live="polite">{note}</p>

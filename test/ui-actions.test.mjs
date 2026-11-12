@@ -76,7 +76,7 @@ test('settings keep prompts and account management while model choice belongs to
 })
 
 test('send actions keep a visible label instead of relying on the icon alone', () => {
-  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /\{sending \? <Shine>Sending…<\/Shine> : \(isUpdate \? 'Send update' : 'Send PR'\)\}/)
   assert.match(feedSource, /count === 1 \? NAMES\.sendToGitHub : `Send \$\{count\} to GitHub`/)
   assert.match(feedSource, /count === 1 \? 'Send to GitHub' : `Send \$\{count\} to GitHub`/)
   assert.doesNotMatch(feedSource, /Send all|Prepare latest/)
@@ -109,7 +109,8 @@ test('single and grouped sends leave the active action from durable results', ()
 
 test('sending uses the shell-style label sweep instead of a rotating action spinner', () => {
   assert.doesNotMatch(cardSource, /co-action-spinner/)
-  assert.match(cardSource, /co-action-label-sweep/)
+  assert.match(cardSource, /<Shine>Sending…<\/Shine>/)
+  assert.match(themeSource, /\.co-shine::after/)
   assert.match(themeSource, /@keyframes co-action-sweep/)
   assert.match(themeSource, /prefers-reduced-motion: no-preference/)
 })
@@ -198,7 +199,7 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.doesNotMatch(feedSource, /PrivateRunAction|<AgentHandoffButton/)
   assert.match(controlsSource, /start\(run.privateAction, prepareAgent\)/)
   assert.match(controlsSource, /An agent groups your local changes into PRs and checks them\. The PRs stay private on your Möbius\./)
-  assert.match(cardSource, /<span>\{sending \? 'Sending…' : \(isUpdate \? 'Send update' : 'Send PR'\)\}<\/span>/)
+  assert.match(cardSource, /\{sending \? <Shine>Sending…<\/Shine> : \(isUpdate \? 'Send update' : 'Send PR'\)\}/)
   assert.match(feedSource, /role="alertdialog"/)
   assert.match(feedSource, /Nothing merges\./)
   assert.match(appSource, /provider: chosenAgent\.provider/)

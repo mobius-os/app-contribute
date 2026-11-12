@@ -5,6 +5,7 @@ import { DEFAULT_STAGE, stageWords } from '../publication-stage.js'
 import { ReviewPromptSettings } from './ReviewPromptSettings.jsx'
 import { DefaultAgentSettings } from './DefaultAgentSettings.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 // Component-local settings layout. The app shell keeps its existing theme tokens.
 export const SETTINGS_CSS = `
 .co-settings-workspace { box-sizing:border-box; width:min(820px,calc(100vw - 32px)); height:min(947px,calc(100dvh - 110px)); max-height:calc(100dvh - 110px); display:flex; flex-direction:column; padding:20px; overflow:hidden; scrollbar-width:none; }
@@ -114,7 +115,7 @@ export function ConnectionCard({
 
   const state = conn?.state
 
-  if (state === 'checking') return <p className="co-conn-note" role="status">Checking account…</p>
+  if (state === 'checking') return <p className="co-conn-note" role="status"><Shine>Checking account…</Shine></p>
 
   if (state === 'unknown') {
     return (
@@ -128,7 +129,7 @@ export function ConnectionCard({
           </p>
           <div className="co-conn-actions">
             <button type="button" className="co-btn" onClick={retryStatus} disabled={statusRetrying} aria-busy={statusRetrying}>
-              {statusRetrying ? 'Checking…' : NAMES.checkAgain}
+              {statusRetrying ? <Shine>Checking…</Shine> : NAMES.checkAgain}
             </button>
           </div>
         </div>

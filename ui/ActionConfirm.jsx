@@ -5,6 +5,7 @@ import { WindowHead } from './WindowHead.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { NAMES } from '../names.js'
 import { TickList } from './TickList.jsx'
+import { Shine, Words } from './Shine.jsx'
 
 const FACT_ICON = { ok: 'check', warn: 'info', bad: 'close' }
 
@@ -53,14 +54,16 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
     setPhase('unconfirmed')
   }
   const done = phase === 'done'
+  // Once the owner has said yes the window stops asking and says what is happening ("Merging #9 into main").
+  const atWork = phase === 'working' || phase === 'checking'
   // Möbius's sheet is the owner's view of what happens; until this action has an outcome this one shows only a line.
   const lineOnly = viaShell && (phase === 'asking' || phase === 'working')
   const finished = typeof live.done === 'function' ? live.done(result) : live.done
   const selected = copy.choices?.options.find(option => option.key === picked)
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead title={done ? finished.title : live.title} titleId={titleId} pulls={[pr]} done={done} />
-    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status">{finished.text}</p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : lineOnly ? <div className="co-rw-body"><p role="status">{phase === 'asking' ? NAMES.waitingForMobius : live.working}</p></div> : <div className="co-rw-body">
-      <ul className="co-rw-facts">{live.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.text}</span></li>)}</ul>
+    <WindowHead title={done ? finished.title : atWork && live.workingTitle ? live.workingTitle : live.title} titleId={titleId} pulls={[pr]} done={done} />
+    {done ? <div className="co-rw-body"><p className="co-rw-result" role="status"><Words text={finished.text} /></p>{/^https:\/\//.test(finished.link?.href || '') ? <a className="co-btn co-btn-quiet" href={finished.link.href} target="_blank" rel="noopener noreferrer">{finished.link.label}</a> : null}</div> : lineOnly ? <div className="co-rw-body"><p className="co-rw-status" role="status"><Shine>{phase === 'asking' ? NAMES.waitingForMobius : live.working}</Shine></p></div> : <div className="co-rw-body">
+      <ul className="co-rw-facts">{live.facts.map(fact => <li key={fact.text} className={'is-' + fact.tone}><Icon name={FACT_ICON[fact.tone]} size={18} /><span>{fact.working ? <Shine>{fact.text}</Shine> : fact.text}</span></li>)}</ul>
       {copy.people ? <>
         <h4 className="co-rw-label">{copy.people.label}</h4>
         <TickList label={copy.people.label} disabled={working} items={copy.people.options.map(option => ({ key: option.key, label: option.label, detail: option.detail, checked: ticked.includes(option.key) }))}
@@ -85,7 +88,7 @@ export function ActionConfirm({ pr, copy, onConfirm, onClose, onDone, onUnconfir
           ? <button type="button" className="co-btn co-btn-primary" onClick={onClose}>Done</button>
           : <>
             <button type="button" className="co-btn" disabled={working} onClick={onClose}>{phase === 'unconfirmed' ? 'Close' : NAMES.cancel}</button>
-            <button type="button" className="co-btn co-btn-primary" disabled={working || phase === 'unconfirmed' || live.disabled === true} aria-busy={working} onClick={confirm}>{phase === 'checking' ? 'Checking GitHub…' : working ? live.working : selected?.action || live.confirm}</button>
+            <button type="button" className="co-btn co-btn-primary" disabled={working || phase === 'unconfirmed' || live.disabled === true} aria-busy={working} onClick={confirm}>{phase === 'checking' ? <Shine>Checking GitHub…</Shine> : working ? <Shine>{live.working}</Shine> : selected?.action || live.confirm}</button>
           </>}
       </div>
     </footer>}

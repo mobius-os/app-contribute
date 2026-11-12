@@ -29,6 +29,7 @@ import { DEFAULT_STAGE, stageApplies, stageWords } from '../publication-stage.js
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { ProjectTabs } from './ProjectTabs.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 function itemProject(item) {
   return item?.project || { name: item?.detail || 'Contribution' }
@@ -245,6 +246,9 @@ const PROGRESS_TEXT = {
   send: { working: 'Sending…', checking: 'Checking result…', 'not-attempted': 'Not sent', closed: 'Pull request closed', merged: 'Merged', done: 'Sent to GitHub' },
 }
 
+// A row that is being sent or opened says so with the moving light; a finished or refused one stands still.
+const progressWords = (mode, state) => (state === 'working' || state === 'checking' ? <Shine>{PROGRESS_TEXT[mode][state]}</Shine> : PROGRESS_TEXT[mode]?.[state])
+
 function ExactActionList({
   items,
   mode,
@@ -278,7 +282,7 @@ function ExactActionList({
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
                 </span>
                 <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
-                  || PROGRESS_TEXT[mode]?.[progress[record.id]]
+                  || progressWords(mode, progress[record.id])
                   || (mode === 'ready' ? NAMES.openForReview : publicationLine(record, publicationPreference, githubState, stage))}</em>
                 {meta ? <code>{meta.baseBranch} → {record?.plan?.branch || record?.branch}</code> : null}
                 {typeof onSelect === 'function' ? (
@@ -499,13 +503,13 @@ function ExactBatchAction({
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
       {checking ? <p className="co-run-error" role="status">Checking the recorded result. Sync to check it; nothing will be sent again from this confirmation.</p> : null}
       {finished ? <div className="co-run-approval-actions">
-        <button type="button" className="co-btn co-btn-primary" disabled={checking} onClick={closeResults}>{checking ? 'Checking result…' : 'Done'}</button>
+        <button type="button" className="co-btn co-btn-primary" disabled={checking} onClick={closeResults}>{checking ? <Shine>Checking result…</Shine> : 'Done'}</button>
       </div> : <div className="co-run-approval-actions">
         <button ref={safeRef} type="button" className="co-btn" disabled={busy} onClick={() => { setApproval(null); setPickedStage(null) }}>
           {mode === 'ready' ? (count === 1 ? 'Keep as draft' : 'Keep as drafts') : 'Keep private'}
         </button>
         <button type="button" className="co-btn co-btn-primary" disabled={busy} aria-busy={busy} onClick={applyAll}>
-          {busy ? 'Working…' : mode === 'ready'
+          {busy ? <Shine>Working…</Shine> : mode === 'ready'
             ? (count === 1 ? NAMES.openForReview : `Open ${count} for review`)
             : staged ? stageWords(stage).onGithub(count) : (count === 1 ? 'Send to GitHub' : `Send ${count} to GitHub`)}
         </button>
@@ -662,7 +666,7 @@ function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
       {retryable ? (
         <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={run}>
           {busy
-            ? 'Working…'
+            ? <Shine>Working…</Shine>
             : record?.last_ready_error_code === 'ready_auto_merge_enabled'
               ? 'I turned off auto-merge. Open for review again'
               : 'Open for review again'}
@@ -712,7 +716,7 @@ function CheckAttentionFocus({ item, reviewStatus, onRefresh, onFeedback, onSetA
         <p role="status">{item.message}</p>
         {item.kind === 'check_attention' && !item.reconnect && onRefresh ? (
           <button type="button" className="co-btn co-btn-primary" disabled={checking} aria-busy={checking} onClick={checkAgain}>
-            {checking ? 'Checking…' : 'Try again'}
+            {checking ? <Shine>Checking…</Shine> : 'Try again'}
           </button>
         ) : null}
         <SourceChatChoices records={records} onFeedback={onFeedback} />

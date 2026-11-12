@@ -35,6 +35,7 @@ export function openForReviewCopy(pr) {
     title: `Open #${pr.number} for review?`,
     confirm: NAMES.openForReview,
     working: 'Opening…',
+    workingTitle: `Opening #${pr.number} for review`,
     facts: [
       { tone: 'ok', text: 'It stops being a draft and is ready for review' },
       checksFact(pr),
@@ -60,9 +61,10 @@ export function postFindingsCopy(pr, { preview = null, error = '', own = false }
     title: `Post this review on #${pr.number}?`,
     confirm: NAMES.postToGitHub,
     working: 'Posting…',
+    workingTitle: `Posting your review on #${pr.number}`,
   }
   if (error) return { ...base, disabled: true, facts: [{ tone: 'bad', text: error }], footnote: 'Nothing was posted.', done: { title: 'Posted', text: '' } }
-  if (!preview) return { ...base, disabled: true, facts: [{ tone: 'warn', text: 'Reading what it would post…' }], footnote: 'Nothing is posted until you confirm.', done: { title: 'Posted', text: '' } }
+  if (!preview) return { ...base, disabled: true, facts: [{ tone: 'warn', text: 'Reading what it would post…', working: true }], footnote: 'Nothing is posted until you confirm.', done: { title: 'Posted', text: '' } }
   return {
     ...base,
     facts: [
@@ -74,7 +76,7 @@ export function postFindingsCopy(pr, { preview = null, error = '', own = false }
     footnote: `Posts exactly this text, once, at the version you reviewed (${short(preview.head_sha || pr.headRefOid)}). If anyone pushes first, nothing is posted and you are told. Contribute cannot take it back: on GitHub you can edit or hide it.`,
     done: outcome => ({
       title: 'Posted on GitHub',
-      text: `Your review is on #${pr.number} now.`,
+      text: `Your review is on **#${pr.number}** now.`,
       ...(outcome?.url ? { link: { href: outcome.url, label: 'View the review on GitHub' } } : {}),
     }),
   }
@@ -134,22 +136,23 @@ export function mergeCopy(pr, { status = null, ignored = null, method = '', stan
     title: `Merge #${pr.number} into ${base}?`,
     confirm: chosen ? MERGE_METHODS[chosen].action : 'Merge',
     working: 'Merging…',
+    workingTitle: `Merging #${pr.number} into ${base}`,
     facts: [...approvalFacts(standing), gateFact(pr), checksFact(pr, { blocking: true }), conflictFact(pr), reviewFact(status, ignored)].filter(Boolean),
     choices: allowed.length > 1 ? { label: 'How should it land?', value: chosen, options: allowed.map(key => ({ key, label: MERGE_METHODS[key].label, action: MERGE_METHODS[key].action, detail: MERGE_METHODS[key].detail(base) })) } : null,
     footnote: `Merges the version you are looking at (${short(pr.headRefOid)}). If anyone pushes first, nothing is merged and you are told. Contribute cannot undo a merge: to take it back you would open a revert on GitHub.`,
     done: outcome => outcome?.state === 'queued'
-      ? { title: 'Added to the merge queue', text: `GitHub merges #${pr.number} into ${base} when the queue reaches it.` }
-      : { title: 'Merged', text: `#${pr.number} is now in ${base}.` },
+      ? { title: 'Added to the merge queue', text: `GitHub merges **#${pr.number}** into \`${base}\` when the queue reaches it.` }
+      : { title: 'Merged', text: `**#${pr.number}** is now in \`${base}\`.` },
   }
 }
 
 // Back to draft: reviewers stop being asked; it can be opened again later.
 export function backToDraftCopy(pr) {
   return {
-    title: `Turn #${pr.number} back into a draft?`, confirm: NAMES.backToDraft, working: 'Turning it into a draft…',
+    title: `Turn #${pr.number} back into a draft?`, confirm: NAMES.backToDraft, working: 'Turning it into a draft…', workingTitle: `Turning #${pr.number} back into a draft`,
     facts: [{ tone: 'ok', text: 'Nothing merges, and no code changes' }, { tone: 'warn', text: 'GitHub shows it as a draft until you open it for review again' }],
     footnote: `For the version you are looking at (${short(pr.headRefOid)}).`,
-    done: () => ({ title: NAMES.backToDraft, text: `#${pr.number} is a draft again.` }),
+    done: () => ({ title: NAMES.backToDraft, text: `**#${pr.number}** is a draft again.` }),
   }
 }
 
@@ -187,7 +190,7 @@ export function askRereviewCopy(pr, { standing = null } = {}) {
   return askSheet(standing, standing?.rereviewFrom || [], picked => {
     const who = names(picked.map(item => item.by))
     return {
-      title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…',
+      title: `Ask ${picked.length ? who : 'reviewers'} to review #${pr.number} again?`, confirm: NAMES.askRereview, working: 'Asking…', workingTitle: `Asking ${picked.length ? who : 'reviewers'} to review #${pr.number} again`,
       facts: [picked.length ? { tone: 'ok', text: `GitHub asks ${who} for a review of the new version` } : { tone: 'bad', text: 'Pick at least one person' },
         ...(picked.length > MAX_ASKED ? [TOO_MANY] : [])],
       footnote: 'They get GitHub’s usual review request. Nothing is posted in the conversation.',
@@ -219,7 +222,7 @@ export function askApprovalCopy(pr, { standing = null } = {}) {
     const note = approvalNote(pr, picked)
     const tooLong = note.length > APPROVAL_NOTE_LIMIT
     return {
-      title: `Ask ${picked.length ? who : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…',
+      title: `Ask ${picked.length ? who : 'reviewers'} to approve #${pr.number}?`, confirm: NAMES.askApproval, working: 'Posting…', workingTitle: `Asking ${picked.length ? who : 'reviewers'} to approve #${pr.number}`,
       facts: [
         picked.length ? { tone: 'ok', text: `${plural(picked.length, 'person', 'people')} will be asked` } : { tone: 'bad', text: 'Pick at least one person' },
         ...(tooLong ? [{ tone: 'bad', text: 'The note is too long: ask fewer people' }] : []),
@@ -237,10 +240,10 @@ export function askApprovalCopy(pr, { standing = null } = {}) {
 // Close without merging. It can be reopened on GitHub.
 export function closeCopy(pr) {
   return {
-    title: `Close #${pr.number} without merging?`, confirm: NAMES.closePr, working: 'Closing…',
+    title: `Close #${pr.number} without merging?`, confirm: NAMES.closePr, working: 'Closing…', workingTitle: `Closing #${pr.number}`,
     facts: [{ tone: 'warn', text: 'Nothing merges. Reviewers stop being asked' }, { tone: 'ok', text: 'It can be reopened on GitHub' }],
     footnote: `For the version you are looking at (${short(pr.headRefOid)}).`,
-    done: () => ({ title: 'Closed', text: `#${pr.number} is closed.` }),
+    done: () => ({ title: 'Closed', text: `**#${pr.number}** is closed.` }),
   }
 }
 

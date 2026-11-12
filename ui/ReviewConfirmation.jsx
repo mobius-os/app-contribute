@@ -11,6 +11,7 @@ import { AgentModelSettings } from './AgentModelSettings.jsx'
 import { SeenOnGithub } from './SeenOnGithub.jsx'
 import { WindowHead } from './WindowHead.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 // Finish it for me and Take over promise to stop before every push for your approval and never to
 // merge. Only a Möbius that advertises the PR machine keeps that promise: an older one pushes without
@@ -198,7 +199,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
       <p>{copy.footnote}</p>
       <div className="co-rw-actions">
         {onCancel ? <button type="button" className="co-btn" disabled={busy} onClick={onCancel}>{NAMES.cancel}</button> : null}
-        <button type="button" className="co-btn co-btn-primary" disabled={busy || disabled || startBlocked} onClick={onConfirm}>{busy ? 'Starting…' : copy.startLabel}</button>
+        <button type="button" className="co-btn co-btn-primary" disabled={busy || disabled || startBlocked} onClick={onConfirm}>{busy ? <Shine>Starting…</Shine> : copy.startLabel}</button>
       </div>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
     </footer>

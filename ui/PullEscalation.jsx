@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { setAutopilot } from '../api.js'
 import { needsHuman } from '../autopilot.js'
 import { Icon } from './Icons.jsx'
+import { Shine } from './Shine.jsx'
 
 // A saved escalation (the follow-up agent stopped and handed the PR back) belongs on the PR page, not
 // only on the saved card: its reason, and Resume, the one existing way on (api.js setAutopilot, which
@@ -19,7 +20,7 @@ export function PullEscalation({ record, appId, token, readOnly = false }) {
     <Icon name="feedback" size={16} />
     <span className="co-flag-text"><b>The agent needs your decision</b><span>The follow-up agent stopped and handed this PR back to you.</span></span>
     <p className="co-escalation-reason">{record.attention?.message || 'It did not say why.'}</p>
-    <button type="button" className="co-btn" onClick={resume} disabled={state.busy}>{state.busy ? 'Resuming…' : 'Resume'}</button>
+    <button type="button" className="co-btn" onClick={resume} disabled={state.busy}>{state.busy ? <Shine>Resuming…</Shine> : 'Resume'}</button>
     {state.error ? <p className="co-escalation-error" role="alert">{state.error}</p> : null}
   </section>
 }

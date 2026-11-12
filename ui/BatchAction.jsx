@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons.jsx'
 import { contributionActionScope } from '../review.js'
+import { Shine } from './Shine.jsx'
 
 // Mini-app frames have an opaque origin, so a frame-origin target silently
 // drops this shell command. postMessage still goes only to the direct parent;
@@ -111,7 +112,7 @@ export function AgentHandoffButton({
         onClick={run}
       >
         {icon ? <Icon name={icon} size={14} /> : null}
-        {busy ? (action.busyLabel || 'Starting…') : action.label}
+        {busy ? <Shine>{action.busyLabel || 'Starting…'}</Shine> : action.label}
       </button>
       {error ? <p className="co-agent-handoff-error" role="status">{error}</p> : null}
     </div>

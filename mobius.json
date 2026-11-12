@@ -190,6 +190,7 @@
     "ui/DefaultAgentSettings.jsx",
     "ui/SeenOnGithub.jsx",
     "ui/WindowHead.jsx",
+    "ui/Shine.jsx",
     "ui/stripScroll.js",
     "ui/useTipDismiss.js",
     "ui/RunDetail.jsx",

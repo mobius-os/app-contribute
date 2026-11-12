@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { parseDiffStat } from '../diff.js'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
+import { Shine } from './Shine.jsx'
 
 function FileStat({ additions, deletions }) {
   return (
@@ -41,7 +42,7 @@ export function FileDiffList({ rec, loadDiff }) {
   }, [rec.id, loadDiff, plan.diff_sha256])
 
   if (state.phase === 'loading') {
-    return <div className="co-files is-loading" role="status">Loading changes…</div>
+    return <div className="co-files is-loading" role="status"><Shine>Loading changes…</Shine></div>
   }
   if (!totals && !state.diff) return null
 

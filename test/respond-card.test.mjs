@@ -82,7 +82,7 @@ test('Post stays off, with the reason in words, while the chat works or waits on
   assert.doesNotMatch(waiting, /data-frame="verdict"/, 'the chat’s own box asks for you; this one waits behind it')
   assert.match(await card(t, response()), /data-frame="verdict"/, 'on its own it is the box that asks for you')
   const busy = await card(t, response(), { busy: true })
-  assert.match(busy, /disabled="">(Post|Working…)</)
+  assert.match(busy, /disabled="">(Post|<span class="co-shine" data-text="Working…">Working…)</)
 })
 
 test('without the host’s owner grant Post is off, with the reason in words, and the answer stays readable and discussable', async t => {
