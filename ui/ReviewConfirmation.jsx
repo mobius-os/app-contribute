@@ -31,9 +31,9 @@ function Switch({ checked, disabled, label, detail, onChange }) {
 // Review: who sees the result is the first choice. "Draft for me" waits for your
 // tap; "Agent posts" lets the agent send its verdict itself, and only when you pick it.
 const WHO = [
-  ['private', 'Only me', 'It writes its findings for you. Nothing reaches GitHub.'],
-  ['draft', 'Draft for me', 'It drafts approve, request changes or comment with its wording. Nothing is posted until you send it. It waits under Needs you.'],
-  ['agent', 'Agent posts', 'It posts its verdict from your account: approve, request changes or comment. You allowed it here, for this review only.'],
+  ['private', 'Only me', 'Findings for you only. Nothing reaches GitHub.'],
+  ['draft', 'Draft for me', 'Drafts approve, request changes or comment. Nothing is posted until you send it.'],
+  ['agent', 'Agent posts', 'Posts approve, request changes or comment from your account. Allowed for this review only.'],
 ]
 export { WHO_OPTIONS }
 function WhoSees({ who, agentAllowed, disabled, onChange }) {

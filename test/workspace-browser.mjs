@@ -535,7 +535,7 @@ async function chooseDraftThenMergeSwitch() {
   ensure(!review().querySelector('[role=switch]').checked && !review().querySelector('[role=switch]').disabled,'Drafting a verdict did not offer an unchecked merge switch')
   await click(button('Only me',review()))
   const dimmed=review().querySelector('[role=switch]')
-  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Merging follows your own approval'),'Only me did not leave the merge switch off and dimmed with its reason')
+  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Needs “Draft for me”'),'Only me did not leave the merge switch off and dimmed with its reason')
   await captureShot('review-only-me-merge-off')
   await click(button('Draft for me',review()))
   const mergeSwitch=review().querySelector('[role=switch]')
@@ -879,11 +879,11 @@ window.runWorkspaceChecks = async () => {
       title.focus(); await click(title); await until(()=>query('.co-task-content'),'The PR detail did not reopen')
       await chooseAgent(query('.co-task-content'), NAMES.review)
       ensure(text(review()).includes('Contribution 8') && text(review()).includes('ccccccc') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope or version')
-      ensure(button('Start review, draft a verdict for me'),'Individual review did not open on Draft for me, or granted merge by default')
+      ensure(button('Start & draft'),'Individual review did not open on Draft for me, or granted merge by default')
       const mergeSwitch=await chooseDraftThenMergeSwitch()
-      ensure(button('Start review, draft a verdict for me'),'Drafting a verdict granted merge or lost its start label')
+      ensure(button('Start & draft'),'Drafting a verdict granted merge or lost its start label')
       await click(mergeSwitch)
-      ensure(button('Start review, merge after your approval'),'Individual merge choice did not require guarded approval')
+      ensure(button('Start, merge after approval'),'Individual merge choice did not require guarded approval')
       ensure(mutationRequests().length===0,'Changing individual review mode mutated GitHub')
       await closeReview()
       } finally { await asOwner() }
@@ -918,7 +918,7 @@ window.runWorkspaceChecks = async () => {
       ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
-      ensure(button('Start review, draft a verdict for me') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
+      ensure(button('Start & draft') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
       const mergeToggle=await chooseDraftThenMergeSwitch()
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
       const region=review(), rect=region.getBoundingClientRect()
@@ -928,7 +928,7 @@ window.runWorkspaceChecks = async () => {
       ensure(text(review()).includes('merges into the newest version of the target branch'),'Approval falsely pins the displayed base')
       ensure(text(review()).includes('all required checks pass'),'Review and required checks missing from approval')
       window.liveBase='d'.repeat(40)
-      await enabled('Start review, merge after your approval')
+      await enabled('Start, merge after approval')
       // Starting closes the review window and clears the selection; the run itself lives in its own conversation.
       await until(() => reviewRuns.length === 1 && !review(),'Review did not start')
       await until(() => ['7','8'].every(n => query('[data-pr="owner/project#'+n+'"]')?.closest('.co-frame')?.dataset.frame === 'reviewing'),'A started review did not show on its rows')
@@ -949,7 +949,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => { const frame = query('[data-pr="owner/project#7"]')?.closest('.co-frame')?.dataset.frame; return frame && frame !== 'reviewing' },'Finished review did not reload')
       await inventory(); await click(firstCheckbox); await chooseAgent(query('.co-pr-box-head'))
       window.failReview = true
-      await enabled('Start private review')
+      await enabled('Start review')
       await until(() => text(review()).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
       window.failReview=false; await closeReview(); await click(query('[aria-label="Clear selection"]'))
@@ -958,7 +958,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length
       await click(firstCheckbox); await chooseAgent(query('.co-pr-box-head'))
       window.exactHeadChanged=true
-      await enabled('Start private review')
+      await enabled('Start review')
       await until(()=>text(review()).includes('changed since this list loaded'),'Changed code did not stop exact launch')
       ensure(mutationRequests().length===before && reviewRuns.length===1,'Changed code was approved')
       window.exactHeadChanged=false
@@ -976,7 +976,7 @@ window.runWorkspaceChecks = async () => {
         await chooseAgent(query('[data-pr="owner/project#8"]'), NAMES.reviewAgain)
         ensure(text(review().querySelector('h3')) === NAMES.reviewAgain, 'The window is not titled Review again: ' + text(review().querySelector('h3')))
         await until(() => /2 new commits since your review of [^.]*3/.test(text(review())), 'The window did not say how many commits are new: ' + text(review()))
-        ensure(whoIs('Draft for me') && button('Start review, draft a verdict for me'), 'A re-review did not open on Draft for me')
+        ensure(whoIs('Draft for me') && button('Start & draft'), 'A re-review did not open on Draft for me')
         await captureShot('review-again-window')
         await closeReview()
         // The PR page keeps that earlier review as a card with the date it covers and no button of its own: Review again is in Actions.
@@ -1029,10 +1029,10 @@ window.runWorkspaceChecks = async () => {
         await click(query('input[aria-label="Select owner/project #7"]')); await click(query('input[aria-label="Select owner/project #8"]'))
         // The page learns what this Möbius can do when a window resolves; the second window is the one that could have defaulted to drafting.
         await chooseAgent(query('.co-pr-box-head'))
-        await until(() => button('Start private review') && !button('Start private review').disabled, 'The review window did not resolve')
+        await until(() => button('Start review') && !button('Start review').disabled, 'The review window did not resolve')
         await closeReview()
         await chooseAgent(query('.co-pr-box-head'))
-        await enabled('Start private review')
+        await enabled('Start review')
         await until(() => text(review()).includes('Fixture review error'), 'The refused review did not show its error')
         ensure(!button('Draft for me', review()) && text(review()).includes('your own PRs'), 'Your own PRs offered a verdict to draft')
         const options = sent().body.options || {}
@@ -1583,15 +1583,15 @@ window.runWorkspaceChecks = async () => {
     const beforeLink = mutationRequests().length
     await check('direct link opens exact approval without granting consent on navigation', async () => {
       await showSelection('selection-link-one')
-      await until(() => button('Start review, merge when safe'), 'Review link did not reach exact approval')
+      await until(() => button('Start, merge when safe'), 'Review link did not reach exact approval')
       ensure(text(query('.co-selection-page')).includes('aaaaaaa → main (bbbbbbb)'), 'Link omitted selected version')
       ensure(!text(query('.co-selection-page')).includes('newest version of the target branch'),'Pinned link incorrectly allows base rebinding')
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {
       // The approval resolves its frozen preview before it can be pressed.
-      await until(() => button('Start review, merge when safe') && !button('Start review, merge when safe').disabled, 'Approval did not become available')
-      const confirm = button('Start review, merge when safe')
+      await until(() => button('Start, merge when safe') && !button('Start, merge when safe').disabled, 'Approval did not become available')
+      const confirm = button('Start, merge when safe')
       confirm.click(); confirm.click()
       await until(() => button('Open chat'), 'Approval did not open its owning conversation')
       ensure(mutationRequests().length === beforeLink + 1, 'Approval did not produce exactly one request')
@@ -1602,29 +1602,29 @@ window.runWorkspaceChecks = async () => {
       await click(button('Back to repositories'))
       await showSelection('selection-link-one')
       await until(() => button('Open chat'), 'Existing selection did not resolve its owner')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Existing selection asked for duplicate approval')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Existing selection asked for duplicate approval')
     })
     await check('changed public version invalidates a link without silently advancing it', async () => {
       await click(button('Back to repositories'))
       const stale = savedSelection('selection-stale'); stale.items[0].head_sha = SECOND_HEAD
       await showSelection('selection-stale', stale)
       await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed version did not stop approval')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
     })
     await check('changed base version also invalidates a link without silently advancing it', async () => {
       await click(button('Back to repositories'))
       const stale = savedSelection('selection-stale-base'); stale.items[0].base_sha = 'd'.repeat(40)
       await showSelection('selection-stale-base', stale)
       await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed base did not stop approval')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale-base link mutated work')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale-base link mutated work')
     })
     await check('editing saved selection during confirmation never approves replacement work', async () => {
       await click(button('Back to repositories'))
       await showSelection('selection-replaced')
-      await until(() => button('Start review, merge when safe'), 'Proposal not ready')
+      await until(() => button('Start, merge when safe'), 'Proposal not ready')
       const changed = savedSelection('selection-replaced'); changed.items[0].number = 8
       values.set('review-selections/selection-replaced.json', changed)
-      await enabled('Start review, merge when safe')
+      await enabled('Start, merge when safe')
       await until(() => text(query('.co-selection-page')).includes('changed while you were reading'), 'Proposal replacement was not detected')
       ensure(mutationRequests().length === beforeLink + 1, 'Replaced proposal was approved')
     })
@@ -1632,9 +1632,9 @@ window.runWorkspaceChecks = async () => {
       await click(button('Back to repositories')); window.fixturePermission = 'READ'
       await showSelection('selection-reader')
       await until(() => button('Review privately instead'), 'Permission failure not explained')
-      ensure(button('Start review, merge when safe')?.disabled, 'Read permission exposed active merge approval')
+      ensure(button('Start, merge when safe')?.disabled, 'Read permission exposed active merge approval')
       await click(button('Review privately instead'))
-      ensure(button('Start private review') && !button('Start private review').disabled, 'Private review became unavailable')
+      ensure(button('Start review') && !button('Start review').disabled, 'Private review became unavailable')
       ensure(mutationRequests().length === beforeLink + 1, 'Changing mode counted as approval')
       window.fixturePermission = 'WRITE'
     })

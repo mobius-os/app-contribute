@@ -13,11 +13,11 @@ import { NAMES } from './names.js'
 // A live list binds unchanged PR heads to the current tip of their target
 // branch at the start; a saved selection stays pinned to its exact versions.
 function versionNote(count, bindCurrentTarget, merges) {
-  if (!bindCurrentTarget) return 'It uses these exact versions. Changed code needs a fresh approval.'
-  const prs = count === 1 ? 'the PR exactly as it is' : 'the PRs exactly as they are'
-  const code = count === 1 ? 'its code changes' : 'their code changes'
+  if (!bindCurrentTarget) return 'Uses these exact versions. Changed code needs a fresh approval.'
+  const prs = count === 1 ? 'the PR as it is' : 'the PRs as they are'
+  const code = count === 1 ? 'it changes' : 'they change'
   const target = merges ? ' and merges into the newest version of the target branch' : ''
-  return `It uses ${prs} now${target}. If ${code} before the start, you confirm again.`
+  return `Uses ${prs} now${target}. If ${code} first, you confirm again.`
 }
 
 // Finish it for me (your PR) and Take over (theirs): the agent fixes, but every
@@ -61,25 +61,25 @@ function postingStep(count) {
 
 function verdictStep(count, agentPosts) {
   const it = count === 1 ? 'the PR' : 'each PR'
-  if (agentPosts) return `It posts its verdict on ${it} from your account: approve, request changes or comment.`
-  return `It drafts a verdict for ${it}, with the words it would post. You send it, change it to a comment, or discard it; nothing is posted before that.`
+  if (agentPosts) return `Posts its verdict on ${it} from your account.`
+  return `Drafts a verdict for ${it}. You send, edit or discard it.`
 }
 
 function mergeStep({ count, posting, verdict }) {
   const it = count === 1 ? 'the PR' : 'each PR'
-  if (verdict) return `Only after you submit an approval, and once all required checks pass, it merges ${it} or adds it to the merge queue.`
+  if (verdict) return `After you approve and all required checks pass, merges ${it} or queues it.`
   if (posting) return `If the review is clean, it posts it first. Once GitHub shows that review and all required checks pass, it merges ${it} or adds it to the merge queue.`
   return `If the review is clean and all required checks pass, it merges ${it} or adds it to the merge queue.`
 }
 
 function reviewStartLabel({ merge, posting, verdict, agentPosts }) {
-  if (merge && verdict) return 'Start review, merge after your approval'
-  if (verdict && agentPosts) return 'Start review, agent posts its verdict'
-  if (merge && posting) return 'Start review, post and merge when safe'
-  if (merge) return 'Start review, merge when safe'
-  if (verdict) return 'Start review, draft a verdict for me'
-  if (posting) return 'Start review, allow comment'
-  return 'Start private review'
+  if (merge && verdict) return 'Start, merge after approval'
+  if (verdict && agentPosts) return 'Review & post'
+  if (merge && posting) return 'Start, post and merge when safe'
+  if (merge) return 'Start, merge when safe'
+  if (verdict) return 'Start & draft'
+  if (posting) return 'Start, allow comment'
+  return 'Start review'
 }
 
 // `title` is the machine's own name for the action that opened the window (Review, or Review again), so the window reads like its button.
@@ -90,11 +90,11 @@ export function reviewWindowCopy({ mode, intent = '', title = '', posting = fals
   const agent = proposing && agentPosts && !merge
   const it = count === 1 ? 'the PR' : 'each PR'
   const steps = [
-    { text: `The agent reads ${it}: the code, the checks and the discussion.` },
-    { text: count === 1 ? 'Its findings appear on this PR’s Review tab.' : 'Its findings appear on each PR’s Review tab.' },
+    { text: `Reads ${it}, checks and discussion.` },
+    { text: count === 1 ? 'Findings appear on this PR’s Review tab.' : 'Findings appear on each PR’s Review tab.' },
     ...(proposing ? [{ text: verdictStep(count, agent), added: true }] : posting ? [{ text: postingStep(count), added: true }] : []),
     ...(merge ? [{ text: mergeStep({ count, posting, verdict: proposing }), added: true }] : []),
-    { text: 'If it has a question, it asks you first.' },
+    { text: 'Asks you first if it has a question.' },
   ]
   return {
     title: title || NAMES.review,
@@ -126,15 +126,15 @@ export function sinceReviewLine({ count = null, more = false, at }) {
 // The hint under the "Merge after I approve" switch, per selected PR for a batch.
 export function reviewSwitchHints(count = 1) {
   return { merge: count === 1
-    ? 'Once you send an approval and all required checks pass, it merges or queues the PR. It does not change any code.'
-    : 'Once you send an approval and all required checks pass, it merges or queues each PR. It does not change any code.' }
+    ? 'Merges or queues the PR once you approve and checks pass. No code changes.'
+    : 'Merges or queues each PR once you approve and checks pass. No code changes.' }
 }
 
 // Why "Merge when safe" cannot be switched on right now, or '' when it can.
 // postingBlocks: this Möbius cannot yet post and merge in one run.
 export function mergeWhenSafeBlocker({ drafts, mayMergeAll, postingBlocks = false, notDrafting = false }) {
   if (drafts) return 'Not available for drafts.'
-  if (notDrafting) return 'Merging follows your own approval: choose “Draft for me”.'
+  if (notDrafting) return 'Needs “Draft for me”.'
   if (!mayMergeAll) return 'Needs merge rights on this repository.'
   if (postingBlocks) return 'Posting and merging together needs a newer Möbius.'
   return ''

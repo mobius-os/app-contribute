@@ -22,5 +22,5 @@ test('the Review window and the Address feedback window close with their Cancel 
     assert.equal((html.match(/>Cancel<\/button>/g) || []).length, 1, `${name} has exactly one close control`)
     assert.doesNotMatch(html, /aria-label="Close"/, `${name} has no X beside the Cancel`)
   }
-  assert.match(review, />Start private review</, 'the primary button is still there')
+  assert.match(review, />Start review</, 'the primary button is still there')
 })
