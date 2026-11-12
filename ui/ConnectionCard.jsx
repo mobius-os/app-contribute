@@ -128,7 +128,7 @@ export function ConnectionCard({
           </p>
           <div className="co-conn-actions">
             <button type="button" className="co-btn" onClick={retryStatus} disabled={statusRetrying} aria-busy={statusRetrying}>
-              {statusRetrying ? 'Checking…' : 'Check GitHub again'}
+              {statusRetrying ? 'Checking…' : NAMES.checkAgain}
             </button>
           </div>
         </div>

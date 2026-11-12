@@ -71,6 +71,41 @@ export function pullFileDiff(file) {
 export function safeDetailLink(value) {
   try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) ? url.href : null } catch { return null }
 }
+// Why a check failed, from what the read-only route can reach: the failed step names of its Actions job and
+// its first annotations, worst first. The job's log is behind a redirect to another host that the route does
+// not follow, so the log itself stays on GitHub (the row's View on GitHub).
+const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure'])
+const FAILED_STEP = new Set(['failure', 'timed_out'])
+const NOTE_RANK = { failure: 0, warning: 1, notice: 2 }
+const NOTES_SHOWN = 3
+const NOTE_TEXT_MAX = 300
+const WHY_CHECKS_MAX = 5
+
+async function checkFailure(token, repoPath, run, signal) {
+  // An Actions job is its check run: GitHub gives both the same id. Another app's check has no job to read.
+  const isJob = run.app?.slug === 'github-actions'
+  const [job, notes] = await Promise.allSettled([
+    isJob ? githubRead(token, `${repoPath}/actions/jobs/${run.id}`, signal) : null,
+    run.output?.annotations_count > 0 ? githubRead(token, `${repoPath}/check-runs/${run.id}/annotations?per_page=10`, signal) : null,
+  ])
+  const steps = (Array.isArray(job.value?.steps) ? job.value.steps : []).filter(step => FAILED_STEP.has(step?.conclusion)).map(step => String(step.name))
+  const annotations = (Array.isArray(notes.value) ? notes.value : [])
+    .filter(note => note?.message)
+    .sort((a, b) => (NOTE_RANK[a.annotation_level] ?? 3) - (NOTE_RANK[b.annotation_level] ?? 3))
+    .slice(0, NOTES_SHOWN)
+    .map(note => ({ where: note.path ? `${note.path}${Number.isInteger(note.start_line) ? `:${note.start_line}` : ''}` : '', text: String(note.message).slice(0, NOTE_TEXT_MAX) }))
+  return steps.length || annotations.length ? { steps, annotations } : null
+}
+
+// A check that has no reason to show is left as it came: the row falls back to its GitHub link.
+async function withFailureReasons(token, repoPath, runs, signal) {
+  const failed = new Set(runs.filter(run => FAILED_RUN.has(run.conclusion) && Number.isInteger(run.id)).slice(0, WHY_CHECKS_MAX))
+  return Promise.all(runs.map(async run => {
+    const why = failed.has(run) ? await checkFailure(token, repoPath, run, signal) : null
+    return why ? { ...run, why } : run
+  }))
+}
+
 export async function loadPullChecks(token, pr, page = 1, signal) {
   pageNumber(page)
   const repoPath = pullPath(pr).split('/pulls/')[0]
@@ -87,7 +122,8 @@ export async function loadPullChecks(token, pr, page = 1, signal) {
     if (field === 'statuses' && data.sha !== pr.headRefOid) throw Object.assign(new Error('Status results did not match the selected head. Sync to read them again.'), { code: 'stale' })
     if (field === 'check_runs' && data[field].some(item => item.head_sha !== pr.headRefOid)) throw Object.assign(new Error('Check runs did not match the selected head. Sync to read them again.'), { code: 'stale' })
     const total = count(data.total_count)
-    return { name, total, items: data[field], hasMore: total === null ? data[field].length === 100 : total > page * 100, paginationUnknown: total === null }
+    const items = field === 'check_runs' ? await withFailureReasons(token, repoPath, data[field], signal) : data[field]
+    return { name, total, items, hasMore: total === null ? data[field].length === 100 : total > page * 100, paginationUnknown: total === null }
     })),
     loadPullDescription(token, pr, signal),
   ])
@@ -214,7 +250,7 @@ export async function loadPullCommits(token, pr, after = null, signal) {
   if (after !== null && (typeof after !== 'string' || after.length > 1024)) throw new Error('Invalid commit cursor.')
   const { data, errors } = await pullGraphRead(token, pr, `commits(first:50, after:$after) {
     totalCount pageInfo { hasNextPage endCursor } nodes { commit {
-      oid abbreviatedOid url messageHeadline messageBody committedDate
+      oid abbreviatedOid url messageHeadline messageBody committedDate additions deletions changedFilesIfAvailable
       authors(first:5) { nodes { name user { login } } }
       statusCheckRollup { state }
     } }
@@ -223,4 +259,18 @@ export async function loadPullCommits(token, pr, after = null, signal) {
   if (!connection) errors.push('The commit list is unavailable.')
   return { commits: (connection?.nodes || []).map(node => node?.commit).filter(Boolean), total: count(connection?.totalCount),
     hasMore: connection?.pageInfo?.hasNextPage === true, nextCursor: connection?.pageInfo?.endCursor || null, head: pr.headRefOid, errors }
+}
+
+// GitHub lists at most this many files for one commit, and its Link headers do not reach the app, so a
+// full list is read as possibly cut short.
+const COMMIT_FILE_LIMIT = 300
+
+// One commit's own files and patches, in the shape the Files changed viewer reads. A commit never changes,
+// so unlike the PR's own reads it needs no head/base check; the sha GitHub answers with must be the one asked for.
+export async function loadPullCommitFiles(token, pr, oid, signal) {
+  if (!/^[a-f0-9]{40,64}$/i.test(oid || '')) throw new Error('Choose a valid commit.')
+  const commit = await githubRead(token, `${pullPath(pr).split('/pulls/')[0]}/commits/${oid}`, signal)
+  if (!Array.isArray(commit?.files) || String(commit.sha).toLowerCase() !== oid.toLowerCase()) throw new Error('GitHub did not return the files of this commit.')
+  const totals = { files: commit.files.length, additions: count(commit.stats?.additions), deletions: count(commit.stats?.deletions) }
+  return { files: commit.files, totals, page: 1, hasMore: false, truncated: commit.files.length >= COMMIT_FILE_LIMIT }
 }

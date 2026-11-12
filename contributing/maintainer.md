@@ -11,75 +11,48 @@ PRs ([publish.md](publish.md)). GitHub repository
 permissions own push, assignment, and merge eligibility; organization
 membership alone is not merge authority.
 
-## PR stacks
+## Existing PR stacks
 
-**Confirm upstream push permission first.** GitHub cannot use a branch that
-exists only in the contributor's fork as the base of a PR in the upstream
-repository, so a stack publishes dedicated `stack/**` branches directly to
-upstream, and the server refuses before pushing anything unless the connected
-owner has `permissions.push` there:
+Every PR you prepare is independent and targets the repository's default
+branch; never a stack. Changes that depend on each other are one PR with clear
+commits, or the next PR opens only after the previous one has merged, from the
+updated default branch. Never write `plan.stack` and never publish `stack/**`
+branches. A PR set already published as a stack is finished as it is: do not
+retarget or close it. Contribute still shows an existing stack as one review
+and sends it; this section covers only that.
+
+### Repair a prepared stack layer
+
+An existing layer is its own complete, reviewed commit and its `.diff` is
+**incremental against the previous layer**, never the cumulative diff against
+the default branch. When a card ask ([card-asks.md](card-asks.md)) sends you to
+rebuild a prepared (private) layer:
+
+1. Rebuild it from its parent's exact current `head_sha` (layer 1 from the
+   freshly fetched default-branch base SHA) in the record's durable review
+   checkout under `/data/contrib/<record-id>/worktree` ([branch.md](branch.md)).
+2. Set the connected owner's repo-local author/committer identity **before every
+   commit**. Standalone send can normalize one tip commit; stack send cannot
+   rewrite a parent without invalidating every child's reviewed ancestry.
+3. Restage it ([ledger.md](ledger.md)) with `base_sha` set to the parent's
+   `head_sha`; the record keeps its `plan.stack` and a restage uses the
+   parent layer's head as its base automatically.
+4. Re-read all records and diffs as one review unit before saying the stack is
+   ready again.
+
+### Send a stack
+
+Sending a stack publishes dedicated `stack/**` branches directly to upstream,
+because GitHub cannot use a branch that exists only in the contributor's fork
+as the base of a PR in the upstream repository. The server refuses before
+pushing anything unless the connected owner has `permissions.push` there:
 
 ```bash
 gh api repos/<owner>/<repo> --jq .permissions.push
 ```
 
-Without it, prepare independent fork PRs; never simulate a stack by publishing
-a cumulative diff that differs from the reviewed `.diff`.
-
-With push permission, decide explicitly before preparing two or more PRs for
-one goal. Use a stack when every layer is independently coherent and later
-layers genuinely depend on earlier ones, or when an ordered split makes review
-substantially clearer; CI then runs on the foundation and on the cumulative
-result at the same time. Do not manufacture layers from one indivisible fix,
-and do not stack unrelated changes: independent work stays as independent PRs
-to the default branch so one failure, review, or delay cannot block the others.
-A stack's direction is parent-first: PR A targets the default branch; PR B
-targets A's upstream branch, so B's check covers A+B; and so on. Mention the
-stack choice in `prior_work.summary` or the record summary when it helps the
-partner understand the review shape.
-
-### Prepare a stack
-
-Each layer is its own complete, reviewed commit and its `.diff` is
-**incremental against the previous layer**, never the cumulative diff against
-the default branch. Each layer must remain a sensible review unit; put the
-tests needed to trust a layer in that layer.
-
-1. Choose one privacy-safe stack id. Every branch starts `stack/<stack-id>/`,
-   followed by an ordered descriptive suffix: `stack/<stack-id>/01-<layer>`,
-   `.../02-<layer>`, `.../03-<layer>`.
-2. Prepare layer 1 from the freshly fetched default-branch base SHA, layer 2
-   from layer 1's exact `head_sha`, and so on, with one durable review
-   checkout per record under `/data/contrib/<record-id>/worktree`
-   ([branch.md](branch.md)).
-3. Set the connected owner's repo-local author/committer identity **before every
-   commit**. Standalone send can normalize one tip commit; stack send cannot
-   rewrite a parent without invalidating every child's reviewed ancestry.
-4. Stage each layer ([ledger.md](ledger.md)); a later layer passes
-   `base_sha` set to the previous layer's exact `head_sha`, so its `.diff` is
-   incremental.
-5. CAS-add this object to every staged plan (positions are 1-based and
-   complete). Once it is present, a restage uses the parent layer's head as
-   its base automatically:
-
-```json
-"stack": {
-  "id": "<stack-id>",
-  "name": "<Stack name>",
-  "position": 2,
-  "total": 3,
-  "parent_record_id": "<stack-id>-01",
-  "base_branch": "stack/<stack-id>/01-<layer>"
-}
-```
-
-Layer 1 has an empty `parent_record_id` and `base_branch` equal to upstream's
-default branch. Every later `parent_record_id` names the immediately preceding
-ledger record, `base_branch` equals that record's branch, and its `base_sha`
-equals that record's `head_sha`. Re-read all records and diffs as one review
-unit before saying the stack is ready.
-
-### Send a stack
+Without it the stack cannot be sent; never publish a cumulative diff that
+differs from the reviewed `.diff` in its place.
 
 When 2–12 prepared PR records carry one complete `plan.stack` chain,
 Contribute groups them into one visual review and shows the current **Update
@@ -92,14 +65,16 @@ Any record carrying `plan.stack` is stack-only: malformed or incomplete chains
 stay visible for feedback, but neither the app nor the platform may fall back
 to sending one layer through the standalone PR path.
 
-A reviewed chain may start with existing pull requests whose branches need an
-update and end with new unpublished children. Keep that as one stack, but use
-two exact public phases: first confirm and update the consecutive `pr_update`
-prefix; after a fresh ledger read proves those updates settled, separately
-confirm and open the `pr` suffix. The confirmation enumerates only the current
-phase, while the full chain remains visible and is revalidated on both calls.
-Never place an existing-PR update after a new private layer, and never let one
-phase claim, hide, or inherit approval for the deferred phase.
+This only describes finishing a chain that already exists: one that starts
+with existing pull requests whose branches need an update and ends with
+children that are already prepared and unpublished. It is never a reason to
+add a layer. Finish such a chain in two exact public phases: first confirm and
+update the consecutive `pr_update` prefix; after a fresh ledger read proves
+those updates settled, separately confirm and open the `pr` suffix. The
+confirmation enumerates only the current phase, while the full chain remains
+visible and is revalidated on both calls. Never place an existing-PR update
+after a new private layer, and never let one phase claim, hide, or inherit
+approval for the deferred phase.
 
 Before the first public push, the platform rechecks every record, every stored
 diff, every parent SHA, the full branch topology, commit attribution, and the

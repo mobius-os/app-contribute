@@ -72,16 +72,20 @@ function bucketOf(decision) {
   if (decision.turn === 'agent') return 'running'
   return decision.turn === 'you' ? 'waiting' : 'done'
 }
+// The one chip a decision shows on a desk row: its label (the same words as the PR page) and whose turn it is.
+export const decisionChip = decision => chip(decision.label, GOOD.has(decision.state) ? 'good' : TONE[decision.turn])
 // What a row shows of a decision: its bucket and its one chip.
-const standingRow = decision => ({ bucket: bucketOf(decision), chips: [chip(decision.label, GOOD.has(decision.state) ? 'good' : TONE[decision.turn])] })
+const standingRow = decision => ({ bucket: bucketOf(decision), chips: [decisionChip(decision)] })
 
 // Where one review's PR stands. `live` is that PR as GitHub returns it now
 // (PR_FIELDS); without it the PR is unknown. `runs` are all review runs and
 // `chats` the live Respond-to-feedback conversations and `responses` the answers they saved.
+// A review saved without its PR's title reads it from the PR, so no row stays "Pull request #n" once the PR is read.
 export function classifyReview(entry, { login = '', ignored = null, live = null, runs = [], chats = [], responses = [] } = {}) {
   if (!live) return { bucket: 'unknown', confirm: false, chips: [chip('Couldn’t read', 'quiet')] }
   const decision = standingFor({ pr: live, login, runs, ignored, chats, responses })
-  return { ...standingRow(decision), confirm: ['to_confirm', 'unconfirmed'].includes(decision.state), decision }
+  const item = entry.item.title || !live.title ? entry.item : { ...entry.item, title: live.title }
+  return { ...standingRow(decision), confirm: ['to_confirm', 'unconfirmed'].includes(decision.state), decision, pull: live, item }
 }
 
 // Respond conversations on a PR that has no review of its own are agent runs too: the PR's frame shows them, so the Agent runs
@@ -91,11 +95,11 @@ export function classifyReview(entry, { login = '', ignored = null, live = null,
 const RESPOND_STANDING = { running: 'working', needs_answer: 'needs_answer' }
 export function respondEntries(chats, reviewed, pulls) {
   const known = new Set((reviewed || []).map(entry => entry.id))
-  const titles = new Map((pulls || []).map(pr => [reviewKey(pr.repository?.nameWithOwner, pr.number), pr.title]))
+  const read = new Map((pulls || []).map(pr => [reviewKey(pr.repository?.nameWithOwner, pr.number), pr]))
   const live = new Map((chats || []).map(chat => [respondPull(chat), chat]))
   return [...live].filter(([id]) => !known.has(id)).map(([id, chat]) => {
     const state = RESPOND_STANDING[chat.state] || 'working'
-    return { id, at: chat.at || 0, ...standingRow({ state, ...STATES[state] }), item: { repo: chat.repo, number: chat.number, title: titles.get(id) || '' } }
+    return { id, at: chat.at || 0, ...standingRow({ state, ...STATES[state] }), pull: read.get(id), item: { repo: chat.repo, number: chat.number, title: read.get(id)?.title || '' } }
   })
 }
 

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+
+import { BLOCKED_REASON } from '../autopilot.js'
 
 import {
   buildContributionRun,
@@ -299,6 +302,46 @@ test('healthy autopilot work stays quiet while human escalation becomes a decisi
   assert.equal(run.privateAction, null)
 })
 
+test('a stopped follow-up agent is filed as blocked with its reason, never as handling', () => {
+  const stopped = (id, attention, autopilot = { enabled: true, state: 'blocked' }) => ({
+    id, type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+    title: id, needs_attention: true, attention, autopilot,
+  })
+  const run = buildContributionRun({ records: [
+    stopped('overwritten', { type: 'github_activity', message: 'New review from a maintainer.' }),
+    stopped('escalated', { type: 'human_required', message: 'A reviewer raised a trade-off.' }),
+    stopped('quiet', null),
+  ] })
+  const byId = id => run.decisions.find(item => item.record?.id === id)
+
+  assert.deepEqual(run.working, [])
+  assert.deepEqual(run.decisions.map(item => item.kind), Array(3).fill('public_attention'))
+  assert.equal(byId('overwritten').detail, BLOCKED_REASON)
+  assert.equal(byId('escalated').detail, 'A reviewer raised a trade-off.')
+  assert.equal(byId('quiet').detail, BLOCKED_REASON)
+  assert.equal(run.privateAction, null)
+})
+
+test('a paused or merely idle follow-up agent is not filed as blocked', () => {
+  const event = { type: 'github_activity', message: 'New review from a maintainer.' }
+  const record = (id, autopilot) => ({
+    id, type: 'pr', repo: 'mobius-os/mobius', status: 'open',
+    title: id, needs_attention: true, attention: event, autopilot,
+  })
+  const run = buildContributionRun({ records: [
+    record('idle', { enabled: true, state: 'idle' }),
+    record('paused', { enabled: false, state: 'blocked' }),
+  ] })
+
+  assert.deepEqual(run.working.map(item => item.record.id), ['idle'])
+  assert.deepEqual(run.decisions.map(item => [item.record.id, item.kind]), [['paused', 'private_review']])
+})
+
+test('a failed send without a message of its own is not described in reconciliation jargon', () => {
+  const source = readFileSync(new URL('../run.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /reconciliation/i)
+})
+
 test('agent-owned public follow-up never starts a duplicate private run', () => {
   const record = {
     id: 'auto', type: 'pr', repo: 'mobius-os/mobius', status: 'open',
@@ -593,15 +636,7 @@ test('run revision is stable for ordering and changes with represented work', ()
   const ready = buildContributionRun({
     records: [first], reviewStatus: readyStatus('first'),
   })
-  const withIncoming = buildContributionRun({
-    records: [], incomingReviews: [{
-      title: 'Review me', number: 7, url: 'https://github.com/owner/repo/pull/7',
-      repository: { nameWithOwner: 'owner/repo' },
-    }],
-  })
-  const empty = buildContributionRun()
   assert.notEqual(needsRefresh.revision, ready.revision)
-  assert.notEqual(withIncoming.revision, empty.revision)
 })
 
 test('run revision changes when a represented stack sibling becomes restorable', () => {

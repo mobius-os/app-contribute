@@ -9,7 +9,16 @@ import { NAMES } from './names.js'
 // not show the owner pressed Post. Post is therefore offered only when this Möbius confirms it on its own sheet (owner-grant.js,
 // ownerConfirmOffered): approveResponse asks that sheet for a grant bound to this answer, and respond_result.py spends it before it posts.
 // Until the host offers it (or when its capabilities cannot be read) Post is off.
-export const POST_OFF_REASON = `${NAMES.postAnswer} is off for now: Möbius cannot yet confirm it was you who pressed it. The answer stays saved. Copy the replies to post them yourself, or use ${NAMES.replyInChat}.`
+export const COPY_REPLIES = 'Copy replies'
+// Why Post is off, naming only the controls the card has in that state: the chat button is Reply in chat until Post was
+// pressed once, and Open chat after (Send again, Try again); Copy replies is named only when there are replies to copy.
+export function postOffReason(status = 'ready', hasReplies = true) {
+  const chat = status === 'ready' ? NAMES.replyInChat : NAMES.openChat
+  const next = hasReplies ? `${COPY_REPLIES} to post the replies yourself, or ${chat}` : `${chat} to talk it over`
+  return `${NAMES.postAnswer} is off on this Möbius: it cannot yet confirm that it was you who pressed it. The answer stays saved. Use ${next}.`
+}
+// The reason as the first Post press meets it (with replies, before anything was sent).
+export const POST_OFF_REASON = postOffReason()
 
 import { SCREENSHOT_NAME } from './domain.js'
 
@@ -208,6 +217,15 @@ export function stepDone(result, key) {
   const receipts = result.receipts
   if (key === 'replies') return result.replies.length > 0 && receipts.replies.length >= result.replies.length
   return Boolean(receipts[key])
+}
+
+// Every reply with what it answers, for the owner to post by hand where Post is off: the review thread (a reply) or the PR's own conversation.
+export function repliesText(result) {
+  const pull = `https://github.com/${result.repo}/pull/${result.number}`
+  return result.replies.map((reply, index) => {
+    const target = reply.reply_to ? `answers review comment ${reply.reply_to}: ${pull}#discussion_r${reply.reply_to}` : `a new comment on the PR: ${pull}`
+    return `Reply ${index + 1} of ${result.replies.length} (${target})\n\n${reply.body}`
+  }).join('\n\n---\n\n')
 }
 
 export const POST_COMMAND = result => `python3 /data/apps/contribute/respond_result.py post --pr ${result.repo}#${result.number} --id ${result.id}`

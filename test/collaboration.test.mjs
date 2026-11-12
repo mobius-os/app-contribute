@@ -97,7 +97,7 @@ test('review-and-merge confirmation names exact PRs and excludes extra public ac
   assert.match(html, /Exact versions/, 'a saved pinned merge keeps its exact-version disclosure')
   assert.match(html, /It uses these exact versions\. Changed code needs a fresh approval\./)
   const privately = render({mode:'review', pulls:[pull(1)]})
-  assert.match(privately, /Seen on GitHub:<\/strong> nothing\. Only you see the review\./); assert.match(privately, /Start private review/)
+  assert.match(privately, /What GitHub sees:<\/strong> nothing\. Only you see the review\./); assert.match(privately, /Start private review/)
   const posting = render({mode:'review', pulls:[pull(1)], options:{post_review:true}})
   assert.doesNotMatch(posting, /Only you see the review|Start private review/, 'a review posted on GitHub is never called private')
   // Only a verdict the agent explicitly marks public is posted (G2 `publish: true`).
@@ -279,22 +279,28 @@ test('a minimized run detail points to the owning conversation and offers no Sto
   const { render } = await renderModule(`import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {RunDetail} from './ui/RunDetail.jsx'; export const render = (run, pulls) => renderToStaticMarkup(React.createElement(RunDetail, {run, pulls, listState: {}, onStop: () => {}}));`)
   const html = render(minimized({ post_review: true }, { public_review: { state: 'posted', url: 'https://github.com/team/repo/pull/7#r' } }), [pull(7)])
   assert.match(html, /<h3>GitHub review<\/h3>/)
-  assert.match(html, /Its instructions and findings are in the owning conversation/)
-  assert.match(html, /Open the owning chat for details/)
+  assert.match(html, /Its instructions and findings are in the chat that ran it/)
+  assert.match(html, /Open the chat for details/)
   assert.match(html, /Matches loaded PR version/)
   assert.match(html, /View the posted review on GitHub/)
-  assert.doesNotMatch(html, /Stop workflow|prompt snapshot|Older PR version|Instructions used by this run|findings will appear here|not a new approval/)
+  assert.doesNotMatch(html, /Stop agent run|Stop workflow|prompt snapshot|Older PR version|Instructions used by this run|findings will appear here|not a new approval/)
   assert.match(render({ id: 'own', app_id: 80, mode: 'review', state: 'reviewing', items: [] }, []), /This older run did not save a prompt snapshot/)
 })
 
 test('the Agent menu jobs map to exact platform modes and publishing presets', async () => {
-  const { reviewIntent, requestOptions } = await import('../collaboration.js')
+  const { reviewIntent, requestOptions, WHO_OPTIONS } = await import('../collaboration.js')
   const PRIVATE = { post_review: false, propose_verdict: false, agent_submits_verdict: false }
-  // Review and Check my PR both open private; the window can draft or (if you allow it) let the agent post.
+  const DRAFT = { post_review: true, propose_verdict: true, agent_submits_verdict: false }
+  // Without a host that offers drafting, Review and Check my PR both open private; the window can still switch.
   assert.deepEqual(reviewIntent('review'), { intent: 'review', mode: 'review', options: PRIVATE })
   assert.deepEqual(reviewIntent('check_my_pr'), { intent: 'check_my_pr', mode: 'review', options: PRIVATE })
   assert.deepEqual(reviewIntent('finish_it'), { intent: 'finish_it', mode: 'review_fix_merge' })
   assert.deepEqual(reviewIntent('take_over'), { intent: 'take_over', mode: 'review_fix_merge' })
+  // Someone else's PR opens on "Draft for me" where the host offers it; your own PR keeps the private check; "Agent posts" is never a default.
+  assert.deepEqual(reviewIntent('review', true), { intent: 'review', mode: 'review', options: DRAFT })
+  assert.deepEqual(reviewIntent('check_my_pr', true), { intent: 'check_my_pr', mode: 'review', options: PRIVATE })
+  assert.deepEqual(reviewIntent('finish_it', true), { intent: 'finish_it', mode: 'review_fix_merge' })
+  assert.deepEqual(WHO_OPTIONS, { private: PRIVATE, draft: DRAFT, agent: { ...DRAFT, agent_submits_verdict: true } })
   // A raw mode (a retry) passes through with its own defaults.
   assert.deepEqual(reviewIntent('review_merge'), { mode: 'review_merge' })
   // The agent may post only on a plain review, and only with a drafted verdict; never with merging.
@@ -302,6 +308,30 @@ test('the Agent menu jobs map to exact platform modes and publishing presets', a
   assert.equal(requestOptions(agent, 'review').agent_submits_verdict, true)
   assert.equal('agent_submits_verdict' in requestOptions(agent, 'review_merge'), false)
   assert.equal('agent_submits_verdict' in requestOptions({ post_review: true, agent_submits_verdict: true }, 'review'), false)
+})
+
+test('a Review tapped before the host\'s capabilities arrive takes the draft default once they do, and a window already settled is left alone', async () => {
+  const { settleDraftDefault, reviewIntent, WHO_OPTIONS } = await import('../collaboration.js')
+  const draftHost = { post_review: true, propose_verdict: true }
+  const pending = { ...reviewIntent('review'), pulls: [], request_id: 'first', draftPending: true }
+  assert.equal(pending.options, WHO_OPTIONS.private, 'opened without capabilities: the private default')
+  assert.equal(settleDraftDefault(pending, null), pending, 'still waiting: nothing changes')
+  const settled = settleDraftDefault(pending, draftHost)
+  assert.deepEqual([settled.options, settled.mode, 'draftPending' in settled], [WHO_OPTIONS.draft, 'review', false])
+  assert.notEqual(settled.request_id, 'first', 'a new options answer is a new request')
+  const plain = settleDraftDefault(pending, {})
+  assert.deepEqual([plain.options, 'draftPending' in plain, plain.request_id], [WHO_OPTIONS.private, false, 'first'], 'a host without drafting keeps the private default')
+  const chosen = { ...settled, options: WHO_OPTIONS.private }
+  assert.equal(settleDraftDefault(chosen, draftHost), chosen, 'a choice already made is never overridden')
+  const known = { ...reviewIntent('review', true), request_id: 'known' }
+  assert.equal(settleDraftDefault(known, draftHost), known, 'a window opened with capabilities known is not touched')
+  assert.equal(settleDraftDefault(null, draftHost), null)
+})
+
+test('"Draft for me" is offered only by a Möbius that can post a review and propose its verdict', async () => {
+  const { offersDraft } = await import('../collaboration.js')
+  assert.equal(offersDraft({ post_review: true, propose_verdict: true }), true)
+  for (const capabilities of [null, undefined, {}, { post_review: true }, { propose_verdict: true }, { post_review: false, propose_verdict: true }]) assert.equal(offersDraft(capabilities), false)
 })
 
 test('a PR changed after its review still finds that review, as an earlier version', async () => {

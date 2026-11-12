@@ -39,13 +39,12 @@ export function byUrgency(items) {
   return [...items].sort((a, b) => rank(a) - rank(b))
 }
 
-// A related group is one row; name the PR the reason is about and its group.
+// A related group is one row; name its PRs. The row's facts line leads with the PR the reason is about.
 export function groupNote(item) {
   const records = runUnitRecords(item)
   if (records.length < 2) return ''
   const numbers = records.map(record => record?.number).filter(Boolean).map(number => `#${number}`)
-  const affected = item?.record?.number ? `On #${item.record.number} · ` : ''
-  return `${affected}${records.length} related PRs${numbers.length ? `: ${numbers.join(', ')}` : ''}`
+  return `${records.length} related PRs${numbers.length ? `: ${numbers.join(', ')}` : ''}`
 }
 
 // One thing that needs the owner: a colour-coded icon, the PR on one line, why

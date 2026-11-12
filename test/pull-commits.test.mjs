@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { authorLine, authorNames, checkWords, commitGroups, copyText, madeWithAgent, reviewMarker } from '../pull-commits.js'
-import { loadPullCommits } from '../pull-details.js'
+import { authorLine, authorNames, checkWords, commitGroups, commitStats, copyText, madeWithAgent, reviewMarker } from '../pull-commits.js'
+import { loadPullCommitFiles, loadPullCommits } from '../pull-details.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
 const commit = (oid, extra = {}) => ({ oid: oid.repeat(40).slice(0, 40), abbreviatedOid: oid.repeat(7).slice(0, 7), url: `https://github.com/o/r/commit/${oid}`, messageHeadline: `Commit ${oid}`, messageBody: '', committedDate: '2026-11-05T13:32:53Z',
@@ -83,9 +83,12 @@ let renderer
 const screens = () => (renderer ||= renderModule(`
   import React from 'react'
   import { renderToStaticMarkup } from 'react-dom/server'
-  import { PullCommits } from './ui/PullCommits.jsx'
+  import { CommitChangesHead, PullCommits } from './ui/PullCommits.jsx'
+  import { PullFiles } from './ui/PullFiles.jsx'
   import { PullRequestDetail } from './ui/PullRequestDetail.jsx'
   export const commits = props => renderToStaticMarkup(React.createElement(PullCommits, props))
+  export const changesHead = props => renderToStaticMarkup(React.createElement(CommitChangesHead, props))
+  export const files = props => renderToStaticMarkup(React.createElement(PullFiles, props))
   export const detail = props => renderToStaticMarkup(React.createElement(PullRequestDetail, props))
 `))
 
@@ -140,4 +143,73 @@ test('the PR page puts Commits right after Comments, with GitHub\'s count, and l
   assert.match(opened, /aria-pressed="true">Commits/)
   assert.match(opened, /Commit a/)
   assert.match(opened, /Show more commits/)
+})
+
+test('a commit row says how much it changed, and says nothing when GitHub cannot count it', () => {
+  assert.deepEqual(commitStats(commit('a', { changedFilesIfAvailable: 7, additions: 132, deletions: 45 })), { files: 7, additions: 132, deletions: 45 })
+  assert.deepEqual(commitStats(commit('a', { changedFilesIfAvailable: 0, additions: 0, deletions: 0 })), { files: 0, additions: 0, deletions: 0 })
+  assert.equal(commitStats(commit('a', { changedFilesIfAvailable: null, additions: 3, deletions: 1 })), null, 'an uncounted commit is not "0 files"')
+  assert.equal(commitStats(commit('a')), null)
+  assert.equal(commitStats(null), null)
+})
+
+test('each commit opens inside the app: See changes beside View on GitHub, with its size in the row', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { commits, changesHead } = await screens()
+  const html = commits({ data: { commits: [commit('a', { changedFilesIfAvailable: 7, additions: 132, deletions: 45 }), commit('b')], hasMore: false } })
+  assert.match(html, /<button type="button" class="co-btn" data-commit="a{40}" aria-label="See changes: commit aaaaaaa">See changes<\/button>/)
+  assert.match(html, /7 files <b class="co-file-add">\+132<\/b> <b class="co-file-del">−45<\/b>/)
+  assert.equal((html.match(/co-commit-stats/g) || []).length, 1, 'a commit GitHub cannot count shows no size')
+  assert.match(html, /aria-label="View on GitHub: commit aaaaaaa"/, 'View on GitHub stays as the way out')
+  const head = changesHead({ commit: commit('a'), onBack: () => {} })
+  assert.match(head, /Back to commits/)
+  assert.match(head, /<code>aaaaaaa<\/code> Commit a/)
+  assert.match(head, /aria-label="View on GitHub: commit aaaaaaa"/)
+})
+
+test('a commit read asks GitHub for the commit itself, checks it is that commit, and flags a list cut at 300 files', async () => {
+  const previous = globalThis.fetch
+  const sent = []
+  const pr = { number: 7, repository: { nameWithOwner: 'o/r' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main' }
+  const oid = 'c'.repeat(40)
+  const answer = body => ({ ok: true, status: 200, json: async () => body })
+  const files = count => Array.from({ length: count }, (_, index) => ({ filename: `f${index}.js`, additions: 1, deletions: 0, status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b' }))
+  try {
+    globalThis.fetch = async url => { sent.push(String(url)); return answer({ sha: oid, files: files(2), stats: { additions: 2, deletions: 0 } }) }
+    const read = await loadPullCommitFiles('token', pr, oid)
+    assert.deepEqual(sent, [`/api/github/api/repos/o/r/commits/${oid}`], 'one read through the read-only route')
+    assert.deepEqual([read.files.length, read.totals, read.hasMore, read.truncated], [2, { files: 2, additions: 2, deletions: 0 }, false, false])
+    globalThis.fetch = async () => answer({ sha: oid, files: files(300), stats: { additions: 300, deletions: 0 } })
+    assert.equal((await loadPullCommitFiles('token', pr, oid)).truncated, true, 'a full 300 may be cut short, so the page says so')
+    globalThis.fetch = async () => answer({ sha: 'd'.repeat(40), files: files(1) })
+    await assert.rejects(loadPullCommitFiles('token', pr, oid), /did not return the files of this commit/)
+    globalThis.fetch = async () => answer({ sha: oid })
+    await assert.rejects(loadPullCommitFiles('token', pr, oid), /did not return the files of this commit/)
+    for (const bad of ['', 'abc', '../x', `${oid}/../..`]) await assert.rejects(loadPullCommitFiles('token', pr, bad), /Choose a valid commit/)
+  } finally { globalThis.fetch = previous }
+})
+
+test('the commit page says when GitHub cut its file list short', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { files } = await screens()
+  const data = { files: [{ filename: 'a.js', additions: 1, deletions: 0, status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b' }], totals: { files: 1, additions: 1, deletions: 0 }, page: 1, hasMore: false }
+  assert.doesNotMatch(files({ data }), /at most 300 files/)
+  const cut = files({ data: { ...data, totals: { ...data.totals, files: 300 }, truncated: true } })
+  assert.match(cut, /GitHub lists at most 300 files for one commit\. The rest are on GitHub\./)
+  assert.match(cut.replace(/<!-- -->/g, ''), /Showing 300\+ changed files with/, 'a cut list is not read as the whole commit')
+  assert.match(files({ data }).replace(/<!-- -->/g, ''), /Showing 1 changed file with/)
+  // A commit's few files open unfolded; the Files changed tab keeps its files folded.
+  assert.match(files({ data, startOpen: true }), /<details class="co-file-disclosure" open="">/)
+  assert.doesNotMatch(files({ data }), /<details class="co-file-disclosure" open="">/)
+})
+
+test('the commit list asks GitHub for each commit\'s size so the row can show it', async () => {
+  const previous = globalThis.fetch
+  let query = ''
+  const pr = { number: 7, repository: { nameWithOwner: 'o/r' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main' }
+  try {
+    globalThis.fetch = async (url, init) => { query = JSON.parse(init.body).query; return { ok: true, json: async () => ({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: 'main', commits: { nodes: [] } } } } }) } }
+    await loadPullCommits('token', pr)
+    assert.match(query, /additions deletions changedFilesIfAvailable/)
+  } finally { globalThis.fetch = previous }
 })

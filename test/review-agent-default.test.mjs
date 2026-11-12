@@ -83,16 +83,18 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub will see is one icon beside Close, and the words stay in the page for a screen reader', async t => {
+test('what GitHub will see is one labelled icon beside Close, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
   assert.match(html, /class="co-rw-tools"><span class="co-rw-seen is-public">/)
-  assert.match(html, /role="tooltip"[^>]*><strong>Seen on GitHub:<\/strong> one approve, request changes or comment, posted by the agent from your account as you allowed/)
+  assert.match(html, /<button type="button" class="co-btn co-btn-quiet is-toned co-rw-seen-btn" aria-describedby="[^"]*" aria-pressed="false"><span>What GitHub sees<\/span><svg/, 'the icon is named in words, and the words come before it so the card’s arrow stays under the icon')
+  assert.doesNotMatch(html, /Seen on GitHub/)
+  assert.match(html, /role="tooltip"[^>]*><strong>What GitHub sees:<\/strong> one approve, request changes or comment, posted by the agent from your account as you allowed/)
   assert.doesNotMatch(html, /co-rw-public/, 'the full-width box is gone')
   const quiet = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review' }, onModeChange() {}, onCancel() {} })
   assert.match(quiet, /co-rw-seen is-private/)
-  assert.match(quiet, /<strong>Seen on GitHub:<\/strong> nothing\. Only you see the review\./)
+  assert.match(quiet, /<strong>What GitHub sees:<\/strong> nothing\. Only you see the review\./)
   // The fix window says the same thing the same way.
   const fix = api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} })
   assert.match(fix, /co-rw-seen is-private/)
@@ -126,6 +128,15 @@ test('the hover card is anchored to the header and sized from the dialog, never 
   assert.match(card, /right:var\(--rw-edge\); width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side')
   assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and header insets and clips the card on a narrow phone')
   assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:16px;/, 'the narrow sheet has the smaller edge')
+})
+
+test('the lock’s label sits left of its icon, which stays beside Close; on a narrow phone it takes its own row under the title', () => {
+  const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 calc\(\(var\(--co-control-height\) - 20px\) \/ 2\) 0 10px; \}/, 'the icon keeps its place a button’s width in from the edge, so the card’s arrow still points at it')
+  const narrow = css.match(/@media\(max-width:450px\) \{\n \.co-rw-tools \{ display:contents; \}([^@]*)\n\}/)?.[1] || ''
+  assert.match(narrow, /\.co-rw-head \.co-rw-close \{ grid-column:3; grid-row:1; \}/, 'Close stays at the top right')
+  assert.match(narrow, /\.co-rw-seen \{ grid-column:2 \/ -1; grid-row:2;/, 'the label has the width of the title column and wider, on its own row')
+  assert.match(narrow, /\.co-rw-seen-card::before \{ display:none; \}/, 'an arrow that cannot point at the icon is not drawn')
 })
 
 test('a new Review or Fix window is started from the saved agent, and only when there is one', () => {

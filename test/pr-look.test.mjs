@@ -114,7 +114,7 @@ test('what happens follows the Who sees the result choice, in the order the agen
   const priv = steps('private')
   assert.equal(priv.length, 3)
   assert.match(priv[0], /reads the PR/)
-  assert.match(priv[1], /writes its findings/)
+  assert.match(priv[1], /Its findings appear on this PR’s Review tab/, 'findings are read on the PR page, never in a conversation')
   assert.match(priv[2], /asks you first/)
   const draft = steps('draft')
   assert.equal(draft.length, 4)

@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { frontendModules, renderModule } from './render-harness.mjs'
+import { NAMES } from '../names.js'
+import { standingFor } from '../pr-standing.js'
 
 let renderer
 async function ui(t) {
@@ -26,11 +28,20 @@ async function ui(t) {
   return renderer
 }
 
+const HEAD = 'a'.repeat(40)
+// A PR GitHub read completely: the shared decision reads a PR without these facts as "could not be read".
 const pullFixture = (number, extra = {}) => ({
   number,
   title: `Improve thing ${number}`,
   author: { login: 'teammate' },
-  repository: { nameWithOwner: 'o/r' },
+  repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE' },
+  headRefOid: HEAD,
+  state: 'OPEN',
+  mergeable: 'MERGEABLE',
+  latestOpinionatedReviews: { nodes: [] },
+  viewerLatestReview: null,
+  reviewThreads: { nodes: [] },
+  commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
   labels: { nodes: [{ name: 'enhancement', color: 'a2eeef' }] },
   comments: { totalCount: 2 },
   headRefName: `head-${number}`,
@@ -56,7 +67,8 @@ const projectFixture = (key, extra = {}) => ({
   ...extra,
 })
 
-const countsFixture = { questions: 1, requests: 2, merge: 3, fix: 1, agent: 0, drafts: 0, mine: 4, merged: 0, reviewsRunning: 0 }
+const changesRequested = { latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'teammate' }, commit: { oid: HEAD } }] } }
+const countsFixture = { questions: 1, requests: 2, merge: 3, fix: 1, again: 0, drafts: 0, mine: 4, merged: 0, reviewsRunning: 0 }
 
 test('the rail shows its four views with their counts, the Repositories block apart, and marks the open project', async t => {
   const api = await ui(t)
@@ -109,14 +121,15 @@ test('count chips name next steps, filter the list, and skip empty ones; drafts 
 test('the drafts line leads to a view that lists what it counted', async t => {
   const api = await ui(t)
   if (!api) return
-  // An approved draft opened outside Contribute: counted as a draft ready to open, with no saved decision behind it.
-  const draft = pullFixture(9, { author: { login: 'owner' }, reviewDecision: 'APPROVED', isDraft: true })
+  // A draft of yours whose check came back clean: counted as a draft ready to open, with no saved decision behind it.
+  const draft = pullFixture(9, { author: { login: 'owner' }, isDraft: true })
+  const checked = { id: 'run', created_at: '2026-11-03T22:00:00Z', state: 'complete', execution_state: 'completed', items: [{ repo: 'o/r', number: 9, head_sha: HEAD, state: 'all_clear' }] }
   const project = projectFixture('kanban', { incomingReviews: [draft] })
   const counts = { ...countsFixture, questions: 0, requests: 0, merge: 0, fix: 0, editedFiles: 0, drafts: 1, mine: 1, work: 0 }
   const view = api.draftsDestination(counts)
-  const html = api.view({ view, projects: [project], records: [], login: 'owner', decisionsFor: () => [], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
+  const html = api.view({ view, projects: [project], records: [], login: 'owner', decisionsFor: () => [], lastLooked: '', query: '', runs: [checked], onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
   assert.match(html, /Improve thing 9/)
-  assert.match(html, /Approved, still a draft/)
+  assert.match(html, /Ready to open/)
 })
 
 test('a side view keeps each app inside one card whose icon and name open it', async t => {
@@ -155,8 +168,8 @@ test('my PRs read as a stack in merge order when they chain', async t => {
     decisionsFor: () => [], lastLooked: '', query: '',
     onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {},
   })
-  assert.match(html, /1 of 2/)
-  assert.match(html, /2 of 2/)
+  assert.match(html, />Part 1 of 2</)
+  assert.match(html, />Part 2 of 2</)
   assert.match(html, /Waiting on reviewers/)
 })
 
@@ -173,11 +186,11 @@ test('the search filters rows and an empty view explains itself', async t => {
 test('a project name in the search keeps that project’s rows in every view, and an author name finds their PRs', async t => {
   const api = await ui(t)
   if (!api) return
-  const authored = pullFixture(5, { author: { login: 'owner' }, reviewDecision: 'CHANGES_REQUESTED' })
+  const authored = pullFixture(5, { author: { login: 'owner' }, ...changesRequested })
   const project = projectFixture('kanban', {
-    canonical_repo: 'o/r', incomingReviews: [authored, pullFixture(6, { author: { login: 'owner' }, reviewDecision: 'CHANGES_REQUESTED' })], reviewRequests: [pullFixture(7, { author: { login: 'reviewer-person' } })],
+    canonical_repo: 'o/r', incomingReviews: [authored, pullFixture(6, { author: { login: 'owner' }, ...changesRequested })], reviewRequests: [pullFixture(7, { author: { login: 'reviewer-person' } })],
   })
-  const other = projectFixture('pages', { incomingReviews: [pullFixture(8, { author: { login: 'owner' }, reviewDecision: 'CHANGES_REQUESTED' })] })
+  const other = projectFixture('pages', { incomingReviews: [pullFixture(8, { author: { login: 'owner' }, ...changesRequested })] })
   const feedback = { id: 'f5', kind: 'public_attention', label: 'Feedback on five', record: { repo: 'o/r', number: 5 } }
   const merged = { id: 'm1', repo: 'o/r', status: 'merged', title: 'Landed work', number: 3, updated_at: new Date().toISOString() }
   const base = { projects: [project, other], records: [merged], login: 'owner', decisionsFor: item => (item === project ? [feedback] : []), lastLooked: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} }
@@ -209,8 +222,8 @@ test('each app card folds with a chevron: down means open it, up means fold it',
 test('a PR with a feedback card is listed once in Needs you, and My PRs keeps it', async t => {
   const api = await ui(t)
   if (!api) return
-  const authored = pullFixture(5, { author: { login: 'owner' }, reviewDecision: 'CHANGES_REQUESTED' })
-  const quiet = pullFixture(6, { author: { login: 'owner' }, reviewDecision: 'CHANGES_REQUESTED' })
+  const authored = pullFixture(5, { author: { login: 'owner' }, ...changesRequested })
+  const quiet = pullFixture(6, { author: { login: 'owner' }, ...changesRequested })
   const project = projectFixture('mobius', { incomingReviews: [authored, quiet] })
   const feedback = { id: 'f5', kind: 'public_attention', label: 'Feedback on five', record: { repo: 'o/r', number: 5 } }
   const base = { projects: [project], records: [], login: 'owner', decisionsFor: () => [feedback], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} }
@@ -236,17 +249,98 @@ test('the project screen has no status panel, only a warning row whose action is
   assert.doesNotMatch(css, /co-link-action/)
 })
 
-test('a feedback card is shaped like a PR row: title, why, chip, no second button', async t => {
+test('a feedback card is shaped like a PR row: title, then #number, then its state, then why, no second button', async t => {
   const api = await ui(t)
   if (!api) return
   const project = projectFixture('mobius')
   const item = { id: 'f1', kind: 'public_attention', label: '#9 Feedback title', detail: 'A GitHub review requested changes.', record: { repo: 'o/r', number: 9, attention: { type: 'changes_requested', detected_at: '2026-11-02T08:00:00Z' } } }
   const html = api.view({ view: 'needs', projects: [project], records: [], login: 'owner', decisionsFor: () => [item], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
   assert.match(html, /class="co-desk-row is-changes"/)
-  assert.match(html, /co-desk-row-title">#9 Feedback title/)
-  assert.match(html, /co-desk-row-why">A GitHub review requested changes\./)
+  assert.match(html, /co-desk-row-title">Feedback title</, 'the number moves to the facts line, so the title is the title alone')
+  assert.match(html, /co-desk-row-meta"><span>#9 · <time[^>]*>detected /)
   assert.match(html, /co-desk-chip is-tone">Changes requested/)
+  assert.match(html, /co-desk-row-why">A GitHub review requested changes\./)
   assert.doesNotMatch(html, /View PR/)
+})
+
+// One PR, three screens, one label and one group (finding B1). The label is the shared decision's own words.
+test('a PR says the same thing on Needs you, in a feedback card, and on My PRs: the label of its shared decision', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const feedbackOn = { reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'teammate' } }] } }] } }
+  const own = pullFixture(5, { author: { login: 'owner' }, ...feedbackOn })
+  const project = projectFixture('mobius', { canonical_repo: 'o/r', incomingReviews: [own] })
+  const label = standingFor({ pr: own, login: 'owner' }).label
+  assert.equal(label, 'Feedback to answer')
+  const base = { projects: [project], records: [], login: 'owner', lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} }
+  const needs = api.view({ ...base, view: 'needs', decisionsFor: () => [] })
+  const mine = api.view({ ...base, view: 'mine', decisionsFor: () => [] })
+  assert.match(needs, new RegExp(`co-desk-chip is-waiting">${label}<`), 'Needs you')
+  assert.match(mine, new RegExp(`co-desk-chip is-waiting">${label}<`), 'My PRs')
+  // The same PR as a saved feedback card: it was "Needs your decision"; now it reads as the PR does.
+  const card = { id: 'f5', kind: 'public_attention', label: '#5 Improve thing 5', detail: 'A reviewer commented after the approval.', record: { repo: 'o/r', number: 5 } }
+  const carded = api.view({ ...base, view: 'needs', decisionsFor: () => [card] })
+  assert.match(carded, new RegExp(`co-desk-chip is-waiting">${label}<`), 'in the same pill the PR wears on My PRs')
+  assert.doesNotMatch(carded, /Needs your decision/)
+  assert.match(carded, /co-desk-row-title">Improve thing 5</, 'the PR\'s own title, with no number in front')
+  assert.match(carded, /co-desk-row-meta"><span>#5 · yours<\/span>/)
+})
+
+test('a running review is the frame alone, with no tag on the row; one that stopped says so', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const project = projectFixture('mobius', { canonical_repo: 'o/r', incomingReviews: [pullFixture(5, { author: { login: 'owner' } })] })
+  const run = execution => ({ id: 'run', created_at: '2026-11-03T22:00:00Z', state: 'running', execution_state: execution, chat_id: 'c', items: [{ repo: 'o/r', number: 5, head_sha: HEAD, state: 'reviewing' }] })
+  const mine = runs => api.view({ view: 'mine', projects: [project], records: [], login: 'owner', decisionsFor: () => [], lastLooked: '', query: '', runs, onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
+  const working = mine([run('running')])
+  assert.match(working, /data-frame="reviewing"/)
+  assert.doesNotMatch(working, /Agent working|Waiting on reviewers/, 'the frame says it; no tag does')
+  const stopped = mine([run('failed')])
+  assert.match(stopped, /data-frame="verdict"/)
+  assert.match(stopped, /co-desk-chip is-waiting">Agent stopped</)
+})
+
+test('an approved PR is a Merge row, whatever GitHub\'s own decision says; pending checks are not', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const approvedBy = { latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'teammate' }, commit: { oid: HEAD } }] } }
+  const ready = pullFixture(5, { author: { login: 'owner' }, reviewDecision: null, ...approvedBy })
+  const running = pullFixture(6, { author: { login: 'owner' }, ...approvedBy, commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING', contexts: { totalCount: 1, checkRunCountsByState: [{ state: 'PENDING', count: 1 }], statusContextCountsByState: [] } } } }] } })
+  const project = projectFixture('mobius', { canonical_repo: 'o/r', incomingReviews: [ready, running] })
+  const html = api.view({ view: 'needs', needsFilter: 'merge', projects: [project], records: [], login: 'owner', decisionsFor: () => [], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
+  assert.match(html, /Improve thing 5/)
+  assert.match(html, /co-desk-chip is-ready">Ready to merge</)
+  assert.doesNotMatch(html, /Improve thing 6/, 'approved, but its checks are still running')
+})
+
+// Every Needs you row, whatever it is, reads title, then facts, then status, then a one-line reason (finding B4).
+test('every Needs you row has one layout: title, #number · who · when, status, then a one-line reason', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const feedbackOn = { reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'teammate' } }] } }] } }
+  const project = projectFixture('mobius', { canonical_repo: 'o/r', reviewRequests: [pullFixture(1)], incomingReviews: [pullFixture(2, { author: { login: 'owner' }, ...changesRequested, ...feedbackOn })] })
+  const note = 'The follow-up agent stopped: a reviewer raised a product trade-off that needs your decision. '.repeat(5).trim()
+  const card = { id: 'f3', kind: 'public_attention', label: '#3 Card title', detail: note, record: { repo: 'o/r', number: 3, attention: { type: 'github_activity', detected_at: '2026-11-02T08:00:00Z' } } }
+  const reviewedPull = pullFixture(4, { headRefOid: 'b'.repeat(40), viewerLatestReview: { state: 'APPROVED', commit: { oid: HEAD } } })
+  const entry = { id: 'o/r#4', at: 1, bucket: 'waiting', run: { created_at: '2026-11-03T22:00:00Z' }, item: { repo: 'o/r', number: 4, title: 'Reviewed title' }, chips: [{ label: 'New commits · review again', tone: 'owner' }], pull: reviewedPull, decision: standingFor({ pr: reviewedPull, login: 'owner' }) }
+  const html = api.view({ view: 'needs', projects: [project], records: [], login: 'owner', decisionsFor: () => [card], lastLooked: '', query: '', reviews: { entries: [entry] }, onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
+  const items = html.split('<div class="co-desk-item').slice(1)
+  assert.equal(items.length, 4, 'a request, a card, an own PR that needs a step, a PR to review again')
+  for (const row of items) {
+    const at = marker => row.indexOf(marker)
+    assert.ok(at('co-desk-row-title') > -1 && at('co-desk-row-title') < at('co-desk-row-meta'), 'title, then facts')
+    assert.ok(at('co-desk-row-meta') < at('co-row-pills'), 'facts, then status')
+    assert.match(row, /co-desk-row-meta"><(span class="co-desk-order"|span)>(Part \d of \d)?/, 'the facts line is the first thing under the title')
+    assert.doesNotMatch(row.slice(at('co-desk-row-title'), at('co-desk-row-meta')), /co-desk-chip/, 'no pill in the title')
+  }
+  // Only a row with a saved note has a reason, and it follows the status, outside the button that opens the PR.
+  const withNote = items.filter(row => row.includes('co-desk-note'))
+  assert.equal(withNote.length, 1)
+  assert.ok(withNote[0].indexOf('co-row-pills') < withNote[0].indexOf('co-desk-note') && withNote[0].indexOf('</button><div class="co-desk-note"') > -1)
+  assert.ok(withNote[0].includes(`>${note}<`), 'the whole note is in the page; one line shows and Show more reveals the rest')
+  assert.match(items.at(-1), /Reviewed title/)
+  assert.match(items.at(-1), /#4 · teammate · <time[^>]*>you reviewed /)
+  assert.doesNotMatch(html, /Pull request #4/)
 })
 
 test('rail badges mark only what waits on you; information shows a quiet number', async t => {
@@ -322,11 +416,14 @@ test('state chips sit beside the title, and the hover Assign is an icon so the r
 test('a row reads title, facts, labels, then pills, each on its own line, in list rows and desk rows', () => {
   const list = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
   assert.match(list, /<div className="co-pr-meta">[\s\S]*?<\/div>\s*<div className="co-pr-labels"><PullLabels pr=\{pr\} \/><\/div>\s*<div className="co-row-pills">\s*<PullStateChips pr=\{pr\} machineChip=\{standing\.role === 'author' \? review\.chip : null\} \/>/)
+  // Every desk row is one DeskRow: title, facts, labels, pills, in that order, all inside the button that opens the PR.
+  const row = readFileSync(new URL('../ui/DeskRow.jsx', import.meta.url), 'utf8')
+  assert.match(row, /<span className="co-desk-row-title">\{title\}<\/span>\s*<span className="co-desk-row-meta">\{facts\}<\/span>\s*\{labels\}\s*\{pills\.length \? <span className="co-row-pills">/)
   const desk = readFileSync(new URL('../ui/DeskViews.jsx', import.meta.url), 'utf8')
-  assert.match(desk, /<\/span>\s*<span className="co-pr-labels"><PullLabels pr=\{pr\} \/><\/span>\s*\{chip \|\| standingChip \? <span className="co-row-pills">/)
-  // The facts line holds no pill: the chip that says whose turn it is lives on the pills line.
-  const factsLine = desk.slice(desk.indexOf('<span className="co-desk-row-meta">'), desk.indexOf('<span className="co-pr-labels">'))
-  assert.doesNotMatch(factsLine, /co-desk-chip/)
+  assert.match(desk, /labels=\{<span className="co-pr-labels"><PullLabels pr=\{pr\} \/><\/span>\}\s*pills=\{pills\.map/)
+  // The facts line holds no pill: the status lives on the pills line.
+  const factsLine = desk.slice(desk.indexOf('facts={<>'), desk.indexOf('labels={<span'))
+  assert.doesNotMatch(factsLine, /co-desk-chip|StatusPill/)
 })
 
 test('the attention bar does not sit inside a second border', () => {
@@ -385,7 +482,8 @@ test('on a phone the four views are one segmented bar with every segment on scre
 test('the phone keeps Sync and Settings labelled, a sticky review footer and decision bar, and an unsqueezed group header', () => {
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const theme = read('theme.js'), work = read('workspace-theme.js'), app = read('index.jsx')
-  assert.match(app, /<span className="co-label-short">\{refreshingAll \? 'Syncing…' : NAMES\.sync\}<\/span>/)
+  assert.match(app, /<span className="co-label-short">\{refreshingAll \? 'Syncing…' : NAMES\.syncShort\}<\/span>/)
+  assert.equal(NAMES.syncShort, 'Sync', 'the phone keeps the short word; the full name is Sync with GitHub')
   assert.match(theme, /\.co-toolbar \.co-label-short \{ display: inline; \}/)
   assert.doesNotMatch(work, /\.co-header \.co-settings > summary > span \{ display:none; \}/, 'Settings keeps its word on a phone')
   assert.match(work, /\.co-rw-foot \{ position:sticky; bottom:0;/)
