@@ -29,6 +29,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Iterator
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -48,6 +49,9 @@ RESULT_VERSION = 1
 # own sheet (spend_owner_grant); the app asks for that grant (respond-flow.js, approveResponse) for exactly this result and chat.
 GH_TIMEOUT = 60
 GIT_TIMEOUT = 300
+# How long `post` lets GitHub's PR record catch up with a push it just made (await_pull_head).
+PULL_HEAD_SETTLE_SECONDS = 30
+PULL_HEAD_POLL_SECONDS = 2
 
 # The caps of respond-result.md ("The result"), counted in characters.
 MAX_POINTS = 30
@@ -803,11 +807,12 @@ def require_same_pull(result: dict[str, Any], facts: dict[str, Any], outcome: st
   # Once the push is receipted, GitHub's head is the tip; before that it is still the head the
   # work was built on, or the tip when a finished push lost its receipt (the push step then
   # finds nothing left to send and only records it).
-  allowed = {result["tip_sha"]} if result["receipts"]["push"] else {pr["head_sha"], result["tip_sha"]}
+  pushed = bool(result["receipts"]["push"])
+  allowed = {result["tip_sha"]} if pushed else {pr["head_sha"], result["tip_sha"]}
   if facts["head_sha"] not in allowed:
+    expected = f"this post pushed {result['tip_sha'][:7]}" if pushed else f"this result was built on {pr['head_sha'][:7]}"
     raise Refused(
-      f"The PR moved: GitHub's head is {facts['head_sha'][:7]} but this result was built on "
-      f"{pr['head_sha'][:7]}, so {outcome}. Ask for another Respond pass."
+      f"The PR moved: GitHub's head is {facts['head_sha'][:7]} but {expected}, so {outcome}. Ask for another Respond pass."
     )
   if facts["head_ref"] != pr["head_ref"] or str(facts["head_repo"]).lower() != pr["head_repo"].lower():
     raise Refused(f"The PR's head branch is not the one this result was built on, so {outcome}.")
@@ -872,6 +877,19 @@ def confirm_branch_head(head_repo: str, head_ref: str, tip: str) -> None:
     raise CommandError(f"after the push GitHub shows {head_ref} at {str(actual)[:7]}, not at {tip[:7]}")
 
 
+def await_pull_head(pull: PullRef, old_head: str, tip: str) -> None:
+  """GitHub moves a PR's own head some seconds after its branch moves, so right after our push the PR can
+  still name `old_head`. Wait out only that lag: any other head returns at once for the strict recheck to judge."""
+  deadline = time.monotonic() + PULL_HEAD_SETTLE_SECONDS
+  while read_pull(pull)["head_sha"] == old_head:
+    if time.monotonic() >= deadline:
+      raise CommandError(
+        f"the commits are pushed (tip {tip[:7]}), but after {PULL_HEAD_SETTLE_SECONDS} seconds GitHub's PR "
+        f"still shows {old_head[:7]}; try again in a minute"
+      )
+    time.sleep(PULL_HEAD_POLL_SECONDS)
+
+
 def done_note(finished: Any) -> str:
   return " (already done)" if finished else ""
 
@@ -903,6 +921,7 @@ class Posting:
     result["receipts"]["push"] = {"sha": tip, "at": utc_now()}
     self.persist()
     print(f"Pushed {counted(len(commits), 'commit')} to {pr['head_repo']}:{pr['head_ref']} (tip {tip[:7]}).")
+    await_pull_head(self.pull, pr["head_sha"], tip)
 
   def recheck(self) -> None:
     """The PR is read again right before a public step, so a PR that moved, was retargeted or was

@@ -79,7 +79,7 @@ import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { SyncHubContext, useDeskReviewRuns, useReviewList } from './ui/useReviewList.js'
 import { useRespondResults } from './ui/useRespondResults.js'
-import { SyncNote } from './ui/GithubParts.jsx'
+import { SyncNote, SYNC_NOTE_ID } from './ui/GithubParts.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { NAMES } from './names.js'
 import { BootProgress } from './ui/BootProgress.jsx'
@@ -355,6 +355,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // Whether the last ledger read was complete. The manual refresh reports
   // failure from it, so a still-partial feed never reads as "updated".
   const ledgerCurrentRef = useRef(false)
+  // Whether the last read of the review requests came back; the hub settles a failed read without throwing.
+  const incomingReadOkRef = useRef(true)
   useEffect(() => { connRef.current = conn }, [conn])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
 
@@ -591,8 +593,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         if (!rows) throw new Error('The review requests could not be read')
         return rows
       },
-      apply: rows => setIncomingReviews(connRef.current.state === 'connected' ? rows : []),
-      failed: () => {}, // the list stays as it was
+      apply: rows => { incomingReadOkRef.current = true; setIncomingReviews(connRef.current.state === 'connected' ? rows : []) },
+      failed: () => { incomingReadOkRef.current = false }, // the list stays as it was
     })
   }, [hub, token, sendOnly])
   const refreshIncomingReviews = useCallback(() => hub.refresh('incoming'), [hub])
@@ -1684,6 +1686,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       }} />
   }
 
+  // The reads the header's "Last synced" depends on all came back: a cached ledger or a failed
+  // review-request read is not a sync. The first load and every Sync ask this same question.
+  const syncReadsCurrent = () => ledgerCurrentRef.current && (connRef.current.state !== 'connected' || incomingReadOkRef.current)
+
   // The one refresh path after the open-time sync: the header's Refresh and
   // the header's Refresh renews everything on screen — local
   // sources, the contribution feed, review requests, repositories, upstream
@@ -1700,7 +1706,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       if (checked.ok) setUpstreamChecks(checked.results)
     }
     setRefreshKey(value => value + 1)
-    return { ok: sourceOk && ledgerCurrentRef.current, upstream }
+    return { ok: sourceOk && syncReadsCurrent(), upstream }
   }
   const [refreshingAll, setRefreshingAll] = useState(false)
   // Whether the last input was the keyboard or a pointer. A row shows its
@@ -1715,17 +1721,19 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     document.addEventListener('pointerdown', pointer, true)
     return () => { document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', pointer, true) }
   }, [])
-  // What the last Refresh found, shown under the page title.
+  // The first successful load and later explicit refreshes share one header history.
   const [refreshNote, setRefreshNote] = useState(null)
   async function refreshAll() {
     if (refreshingAll) return undefined
     setRefreshingAll(true)
     try {
       const outcome = await refreshEverything()
-      setRefreshNote({ outcome, at: new Date().toISOString() })
+      setRefreshNote(old => outcome?.ok && outcome?.upstream?.ok !== false
+        ? { at: new Date().toISOString(), failed: false }
+        : { at: old?.at || null, failed: true })
       return outcome
     } catch {
-      setRefreshNote({ outcome: null, at: new Date().toISOString() })
+      setRefreshNote(old => ({ at: old?.at || null, failed: true }))
       return null
     } finally { setRefreshingAll(false) }
   }
@@ -1736,7 +1744,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // later manual refresh never drops the app back to the opening screen.
   const [booted, setBooted] = useState(false)
   const bootReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady
-  useEffect(() => { if (bootReady) setBooted(true) }, [bootReady])
+  useEffect(() => {
+    if (!bootReady || booted) return
+    setBooted(true)
+    if (conn.state === 'connected') setRefreshNote(old => old || (!sourceError && syncReadsCurrent() ? { at: new Date().toISOString(), failed: false } : { at: null, failed: true }))
+  }, [bootReady, booted, conn.state, sourceError])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
@@ -1828,11 +1840,12 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       <style>{CSS}</style>
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
-          <SyncNote note={refreshNote} />
-          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync}>
+          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed ? SYNC_NOTE_ID : undefined}>
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-label-long">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
-            <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.syncShort}</span>
+            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+              <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.syncShort}</span>
+              <SyncNote note={refreshNote} />
+            </span>
           </button>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}

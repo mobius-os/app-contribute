@@ -141,9 +141,10 @@ export const CSS = `
   width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--muted);
 }
-.co-toolbar-refresh { gap: 7px; white-space: nowrap; }
+.co-toolbar-refresh { gap: 7px; white-space: nowrap; text-align:left; }
+.co-sync-copy { display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
 .co-label-short { display: none; }
-.co-sync-note { color: var(--muted); font-size: var(--co-text-meta); white-space: nowrap; }
+.co-sync-note { color: var(--muted); font-size: var(--co-text-meta); white-space: nowrap; font-weight:500; }
 .co-boot {
   min-height: 70dvh; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px;
@@ -1406,7 +1407,8 @@ export const CSS = `
   .co-toolbar { gap: 3px; }
   .co-toolbar-check { width: 32px; padding: 0; justify-content: center; }
   /* Sync and Settings keep a word on a phone: an icon alone is not a label (DESIGN.md). */
-  .co-toolbar .co-label-long, .co-sync-note { display: none; }
+  .co-toolbar .co-label-long { display: none; }
+  .co-sync-last { display: none; }
   .co-toolbar .co-label-short { display: inline; }
   .co-toolbar-refresh { min-width: 40px; justify-content: center; }
   .co-project-control { max-width: 108px; padding-inline: 8px; }

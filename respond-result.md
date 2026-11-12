@@ -221,7 +221,10 @@ gate, above) and, when that is refused, exits 3 before touching anything. Then, 
      commit the description links is the one proven in this run;
    * **push**: `tip_sha` to `refs/heads/<pr.head_ref>` of `pr.head_repo`, fast-forward only
      (never forced), from the bundle (fetch the PR head, fetch the bundle, push); then check
-     GitHub shows `tip_sha` as that branch's head. Skipped when there are no commits;
+     GitHub shows `tip_sha` as that branch's head. GitHub moves the PR's own head some seconds
+     after the branch, so the step then waits (up to 30 seconds) while the PR still shows
+     `pr.head_sha`; a PR that still lags after that stops the post with the push receipted, and
+     a second run carries on. Skipped when there are no commits;
    * **replies**: one `POST` each (`issues/<n>/comments`, or
      `pulls/<n>/comments/<reply_to>/replies` when `reply_to` is set), in order. Before each
      write `receipts.sending` is saved; it is cleared once the receipt is, or when GitHub answers

@@ -28,8 +28,8 @@ function conflictFact(pr) {
 
 const short = sha => String(sha || '').slice(0, 7)
 
-// Open a draft for review: reviewers are notified, and Contribute cannot take
-// it back to a draft. The exact version is pinned by the platform's action.
+// Open a draft for review: GitHub shows it as ready. This asks nobody to review it (asking a person
+// is a separate review request), and the exact version is pinned by the platform's action.
 export function openForReviewCopy(pr) {
   return {
     icon: 'send',
@@ -37,12 +37,12 @@ export function openForReviewCopy(pr) {
     confirm: NAMES.openForReview,
     working: 'Opening…',
     facts: [
-      { tone: 'ok', text: 'Reviewers are asked to look at it' },
+      { tone: 'ok', text: 'It stops being a draft and is ready for review' },
       checksFact(pr),
       conflictFact(pr),
       { tone: 'ok', text: 'You can turn it back into a draft later' },
     ].filter(Boolean),
-    footnote: `Opens the version you are looking at (${short(pr.headRefOid)}). Nothing merges.`,
+    footnote: `Opens the version you are looking at (${short(pr.headRefOid)}). It does not ask anyone to review it, unless the repository has code owners. Nothing merges.`,
     // GitHub cannot pin a version on this write, so the platform reports the head it saw afterwards.
     done: outcome => ({
       title: NAMES.openForReview,
