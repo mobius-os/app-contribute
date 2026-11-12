@@ -3,7 +3,7 @@ import { IGNORE_REASONS } from '../review-actions.js'
 import { focusActionRegion } from './TaskPane.jsx'
 import { CloseWindowButton, WindowHead } from './WindowHead.jsx'
 
-// "Ignore": set a review's findings aside for this exact version, with one tap
+// "Set aside": set a review's findings aside for this exact version, with one tap
 // on why. The note stays inside Contribute and posts nothing; the X is the only
 // way out. Opened inside a ReviewDialog.
 export function IgnoreReview({ pr, onPick, onClose }) {
@@ -11,7 +11,7 @@ export function IgnoreReview({ pr, onPick, onClose }) {
   const titleId = useId()
   useEffect(() => { focusActionRegion(region.current) }, [])
   return <section ref={region} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead icon="review" title="Ignore this review?" titleId={titleId} pulls={[pr]} tools={<CloseWindowButton onClick={onClose} />} />
+    <WindowHead icon="review" title="Set this review aside?" titleId={titleId} pulls={[pr]} tools={<CloseWindowButton onClick={onClose} />} />
     <div className="co-rw-body">
       <h4 className="co-rw-label">Why?</h4>
       <div className="co-rw-reasons">{IGNORE_REASONS.map(reason => <button key={reason} type="button" className="co-rw-reason" onClick={() => onPick(reason)}>{reason}</button>)}</div>

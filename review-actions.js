@@ -24,10 +24,11 @@ const primary = action => ({ ...action, primary: true })
 const quiet = action => ({ ...action, quiet: true })
 
 // `tone` is reviewContent's key (ui/ReviewTab.jsx). `can` says which actions this surface can
-// take (a closed PR cannot start a review, an older run has no retry, ...).
-export function reviewActionPlan({ tone, own = false, chat = false, asked = false, stoppable = false, can = {} }) {
+// take (a closed PR cannot start a review, an older run has no retry, ...). `batch` is how many
+// PRs the run covers: Stop ends the whole run, so a batch's button says how many it stops.
+export function reviewActionPlan({ tone, own = false, chat = false, asked = false, stoppable = false, batch = 1, can = {} }) {
   const ask = label => (chat ? [{ key: 'ask', label }] : [])
-  const stop = stoppable ? [quiet({ key: 'stop', label: 'Stop review' })] : []
+  const stop = stoppable ? [quiet({ key: 'stop', label: batch > 1 ? `Stop review of ${batch} PRs` : 'Stop review' })] : []
   switch (tone) {
     case 'running':
       return [...ask(NAMES.openChat).map(primary), ...stop]
@@ -43,12 +44,12 @@ export function reviewActionPlan({ tone, own = false, chat = false, asked = fals
         // On someone else's PR the next step is saying what you found. On your own PR nothing is ever
         // posted as a review of yourself (pr-machine.js): you fix it or set it aside.
         ...(can.post && !own ? [primary({ key: 'post', label: NAMES.postToGitHub })] : []),
-        ...(can.ignore ? [{ key: 'ignore', label: 'Ignore…' }] : []),
+        ...(can.ignore ? [{ key: 'ignore', label: NAMES.ignore }] : []),
         ...(can.again ? [{ key: 'again', label: NAMES.reviewAgain }] : []),
         ...ask('Ask the reviewer something'),
       ]
     case 'ignored':
-      return [...(can.undo ? [{ key: 'undo', label: 'Undo ignore' }] : []), ...ask('Ask the reviewer something')]
+      return [...(can.undo ? [{ key: 'undo', label: 'Undo set aside' }] : []), ...ask('Ask the reviewer something')]
     default: // a verdict card carries its own buttons; clear, waiting and settled reviews only offer the question
       return ask('Ask the reviewer something')
   }

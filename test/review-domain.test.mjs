@@ -2,10 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  addressAllAction,
   contributionsNeedingAttention,
   indexReviewStatus,
-  isContributionCycleChat,
   partitionReviewUnits,
   progressReviewAction,
   reviewStateFor,
@@ -113,7 +111,7 @@ test('a check that could not run never starts a review agent', () => {
   assert.equal(progressReviewAction([pr('unchecked')], { state: 'unavailable', byId: {} }), null)
 })
 
-test('address all includes active blockers, not history or healthy public work', () => {
+test('what needs attention includes active blockers, not history or healthy public work', () => {
   const records = [
     { id: 'local', type: 'pr', status: 'prepared', repo: 'mobius-os/app-local', plan: { title: 'Refresh local change' } },
     {
@@ -132,16 +130,4 @@ test('address all includes active blockers, not history or healthy public work',
     contributionsNeedingAttention(records, review).map((record) => record.id),
     ['local', 'live'],
   )
-  const action = addressAllAction(records, review)
-  assert.equal(action.count, 2)
-  assert.match(action.draft, /Refresh local change/)
-  assert.match(action.draft, /Checks failed — One test is red\./)
-  assert.doesNotMatch(action.draft, /history|issue|clean/)
-})
-
-test('contribution cycle recovery uses its durable scope only', () => {
-  assert.equal(isContributionCycleChat({ scope: 'contribute-cycle', title: 'Anything' }), true)
-  assert.equal(isContributionCycleChat({ scope: 'contribute-task:abc123' }), true)
-  assert.equal(isContributionCycleChat({ title: 'Finishing the contribution cycle' }), false)
-  assert.equal(isContributionCycleChat({ scope_label: 'Contribution cycle' }), false)
 })

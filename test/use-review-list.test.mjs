@@ -63,8 +63,9 @@ function harness() {
   unmounts.push(() => { effects.forEach(effect => effect?.cleanup?.()); stopHub() })
   // The entries come out of the evaluated hook's realm: copy them so the arrays compare with the test's own.
   const rows = () => [...view.entries].map(entry => `${entry.bucket}:${entry.chips.map(chip => chip.label).join('+')}`)
+  const titles = () => [...view.entries].map(entry => entry.item.title)
   const flush = () => new Promise(resolve => setImmediate(resolve))
-  return { render, reads, rows, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: () => view.syncPulls() }
+  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: () => view.syncPulls() }
 }
 
 const head = letter => letter.repeat(40)
@@ -156,4 +157,17 @@ test('an approved review is read live too, so a push after it puts the PR back t
   assert.deepEqual(h.rows(), ['checking:'])
   h.reads[0].resolve(live(pushed('APPROVED', head('a')))); await h.flush()
   assert.deepEqual(h.rows(), ['waiting:New commits · review again'])
+})
+
+test('a review saved without its PR\'s title shows the title from GitHub once the next read answers', async () => {
+  const h = harness()
+  h.render({ ...base, runs: runsOf(review('all_clear', { title: '' })) })
+  assert.deepEqual(h.titles(), [''], 'until a read answers there is nothing to read it from')
+  h.reads[0].resolve(live({ title: 'Its title on GitHub' })); await h.flush()
+  assert.deepEqual(h.titles(), ['Its title on GitHub'])
+  // A later Sync that finds the PR renamed does not rewrite a title the review saved itself.
+  const saved = harness()
+  saved.render({ ...base, runs: runsOf(review('all_clear', { title: 'Saved title' })) })
+  saved.reads[0].resolve(live({ title: 'Renamed' })); await saved.flush()
+  assert.deepEqual(saved.titles(), ['Saved title'])
 })

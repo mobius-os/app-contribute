@@ -19,14 +19,14 @@ test('only a confirmed disconnect asks the owner to connect GitHub', async t => 
   const html = await render(t, { state: 'disconnected' })
   if (html === null) return
   assert.match(html, /connect GitHub/)
-  assert.doesNotMatch(html, /Check GitHub again/)
+  assert.doesNotMatch(html, /Check again/)
 })
 
 test('an unreachable status read is retryable and never asks to reconnect', async t => {
   const html = await render(t, { state: 'unknown', message: 'The GitHub connection check timed out.' })
   if (html === null) return
   assert.match(html, /timed out/)
-  assert.match(html, /Check GitHub again/)
+  assert.match(html, /Check again/)
   assert.doesNotMatch(html, /connect GitHub/)
 })
 

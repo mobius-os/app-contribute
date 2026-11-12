@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { baseTip, prKey, reviewItemProgress, reviewRunHalted, reviewRunStateLabel, reviewRunTitle, runDetailsElsewhere, waitingRepair } from '../collaboration.js'
-import { verdictCopy } from '../review-copy.js'
+import { reviewDate, verdictCopy } from '../review-copy.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
@@ -59,7 +59,7 @@ export function RepairProposal({ item, busy, onDecide }) {
     <p className="co-task-footnote">Pushes commit <code>{short(repair.commit)}</code> on top of <code>{short(repair.base || item.head_sha)}</code>. If the branch moved, nothing is pushed.</p>
     {onDecide ? <div className="co-verdict-actions">
       <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={() => onDecide(repair, 'push')}>{busy ? 'Working…' : 'Push fix'}</button>
-      <button type="button" className="co-btn" disabled={busy} onClick={() => onDecide(repair, 'discard')}>Don’t push</button>
+      <button type="button" className="co-btn" disabled={busy} onClick={() => onDecide(repair, 'discard')}>{NAMES.discard}</button>
     </div> : null}
   </div>
 }
@@ -72,7 +72,7 @@ function UnconfirmedVerdict({ busy, onCheck, onDismiss }) {
   async function check() { setChecked(!!await onCheck()) }
   return <>
     <div className="co-verdict-actions">
-      <button type="button" className="co-btn" disabled={busy} onClick={check}>{busy ? 'Checking…' : 'Check GitHub now'}</button>
+      <button type="button" className="co-btn" disabled={busy} onClick={check}>{busy ? 'Checking…' : NAMES.checkAgain}</button>
       {onDismiss ? <button type="button" className="co-btn" disabled={busy} onClick={onDismiss}>{NAMES.discard}</button> : null}
     </div>
     {checked ? <p className="co-task-footnote" role="status">Checked just now: GitHub shows no review from this attempt.</p> : null}
@@ -92,14 +92,16 @@ export function RunDetail({ run, pulls, listState, busy = false, error = '', onS
   const stoppable = run.can_stop && run.state !== 'complete' && !halted
   const retryable = halted && retryPulls.length > 0 && onRetry
   const elsewhere = runDetailsElsewhere(run)
+  const when = reviewDate(run.created_at, true)
+  const reviewedOn = when ? `Reviewed the version of ${when}` : 'Reviewed an earlier version'
   return <>
     <Icon name="review" size={23} /><h3>{reviewRunTitle(run)}</h3>
     <p>Recorded status: {reviewRunStateLabel(run)}</p>{run.summary ? <p>{run.summary}</p> : null}
-    {elsewhere ? <p className="co-task-footnote">Started outside Contribute. Its instructions and findings are in the owning conversation.</p>
+    {elsewhere ? <p className="co-task-footnote">Started outside Contribute. Its instructions and findings are in the chat that ran it.</p>
       : <details className="co-task-details"><summary>Instructions used by this run</summary>{run.options ? <ResolvedPrompt snapshot={run.options} /> : <p>This older run did not save a prompt snapshot.</p>}</details>}
     <div className="co-task-pulls">{run.items?.map(item => <div key={`${item.repo}:${item.number}`}>
       <strong>#{item.number} · {reviewItemProgress(run, item).label}</strong>
-      <p className="co-pr-note">{savedVersion(item, pulls, listState)} · Recorded version <code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code>.{elsewhere ? '' : ' Saved findings are not a new approval.'}</p>
+      <p className="co-pr-note">{savedVersion(item, pulls, listState)} · {reviewedOn} <small><code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code></small>.{elsewhere ? '' : ' Saved findings are not a new approval.'}</p>
       {item.summary ? <MarkdownView markdown={item.summary} /> : elsewhere ? null : <p>The agent’s findings will appear here.</p>}
       {item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a>
         : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p>
@@ -109,10 +111,10 @@ export function RunDetail({ run, pulls, listState, busy = false, error = '', onS
         onCheck={onCheck && !elsewhere ? onCheck : null} /> : null}
       <RepairProposal item={item} busy={busy} onDecide={onRepair && !elsewhere ? (attempt, decision) => onRepair(item, attempt, decision) : null} />
     </div>)}</div>
-    {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{needsAnswer ? NAMES.answerInChat : elsewhere ? 'Open the owning chat for details' : NAMES.openChat}</button> : null}
-    {stoppable && onStop ? <><button className="co-btn co-btn-quiet" disabled={busy} onClick={onStop}>Stop workflow</button><p className="co-task-footnote">Stop prevents future actions. An already-started public action may finish; its outcome stays visible.</p></> : null}
+    {run.chat_id ? <button className="co-btn co-btn-primary co-task-primary" onClick={() => openAgentConversation(run.chat_id)}>{needsAnswer ? NAMES.answerInChat : elsewhere ? 'Open the chat for details' : NAMES.openChat}</button> : null}
+    {stoppable && onStop ? <><button className="co-btn co-btn-quiet" disabled={busy} onClick={onStop}>Stop agent run</button><p className="co-task-footnote">Stop prevents future actions. An already-started public action may finish; its outcome stays visible.</p></> : null}
     {retryable ? <><button className="co-btn co-task-secondary" disabled={busy} onClick={() => onRetry(retryPulls)}>{rerunName(run.mode)}</button><p className="co-task-footnote">Starts a new run on the current versions. You can pick another model.</p></> : null}
-    {!run.can_stop && run.state !== 'complete' && run.chat_id && !retryable ? <p className="co-task-footnote">Use Stop in the owning chat to stop this workflow.</p> : null}
+    {!run.can_stop && run.state !== 'complete' && run.chat_id && !retryable ? <p className="co-task-footnote">Use Stop in the chat that ran it to stop this agent run.</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {run.items?.some(item => item.state === 'merged') && updater ? <><p className="co-task-footnote">Merged on GitHub. {updater.where}</p><button className="co-btn co-task-secondary" onClick={updater.open}>{updater.label}</button></> : null}
     {run.items?.some(item => item.state === 'queued') ? <p>In the merge queue, not merged yet. Contribute checks GitHub and shows when it lands.</p> : null}

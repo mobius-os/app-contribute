@@ -137,7 +137,7 @@ nothing. Pause/Resume needs an explicit partner action, either through the
 Contribute control or an unambiguous chat instruction to use that same guarded
 operation.
 
-PR stacks, merging, and app publication with a post-merge connection are in
+Existing PR stacks, merging, and app publication with a post-merge connection are in
 [maintainer.md](maintainer.md); legacy `mobius-bot` sends
 are in [legacy-bot.md](legacy-bot.md).
 

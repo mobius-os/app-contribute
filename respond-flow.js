@@ -3,7 +3,7 @@
 // confirms it on its own sheet (respond-result.js, THE GATE): an approval the agent could have written itself is not the owner's press.
 import { respondScope } from './address-feedback.js'
 import { clearDecision, readFreshResult, writeDecision } from './respond-store.js'
-import { POST_OFF_REASON, postMessage } from './respond-result.js'
+import { postMessage, postOffReason } from './respond-result.js'
 import { askOwner, ownerConfirmOffered } from './owner-grant.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { NAMES } from './names.js'
@@ -36,7 +36,7 @@ const refused = delivery => Boolean(delivery.status || delivery.gone)
 // `again`: the first message may not have woken the chat, or the post stopped; a new message id, because the same id is a duplicate
 // the platform drops. The helper never posts a step twice, so a second message is harmless.
 export async function approveResponse({ slug, digest, pr, chat = null, token, storage, capabilities = null, again = false, deliver = deliverCycleMessage, now = here }) {
-  if (!ownerConfirmOffered(capabilities)) return { ok: false, error: POST_OFF_REASON }
+  if (!ownerConfirmOffered(capabilities)) return { ok: false, error: postOffReason(again ? 'approved' : 'ready') }
   const current = await currentAnswer(slug, digest, storage)
   if (!current.ok) return current
   const { result } = current

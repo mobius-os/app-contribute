@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { stageWords } from '../publication-stage.js'
 
 import {
-  addressAllAction,
   contributionActionScope,
   contributionApprovalFingerprint,
   contributionApprovalIsCurrent,
@@ -15,9 +14,7 @@ import {
   contributionReviewScope,
   focusedContributionNavigationReady,
   focusedContributionReady,
-  contributionCycleProgress,
   isAllClear,
-  locateContributionReview,
   organizePrivateWorkAction,
   partitionReviewUnits,
   progressReviewAction,
@@ -102,25 +99,6 @@ test('shell review intents name one ledger record without encoding presentation 
   }
 })
 
-test('a record intent resolves its current phase and enclosing stack', () => {
-  const stack = {
-    id: 'stack:demo',
-    records: [{ id: 'layer-1' }, { id: 'layer-2' }],
-  }
-  const single = { id: 'single-unit', record: { id: 'single' } }
-  const phases = { action: [single], clear: [stack], history: [] }
-
-  assert.deepEqual(locateContributionReview(phases, 'layer-2'), {
-    phase: 'clear',
-    unit: stack,
-  })
-  assert.deepEqual(locateContributionReview(phases, 'single'), {
-    phase: 'action',
-    unit: single,
-  })
-  assert.equal(locateContributionReview(phases, 'missing'), null)
-})
-
 test('the app resolves trusted focused intents without waiting for the full ledger', () => {
   assert.match(appSource, /event\.origin !== window\.location\.origin/)
   assert.match(appSource, /event\.source !== window\.parent/)
@@ -182,7 +160,7 @@ test('review-facing refreshes reject stale async settlements', () => {
   assert.match(appSource, /requestId !== reviewStatusRequestRef\.current/)
   // The hub drops a read begun before an action superseded it, and reads of one fact never overlap.
   assert.match(appSource, /hub\.supersede\('incoming'\)/)
-  assert.equal((appSource.match(/hub\.supersede\('incoming'\)/g) || []).length, 2, 'settling a review request and assigning one both supersede an in-flight read')
+  assert.equal((appSource.match(/hub\.supersede\('incoming'\)/g) || []).length, 1, 'settling a review request supersedes an in-flight read')
   assert.match(appSource, /connRef\.current\.state === 'connected'/)
   assert.match(appSource, /refreshMountedLedger: ledgerReadyRef\.current/)
   assert.match(appSource, /await hub\.refresh\('ledger'\)/)
@@ -267,10 +245,10 @@ test('projects contain their contribution flow without a separate Reviews destin
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.doesNotMatch(feedSource, /<AttentionList items=\{ownerDecisions\}/)
   assert.match(feedSource, /preparedCount=\{preparedPrItems\.length\}/)
-  assert.match(feedSource, /agentActivity, 'Agent activity'/)
+  assert.match(feedSource, /agentActivity, NAMES\.agentRuns/)
   assert.match(feedSource, />Finished and closed work</)
   assert.match(feedSource, /DECISION_ACTION_LABELS/)
-  assert.match(sourceMapSource, /<SearchField label="Find a project"/)
+  assert.match(sourceMapSource, /<SearchField label="Find a repository"/)
   assert.match(sourceMapSource, /\['local', 'With local changes'\]/)
   assert.equal((sourceMapSource.match(/\['all', 'All'\]/g) || []).length, 1)
 })
@@ -518,41 +496,6 @@ test('a focused active review reuses the queue scope instead of starting a secon
   assert.match(cardSource, /reviewInProgress[\s\S]*'Review in progress'/)
 })
 
-test('address all handoff stays private and names every active blocker', () => {
-  const records = [
-    {
-      id: 'prepared', type: 'pr', status: 'prepared', repo: 'mobius-os/mobius',
-      title: 'Refresh prepared branch',
-    },
-    {
-      id: 'open', type: 'pr', status: 'open', repo: 'mobius-os/app-demo',
-      title: 'Handle review feedback', needs_attention: true,
-      attention: { message: 'A reviewer requested a focused test.' },
-      url: 'https://github.com/mobius-os/app-demo/pull/7',
-    },
-    {
-      id: 'merged', type: 'pr', status: 'merged', needs_attention: true,
-      title: 'Settled work',
-    },
-  ]
-  const reviewStatus = {
-    byId: {
-      prepared: {
-        state: 'needs_refresh',
-        message: 'The reviewed branch moved.',
-      },
-    },
-  }
-
-  const action = addressAllAction(records, reviewStatus)
-  assert.equal(action.count, 2)
-  assert.equal(action.label, 'Address all 2')
-  assert.match(action.draft, /Refresh prepared branch/)
-  assert.match(action.draft, /Handle review feedback/)
-  assert.doesNotMatch(action.draft, /Settled work/)
-  assert.match(action.draft, /Do not push, reply, publish, merge/)
-})
-
 test('private work excludes healthy public PRs and delegates only judgment', () => {
   const action = organizePrivateWorkAction([
     { id: 'one', type: 'pr', status: 'prepared' },
@@ -568,6 +511,9 @@ test('private work excludes healthy public PRs and delegates only judgment', () 
   assert.match(action.draft, /Voice/)
   assert.match(action.draft, /deterministic reconciliation helpers/)
   assert.match(action.draft, /Use agent judgment only where it is actually required/)
+  // The owner's rule (10 Nov 2026): independent PRs on the default branch, never a stack.
+  assert.match(action.draft, /Prepare independent PRs against the default branch; never a stack/)
+  assert.doesNotMatch(action.draft, /use stacks/i)
   assert.doesNotMatch(action.draft, /healthy/)
   assert.doesNotMatch(action.draft, /durable waits/)
   assert.match(action.startedMessage, /approval buttons update/)
@@ -604,24 +550,6 @@ test('public action failures have one truthful owner', () => {
   assert.match(feedSource, /contributionFailureOwner\(outcome\) === 'agent'/)
   assert.doesNotMatch(feedSource, /await onStartAgent/)
   assert.match(appSource, /Connect GitHub in Möbius Settings → Accounts to send this related group as your account\.[\s\S]*?failure: \{ owner: 'owner', code: 'github_not_connected' \}/)
-})
-
-test('cycle progress uses the durable plan and current task', () => {
-  assert.deepEqual(contributionCycleProgress({
-    running: true,
-    goal_plan: {
-      tasks: [
-        { id: 'prepare', title: 'Prepare local work', status: 'completed' },
-        { id: 'review', title: 'Review prepared changes', status: 'running' },
-      ],
-      summary: { completed: 1, total: 2 },
-    },
-  }), {
-    completed: 1,
-    total: 2,
-    percent: 50,
-    label: 'Review prepared changes',
-  })
 })
 
 

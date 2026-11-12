@@ -386,23 +386,6 @@ export function hasAttentionSignal(rec) {
     (typeof rec?.attention?.message === 'string' && !!rec.attention.message.trim())
 }
 
-export function attentionReason(rec, reviewStatus) {
-  const attention = rec?.attention || {}
-  const review = reviewStateFor(rec, reviewStatus)
-  const details = [
-    typeof attention.title === 'string' ? attention.title.trim() : '',
-    typeof attention.message === 'string' ? attention.message.trim() : '',
-  ].filter(Boolean)
-  if (details.length > 0) return details.join(' — ')
-  if (review?.state === 'needs_refresh') {
-    return review.message || 'This changed after it was reviewed and needs to be refreshed.'
-  }
-  if (typeof rec?.last_submit_error === 'string' && rec.last_submit_error.trim()) {
-    return rec.last_submit_error.trim()
-  }
-  return 'This contribution needs another look.'
-}
-
 // The batch handoff deliberately covers only active pull requests. A stale
 // attention flag on a merged, closed, superseded, or dropped record belongs in
 // History and must never bring settled work back into the action queue.
@@ -412,39 +395,6 @@ export function contributionsNeedingAttention(records, reviewStatus) {
     return hasAttentionSignal(rec) ||
       reviewStateFor(rec, reviewStatus)?.state === 'needs_refresh'
   })
-}
-
-export function addressAllAction(records, reviewStatus) {
-  const attentionRecords = contributionsNeedingAttention(records, reviewStatus)
-  if (attentionRecords.length === 0) return null
-  const list = attentionRecords.map((rec) => {
-    const title = rec.plan?.title || rec.title || rec.summary || 'Untitled pull request'
-    const repo = rec.repo ? ` — ${rec.repo}` : ''
-    const url = rec.attention?.url || rec.url || ''
-    return [
-      `- ${title}${repo}`,
-      `  ${attentionReason(rec, reviewStatus)}`,
-      url ? `  ${url}` : '',
-    ].filter(Boolean).join('\n')
-  })
-  return {
-    event: 'address_all_contributions',
-    title: 'Address contribution follow-up',
-    label: attentionRecords.length === 1 ? 'Fix' : `Address all ${attentionRecords.length}`,
-    busyLabel: 'Starting…',
-    startedLabel: 'Agent is handling follow-up',
-    startedMessage: 'Stay in Contribute. Refreshed reviews and any decisions will appear here.',
-    count: attentionRecords.length,
-    draft: [
-      'Address every active Contribute pull request that needs attention:',
-      '',
-      ...list,
-      '',
-      'Inspect each blocker, explain what can be fixed privately, and prepare the required updates.',
-      'Do not push, reply, publish, merge, or otherwise change GitHub without the approval required for that exact public action.',
-      'If a merge conflict or owner decision is required, leave it flagged and explain the next choice.',
-    ].join('\n'),
-  }
 }
 
 export function organizePrivateWorkAction(records, reviewStatus, projects = []) {
@@ -521,7 +471,7 @@ export function organizePrivateWorkAction(records, reviewStatus, projects = []) 
       'Before preparing any branch, fetch its canonical upstream read-only. Never pull, rebase, reset, switch, or otherwise move a shared live checkout. Build the review checkout from the freshly fetched accepted base, then replay only the attributable local commits and working diff in isolation. Do not copy an older whole tree over newer upstream changes. If a three-way replay is ambiguous, stop with the exact conflict.',
       'Inspect untracked and generated-looking paths before staging. When a path is clearly repository-wide generated state, add the smallest reusable ignore rule to the owning .gitignore and settle the generated path locally. Do not silently ignore ambiguous files; leave one concrete owner decision instead.',
       'Use agent judgment only where it is actually required: classifying local intent, grouping and deduplicating reusable changes, reviewing complete diffs, or fixing a real code/review problem.',
-      'Group cohesive changes within each repository before publication, not one pull request per chat. Keep unrelated work independent; use stacks only for genuine dependencies. Preserve all source-chat links when work is consolidated. A blocked group must not hold up unrelated ready work.',
+      'Group cohesive changes within each repository before publication, not one pull request per chat. Prepare independent PRs against the default branch; never a stack. Changes that depend on each other are one PR with clear commits, or the next PR opens only after the previous one has merged. Preserve all source-chat links when work is consolidated. A blocked group must not hold up unrelated ready work.',
       'Privately prepare every worthwhile change in scope and thoroughly review each exact head. Stage each exact head through Contribute\'s stage call and record verdicts through its review call; all_clear is valid only for the complete current staged head.',
       'Record intentionally excluded chat paths through their exact reviewed timestamps when this work came from a source chat.',
       'Do not push, publish, update a pull request, comment, merge, or otherwise change GitHub. Stop at direct approval buttons and summarize what is ready, automatic, blocked, and intentionally local.',
@@ -545,32 +495,6 @@ export function contributionFailureOwner(outcome) {
   const code = String(failure.code || '').toLowerCase()
   if (status === 401 || status === 403 || OWNER_FAILURE_CODES.has(code)) return 'owner'
   return 'agent'
-}
-
-export function isContributionCycleChat(chat) {
-  const scope = typeof chat?.scope === 'string' ? chat.scope : ''
-  return scope === 'contribute-cycle' || scope.startsWith('contribute-task:')
-}
-
-export function contributionCycleProgress(runtime) {
-  const plan = runtime?.goal_plan
-  const tasks = Array.isArray(plan?.tasks) ? plan.tasks : []
-  const summary = plan?.summary || {}
-  const completed = Number.isInteger(summary.completed)
-    ? summary.completed
-    : tasks.filter((task) => task?.status === 'completed').length
-  const total = Number.isInteger(summary.total) ? summary.total : tasks.length
-  const current = tasks.find((task) => task?.status === 'running')
-    || tasks.find((task) => task?.ready === true)
-  const label = current?.title
-    || runtime?.active_goal_objective
-    || (runtime?.pending_question_id ? 'Waiting for your decision' : 'Working through the cycle')
-  return {
-    completed,
-    total,
-    percent: total > 0 ? Math.round((completed / total) * 100) : null,
-    label,
-  }
 }
 
 export function partitionReviewUnits(units, reviewStatus) {
@@ -687,18 +611,4 @@ export function focusedContributionNavigationReady(focusTarget, lookup, records)
     return false
   }
   return lookup.ready === true || focusedContributionReady(records, recordId)
-}
-
-export function locateContributionReview(phaseUnits, recordId) {
-  const wanted = typeof recordId === 'string' ? recordId : ''
-  if (!wanted) return null
-  for (const [phase, units] of Object.entries(phaseUnits || {})) {
-    for (const unit of units || []) {
-      const records = unit?.records || (unit?.record ? [unit.record] : [])
-      if (records.some((record) => record?.id === wanted)) {
-        return { phase, unit }
-      }
-    }
-  }
-  return null
 }

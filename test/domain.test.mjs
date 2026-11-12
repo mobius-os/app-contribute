@@ -170,12 +170,15 @@ test('problem codes map to short human headlines, unknown falls back to raw', ()
   )
   assert.equal(
     problemHeadline('invalid_checkout'),
-    'The prepared files can no longer be verified — your agent can restage it',
+    'The prepared files can no longer be verified — your agent can prepare it again',
   )
   assert.equal(
     problemHeadline('review_unavailable'),
     'This review could not be verified — ask your agent to check it',
   )
+  // Plain words: the owner is never told to "restage" anything.
+  assert.deepEqual(Object.values(PROBLEM_HEADLINES).filter(text => /restage/i.test(text)), [])
+  assert.match(problemHeadline('invalid_stack'), /your agent can prepare it again/)
   // The map's keys are exactly the backend's _review_status_problem codes
   // (routes/github.py) — an invented key is dead copy, a missing real code
   // silently drops its friendly headline.

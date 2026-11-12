@@ -1,11 +1,14 @@
+import { useState } from 'react'
 import { ReviewFrame } from './ReviewFrame.jsx'
 import { MarkdownView, isPngDataUrl } from './MarkdownView.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 import { Icon } from './Icons.jsx'
 import { RunTag } from './RunTag.jsx'
+import { copyToClipboard } from './clipboard.js'
 import { NAMES } from '../names.js'
-import { SCREENSHOT_FOLDER, changesFrontEnd, chatStarting, planSteps, POST_OFF_REASON, stepDone } from '../respond-result.js'
+import { reviewDate } from '../review-copy.js'
+import { COPY_REPLIES, SCREENSHOT_FOLDER, changesFrontEnd, chatStarting, planSteps, postOffReason, repliesText, stepDone } from '../respond-result.js'
 import { screenshotCountText } from '../domain.js'
 import { useScreenshots } from './useScreenshots.js'
 
@@ -31,8 +34,11 @@ const filesData = result => ({
 })
 
 function statusLine({ status, result }, pr, starting) {
+  // "Nov 6, 09:30": when the answer was written names the version it was built on; empty when the time does not read.
+  const answered = reviewDate(result.created_at, true)
+  const builtOn = answered ? `the version of ${answered}` : short(result.pr.head_sha)
   switch (status) {
-    case 'ready': return `${plural(result.points.length, 'point', 'points')} answered · built on ${short(result.pr.head_sha)}`
+    case 'ready': return `${plural(result.points.length, 'point', 'points')} answered · built on ${builtOn}`
     case 'stale': return `The PR changed after this answer (${short(result.pr.head_sha)} → ${short(pr.headRefOid)}). Nothing was posted.`
     case 'approved': return starting ? STARTING.line : 'The chat has not started yet. Send it again, or open the chat.'
     case 'posting': return 'The chat is posting this now. Each step is ticked as it is done. If nothing changes for a few minutes, open the chat and ask it to continue.'
@@ -123,19 +129,33 @@ function Steps({ result, status }) {
   </div>
 }
 
+// For a Möbius that cannot Post: every reply with what it answers, to post by hand. "Copied" shows only once the write succeeded;
+// otherwise it says so, and the replies stay on this card to copy by hand.
+function CopyReplies({ result }) {
+  const [done, setDone] = useState('')
+  const label = done === 'copied' ? 'Copied' : done === 'failed' ? 'Couldn’t copy' : COPY_REPLIES
+  // An answer of commits alone has no replies; the button stays, because the reason names it.
+  return <button type="button" className="co-btn" disabled={!result.replies.length} onClick={async () => {
+    setDone(await copyToClipboard(repliesText(result)) ? 'copied' : 'failed')
+    window.setTimeout(() => setDone(''), 1500)
+  }}><Icon name={done === 'copied' ? 'check' : 'copy'} size={16} /><span>{label}</span></button>
+}
+
 // Why Post, Send again and Try again are off, or ''. Möbius's own confirmation (the gate) comes before anything about the chat or the screenshots.
-const postBlocker = (status, chat, ownerGrant, unseen) => (ownerGrant ? (status === 'ready' ? holdReason(chat) || imagesReason(unseen) : '') : POST_OFF_REASON)
+const postBlocker = ({ status, result }, chat, ownerGrant, unseen) => (ownerGrant ? (status === 'ready' ? holdReason(chat) || imagesReason(unseen) : '') : postOffReason(status, result.replies.length > 0))
 
 function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onPost, onDiscard, onRespondAgain }) {
   const { status, result } = view
-  const blocked = postBlocker(status, chat, ownerGrant, unseen)
+  const blocked = postBlocker(view, chat, ownerGrant, unseen)
+  // Offered exactly when the card says Post is off (the reason names it).
+  const copy = ownerGrant ? null : <CopyReplies key="copy" result={result} />
   const chatButton = label => <button key={label} type="button" className="co-btn" onClick={() => openAgentConversation(result.chat_id)}>{label}</button>
   if (readOnly || status === 'posted') return null
   const buttons = {
-    ready: [<button key="post" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(false)}>{busy ? 'Working…' : NAMES.postAnswer}</button>, chatButton(NAMES.replyInChat),
+    ready: [<button key="post" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(false)}>{busy ? 'Working…' : NAMES.postAnswer}</button>, copy, chatButton(NAMES.replyInChat),
       <button key="discard" type="button" className="co-btn co-btn-quiet" disabled={busy} onClick={onDiscard}>{NAMES.discard}</button>],
-    approved: starting ? [chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.sendAgain}</button>, chatButton(NAMES.openChat)],
-    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.tryAgain}</button>, chatButton(NAMES.openChat)],
+    approved: starting ? [copy, chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.sendAgain}</button>, copy, chatButton(NAMES.openChat)],
+    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.tryAgain}</button>, copy, chatButton(NAMES.openChat)],
     posting: [chatButton(NAMES.openChat)],
     // A second pass is offered only when the PR logic still allows one.
     stale: [onRespondAgain ? <button key="again" type="button" className="co-btn co-btn-primary" disabled={busy} onClick={onRespondAgain}>{NAMES.respondAgain}</button> : null,

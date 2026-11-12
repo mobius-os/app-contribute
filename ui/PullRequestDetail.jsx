@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { loadPullActivity, loadPullChecks, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, safeDetailLink } from '../pull-details.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { loadPullActivity, loadPullChecks, loadPullCommitFiles, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, safeDetailLink } from '../pull-details.js'
+import { fetchRepoFile } from '../api.js'
+import { createImageReader } from '../image-source.js'
 import { MarkdownView } from './MarkdownView.jsx'
+import { RepoImageContext } from './MarkdownPictures.jsx'
 import { ClampedMarkdown } from './ClampedMarkdown.jsx'
 import { CopyId, commentReference } from './CopyId.jsx'
 import { Icon } from './Icons.jsx'
@@ -17,8 +20,9 @@ import { NAMES } from '../names.js'
 import { showOpenTab } from './stripScroll.js'
 import { NextStep, StateLine } from './NextStep.jsx'
 import { nextStepModel } from '../next-step.js'
-import { PullCommits } from './PullCommits.jsx'
+import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
+import { PullEscalation } from './PullEscalation.jsx'
 export { PullFiles }
 
 export function DateLabel({ value, prefix = '', time = false }) {
@@ -77,7 +81,7 @@ const FEEDBACK_FLAGS = {
   changes_requested: { label: 'Changes requested', tone: 'blocker', note: 'Not addressed yet. Read the review under Comments.' },
   github_activity: { label: 'New feedback', tone: 'news', note: 'The text is under Comments.' },
 }
-export function PullFeedbackFlag({ record, status = null, activity = null }) {
+function PullFeedbackFlag({ record, status = null, activity = null }) {
   const attention = record?.attention
   const flag = FEEDBACK_FLAGS[attention?.type]
   const reference = commentReference(attention?.url)
@@ -141,6 +145,8 @@ function PullStickyTitle({ pr, targetRef, tone }) {
 }
 
 const COMMENT_PREVIEW = 4
+// A commit with this many files or fewer opens its diffs already unfolded.
+const COMMIT_OPEN_FILES = 5
 
 // Which job a chat belongs to. Every chat button is Open chat; the kind tells several apart.
 const PROVENANCE_KINDS = { source: 'where it started', review: 'review', fix: 'fix', respond: 'feedback' }
@@ -190,9 +196,13 @@ function PullProvenance({ record, onRecord, conversations }) {
 function ReadErrors({ errors, onRetry }) {
   return errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={onRetry}>Retry</button></p>)
 }
-export function PullFileTotals({ totals, label = 'Total change' }) {
-  if (!totals || Object.values(totals).every(value => value === null)) return null
-  return <p className="co-detail-stats" aria-label={label}><span>{label}</span>{totals.files !== null ? <span>{totals.files} {totals.files === 1 ? 'file' : 'files'}</span> : null}{totals.additions !== null ? <span className="co-file-add">+{totals.additions} lines</span> : null}{totals.deletions !== null ? <span className="co-file-del">−{totals.deletions} lines</span> : null}</p>
+// Why a failed check failed: its failed step names and first annotations, as plain text (an annotation is
+// whatever the check's own tool wrote). The log itself is on GitHub, behind the row's link.
+function CheckWhy({ why }) {
+  return <div className="co-check-why">
+    {why.steps.length ? <p>{why.steps.length === 1 ? 'Failed step' : 'Failed steps'}: {why.steps.map(name => <code key={name}>{name}</code>)}</p> : null}
+    {why.annotations.length ? <ul>{why.annotations.map((note, index) => <li key={index}>{note.where ? <code>{note.where}</code> : null} {note.text}</li>)}</ul> : null}
+  </div>
 }
 export function PullChecks({ data }) {
   return <>
@@ -203,7 +213,8 @@ export function PullChecks({ data }) {
       {group.items.map(item => <article className="co-activity-item" key={item.id}>
         <header style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', overflowWrap: 'anywhere' }}><strong>{item.name || item.context || 'Unnamed check'}</strong><span>{(item.conclusion || item.status || item.state || 'unknown').replaceAll('_', ' ')}</span><DateLabel value={item.completed_at || item.updated_at || item.started_at || item.created_at} /></header>
         {item.output?.title || item.description ? <p>{item.output?.title || item.description}</p> : null}
-        {item.details_url || item.target_url || item.html_url ? <DetailLink href={item.details_url || item.target_url || item.html_url}>View result</DetailLink> : null}
+        {item.why ? <CheckWhy why={item.why} /> : null}
+        {item.details_url || item.target_url || item.html_url ? <DetailLink href={item.details_url || item.target_url || item.html_url}>{NAMES.viewOnGitHub}</DetailLink> : null}
       </article>)}
       {!group.items.length ? <p>No {group.name.toLowerCase()} returned on this page.</p> : null}
     </section>)}
@@ -249,11 +260,13 @@ export function PullThreads({ data }) {
 export function PullRequestDetail(props) {
   const pr = props.pr
   const identity = `${pr.repository?.nameWithOwner}#${pr.number}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
-  return <PullRequestDetailView key={identity} {...props} />
+  // The description, comments and discussions share one picture reader, so one page version has one picture budget.
+  const readPicture = useMemo(() => createImageReader(source => fetchRepoFile(props.token, source)), [identity, props.token])
+  return <RepoImageContext.Provider value={readPicture}><PullRequestDetailView key={identity} {...props} /></RepoImageContext.Provider>
 }
 // `review` carries what the Review tab needs from the run list: whether the
 // viewer wrote the PR, busy and error state, the run actions, and the loaded PRs.
-function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, capabilities = null, readOnly = false, provenance = [], holdUntilLoaded = false, initialTab = 'conversation', review = {} }) {
+function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, capabilities = null, readOnly = false, provenance = [], holdUntilLoaded = false, initialTab = 'conversation', review = {} }) {
   const [tab, setTab] = useState(initialTab)
   const tips = useTipDismiss()
   // On a phone the four tabs can overflow; the open one is always brought into view.
@@ -291,6 +304,9 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
   const shownComments = items => commentsOpen(items) ? (items || []) : items.slice(0, COMMENT_PREVIEW)
   const [threadCursors, setThreadCursors] = useState([null])
   const [commitCursors, setCommitCursors] = useState([null])
+  // The commit whose own diff is open in the Commits tab; Back hands focus to that commit's row.
+  const [openCommit, setOpenCommit] = useState(null)
+  const returnFocus = useRef('')
   const [versionStale, setVersionStale] = useState(cacheStore?.stale === true)
   useEffect(() => {
     if (!cacheStore) return
@@ -309,7 +325,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     description: 'description:1',
     ...(tab === 'conversation'
       ? { activity: `activity:${number}`, threads: `threads:${threadCursor || ''}`, related: 'related' }
-      : tab === 'review' ? {} : tab === 'commits' ? { view: `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
+      : tab === 'review' ? {} : tab === 'commits' ? { view: openCommit ? `commit:${openCommit.oid}` : `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
   }
   const keySignature = Object.values(keys).join('|')
   useEffect(() => {
@@ -346,7 +362,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       read(keys.threads, signal => loadPullThreads(token, pr, threadCursor, signal))
       read(keys.related, signal => loadPullRelated(token, pr, signal))
     } else if (tab !== 'review') {
-      read(keys.view, signal => tab === 'files' ? loadPullFiles(token, pr, number, signal) : tab === 'commits' ? loadPullCommits(token, pr, commitCursor, signal) : loadPullChecks(token, pr, number, signal))
+      read(keys.view, signal => tab === 'files' ? loadPullFiles(token, pr, number, signal) : tab === 'commits' ? (openCommit ? loadPullCommitFiles(token, pr, openCommit.oid, signal) : loadPullCommits(token, pr, commitCursor, signal)) : loadPullChecks(token, pr, number, signal))
     }
   }, [keySignature, cache, writeCache, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
   const entry = key => cache[key] || { loading: true }
@@ -429,13 +445,14 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
         {ready(description) ? <ClampedMarkdown markdown={description.data?.body || '_No description provided._'} /> : null}
       </div>
     </details>
+    <PullEscalation key={record?.attention?.key || ''} record={record} appId={appId} token={token} readOnly={readOnly} />
     <PullFeedbackFlag record={record} status={status} activity={ready(activity) ? activity.data : null} />
     </>}
-    <nav className="co-detail-tabs" aria-label="Pull request details" ref={tabStrip}>{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}
+    <nav className="co-detail-tabs" aria-label="Pull request details" ref={tabStrip}>{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => { setTab(key); if (key === 'commits') setOpenCommit(null) }}>{label}
       {key === 'checks' && checks?.total ? <><span className={'co-tab-dot is-' + checks.state} title={`${checks.passed} of ${checks.total} checks passed or skipped`} aria-label={{ success: 'checks passed', failure: 'checks failing', pending: 'checks running' }[checks.state]} /><span className="co-tab-count">{checks.failed ? `${checks.failed} failing` : `${checks.passed}/${checks.total}`}</span></> : null}
       {key === 'review' ? <ReviewMark standing={review?.standing} status={status} ctx={{ own: review?.own, ignored: review?.ignored }} /> : null}
       {Number.isInteger(tabCounts[key]) ? <span className="co-tab-count">{tabCounts[key]}</span> : null}</button>)}</nav>
-    <div className="co-pr-detail-body" role="region" aria-label="Pull request context">
+    <div className="co-pr-detail-body" role="region" aria-label="Pull request context" data-tab={tab}>
     {stale ? <p role="alert">This PR changed since the list was loaded. <button className="co-btn" onClick={onRefresh}>{NAMES.sync}</button></p> : null}
     {tab === 'conversation' && conversationLoading ? <Skeleton lines={7} label="Loading the conversation" /> : null}
     {tab === 'conversation' && !conversationLoading ? <>
@@ -453,9 +470,12 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
     </> : null}
     {tab === 'review' ? <ReviewTab pr={pr} status={status} readOnly={readOnly} {...review} /> : null}
+    {tab === 'commits' && openCommit ? <CommitChangesHead commit={openCommit} onBack={() => { returnFocus.current = openCommit.oid; setOpenCommit(null) }} /> : null}
     {tab === 'files' || tab === 'checks' || tab === 'commits' ? readState(view, tab) : null}
-    {tab === 'commits' && ready(view) ? <>
-      <PullCommits data={view.data} reviewedHead={status?.item?.head_sha || review?.earlier?.item?.head_sha || ''} again={againAction} pinned={!!againAction && !stale && !readOnly && nextStepModel(review.standing, { record, capabilities })?.primary?.intent === againAction.id} onAgain={intent => onReview?.(intent)} />
+    {tab === 'commits' && openCommit && ready(view) ? <PullFiles data={view.data} startOpen={view.data.files.length <= COMMIT_OPEN_FILES} /> : null}
+    {tab === 'commits' && !openCommit && ready(view) ? <>
+      <PullCommits data={view.data} reviewedHead={status?.item?.head_sha || review?.earlier?.item?.head_sha || ''} again={againAction} pinned={!!againAction && !stale && !readOnly && nextStepModel(review.standing, { record, capabilities })?.primary?.intent === againAction.id} onAgain={intent => onReview?.(intent)}
+        onOpen={setOpenCommit} returnFocus={returnFocus} />
       {commitCursors.length > 1 || view.data?.hasMore ? <div className="co-board-actions">
         {commitCursors.length > 1 ? <button className="co-btn" onClick={() => setCommitCursors(old => old.slice(0, -1))}>Previous commits</button> : null}
         {view.data?.hasMore && view.data.nextCursor ? <button className="co-btn" onClick={() => setCommitCursors(old => [...old, view.data.nextCursor])}>Show more commits</button> : null}
@@ -464,7 +484,7 @@ function PullRequestDetailView({ cacheStore, pr, token, onReview, onAssign, onRe
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
     {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
     {(tab === 'files' || tab === 'checks') && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
-    {tab === 'checks' && !view.loading ? <button className="co-btn co-btn-quiet" onClick={() => { writeCache(old => { const next = { ...old }; delete next[keys.view]; return next }) }}>{NAMES.sync}</button> : null}
+    {tab === 'checks' && !view.loading ? <button className="co-btn co-btn-quiet" onClick={() => { writeCache(old => { const next = { ...old }; delete next[keys.view]; return next }) }}>{NAMES.checkAgain}</button> : null}
     </div>
     {review?.standing ? <NextStep bar decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
   </div>

@@ -148,8 +148,9 @@ labels?: [type, area?], coauthor_trailer?: false,
 prior_work?: {searched_at, query, decision, summary?, matches?}
 ```
 
-`plan.stack` and `plan.after_merge` are maintainer-only fields:
-[maintainer.md](maintainer.md).
+`plan.after_merge` is a maintainer-only field: [maintainer.md](maintainer.md).
+Never write `plan.stack`: every PR is independent and targets the default
+branch (only an existing stack carries it).
 
 - Write `summary` for a person who does not know Git or the codebase: one short
   sentence about what becomes clearer, safer, faster, or easier. Do not put file

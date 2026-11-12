@@ -9,6 +9,7 @@ export const NAMES = Object.freeze({
   pr: 'PR',
   preparedPr: 'Prepared PR',
   localChanges: 'Local changes',
+  // One name for the agent's work: an agent run. Not a job, workflow, cycle, activity or progress.
   agentRun: 'Agent run',
   // The second card of an app on the Agent runs page: its prepared PRs and saved decisions, apart from its runs.
   preparedWork: 'Prepared work',
@@ -36,7 +37,8 @@ export const NAMES = Object.freeze({
   takeOver: 'Take over',
   approve: 'Approve',
   requestChanges: 'Request changes',
-  ignore: 'Ignore',
+  // Setting a review aside asks why first, so it ends in an ellipsis (the PR machine's own word for it).
+  ignore: 'Set aside…',
   merge: 'Merge',
   // Where Möbius confirms Merge on its own sheet, the way it lands is chosen here first, only when the repository allows more than one.
   mergeOptions: 'Merge options…',
@@ -54,7 +56,11 @@ export const NAMES = Object.freeze({
   push: 'Push',
 
   // Other buttons
-  sync: 'Sync',
+  // Sync reads everything again; Check again reads one thing (one PR, one connection, one verdict).
+  sync: 'Sync with GitHub',
+  syncShort: 'Sync',
+  checkAgain: 'Check again',
+  // One word for taking a proposal or draft away, whatever it was (a verdict, a pushed fix, a prepared PR).
   discard: 'Discard',
   openChat: 'Open chat',
   answerInChat: 'Answer in chat',
@@ -73,7 +79,7 @@ export const NAMES = Object.freeze({
   viewOnGitHub: 'View on GitHub',
   settings: 'Contribute settings',
 
-  // The app's list of followed repositories. "Projects" is the Möbius shell's own word for something else.
+  // The app's list of followed repositories. Say repository, not project or app: "Projects" is the Möbius shell's own word for something else.
   repositories: 'Repositories',
   moreRepositories: 'More repositories',
   allRepositories: 'All repositories',

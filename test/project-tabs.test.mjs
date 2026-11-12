@@ -49,7 +49,7 @@ test('the PR list follows its tab: requests explain themselves and My work shows
   assert.match(requests, /PRs where someone asked for your review/)
   assert.doesNotMatch(requests, /aria-label="Filter pull requests"/)
   const mine = render('PullRequests', { ...base, scope: 'mine' })
-  assert.match(mine, /No agent reviews in this project yet/)
+  assert.match(mine, /No agent runs in this project yet/)
   assert.doesNotMatch(mine, /Search pull requests|co-pr-box/)
 })
 
@@ -63,7 +63,7 @@ test('the projects list tags each project and folds apps with nothing to do', as
   assert.match(html, /Möbius<\/strong><span class="co-source-tag">Platform<\/span>/)
   assert.match(html, /Busy app<\/strong><span class="co-source-tag">App<\/span>/)
   assert.match(html, /1 PR waits for your review\. 2 things need you\./)
-  assert.match(html, /<details class="co-quiet-projects"><summary><span>Apps with nothing to do<\/span><b>1<\/b>/)
+  assert.match(html, /<details class="co-quiet-projects"><summary><span>Repositories with nothing to do<\/span><b>1<\/b>/)
   assert.doesNotMatch(html, /Everything else/)
 })
 

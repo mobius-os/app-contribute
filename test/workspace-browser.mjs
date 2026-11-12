@@ -1,9 +1,11 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Fourteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Seventeen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runProjectWarningChecks (the project fixture: the project screen's one GitHub row shows only for a conflict or an update),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
+// runPullReadingChecks (the whole app: reading a PR page: pictures, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
+// runDeskListChecks (the whole app: Needs you rows share one layout and their counts, Agent runs has three tabs, a merged row opens its PR page),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
@@ -53,6 +55,7 @@ import { organizePrivateWorkAction } from './review.js'
 import { batchHandle } from './chat-blocks.js'
 import { CSS } from './theme.js'
 import { NAMES } from './names.js'
+import { COPY_REPLIES } from './respond-result.js'
 import { stageWords } from './publication-stage.js'
 import { createSyncHub } from './refresh.js'
 import { SyncHubContext, useDeskReviewRuns } from './ui/useReviewList.js'
@@ -84,12 +87,12 @@ const prepared = {
     head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
-const calls = { exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], merges: [], grants: [], githubRetries: 0 }
+const calls = { autopilot: [], exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], merges: [], grants: [], githubRetries: 0 }
 const values = new Map(), versions = new Map(), navigation = [], reviewRuns = [], respondChats = []
 let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 // Reachable only by exact read, as a closed PR is absent from open search.
-const closedPulls = [pull(11, { title: 'Closed contribution', state: 'CLOSED' })]
+const closedPulls = [pull(11, { title: 'Closed contribution', state: 'CLOSED' }), pull(12, { title: 'Merged contribution', state: 'MERGED' })]
 // A finished review of PR 7 with the verdict in the given state; the server's own item states follow it.
 const VERDICT_ITEM_STATES = { proposed: 'verdict_pending', posted: 'all_clear', unknown: 'verdict_unknown' }
 const verdictRun = verdict => ({ id: 'review-verdict', chat_id: 'review-chat-fixture', mode: 'review', state: verdict === 'proposed' ? 'needs_you' : 'complete', can_stop: false,
@@ -119,6 +122,8 @@ window.fetch = async (url, options = {}) => {
   calls.requests.push(call)
   // The platform's note asking reviewers who looked again to approve: the one public write of the Ask for approval sheet.
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/merge') { calls.merges.push(call.body); return response({ state: 'merged', merge_sha: 'a'.repeat(40), repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
+  // Resume on an escalated PR: the platform's autopilot route, the one existing way on.
+  if (call.method === 'POST' && /^\/api\/github\/contributions\/fixture-app\/[\w-]+\/autopilot$/.test(call.url)) { calls.autopilot.push({ url: call.url, ...call.body }); return response({ status: 'ok', enabled: call.body.enabled }) }
   if (call.method === 'POST' && call.url === '/api/github/contributions/fixture-app/pulls/ask-approval') { calls.asks.push(call.body); return response({ state: 'asked', observed_head_sha: call.body.head_sha, repo: call.body.repo, number: call.body.number, head_sha: call.body.head_sha }) }
   // A conversation of the app: the platform returns the PR's existing one for its scope, and takes a message into any chat the app made.
   if (call.method === 'POST' && call.url === '/api/app-chats/start') { calls.appChatStarts.push(call.body); return response({ chat_id: 'respond-chat-fixture', outcome: 'reused' }) }
@@ -149,7 +154,7 @@ window.fetch = async (url, options = {}) => {
       // The Desk scenario asks the fixture PRs for review; everything else it reads falls through to the project mocks below.
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
         if (window.failIncoming || window.failIncomingFull) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
-        return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:[]}}})
+        return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:window.githubInvolved || []}}})
       }
       // The change probe: only the review requests and the PRs the owner reviewed, one point.
       if (window.fullAppDesk && call.body.query.includes('ContributeChangeProbe')) {
@@ -180,10 +185,15 @@ window.fetch = async (url, options = {}) => {
     if (call.body.query.includes('ContributePullContext')) {
       const pr=[...pulls, ...closedPulls].find(pr=>pr.number===call.body.variables.number)
       ensure(call.body.variables.owner==='owner' && call.body.variables.name==='project','Wrong context repository')
+      // window.fixtureCommits: the PR's commits, oldest first, as GitHub lists them (the Commits tab and the re-review window read them).
+      const listed=window.fixtureCommits ? { headRefOid:window.fixtureChangedHead && pr.number===8 ? 'e'.repeat(40) : pr.headRefOid, commits:{ totalCount:window.fixtureCommits.length, pageInfo:{hasNextPage:false,endCursor:null},
+        nodes:window.fixtureCommits.map(oid=>({ commit:{ oid, abbreviatedOid:oid.slice(0,7), url:'', messageHeadline:'A commit', messageBody:'', committedDate:'2026-11-04T10:00:00Z', authors:{nodes:[]}, statusCheckRollup:null } })) } } : {}
       return response({data:{repository:{pullRequest:{...pr,
+        ...(window.pullCommits ? { commits: window.pullCommits } : {}),
         reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},
         closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},
         timelineItems:{nodes:[],pageInfo:{hasNextPage:false}},
+        ...listed,
       }}}})
     }
     if (call.body.query.includes('ContributeReviewPulls')) {
@@ -218,7 +228,7 @@ window.fetch = async (url, options = {}) => {
   if (/\/review-runs\/review-verdict\/verdict$/.test(call.url) && call.method === 'POST') {
     const verdict = call.body.decision === 'submit' ? window.verdictOutcome : 'discarded'
     reviewRuns[0] = verdictRun(verdict)
-    return response({ run: reviewRuns[0], ...(call.body.decision === 'submit' ? { verdict: { state: verdict, event: 'APPROVE' } } : {}), merge_resumed: null })
+    return response({ run: reviewRuns[0], ...(call.body.decision === 'submit' ? { verdict: { state: verdict, event: 'APPROVE' } } : {}), merge_resumed: window.mergeResumed ?? null })
   }
   if (call.url === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') {
@@ -251,21 +261,34 @@ window.fetch = async (url, options = {}) => {
   if (call.url.startsWith('/api/github/api/repos/owner/project/') && call.method === 'GET') {
     // GitHub's comparison of a version against the base tip: each scenario says what the PR's own files are at each commit.
     if(call.url.includes('/compare/')) return window.compareAnswers ? response(window.compareAnswers(call.url.split('...')[1])) : forbidden('unexpected comparison')(call.url)
+    // A file of the repository as the contents API answers it: a scenario fills window.repoFiles (path to answer); anything else is not found.
+    const notFound = () => new Response(JSON.stringify({message:'Not Found'}),{status:404})
+    if(call.url.includes('/contents/')) {
+      const path=decodeURIComponent(call.url.split('/contents/')[1].split('?')[0])
+      return window.repoFiles?.[path] ? response(window.repoFiles[path]) : notFound()
+    }
+    // One commit's own files, and what the failed check's job and annotations say; a scenario fills window.commitFiles, checkJob and checkAnnotations.
+    const oneCommit=call.url.match(/\/commits\/([a-f0-9]{40})$/)
+    if(oneCommit) return window.commitFiles?.[oneCommit[1]] ? response(window.commitFiles[oneCommit[1]]) : notFound()
+    if(call.url.includes('/actions/jobs/')) return window.checkJob ? response(window.checkJob) : notFound()
+    if(call.url.includes('/annotations')) return response(window.checkAnnotations || [])
     if(call.url.includes('/commits/')) {
       const head=call.url.match(/commits\/([a-f0-9]+)\//)?.[1]
       ensure([HEAD,SECOND_HEAD].includes(head),'Checks lost their exact head')
       if(call.url.includes('/check-runs?')) return window.failChecks
         ? new Response(JSON.stringify({detail:'Fixture check runs unavailable'}),{status:503})
-        : response({total_count:1,check_runs:[{id:1,name:'Unit tests',head_sha:head,status:'completed',conclusion:'success'}]})
+        : response({total_count:1,check_runs:[window.failedCheck
+          ? {id:77,name:'Unit tests',head_sha:head,status:'completed',conclusion:'failure',app:{slug:'github-actions'},output:{title:'Process completed with exit code 1.',annotations_count:window.checkAnnotations?.length || 0},details_url:'https://github.com/owner/project/actions/runs/9/job/77'}
+          : {id:1,name:'Unit tests',head_sha:head,status:'completed',conclusion:'success'}]})
       if(call.url.includes('/status?')) return response({sha:head,total_count:1,statuses:[{id:2,context:'Build',state:'success'}]})
       return forbidden('unknown commit read')(call.url)
     }
     const number = Number(call.url.match(/(?:pulls|issues)\/(\d+)/)?.[1]); const pr=[...pulls, ...closedPulls].find(item=>item.number===number)
     if (call.url.includes('/files?')) return response([{filename:'change.js',additions:1,deletions:0,status:'modified',patch:'@@ -1 +1 @@\n-old\n+safe change'}])
-    if (call.url.includes('/comments?')) return response([{id:1,body:'Please check this edge case',user:{login:'reviewer'},created_at:'2026-09-07T14:00:00Z'}])
+    if (call.url.includes('/comments?')) return response([{id:1,body:window.commentBody || 'Please check this edge case',user:{login:'reviewer'},created_at:'2026-09-07T14:00:00Z'}])
     if (call.url.includes('/reviews?')) return response([])
     if(!/\/pulls\/\d+$/.test(call.url)) return forbidden('unknown pull read')(call.url)
-    return response({changed_files:pr.changedFiles,additions:pr.additions,deletions:pr.deletions,body:'Fixture PR description '+number,head:{sha:pr.headRefOid},base:{sha:pr.baseRefOid,ref:pr.baseRefName}})
+    return response({changed_files:pr.changedFiles,additions:pr.additions,deletions:pr.deletions,body:window.pullBody ? window.pullBody(number) : 'Fixture PR description '+number,head:{sha:pr.headRefOid},base:{sha:pr.baseRefOid,ref:pr.baseRefName}})
   }
   return forbidden('fetch')(call.url)
 }
@@ -492,13 +515,26 @@ const asReviewer = async () => {
   await frame(); await frame()
 }
 const asOwner = async () => { window.fixtureCapabilities=undefined; window.setConnectionFixture({state:'connected',login:'owner'}); await frame(); await frame() }
-// Merging follows the viewer's own approval, so it is offered only once "Draft for me" is chosen; returns its switch, still off.
+// Someone else's PR opens on "Draft for me", where merging after the viewer's approval is a switch, still off. On "Only me" the switch stays drawn
+// but dimmed with its reason (merging follows the viewer's own approval); choosing "Draft for me" again switches it on. Returns the switch, still off.
+// The page reads what this Möbius can do whenever a review window resolves, so once a fixture changes it one window is opened and closed first.
+async function warmCapabilities(root, choice) {
+  await chooseAgent(root, choice)
+  await until(()=>button('Draft for me',review()),'The review window did not learn that this Möbius can draft')
+  await closeReview()
+}
+const whoIs = name => button(name, review())?.getAttribute('aria-checked') === 'true'
 async function chooseDraftThenMergeSwitch() {
   await until(()=>button('Draft for me',review()),'Who sees the result did not load')
-  ensure(!review().querySelector('[role=switch]') && text(review()).includes('Merging follows your own approval'),'Merge was offered before the viewer chose to send the verdict')
+  ensure(whoIs('Draft for me') && !button('Agent posts',review()),'Someone else\'s PR did not open on Draft for me (never on Agent posts)')
+  ensure(!review().querySelector('[role=switch]').checked && !review().querySelector('[role=switch]').disabled,'Drafting a verdict did not offer an unchecked merge switch')
+  await click(button('Only me',review()))
+  const dimmed=review().querySelector('[role=switch]')
+  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Merging follows your own approval'),'Only me did not leave the merge switch off and dimmed with its reason')
+  await captureShot('review-only-me-merge-off')
   await click(button('Draft for me',review()))
   const mergeSwitch=review().querySelector('[role=switch]')
-  ensure(mergeSwitch && !mergeSwitch.checked,'Drafting a verdict did not offer an unchecked merge switch')
+  ensure(mergeSwitch && !mergeSwitch.checked && !mergeSwitch.disabled,'Drafting a verdict did not offer an unchecked merge switch')
   return mergeSwitch
 }
 // Make PRs from local changes sits in the Local changes tab, so open the tab to reach it.
@@ -597,6 +633,7 @@ window.runWorkspaceChecks = async () => {
   }
   try {
     await until(() => query('.co-source-row'), 'Project list did not render')
+    await captureShot('repository-list')
     await check('project directory uses wrapped filter buttons instead of a dropdown or scroller', async () => {
       const filters=query('.co-directory .co-filter-line'), filterButtons=[...filters.querySelectorAll('button')]
       ensure(filters && !query('.co-directory-filter select') && !query('.co-lens-nav'), 'Project filters did not use the compact button group')
@@ -841,9 +878,11 @@ window.runWorkspaceChecks = async () => {
       const title=document.querySelectorAll('.co-pr-open')[1]
       await asReviewer()
       try {
+      await warmCapabilities(query('[data-pr="owner/project#7"]'), NAMES.review)
+      title.focus(); await click(title); await until(()=>query('.co-task-content'),'The PR detail did not reopen')
       await chooseAgent(query('.co-task-content'), NAMES.review)
       ensure(text(review()).includes('Contribution 8') && text(review()).includes('ccccccc') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope or version')
-      ensure(button('Start private review'),'Individual review granted merge by default')
+      ensure(button('Start review, draft a verdict for me'),'Individual review did not open on Draft for me, or granted merge by default')
       const mergeSwitch=await chooseDraftThenMergeSwitch()
       ensure(button('Start review, draft a verdict for me'),'Drafting a verdict granted merge or lost its start label')
       await click(mergeSwitch)
@@ -877,11 +916,12 @@ window.runWorkspaceChecks = async () => {
     await check('inline batch review enumerates exact versions and starts only after approval', async () => {
       await asReviewer()
       try {
+      await warmCapabilities(query('.co-pr-box-head'))
       await chooseAgent(query('.co-pr-box-head'))
       ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
-      ensure(button('Start private review') && reviewRuns.length === 0,'Private review was not the default, or something started')
+      ensure(button('Start review, draft a verdict for me') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
       const mergeToggle=await chooseDraftThenMergeSwitch()
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
       const region=review(), rect=region.getBoundingClientRect()
@@ -927,6 +967,82 @@ window.runWorkspaceChecks = async () => {
       window.exactHeadChanged=false
       await closeReview(); await click(query('[aria-label="Clear selection"]'))
     })
+    await check('a review of an earlier version reopens as Review again: it says what changed and starts on Draft for me', async () => {
+      reviewRuns[0].created_at = '2026-11-03T09:30:00Z'
+      window.fixtureChangedHead = true
+      // The reviewed head, one more commit, and the head now: two commits are new since the review.
+      window.fixtureCommits = [SECOND_HEAD, 'f'.repeat(40), 'e'.repeat(40)]
+      await asReviewer()
+      try {
+        await checkGithub('The changed PR did not load')
+        await warmCapabilities(query('[data-pr="owner/project#7"]'), NAMES.review)
+        await chooseAgent(query('[data-pr="owner/project#8"]'), NAMES.reviewAgain)
+        ensure(text(review().querySelector('h3')) === NAMES.reviewAgain, 'The window is not titled Review again: ' + text(review().querySelector('h3')))
+        await until(() => /2 new commits since your review of [^.]*3/.test(text(review())), 'The window did not say how many commits are new: ' + text(review()))
+        ensure(whoIs('Draft for me') && button('Start review, draft a verdict for me'), 'A re-review did not open on Draft for me')
+        await captureShot('review-again-window')
+        await closeReview()
+        // The PR page keeps that earlier review as a card with the date it covers and no button of its own: Review again is in Actions.
+        const title = document.querySelectorAll('.co-pr-open')[1]
+        await click(title)
+        await until(() => query('.co-detail-tabs'), 'PR 8 did not open')
+        await click(detailTab('Review'))
+        await until(() => text(query('.co-review-box')).includes('Checked the version of'), 'The earlier review was not shown: ' + text(query('.co-pr-detail-body')))
+        ensure(![...query('.co-review-box').querySelectorAll('button')].some(node => /^Review /.test(text(node))), 'The earlier review card still has its own Review button')
+        await captureShot('review-tab-earlier-version')
+        await inventory()
+      } finally { window.fixtureChangedHead = false; window.fixtureCommits = undefined; await asOwner(); await checkGithub('The PR did not reload') }
+    })
+    await check('a batch says what it touches: Stop review of 2 PRs, and a dimmed Review each names the PR that blocks it', async () => {
+      // One run covers both PRs; PR 7 is done and PR 8 is still being reviewed.
+      const run = reviewRuns[0], sync = () => checkGithub('The running review did not load')
+      Object.assign(run, { state: 'reviewing', execution_state: 'running', can_stop: true })
+      run.items[0].state = 'all_clear'; run.items[1].state = 'reviewing'
+      await sync()
+      await inventory()
+      try {
+        await click(query('input[aria-label="Select owner/project #7"]')); await click(query('input[aria-label="Select owner/project #8"]'))
+        await click(query('.co-pr-box-head .co-agent-menu-button'))
+        await until(() => query('.co-pr-box-head [role=menuitem]'), 'The batch Actions menu did not open')
+        const each = [...document.querySelectorAll('[role=menuitem]')].find(node => text(node.querySelector('strong')) === 'Review each')
+        ensure(each?.getAttribute('aria-disabled') === 'true', 'Review each was not dimmed while one PR of the batch is being reviewed')
+        ensure(text(each.querySelector('small')) === '#8: An agent is already working on this PR.', 'The dimmed reason does not name the PR that blocks it: ' + text(each.querySelector('small')))
+        await captureShot('batch-review-each-dimmed')
+        await nativeEscape(); await click(query('[aria-label="Clear selection"]'))
+        const title = document.querySelectorAll('.co-pr-open')[1]
+        title.focus(); await click(title)
+        await until(() => query('.co-detail-tabs'), 'PR 8 did not open')
+        await click(detailTab('Review'))
+        await until(() => button('Stop review of 2 PRs'), 'Stop on one PR of a batch does not say it stops both: ' + [...document.querySelectorAll('.co-review-actions button')].map(text).join(' | '))
+        button('Stop review of 2 PRs').scrollIntoView({ block: 'center' })
+        await captureShot('batch-stop-review')
+      } finally {
+        Object.assign(run, { state: 'complete', execution_state: 'completed', can_stop: false })
+        run.items = run.items.map(item => ({ ...item, state: 'all_clear' }))
+        await inventory(); await sync()
+      }
+    })
+    await check('your own PRs keep the private check where Draft for me is offered: no verdict is drafted or asked for', async () => {
+      window.fixtureCapabilities = { review_fix_merge: false, post_review: true, propose_verdict: true, post_review_merge: true }
+      window.failReview = true
+      const sent = () => calls.requests.filter(call => call.method === 'POST' && call.url.endsWith('/review-runs')).at(-1)
+      try {
+        await inventory()
+        // A batch is the plain Review intent, the one that drafts for someone else's PRs; here every PR is the viewer's own.
+        await click(query('input[aria-label="Select owner/project #7"]')); await click(query('input[aria-label="Select owner/project #8"]'))
+        // The page learns what this Möbius can do when a window resolves; the second window is the one that could have defaulted to drafting.
+        await chooseAgent(query('.co-pr-box-head'))
+        await until(() => button('Start private review') && !button('Start private review').disabled, 'The review window did not resolve')
+        await closeReview()
+        await chooseAgent(query('.co-pr-box-head'))
+        await enabled('Start private review')
+        await until(() => text(review()).includes('Fixture review error'), 'The refused review did not show its error')
+        ensure(!button('Draft for me', review()) && text(review()).includes('your own PRs'), 'Your own PRs offered a verdict to draft')
+        const options = sent().body.options || {}
+        ensure(!options.post_review && !options.propose_verdict && !options.agent_submits_verdict, 'Your own PR asked for a posted or drafted review: ' + JSON.stringify(options))
+        await closeReview(); await click(query('[aria-label="Clear selection"]'))
+      } finally { window.failReview = false; window.fixtureCapabilities = undefined }
+    })
     await check('explicit send joins the same public inventory without implying merge', async () => {
       await inventory(); await openTab('Prepared PRs')
       await captureShot('prepared-tab')
@@ -956,6 +1072,7 @@ window.runWorkspaceChecks = async () => {
     await check('dismissed work is discoverable without a link and only explicit Restore changes its local state', async () => {
       const before=mutationRequests().length, publications=calls.publications.length
       await openTab('Agent runs')
+      await captureShot('project-agent-runs')
       const archive=query('.co-run-fold.is-recent')
       ensure(archive && !archive.open,'Dismissed contributions have no collapsed discovery route')
       await click(archive.querySelector('summary'))
@@ -1090,7 +1207,7 @@ window.runWorkspaceChecks = async () => {
       await click(query('.co-work-progress-row'))
       const pane = () => query('[data-task="task:cycle"]')
       await until(() => pane() && button('Open current conversation', pane()), 'Cycle status hidden without merge rights')
-      ensure(!button('Start fresh full merge cycle', pane()), 'A read-only project offered a new merge cycle')
+      ensure(!button('Start fresh full merge run', pane()), 'A read-only project offered a new merge run')
       await click(await makePrsButton())
       ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
       window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
@@ -1263,10 +1380,10 @@ window.runWorkspaceChecks = async () => {
       await inventory()
       const before=mutationRequests().length
       window.setConnectionFixture({state:'unknown',message:'Fixture GitHub check timed out.'})
-      await until(()=>button('Check GitHub again'),'Unknown GitHub retry is hidden behind an unopened task')
-      ensure(button('Check GitHub again').getClientRects().length,'GitHub retry is not visible')
+      await until(()=>button('Check again'),'Unknown GitHub retry is hidden behind an unopened task')
+      ensure(button('Check again').getClientRects().length,'GitHub retry is not visible')
       ensure(text(query('.co-workspace')).includes('Your connection is unchanged'),'Unknown status implies disconnected account')
-      await click(button('Check GitHub again'))
+      await click(button('Check again'))
       await until(()=>button('Checking…')?.disabled && window.finishGithubRetry,'Retry did not expose checking state')
       button('Checking…').click()
       ensure(calls.githubRetries===1,'Disabled retry repeated the check')
@@ -1325,7 +1442,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => prRow(8), 'Inventory did not recover')
     })
     await check('a chat run link opens that run in its project and starts nothing', async () => {
-      const run = { id: 'chat-run-12345678', mode: 'review', state: 'complete', chat_id: 'chat-run-chat', options: { review_prompt: 'Review fixture' },
+      const run = { id: 'chat-run-12345678', mode: 'review', state: 'complete', chat_id: 'chat-run-chat', created_at: '2026-10-23T09:00:00Z', options: { review_prompt: 'Review fixture' },
         items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'all_clear', summary: 'Linked run findings',
           public_review: { state: 'posted', url: 'https://github.com/owner/project/pull/7#pullrequestreview-1' } }] }
       // An older run, beyond the capped recent list: the link carries its exact read.
@@ -1339,7 +1456,7 @@ window.runWorkspaceChecks = async () => {
       await click(checkButton())
       await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run')
       ensure(pane() && text(pane()).includes('Linked run findings'), 'A refresh evicted the linked run')
-      ensure(text(pane()).includes('Recorded version') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open chat', pane()), 'Shared run detail lost its version note, posted review or owning chat')
+      ensure(text(pane()).includes('Reviewed the version of') && pane().querySelector('a[href*="pullrequestreview-1"]') && button('Open chat', pane()), 'Shared run detail lost its version note, posted review or owning chat')
       ensure(mutationRequests().length === before && calls.starts.length === starts, 'Opening a run link started or changed work')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Run detail did not close')
@@ -1355,14 +1472,14 @@ window.runWorkspaceChecks = async () => {
       window.oldRuns = new Map([[run.id, structuredClone(run)]])
       window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'core-run-link' })
       const pane = () => query('[data-task="task:run:core-run-1234"]')
-      await until(() => pane() && text(pane()).includes('owning conversation'), 'Minimized run did not open')
+      await until(() => pane() && text(pane()).includes('chat that ran it'), 'Minimized run did not open')
       const exactBefore = calls.exactRuns.length
       await click(checkButton())
       await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run')
       const shown = text(pane())
       ensure(shown.includes('Review & merge') && !shown.includes('Private review'), 'Minimized run was not titled by its mode')
       ensure(!/prompt snapshot|Older PR version|findings will appear here/.test(shown), 'Minimized run showed prompt or version warnings')
-      ensure(button('Open the owning chat for details', pane()) && !button('Stop workflow', pane()), 'Minimized run lacks its owning-conversation link or offers Stop')
+      ensure(button('Open the chat for details', pane()) && !button('Stop agent run', pane()), 'Minimized run lacks its link to the chat that ran it or offers Stop')
       ensure(!calls.requests.some(call => call.url.includes(run.id) && call.url.endsWith('/observe')), 'A run this app does not own was observed')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Run detail did not close')
@@ -1375,13 +1492,13 @@ window.runWorkspaceChecks = async () => {
       window.focusRunFixture({ runId: run.id, repo: 'owner/project', run, nonce: 'old-run-link' })
       const pane = () => query('[data-task="task:run:old-run-87654321"]')
       await until(() => pane() && text(pane()).includes('Recorded status: Reviewing'), 'Old run did not open')
-      await click(button('Stop workflow', pane()))
+      await click(button('Stop agent run', pane()))
       await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
       const exactBefore = calls.exactRuns.length
       await click(checkButton())
       await until(() => calls.exactRuns.length > exactBefore, 'Refresh did not reread the linked run exactly')
       await frame(); await frame()
-      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'A refresh resurrected the stale running snapshot')
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop agent run', pane()), 'A refresh resurrected the stale running snapshot')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Old run did not close')
       window.oldRuns = null
@@ -1399,11 +1516,11 @@ window.runWorkspaceChecks = async () => {
       await click(checkButton())
       await until(() => calls.exactRuns.length > exactBefore && window.releaseExactRun, 'Exact read was not issued')
       window.holdExactRun = false
-      await click(button('Stop workflow', pane()))
+      await click(button('Stop agent run', pane()))
       await until(() => text(pane()).includes('Recorded status: Stopped'), 'Stop result not shown')
       window.releaseExactRun(); window.releaseExactRun = null
       for (let i = 0; i < 6; i++) await frame()
-      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop workflow', pane()), 'An older read overwrote the confirmed Stop')
+      ensure(text(pane()).includes('Recorded status: Stopped') && !button('Stop agent run', pane()), 'An older read overwrote the confirmed Stop')
       pane().focus(); await nativeEscape()
       await until(() => !pane(), 'Race run did not close')
       window.oldRuns = null
@@ -1894,7 +2011,7 @@ window.runWorkspaceChecks = async () => {
 
 // The whole app on a fresh page: a review the owner starts from a PR's own page
 // must show on that PR's Desk row without pressing Sync with GitHub.
-async function mountDeskApp({ pullPatch = {} } = {}) {
+async function mountDeskApp({ pullPatch = {}, records = [] } = {}) {
   root.render(null)
   await frame(); await frame()
   window.fullAppFixture = true; window.fullAppConnected = true; window.fullAppDesk = true
@@ -1903,7 +2020,7 @@ async function mountDeskApp({ pullPatch = {} } = {}) {
   // A test may hold the reads of the saved answers (window.holdResponsesRead) and let them go with window.releaseResponsesRead().
   window.responseGates = []
   window.releaseResponsesRead = () => { window.holdResponsesRead = false; window.responseGates.splice(0).forEach(resolve => resolve()) }
-  window.mobius.storage.listWithStatus = async prefix => (window.holdResponsesRead && prefix.startsWith('respond-') ? await new Promise(resolve => window.responseGates.push(resolve)) : null, { complete: true, entries: !prefix.startsWith('respond-') ? [] : [...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ type: 'file', name: key.slice(prefix.length), path: key, content: structuredClone(value) })) })
+  window.mobius.storage.listWithStatus = async prefix => (window.holdResponsesRead && prefix.startsWith('respond-') ? await new Promise(resolve => window.responseGates.push(resolve)) : null, { complete: true, entries: prefix === 'contributions/' ? (window.deskRecords || records).map(record => ({ type: 'file', name: record.id + '.json', path: prefix + record.id + '.json', content: structuredClone(record) })) : !prefix.startsWith('respond-') ? [] : [...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ type: 'file', name: key.slice(prefix.length), path: key, content: structuredClone(value) })) })
   // A PR GitHub read completely: without these facts its standing is "couldn't read" and nothing frames it.
   Object.assign(pulls[0], { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
     latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] }, ...pullPatch })
@@ -2022,6 +2139,304 @@ window.runDeskFrameChecks = async () => {
     await click(query('.co-desk-back'))
     await until(() => deskFrame('Contribution 7') === 'idle', 'The Desk kept the frame of a review stopped while its PR page was open')
     checks.push({ name: 'leaving a PR page makes the Desk re-read the review runs', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  }
+}
+
+// Reading a PR page. A picture that is a file in the repository shows as a picture, read through the read-only GitHub route and
+// shown from a data: address; every other picture stays a labelled tile that links out, and the page never asks another host for
+// an image (the harness blocks the network and fails the scenario on any request). A failed check says why. One commit opens its own
+// diff in the same viewer as Files changed. The page grows with the pane. A saved escalation shows with its reason and Resume,
+// and the strip under the Review tab says whose next steps it shows.
+async function fixturePicture(width, height, color) {
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
+  const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, width, height)
+  context.fillStyle = '#fff'; context.fillRect(24, 24, width / 2, height / 3)
+  const base64 = canvas.toDataURL('image/png').split(',')[1]
+  // GitHub's contents answer wraps its base64 every 60 characters.
+  return { type: 'file', encoding: 'base64', size: atob(base64).length, content: base64.replace(/(.{60})/g, '$1\n') + '\n' }
+}
+window.runPullReadingChecks = async () => {
+  const checks = []
+  const pass = name => checks.push({ name, status: 'pass' })
+  const tab = name => detailTab(name)
+  const rawPicture = path => 'https://raw.githubusercontent.com/owner/project/' + HEAD + '/' + path
+  const readsOf = part => calls.requests.filter(call => call.url.includes(part))
+  const escalation = { ...prepared, id: 'escalated-record', title: 'Escalated change', summary: 'Escalated change', status: 'open', number: 7, url: 'https://github.com/owner/project/pull/7', needs_attention: true,
+    attention: { type: 'human_required', key: 'human_required:1', title: 'Needs your input', message: 'A reviewer raised a trade-off that needs a maintainer decision.', detected_at: '2026-09-07T13:30:00Z' }, autopilot: { enabled: true, state: 'blocked', rounds_used: 2 } }
+  try {
+    reviewRuns.length = 0
+    respondChats.length = 0
+    window.repoFiles = { 'screenshots/before.png': await fixturePicture(480, 300, '#2454cc'), 'screenshots/later.png': await fixturePicture(300, 200, '#0a7a4b') }
+    window.pullBody = () => ['Before and after.', '', '![before screen](' + rawPicture('screenshots/before.png') + ')', '', '![build badge](https://img.shields.io/badge/build-passing-green.svg)', '',
+      '![sneaky](//evil.example/pixel.png)', '', '![gone](' + rawPicture('screenshots/missing.png') + ')', '', '![vector](' + rawPicture('screenshots/logo.svg') + ')'].join('\n')
+    // The text may carry the app's own picture markup and the other ways to name a picture: none of it may act like the real thing.
+    const forgedPicture = '<img src="data:image/png;base64,iVBORw0KGgo=" alt="forged">'
+    const forgedMarkup = ['<a class="co-md-photo" href="https://evil.example/open">' + forgedPicture + '</a>', '<button class="CO-MD-photo" data-source="javascript:void(0)">forged button</button>',
+      '<a class="co-md-image" href="' + rawPicture('screenshots/forged.png') + '">forged tile</a>', '<picture><source srcset="https://evil.example/s.png">' + forgedPicture + '</picture>',
+      '<span style="background:url(https://evil.example/b.png)">styled</span>', '<style>p{background:url(https://evil.example/c.png)}</style>', '<input type="image" src="https://evil.example/f.png">']
+    window.commentBody = [...Array.from({ length: 16 }, (_, index) => 'Line ' + (index + 1) + ' of a long comment.'), '![after screen](' + rawPicture('screenshots/later.png') + ')', ...forgedMarkup].join('\n\n')
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [escalation] })
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+    await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+    await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
+
+    // The page is as wide as the pane: the 1192 px column of the lists no longer holds it.
+    const page = query('.co-page'), view = query('.co-projects-view')
+    ensure(view.getBoundingClientRect().width >= page.clientWidth - 1, 'The PR page is only ' + Math.round(view.getBoundingClientRect().width) + 'px of a ' + page.clientWidth + 'px screen')
+    ensure(query('.co-header').getBoundingClientRect().width >= page.clientWidth - 1, 'The header stayed in its narrow column over a wide PR page')
+    pass('the PR page grows with the pane')
+
+    // A saved escalation: its reason, and Resume, the existing way on.
+    const flag = query('.co-escalation')
+    ensure(flag && text(flag).includes('The agent needs your decision') && text(flag).includes('A reviewer raised a trade-off that needs a maintainer decision.'), 'The escalation was not shown with its reason: ' + text(query('.co-pr-detail')).slice(0, 400))
+    await captureShot('pr-page-escalation')
+    await click(button('Resume', flag))
+    await until(() => calls.autopilot.length === 1 && !query('.co-escalation') && text(query('.co-pr-detail')).includes('Resumed'), 'Resume did not reach the autopilot route')
+    ensure(calls.autopilot[0].enabled === true && calls.autopilot[0].url === '/api/github/contributions/fixture-app/escalated-record/autopilot', 'Resume sent: ' + JSON.stringify(calls.autopilot))
+    pass('a saved escalation shows with its reason and Resume')
+
+    // Pictures: the description is folded; opening it brings the repository picture in, small, from a data: address.
+    await click(query('.co-gh-description > summary'))
+    await until(() => query('.co-gh-description .co-md-photo img'), 'The repository picture did not show: ' + text(query('.co-gh-description')))
+    const photo = query('.co-gh-description .co-md-photo'), image = photo.querySelector('img'), shown = image.getBoundingClientRect()
+    ensure(image.getAttribute('src').startsWith('data:image/png;base64,') && image.naturalWidth === 480, 'The picture is not the file from the repository')
+    ensure(shown.width <= 360 && shown.height <= 240 && photo.getBoundingClientRect().right <= window.innerWidth, 'The picture is not small and inside the screen: ' + Math.round(shown.width) + 'x' + Math.round(shown.height))
+    const tiles = [...query('.co-gh-description').querySelectorAll('a.co-md-image')]
+    ensure(tiles.length === 4 && tiles.every(tile => tile.target === '_blank' && /^Image: /.test(text(tile))), 'The other pictures are not labelled tiles: ' + tiles.map(text).join(' | '))
+    ensure(tiles.map(tile => tile.getAttribute('href')).includes('https://img.shields.io/badge/build-passing-green.svg') && tiles.map(tile => tile.getAttribute('href')).includes('//evil.example/pixel.png'), 'A tile lost its link')
+    ensure(tiles.every(tile => tile.getBoundingClientRect().height >= 44 && tile.getBoundingClientRect().right <= window.innerWidth), 'A tile is not a tappable box inside the screen')
+    const wrongSources = [...document.images].map(node => node.getAttribute('src')).filter(src => !/^(data:image\/|\/(?![/\\]))/.test(src))
+    ensure(wrongSources.length === 0, 'The page holds an image another host would serve: ' + wrongSources.join(', '))
+    // The description is clamped: bring the last picture into view, whatever the screen size, and it is read, once.
+    await click(button('Show more', query('.co-gh-description')))
+    query('.co-gh-description a.co-md-image[href$="missing.png"]').scrollIntoView({ block: 'center' })
+    await until(() => readsOf('/contents/screenshots/missing.png').length === 1, 'The picture brought into view was not read')
+    ensure(readsOf('/contents/screenshots/before.png?ref=' + HEAD).length === 1, 'The repository picture was not read once through the route')
+    ensure(readsOf('logo.svg').length === 0 && readsOf('shields.io').length === 0 && readsOf('evil.example').length === 0, 'A picture that must stay a link was requested')
+    ensure(calls.forbidden.length === 0, 'Unexpected transport: ' + JSON.stringify(calls.forbidden))
+    await captureShot('pr-page-pictures', photo)
+    pass('a repository picture shows small from the read-only route and every other picture stays a labelled tile')
+
+    // Tapping it opens it larger, and Escape or Close gives focus back.
+    photo.focus(); await click(photo)
+    await until(() => query('dialog.co-picture-viewer[open]'), 'The picture did not open larger')
+    const large = query('dialog.co-picture-viewer img').getBoundingClientRect()
+    ensure(large.width > shown.width && large.right <= window.innerWidth, 'The larger picture is not larger: ' + Math.round(large.width) + ' of ' + Math.round(shown.width))
+    ensure(text(query('.co-picture-viewer')).includes('Open on GitHub'), 'The larger picture has no way out to GitHub')
+    await click(button('Close', query('.co-picture-viewer')))
+    await until(() => !query('dialog.co-picture-viewer'), 'Close did not close the larger picture')
+    ensure(document.activeElement === photo, 'Closing the larger picture did not give focus back')
+    pass('a picture opens larger on tap and closes back to where it was')
+
+    // A picture below the fold is not read until it scrolls into view (here: until the long comment is opened).
+    ensure(readsOf('screenshots/later.png').length === 0, 'A picture hidden in a folded comment was read already')
+    const comment = query('.co-gh-comment')
+    await click(button('Show more', comment))
+    comment.querySelector('a.co-md-image, .co-md-photo').scrollIntoView({ block: 'center' })
+    await until(() => comment.querySelector('.co-md-photo img'), 'The picture in the opened comment did not show')
+    ensure(readsOf('screenshots/later.png').length === 1, 'The later picture was read ' + readsOf('screenshots/later.png').length + ' times')
+    pass('pictures load only when they come into view')
+
+    // Forged picture markup in the text is plain text: no picture button, no read, no outside picture, and a tap never navigates the frame.
+    const forgedLink = [...comment.querySelectorAll('a')].find(link => link.getAttribute('href') === 'https://evil.example/open')
+    ensure(comment.querySelectorAll('.co-md-photo').length === 1 && comment.querySelectorAll('[data-source]').length === 1, 'Text passed itself off as a picture button: ' + comment.innerHTML.slice(-900))
+    ensure(forgedLink && text(comment).includes('forged button') && !comment.querySelector('source, [srcset], [style], style, input[src]'), 'The forged markup was not made plain: ' + comment.innerHTML.slice(-900))
+    ensure(readsOf('forged.png').length === 0, 'A picture tile forged in the text was read')
+    const realOpen = window.open, opened = []
+    window.open = url => { opened.push(url); return null }
+    const tap = target => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); target.dispatchEvent(event); return event.defaultPrevented }
+    const tapped = [tap(forgedLink), tap(button('forged button', comment))]
+    window.open = realOpen
+    ensure(tapped[0] && opened.join() === 'https://evil.example/open' && !query('dialog.co-picture-viewer'), 'A tap on a forged picture link did not open as an ordinary link: ' + opened.join() + ' ' + tapped)
+    ensure(!tapped[1] && !query('dialog.co-picture-viewer'), 'A forged picture button opened the viewer')
+    pass('picture markup in the text of a comment is plain: no picture button, no read, no viewer, no navigation')
+
+    // Why a check failed: the failed step and the annotation, with View on GitHub as the way to the log.
+    window.failedCheck = true
+    window.checkJob = { id: 77, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run unit tests', conclusion: 'failure' }] }
+    window.checkAnnotations = [{ path: 'test/desk.test.mjs', start_line: 41, annotation_level: 'failure', message: 'not ok 412 - desk counts a ready PR once' }]
+    await click(tab('Checks'))
+    await until(() => query('.co-check-why'), 'The failed check did not say why: ' + text(query('.co-pr-detail-body')))
+    const why = query('.co-check-why')
+    ensure(text(why).includes('Failed step: Run unit tests') && text(why).includes('test/desk.test.mjs:41') && text(why).includes('not ok 412'), 'The reason read: ' + text(why))
+    ensure([...query('.co-pr-detail-body').querySelectorAll('a')].some(link => text(link) === 'View on GitHub'), 'The check lost View on GitHub')
+    ensure(readsOf('/actions/jobs/77').length === 1 && readsOf('/check-runs/77/annotations').length === 1 || readsOf('/annotations').length === 0, 'The failure was not read through the route')
+    await captureShot('pr-page-check-why', query('.co-detail-tabs'))
+    pass('a failing check shows its failed step and annotation, with View on GitHub')
+
+    // One commit opens its diff in the Files changed viewer; Back returns to its row.
+    const SHA_ONE = '1'.repeat(40), SHA_TWO = '2'.repeat(40)
+    const commit = (oid, headline, extra = {}) => ({ commit: { oid, abbreviatedOid: oid.slice(0, 7), url: 'https://github.com/owner/project/commit/' + oid, messageHeadline: headline, messageBody: '', committedDate: '2026-09-07T12:30:00Z',
+      additions: 3, deletions: 1, changedFilesIfAvailable: 2, authors: { nodes: [{ name: 'octocat', user: { login: 'octocat' } }] }, statusCheckRollup: { state: 'SUCCESS' }, ...extra } })
+    window.pullCommits = { totalCount: 2, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [commit(SHA_ONE, 'Add the safe change'), commit(SHA_TWO, 'Huge rewrite', { changedFilesIfAvailable: 312, additions: 900, deletions: 20 })] }
+    window.commitFiles = {
+      [SHA_ONE]: { sha: SHA_ONE, files: [{ filename: 'change.js', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1,2 +1,3 @@\n-old\n+the first commit line\n+another' }], stats: { additions: 2, deletions: 1 } },
+      [SHA_TWO]: { sha: SHA_TWO, files: Array.from({ length: 300 }, (_, index) => ({ filename: 'f' + index + '.js', status: 'added', additions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+x' })), stats: { additions: 300, deletions: 0 } },
+    }
+    await click(tab('Commits'))
+    await until(() => document.querySelectorAll('.co-commit').length === 2, 'The commits did not list')
+    ensure(text(query('.co-commit-stats')).startsWith('2 files +3') && button('See changes: commit 1111111'), 'The commit row shows no size or no See changes: ' + text(query('.co-commit')))
+    ensure([...document.querySelectorAll('.co-commit a')].some(link => text(link) === 'View on GitHub'), 'The commit row lost View on GitHub')
+    await captureShot('pr-page-commits', query('.co-detail-tabs'))
+    const open = button('See changes: commit 1111111'); open.focus(); await click(open)
+    await until(() => query('.co-commit-open') && query('.co-pr-detail-body .diff-view')?.getClientRects().length, 'The commit did not open its diff on screen: ' + text(query('.co-pr-detail-body')))
+    await captureShot('pr-page-commit-diff', query('.co-detail-tabs'))
+    ensure(text(query('.co-commit-open')).includes('1111111') && text(query('.co-commit-open')).includes('Add the safe change'), 'The commit head did not name the commit')
+    ensure(!query('.co-commit') && text(query('.co-pr-detail-body .diff-view')).includes('the first commit line') && readsOf('/commits/' + SHA_ONE).length === 1, 'The diff is not the commit\'s own')
+    ensure(!text(query('.co-pr-detail-body')).includes('at most 300 files'), 'A small commit claimed to be cut short')
+    await click(button('Back to commits'))
+    await until(() => document.querySelectorAll('.co-commit').length === 2, 'Back did not return to the commits')
+    await until(() => document.activeElement === button('See changes: commit 1111111'), 'Back did not return focus to the commit that was open')
+    await click(button('See changes: commit 2222222'))
+    await until(() => text(query('.co-pr-detail-body')).includes('GitHub lists at most 300 files for one commit'), 'A commit of 300 files did not say it may be cut short')
+    await click(tab('Commits'))
+    await until(() => document.querySelectorAll('.co-commit').length === 2, 'The Commits tab did not return to its list')
+    pass('one commit opens its own diff in the Files changed viewer, with a notice when truncated')
+
+    // Files changed uses the whole pane, and on a wide screen the conversation keeps a reading width.
+    await click(tab('Files changed'))
+    await until(() => query('.co-pr-detail-body .co-file-disclosure'), 'Files did not load')
+    await click(query('.co-file-disclosure summary'))
+    const body = query('.co-pr-detail-body'), diff = body.querySelector('.diff-view')
+    await captureShot('pr-page-files-wide', query('.co-detail-tabs'))
+    ensure(diff.getBoundingClientRect().width >= body.clientWidth - 24, 'The diff is ' + Math.round(diff.getBoundingClientRect().width) + 'px of a ' + body.clientWidth + 'px pane')
+    await click(tab('Comments'))
+    await until(() => query('.co-gh-comment'), 'The comments did not return')
+    if (window.innerWidth > 1600) ensure(query('.co-gh-comment').getBoundingClientRect().width <= 1000, 'A comment runs ' + Math.round(query('.co-gh-comment').getBoundingClientRect().width) + 'px wide on a wide screen')
+    pass('Files changed uses the full width and the conversation keeps a reading width')
+
+    // The strip under the Review tab says whose steps it shows.
+    await click(tab('Review'))
+    await until(() => query('.co-review-steps'), 'The Review tab showed no steps for your own PR: ' + text(query('.co-pr-detail-body')))
+    ensure(text(query('.co-review-steps-row')).startsWith('Your next steps') && query('.co-review-steps').getAttribute('aria-label') === 'Your next steps', 'The strip is not named: ' + text(query('.co-review-steps-row')))
+    pass('the strip under the Review tab is named Your next steps')
+
+    ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    await captureShot('pr-page-reading', query('.co-detail-tabs'))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  }
+}
+
+// The whole app on a fresh page: every Needs you row has one layout, a long saved note is one line with Show more, the chips count each PR
+// once under its shared decision and the rail badge is their sum, Agent runs has Waiting on you / Running / Finished and opens on the first with
+// rows, a review saved without a title reads its PR's title, My PRs says Part 1 of 2, and a merged row opens its PR page.
+window.runDeskListChecks = async () => {
+  const checks = []
+  const rows = () => [...document.querySelectorAll('.co-desk-item')]
+  const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
+  const chips = () => [...document.querySelectorAll('.co-filter-line button')].map(node => text(node.querySelector('b')) + ' ' + text(node.querySelector('span')))
+  const visible = node => node.getClientRects().length > 0
+  const openView = async name => click([...document.querySelectorAll('.co-rail-item, .co-desk-seg button')].find(node => visible(node) && text(node).startsWith(name)), 'No ' + name + ' view button')
+  const tabs = () => [...document.querySelectorAll('.co-pr-filters button')].map(node => (node.getAttribute('aria-pressed') === 'true' ? '>' : '') + text(node))
+  const NOTE = 'The follow-up agent stopped: a reviewer raised a product trade-off that needs your decision, and the way it is settled changes what the next PR in this stack has to do, so it should not be guessed. '
+  try {
+    const open = number => ({ isResolved: false, comments: { nodes: [{ author: { login: 'teammate' } }] }, number })
+    const own = (number, title, extra = {}) => pull(number, { title, author: { login: 'reconnected-owner' }, ...extra })
+    const theirs = (number, title, extra = {}) => pull(number, { title, author: { login: 'teammate' }, ...extra })
+    const approved = { latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'teammate' }, commit: { oid: HEAD } }] } }
+    window.githubInvolved = [
+      own(20, 'Own change with a note', { headRefName: 'with-note', reviewThreads: { nodes: [open(1)] } }),
+      own(21, 'Approved change', { headRefName: 'approved', ...approved }),
+      own(24, 'Change with findings', { headRefName: 'with-findings' }),
+      own(22, 'First of a chain', { headRefName: 'chain-a' }),
+      own(23, 'Second of a chain', { headRefName: 'chain-b', baseRefName: 'chain-a' }),
+    ]
+    // PRs of someone else the owner reviewed: GitHub is read for each (the review list), one has moved on, one merged, one is being reviewed now.
+    pulls.push(theirs(30, 'Reviewed again', { headRefOid: SECOND_HEAD }), theirs(31, 'Merged by its author', { state: 'MERGED' }), theirs(32, 'Being reviewed'), own(24, 'Change with findings', { headRefName: 'with-findings' }))
+    const reviewOfPull = (number, state, extra = {}) => ({ id: 'run-' + number, chat_id: 'review-chat-fixture', mode: 'review', state: state === 'reviewing' ? 'reviewing' : 'complete', execution_state: state === 'reviewing' ? 'running' : 'completed', can_stop: state === 'reviewing',
+      created_at: new Date(Date.now() - 3600e3).toISOString(), items: [{ repo: 'owner/project', number, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state, ...extra }] })
+    reviewRuns.length = 0
+    reviewRuns.push(reviewOfPull(30, 'all_clear', { title: 'Reviewed again' }), reviewOfPull(31, 'all_clear'), reviewOfPull(32, 'reviewing', { title: 'Being reviewed' }),
+      reviewOfPull(24, 'needs_you', { title: 'Change with findings', summary: 'One problem.' }))
+    window.deskRecords = [
+      { id: 'card-20', type: 'pr', status: 'open', repo: 'owner/project', number: 20, title: 'Own change with a note', created_at: '2026-09-07T12:00:00Z', updated_at: '2026-09-07T13:00:00Z', needs_attention: true,
+        attention: { type: 'human_required', message: NOTE.repeat(3).trim(), detected_at: new Date(Date.now() - 3600e3).toISOString() }, plan: { action: 'pr', repo: 'owner/project', title: 'Own change with a note' } },
+      { id: 'card-24', type: 'pr', status: 'open', repo: 'owner/project', number: 24, title: 'Change with findings', created_at: '2026-09-07T12:00:00Z', updated_at: '2026-09-07T13:00:00Z', needs_attention: true,
+        attention: { type: 'human_required', message: 'A reviewer left one comment.', detected_at: new Date(Date.now() - 7200e3).toISOString() }, plan: { action: 'pr', repo: 'owner/project', title: 'Change with findings' } },
+      { id: 'merged-12', type: 'pr', status: 'merged', repo: 'owner/project', number: 12, title: 'Merged contribution', created_at: '2026-09-07T12:00:00Z', updated_at: new Date(Date.now() - 4 * 86400e3).toISOString(), plan: { action: 'pr', repo: 'owner/project', title: 'Merged contribution' } },
+    ]
+    await mountDeskApp()
+    await until(() => chips().join('|') === '2 To look at|1 Review|1 Merge|1 Review again', () => 'The Needs you chips were: ' + chips().join('|'))
+    const railBadge = text(query('.co-rail-views .co-rail-count.is-you') || query('.co-desk-seg button[aria-pressed=true] b'))
+    ensure(railBadge === '5', 'The Needs you badge was ' + railBadge + ', not the chips\' sum of 5')
+    ensure(rows().length === 5, 'Needs you listed ' + rows().length + ' rows for 5 counted')
+    checks.push({ name: 'each PR counts once under its own step and the badge is the chips\' sum', status: 'pass' })
+    // One layout: title, then #number · who · when, then the status, then the one-line reason; nothing wider than the screen.
+    const expectations = [['Contribution 7', /^#7 · owner · updated /, 'Asks for your review'], ['Own change with a note', /^#20 · yours · detected /, 'Feedback to answer'],
+      ['Approved change', /^#21 · yours · updated /, 'Ready to merge'], ['Reviewed again', /^#30 · teammate · you reviewed /, 'New commits · review again'],
+      ['Change with findings', /^#24 · yours · detected /, 'Findings']]
+    for (const [title, facts, status] of expectations) {
+      const row = rowOf(title)
+      ensure(row, 'No Needs you row titled ' + title)
+      const box = node => node.getBoundingClientRect()
+      const [head, meta, pills] = ['.co-desk-row-title', '.co-desk-row-meta', '.co-row-pills'].map(selector => row.querySelector(selector))
+      ensure(pills, title + ' shows no status')
+      ensure(facts.test(text(meta)), title + ' facts line was: ' + text(meta))
+      ensure(text(pills).includes(status), title + ' status was: ' + text(pills))
+      ensure(box(head).bottom <= box(meta).top + 1 && box(meta).bottom <= box(pills).top + 1, title + ' does not read title, facts, status from the top')
+      const note = row.querySelector('.co-desk-note')
+      ensure(!note || box(pills).bottom <= box(note).top + 1, title + ' shows its reason above its status')
+      ensure(box(row).left >= 0 && box(row).right <= window.innerWidth + 1 && row.scrollWidth <= row.clientWidth + 1, title + ' is wider than the screen')
+    }
+    ensure(!text(query('.co-desk-pane')).includes('Needs your decision'), 'A card still says Needs your decision')
+    checks.push({ name: 'every Needs you row reads title, #number · who · when, status, then the reason, and says what the PR page says', status: 'pass' })
+    // A row's own answer (Fix these findings) sits beside it on a wide screen and under its reason on a phone, never inside the button that opens the PR.
+    const fixing = rowOf('Change with findings'), fix = fixing.querySelector('.co-desk-row-action'), button = fixing.querySelector('button.co-desk-row')
+    ensure(fix && text(fix) === 'Fix these findings' && !button.contains(fix), 'The row with findings offers no Fix these findings beside it')
+    const [fixBox, rowBox, noteBox] = [fix, button, fixing.querySelector('.co-desk-note')].map(node => node.getBoundingClientRect())
+    ensure(window.innerWidth > 680 ? fixBox.left >= rowBox.right - 1 : fixBox.top >= noteBox.bottom - 1 && fixBox.width > rowBox.width * 0.8, 'Fix these findings sits in the wrong place: ' + JSON.stringify([fixBox, rowBox, noteBox].map(box => [box.left, box.top, box.width, box.height].map(Math.round))))
+    ensure(Math.round(fixBox.height) >= 44 && fixBox.right <= window.innerWidth + 1, 'Fix these findings is not a control on the screen')
+    checks.push({ name: 'a row\'s own answer sits beside it, or under it on a phone', status: 'pass' })
+    // The saved note is one line, and Show more reveals all of it without opening the PR.
+    const card = rowOf('Own change with a note')
+    const line = card.querySelector('.co-desk-row-why'), oneLine = parseFloat(getComputedStyle(line).lineHeight)
+    await until(() => card.querySelector('.co-desk-note button'), 'A long saved note has no Show more')
+    ensure(line.getBoundingClientRect().height <= oneLine * 1.2, 'The note is ' + Math.round(line.getBoundingClientRect().height) + 'px tall, not one line of ' + Math.round(oneLine))
+    const more = card.querySelector('.co-desk-note button')
+    ensure(text(more) === 'Show more' && Math.round(more.getBoundingClientRect().height) >= 44, 'Show more is not a 44px control: ' + Math.round(more.getBoundingClientRect().height))
+    await captureShot('desk-needs-you')
+    await captureShot('desk-needs-you-fix', rowOf('Change with findings'))
+    await click(more)
+    ensure(!query('.co-desk-back'), 'Show more opened the PR')
+    ensure(line.getBoundingClientRect().height > oneLine * 2 && text(line) === NOTE.repeat(3).trim(), 'Show more did not reveal the whole note')
+    await click(card.querySelector('.co-desk-note button'))
+    ensure(line.getBoundingClientRect().height <= oneLine * 1.2 && text(card.querySelector('.co-desk-note button')) === 'Show more', 'Show less did not fold the note again')
+    checks.push({ name: 'a long saved note is one line, with Show more for all of it', status: 'pass' })
+    // Agent runs: three tabs, opening on the first with rows; a review saved without a title shows its PR's title.
+    await openView('Agent runs')
+    // Waiting on you holds the reviews that wait on the owner (one came back, one found problems) and the saved work (the cards) that waits on them too.
+    await until(() => tabs().join('|') === '>Waiting on you4|Running1|Finished1', () => 'The Agent runs tabs were ' + tabs().join('|'))
+    ensure(rowOf('Reviewed again') && rowOf('Own change with a note') && !rowOf('Being reviewed') && !rowOf('Merged by its author'), 'Waiting on you did not hold only what waits on the owner')
+    await captureShot('agent-runs-waiting')
+    await click([...document.querySelectorAll('.co-pr-filters button')].find(node => text(node).startsWith('Running')))
+    ensure(rowOf('Being reviewed') && !rowOf('Reviewed again'), 'Running did not hold only the review at work')
+    await click([...document.querySelectorAll('.co-pr-filters button')].find(node => text(node).startsWith('Finished')))
+    ensure(rowOf('Merged by its author') && !rowOf('Pull request #31'), 'The finished review saved without a title did not read its PR\'s title')
+    ensure(text(rowOf('Merged by its author').querySelector('.co-row-pills')).includes('Merged') && !rowOf('Reviewed again'), 'Finished held more than what is over')
+    await captureShot('agent-runs-finished')
+    checks.push({ name: 'Agent runs opens on Waiting on you, and Finished holds only what is over, each with its PR\'s own title', status: 'pass' })
+    // My PRs: a chain reads Part 1 of 2; a merged row opens its PR page.
+    await openView('My PRs')
+    await until(() => rowOf('First of a chain'), 'My PRs did not list the chain')
+    ensure(text(rowOf('First of a chain')).includes('Part 1 of 2') && text(rowOf('Second of a chain')).includes('Part 2 of 2'), 'The chain did not read Part 1 of 2 and Part 2 of 2')
+    ensure(rowOf('Approved change') && text(rowOf('Approved change').querySelector('.co-row-pills')) === 'Ready to merge', 'My PRs listed: ' + rows().map(node => text(node)).join(' | '))
+    await captureShot('desk-my-prs')
+    await click([...document.querySelectorAll('.co-pr-filters button')].find(node => text(node).startsWith('Merged')))
+    await until(() => rowOf('Merged contribution'), 'Merged did not list the merged PR')
+    await captureShot('desk-my-prs-merged')
+    await click(rowOf('Merged contribution').querySelector('button'))
+    await until(() => query('.co-desk-back') && text(query('.co-pull-page')).includes('Merged contribution'), 'A merged row did not open its PR page')
+    await until(() => query('.co-next-hint'), 'The merged PR page shows no next-step line')
+    ensure(text(query('.co-next-hint')) === 'Merged' && !query('.co-next-step button:not(:disabled)'), 'The merged PR page said ' + text(query('.co-next-hint')) + ' and offered a next step')
+    await captureShot('merged-pr-page')
+    checks.push({ name: 'a merged row opens its PR page, with nothing left to do on it', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
@@ -2350,22 +2765,35 @@ window.runRespondResultChecks = async () => {
 
 // A picture of this moment when a capture run asks for one (window.workspaceShot is a CDP binding); otherwise nothing.
 // It waits up to 1.5 s for finite animations (a window fading in) to end first; a spinner never ends, so it is not waited for.
-async function captureShot(name) {
+async function captureShot(name, focus) {
   if (!window.workspaceShot) return
+  // The page may be scrolled past what the picture is about: bring the node to the top, below the sticky header (a phone has two bars).
+  // Only the page's own scroller moves: scrollIntoView would also move the rows inside a clipped group card.
+  if (focus) {
+    let scroller = focus.parentElement
+    while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    ;(scroller || document.scrollingElement).scrollBy(0, focus.getBoundingClientRect().top - 110)
+  }
   const settled = Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
   await Promise.race([settled, new Promise(resolve => setTimeout(resolve, 1500))])
   await new Promise(resolve => { window.finishShot = resolve; window.workspaceShot(name) })
 }
 
 // A Möbius that does not offer the owner grant (today's: the default fixture capabilities): the answer is readable and can be discussed or
-// discarded, but Post is off, says why in words that fit the screen, and cannot write an approval or message the chat.
+// discarded, but Post is off, says why in words that fit the screen, and cannot write an approval or message the chat. The card has a real
+// Copy replies button, and the Respond window warns about all this before it starts and sends a long saved review whole, as a file.
 window.runRespondPostOffChecks = async () => {
   const checks = []
   const button = label => [...document.querySelectorAll('button')].find(node => text(node) === label)
   const reviewBody = () => text(query('.co-pr-detail-body'))
-  const reason = 'Post is off for now: Möbius cannot yet confirm it was you who pressed it.'
+  const reason = 'Post is off on this Möbius: it cannot yet confirm that it was you who pressed it.'
+  // Far past the 6,000 characters the brief used to keep, and ending in a line that cut text would have lost.
+  const findings = Array.from({ length: 400 }, (_, index) => (index + 1) + '. Finding number ' + (index + 1) + ' with enough words to be a real line of the review.').join('\n')
+  const FINDINGS_KEY = 'respond-findings/owner__project__7.md'
   try {
     reviewRuns.length = 0
+    reviewRuns.push({ id: 'review-findings', chat_id: 'review-chat-fixture', mode: 'review', state: 'complete', can_stop: false,
+      items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'needs_you', summary: findings }] })
     respondChats.length = 0
     values.set(RESPONSE_KEY, savedResponse())
     await mountDeskApp({ pullPatch: OWN_PULL_WITH_FEEDBACK })
@@ -2373,7 +2801,7 @@ window.runRespondPostOffChecks = async () => {
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => reviewBody().includes('Replies ready') && button(NAMES.postAnswer), 'The Review tab did not show the saved answer: ' + reviewBody())
     await until(() => button(NAMES.postAnswer).disabled, 'Post stayed on without the owner grant')
-    ensure(reviewBody().includes(reason) && reviewBody().includes('Reply in chat'), 'The card did not say why Post is off: ' + reviewBody())
+    ensure(reviewBody().includes(reason) && reviewBody().includes(COPY_REPLIES + ' to post the replies yourself, or Reply in chat'), 'The card did not say why Post is off: ' + reviewBody())
     ensure(reviewBody().includes('Both points are answered.') && reviewBody().includes('A lost answer is unresolved'), 'The answer is no longer readable: ' + reviewBody())
     ensure(!button(NAMES.replyInChat).disabled && !button(NAMES.discard).disabled, 'Reply in chat or Discard was switched off with Post')
     checks.push({ name: 'without the owner grant Post is off with its reason in words, and the answer, Reply in chat and Discard stay', status: 'pass' })
@@ -2390,6 +2818,37 @@ window.runRespondPostOffChecks = async () => {
     await new Promise(resolve => setTimeout(resolve, 300))
     ensure(!values.get(DECISION_KEY) && calls.messages.length === 0, 'Post wrote ' + JSON.stringify(values.get(DECISION_KEY)) + ' and sent ' + calls.messages.length + ' messages')
     checks.push({ name: 'a press on the disabled Post writes no approval and sends the chat nothing', status: 'pass' })
+    // The button the reason names copies every reply with what it answers, and says Copied only after the write worked.
+    const copied = []
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { copied.push(value) } } })
+    await click(button(COPY_REPLIES))
+    await until(() => button('Copied'), 'Copy replies did not say Copied: ' + reviewBody())
+    ensure(copied.length === 1 && copied[0].includes('Both points are answered.') && copied[0].includes('a new comment on the PR: https://github.com/owner/project/pull/7'), 'Copied ' + JSON.stringify(copied))
+    await until(() => button(COPY_REPLIES), 'Copy replies did not come back')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('denied') } } })
+    await click(button(COPY_REPLIES))
+    await until(() => button('Couldn’t copy') && !button('Copied'), 'A refused copy still said Copied: ' + reviewBody())
+    ensure(edge(button('Couldn’t copy')) <= window.innerWidth, 'The Copy replies button runs past the screen edge')
+    checks.push({ name: 'Copy replies copies every reply with what it answers, and a refused copy says so', status: 'pass' })
+    // The Respond window says before Start that Post is off, says what it covers, and hands the agent the whole review as a file.
+    await until(() => button(COPY_REPLIES), 'Copy replies did not come back')
+    await click(query('[aria-label="Choose an action for PR 7"]'))
+    await click([...document.querySelectorAll('[role=menuitem]')].find(node => text(node.querySelector('strong')) === NAMES.respondAgain))
+    await until(() => query('.co-review-window') && !text(query('.co-review-window')).includes('Reading the reviews'), 'The Respond window did not open: ' + text(query('main')).slice(0, 300))
+    const heads = query('.co-review-window [data-post-off]')
+    ensure(heads && text(heads) === 'Heads-up: Post is off on this Möbius. The answer will wait in this PR’s Review tab, where you can copy the replies.', 'The window did not warn about Post: ' + text(query('.co-review-window')).slice(0, 300))
+    ensure(heads.compareDocumentPosition(button(NAMES.respondAgain)) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not before Start')
+    ensure(!text(query('.co-review-window')).includes('until you press'), 'The window still promises Post: ' + text(query('.co-review-window')))
+    ensure(text(query('.co-review-window')).includes('the whole saved review. Nothing is cut.'), 'The window did not say what it covers: ' + text(query('.co-review-window')))
+    ensure(edge(heads) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The window runs past the screen edge: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
+    await captureShot('respond-post-off-window')
+    await click(button(NAMES.respondAgain))
+    await until(() => calls.messages.length === 1, 'The window sent nothing')
+    ensure(values.get(FINDINGS_KEY) === findings, 'The saved review was not written whole: ' + String(values.get(FINDINGS_KEY)).length + ' of ' + findings.length + ' characters')
+    ensure(calls.messages[0].content.includes('/data/apps/fixture-app/' + FINDINGS_KEY) && !calls.messages[0].content.includes('Finding number 400'), 'The brief did not name the file instead of carrying the text: ' + calls.messages[0].content.slice(0, 600))
+    checks.push({ name: 'the Respond window warns that Post is off before Start, says what it covers, and sends the whole saved review as a file', status: 'pass' })
+    await click(button('Close'))
+    await until(() => !query('.co-review-window'), 'The window did not close')
     // Discard publishes nothing, so it still works.
     await click(button(NAMES.discard))
     await until(() => values.get(DECISION_KEY)?.decision === 'discarded', 'Discard wrote no decision')
@@ -2693,9 +3152,20 @@ window.runReviewRequestChecks = async () => {
     // The verdict posted. GitHub still lists the PR for the moment (its search lags), yet the row leaves now.
     reviewRuns[0] = verdictRun('proposed')
     window.verdictOutcome = 'posted'
+    // The review chat could not be woken to carry on with the merge: the approval itself went through, so it is a notice, not an error.
+    window.mergeResumed = false
     await openVerdict()
     const readsBefore = incomingReads()
-    await approveAndLeave()
+    await click(approve())
+    await until(() => !approve(), 'The verdict did not go out')
+    const notice = () => [...document.querySelectorAll('.co-pr-note[role=status]')].map(text).join(' | ')
+    await until(() => notice().includes('Approved on GitHub. The merge did not continue by itself.'), 'The approval did not say its merge did not continue: ' + notice())
+    ensure(!notice().includes('Agent progress unavailable') && !query('[role=alert]'), 'A successful approval was shown as an error: ' + notice())
+    await captureShot('approval-merge-not-continued')
+    window.mergeResumed = undefined
+    checks.push({ name: 'an approval whose merge could not carry on is a notice, not "Agent progress unavailable"', status: 'pass' })
+    await click(query('.co-desk-back'))
+    await until(() => !query('.co-desk-back'), 'Back did not return to the Desk')
     await until(() => askRows().length === 0, 'The row stayed in Review requests after the verdict posted')
     ensure(incomingReads() === readsBefore, 'The row left only because GitHub was read again, not because the verdict landed')
     checks.push({ name: 'a posted verdict takes the PR out of Review requests at once, before any new GitHub read', status: 'pass' })
@@ -2707,7 +3177,9 @@ window.runReviewRequestChecks = async () => {
     Date.now = () => realNow() + 6 * 60000
     shownAgain()
     await until(() => askRows().length === 1 && text(askRows()[0]).includes('Contribution 8'), 'Showing the frame again did not read the requests once the cooldown was over')
-    ensure(!rows().some(node => text(node).includes('Contribution 7')), 'The reviewed PR came back after the next read')
+    // The PR you approved is no request any more. It is ready to merge, so it is one row under Merge, with its own title (it was "Pull request #7").
+    const back = rows().filter(node => text(node).includes('Contribution 7'))
+    ensure(back.length === 1 && !text(back[0]).includes('Asks for your review') && text(back[0]).includes('Ready to merge'), 'The reviewed PR came back as a request after the next read: ' + back.map(node => text(node)).join(' | '))
     checks.push({ name: 'the frame shown again reads the requests once the five-minute cooldown is over', status: 'pass' })
     // A read that fails is not "nothing asks for your review".
     window.failIncoming = true
@@ -3037,8 +3509,9 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
-    const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }].filter(size => !process.env.WORKSPACE_BROWSER_VIEWPORT || size.name === process.env.WORKSPACE_BROWSER_VIEWPORT)
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
+    // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
+    const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
       const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' })
       const { sessionId } = await protocol.send('Target.attachToTarget', { targetId, flatten: true })
