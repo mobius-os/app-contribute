@@ -72,7 +72,8 @@ test('a batch offers one review of each, off when any PR cannot take it', () => 
   const busy = [pull(), pull({ number: 9, repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE' } })]
   const runs = [{ id: 'r', created_at: '2026-11-04T10:00:00Z', state: 'running', execution_state: 'running', items: [{ repo: 'o/r', number: 9, head_sha: HEAD, base_ref: 'main', state: 'reviewing' }] }]
   const batch = actionsMenuModel(busy, busy.map(pr => standingFor({ pr, login: 'alex', runs })))
-  assert.equal(batch.agent[0].reason, 'An agent is already working on this PR.')
+  assert.equal(batch.agent[0].reason, '#9: An agent is already working on this PR.', 'the dimmed reason names the PR that blocks it, not the first PR of the batch')
+  assert.equal(batch.agent[0].off, true)
 })
 
 test('every menu intent is a machine action, and the header says what GitHub shows', () => {

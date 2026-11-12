@@ -123,7 +123,8 @@ sys.path.insert(0, os.environ["SCRIPT_DIR"])
 from ledger_scan import LedgerScan, awaiting_publication_connection
 from github_events import (
   AUTHOR_ATTENTION_TYPES, COMMENT_FIELDS, REVIEW_FIELDS, TRUSTED, UNTRUSTED,
-  UNVERIFIED, attention_provenance, latest_events, trusted_changes_request,
+  UNVERIFIED, attention_provenance, latest_events, review_events,
+  trusted_changes_request,
 )
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
@@ -532,7 +533,8 @@ def _is_autopilot(rec):
 
 
 # Each blocker clears only when GitHub shows its own condition resolved;
-# feedback and unknown reasons stay until handled or dismissed.
+# feedback and unknown reasons stay until handled or dismissed (new GitHub
+# activity: see _activity_answered).
 _RESOLVED_WHEN = {
   "checks_failed": lambda checks, mergeable, review: checks == "SUCCESS",
   "merge_conflict": lambda checks, mergeable, review: mergeable == "MERGEABLE",
@@ -543,6 +545,37 @@ _RESOLVED_WHEN = {
 def _attention_resolved(attention, check_state, mergeable, review_decision):
   resolved = _RESOLVED_WHEN.get(attention.get("type"))
   return bool(resolved and resolved(check_state, mergeable, review_decision))
+
+
+# The platform's SETTLED_OUTCOMES (contribution_autopilot.py): rounds that
+# pushed, replied or marked the event handled.
+_SETTLED_ROUNDS = frozenset(("pushed", "replied", "handled"))
+
+
+def _round_answered(rec, key):
+  block = rec.get("autopilot") if isinstance(rec.get("autopilot"), dict) else {}
+  return any(
+    isinstance(entry, dict) and entry.get("attention_key") == key
+    and entry.get("outcome") in _SETTLED_ROUNDS
+    for entry in block.get("rounds") or []
+  )
+
+
+# A "new GitHub activity" note names an event someone may still owe an answer
+# to, so it is never dropped on a guess. It clears on proof it was dealt with:
+# a settled round that named its key, or an approval at or after the event
+# (the approval of a reviewer's own review is not an unanswered question).
+# A merged or closed PR clears every note where the status changes.
+def _activity_answered(rec, attention, node, review_decision):
+  if attention.get("type") != "github_activity":
+    return False
+  if _round_answered(rec, attention.get("key")):
+    return True
+  since = str(attention.get("event_at") or attention.get("detected_at") or "")
+  return review_decision == "APPROVED" and any(
+    event.get("state") == "APPROVED" and event["at"] >= since
+    for event in review_events(node)
+  )
 
 
 def _without_type(items: list, kind: str) -> list:
@@ -665,7 +698,8 @@ def _attention_update(rec, node):
     rec.get("attention") if isinstance(rec.get("attention"), dict) else {}
   )
   resolved = _attention_resolved(
-    current_attention, check_state, mergeable, review_decision)
+    current_attention, check_state, mergeable, review_decision
+  ) or _activity_answered(rec, current_attention, node, review_decision)
   if resolved:
     patch["needs_attention"] = False
     patch["attention"] = None
@@ -1017,6 +1051,8 @@ for alias, (name, rec, etag) in aliases.items():
     if new_status in ("merged", "closed"):
       patch["needs_attention"] = False
       patch["attention"] = None
+      if rec.get("waiting_attention"):
+        patch["waiting_attention"] = []
   if not patch:
     _deliver_attention(name, node)
     continue

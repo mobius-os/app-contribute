@@ -62,7 +62,7 @@ function postingStep(count) {
 function verdictStep(count, agentPosts) {
   const it = count === 1 ? 'the PR' : 'each PR'
   if (agentPosts) return `It posts its verdict on ${it} from your account: approve, request changes or comment.`
-  return `It drafts a verdict for ${it}, with the words it would post. You send it, change it to a comment, or throw it away; nothing is posted before that.`
+  return `It drafts a verdict for ${it}, with the words it would post. You send it, change it to a comment, or discard it; nothing is posted before that.`
 }
 
 function mergeStep({ count, posting, verdict }) {
@@ -82,9 +82,8 @@ function reviewStartLabel({ merge, posting, verdict, agentPosts }) {
   return 'Start private review'
 }
 
-const INTENT_TITLES = { review: NAMES.review, check_my_pr: NAMES.review }
-
-export function reviewWindowCopy({ mode, intent = '', posting = false, verdict = false, agentPosts = false, count = 1, bindCurrentTarget = false }) {
+// `title` is the machine's own name for the action that opened the window (Review, or Review again), so the window reads like its button.
+export function reviewWindowCopy({ mode, intent = '', title = '', posting = false, verdict = false, agentPosts = false, count = 1, bindCurrentTarget = false }) {
   if (mode === 'review_fix_merge') return takeoverCopy({ count, bindCurrentTarget, intent })
   const merge = mode === 'review_merge'
   const proposing = posting && verdict
@@ -92,18 +91,36 @@ export function reviewWindowCopy({ mode, intent = '', posting = false, verdict =
   const it = count === 1 ? 'the PR' : 'each PR'
   const steps = [
     { text: `The agent reads ${it}: the code, the checks and the discussion.` },
-    { text: 'It writes its findings for you in a private conversation.' },
+    { text: count === 1 ? 'Its findings appear on this PR’s Review tab.' : 'Its findings appear on each PR’s Review tab.' },
     ...(proposing ? [{ text: verdictStep(count, agent), added: true }] : posting ? [{ text: postingStep(count), added: true }] : []),
     ...(merge ? [{ text: mergeStep({ count, posting, verdict: proposing }), added: true }] : []),
     { text: 'If it has a question, it asks you first.' },
   ]
   return {
-    title: INTENT_TITLES[intent] || 'Review',
+    title: title || NAMES.review,
     steps,
     publicEffect: reviewPublicEffect({ merge, posting, verdict: proposing, agentPosts: agent, count }),
     startLabel: reviewStartLabel({ merge, posting, verdict: proposing, agentPosts: agent }),
     footnote: versionNote(count, bindCurrentTarget, merge),
   }
+}
+
+// A review's day (and time), for lines that say which version was looked at. DateLabel in ui/PullRequestDetail.jsx
+// says the same, but that module imports the Review tab, so the tab cannot import it back.
+export function reviewDate(at, withTime = false) {
+  const when = new Date(at)
+  if (!Number.isFinite(when.getTime())) return ''
+  const day = when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return withTime ? `${day}, ${when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : day
+}
+
+// What a re-review's window says changed since the review you last ran. `count` is the new commits
+// (`more` when the list was cut short) or null while unknown.
+export function sinceReviewLine({ count = null, more = false, at }) {
+  const day = reviewDate(at)
+  const since = `since your review${day ? ` of ${day}` : ''}.`
+  if (!count) return `This PR changed ${since}`
+  return `${count}${more ? '+' : ''} new ${count === 1 && !more ? 'commit' : 'commits'} ${since}`
 }
 
 // The hint under the "Merge after I approve" switch, per selected PR for a batch.

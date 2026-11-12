@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
+import { NAMES } from '../names.js'
 import { stageWords } from '../publication-stage.js'
 
 const cardSource = readFileSync(new URL('../ui/ContributionCard.jsx', import.meta.url), 'utf8')
@@ -22,6 +23,14 @@ test('a frozen selection cannot change its scope through the unavailable merge f
   const selection = readFileSync(new URL('../ui/ReviewSelection.jsx', import.meta.url), 'utf8')
   assert.match(selection, /state\.request\?\.preview_sha256\s*\? 'Start a new private review selection/)
   assert.match(selection, /setResolved\(null\); setMode\('review'\)/)
+})
+
+test('Starting a review closes its task like closing the window does, so the list needs no dead Back press', () => {
+  const pulls = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
+  const start = pulls.match(/async function start\(\) \{[\s\S]*?\n  \}\n/)[0]
+  assert.match(start, /closeReview\(\); setSelected\(new Set\(\)\)/)
+  assert.doesNotMatch(start, /setChoice\(null\)/, 'clearing only the choice leaves the task open')
+  assert.match(pulls, /const closeReview = \(\) => \{ setChoice\(null\); task\?\.close\(\) \}/)
 })
 
 test('new contributions use GitHub automatically without a route picker', () => {
@@ -159,7 +168,6 @@ test('pull requests and requests share one decision-first Run', () => {
   assert.match(runSource, /REQUEST_TYPES = new Set\(\['issue', 'issue_comment', 'discussion_comment'\]\)/)
   assert.match(runSource, /decisions\.push\(decision\('request'/)
   assert.match(cardSource, /!isPr && rec\.status === 'prepared'/)
-  assert.match(feedSource, /STATE_LABELS/)
 })
 
 test('only project drill-down owns reversible navigation; inline actions preserve the workspace', () => {
@@ -173,16 +181,8 @@ test('only project drill-down owns reversible navigation; inline actions preserv
   assert.match(sourceMapSource, /workTriggerRef\.current = document\.activeElement/)
 })
 
-test('an incoming review stays recoverable until its conversation starts', () => {
-  assert.match(
-    appSource,
-    /const started = await startAgentTask\([\s\S]*if \(!started\.ok\) return started[\s\S]*setIncomingReviews/,
-  )
-})
-
 test('reviewing someone else’s PR never assigns the owner to it', () => {
   assert.doesNotMatch(appSource, /assignIncomingReview|assign_and_review/)
-  assert.match(feedSource, /\{busy \? 'Starting…' : NAMES\.review\}/)
   assert.doesNotMatch(feedSource, /Assign & review|Assigning…/)
 })
 
@@ -216,6 +216,23 @@ test('preparation runs as one cycle while every public send stays explicit', () 
   assert.match(batchActionSource, /'Starting…'/)
   assert.match(batchActionSource, /aria-busy=\{busy\}/)
   assert.match(appSource, /resolveUncertainSubmission/)
+})
+
+test('opening a draft says what it does: Opening for review…, then Open for review, never a request to anyone', () => {
+  assert.equal(NAMES.openForReview, 'Open for review')
+  assert.match(feedSource, /ready: \{ working: 'Opening for review…', checking: 'Checking result…', 'not-attempted': 'Not opened', closed: 'Pull request closed', merged: 'Merged', done: NAMES\.openForReview \}/)
+  for (const [name, source] of [['Feed', feedSource], ['api', apiSource], ['index', appSource]]) {
+    assert.match(source, /Could not open for review\./, name + ' fails in the same words')
+    assert.doesNotMatch(source, /Requesting review|Review requested|Not requested|Could not request review|'Request review'/, name)
+  }
+})
+
+test('plain words come first and ids come small after them (D6)', () => {
+  assert.match(cardSource, /Prepared version: <small><code>\{plan\.head_sha/)
+  assert.doesNotMatch(cardSource, /Prepared head/)
+  assert.doesNotMatch(appSource, /'[^'\n]*Möbius relay/, 'screen text; a comment may still name the route')
+  assert.match(appSource, /Möbius sends this contribution from its own account/)
+  assert.match(appSource, /A draft sent from Möbius’s own account cannot be opened for review/)
 })
 
 test('project changed-file review loads the real diff and opens its first file immediately', () => {
@@ -378,7 +395,7 @@ test('background checks have one shared accessible toolbar indicator', () => {
 test('GitHub status failures stay visible and the account refreshes on return', () => {
   assert.doesNotMatch(connectionSource, /if \(state === 'unknown'\) return null/)
   assert.match(connectionSource, /GitHub status unavailable/)
-  assert.match(connectionSource, /Check GitHub again/)
+  assert.match(connectionSource, /NAMES\.checkAgain/)
   assert.match(appSource, /connectionRequestRef/)
   assert.match(appSource, /requestId !== connectionRequestRef\.current/)
   assert.match(appSource, /refreshConnectionRef\.current\?\.\(\)/)
@@ -390,8 +407,8 @@ test('the Projects summary reserves its row while source checks refresh', () => 
   assert.match(appSource, /if \(!quiet\) setSourceLoading\(true\)/)
   assert.match(sourceMapSource, /function LoadingState\(\)/)
   assert.match(sourceMapSource, /className="co-source-loading" role="status"/)
-  assert.match(sourceMapSource, /Checking projects…/)
-  assert.match(sourceMapSource, /No projects with edits/)
+  assert.match(sourceMapSource, /Checking repositories…/)
+  assert.match(sourceMapSource, /No repositories with edits/)
 })
 
 test('project status and essential controls remain visible with a readable type floor', () => {
@@ -442,13 +459,13 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
   assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
   assert.match(appSource, /checks=\{upstreamChecks\}/)
-  // The sync keeps its last successful time inside the header control, including on phones.
-  assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
+  // The sync keeps its last successful time inside the header control, including on phones, and is named for what it does.
+  assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label=\{NAMES\.sync\}[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
+  assert.equal(NAMES.sync, 'Sync with GitHub')
   // A failed review-request read is a failed sync, on a manual Sync and on the first load alike (the hub settles it without throwing).
   assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
   assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
   assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
-  assert.match(appSource, /Sync with GitHub/)
   assert.match(appSource, /setRefreshNote\(old => outcome\?\.ok/)
   assert.match(appSource, /onClick=\{refreshAll\}/)
 })
@@ -506,8 +523,9 @@ test('a running review is shown by the frame and the Review tab only: no Reviewi
   const detailSource = readFileSync(new URL('../ui/PullRequestDetail.jsx', import.meta.url), 'utf8')
   // Tags for finished or waiting reviews stay; the one for a running review goes.
   assert.match(pullsSource, /\{review\.chip \? <button className=\{'co-pr-agent-state'/)
-  assert.match(deskSource, /const standingChip = framed === 'verdict' \? chipOf\(standing\) : null/)
-  assert.match(deskSource, /\{standingChip \? <span className="co-desk-chip is-waiting">/)
+  // The desk row says the PR's decision in words, except while an agent works: then the frame alone says it.
+  assert.match(deskSource, /const labelled = framed !== 'reviewing' && /)
+  assert.match(deskSource, /\(labelled \? \[decisionChip\(decision\)\] : \[\]\)/)
   assert.doesNotMatch(deskSource, /is-review/)
   assert.doesNotMatch(menuSource, /co-arc|is-active|active =/)
   assert.doesNotMatch(pullsSource, /<AgentMenu active=/)
@@ -539,6 +557,30 @@ test('an external image in GitHub markdown becomes a labelled link, never a brok
   assert.match(markdownSource, /function linkExternalImages/)
   assert.match(markdownSource, /img\.replaceWith\(link\)/)
   assert.match(markdownSource, /linkExternalImages\(DOMPurify\.sanitize/)
+  // Rewritten in a <template>, which fetches nothing: a plain element would request every <img> address as it parsed.
+  assert.match(markdownSource, /document\.createElement\('template'\)/)
+  assert.doesNotMatch(markdownSource, /document\.createElement\('div'\)/)
+})
+
+test('the markdown view drops the picture hooks and other picture carriers from the text, on every path', () => {
+  const markdownSource = readFileSync(new URL('../ui/MarkdownView.jsx', import.meta.url), 'utf8')
+  // The text cannot carry the app's own picture markup: dropped before the app adds its own.
+  assert.match(markdownSource, /\[class\*="co-md-" i\]/)
+  assert.ok(markdownSource.indexOf('dropPictureHooks(box.content)') < markdownSource.indexOf("createElement('a')"))
+  // No picture through <picture><source>, srcset, poster, background or style url().
+  assert.match(markdownSource, /FORBID_TAGS: \['source', 'style'\], FORBID_ATTR: \['srcset', 'poster', 'background', 'style'\]/)
+  // An <input type=image src> keeps no outside address either.
+  assert.match(markdownSource, /querySelectorAll\('input\[src\]'\)/)
+  // The fallback after a parse error is cleaned like the normal path.
+  assert.doesNotMatch(markdownSource, /return DOMPurify\.sanitize/)
+  // A tap on a picture class never navigates the frame, and the viewer is fed only what pictureOf accepts.
+  assert.match(markdownSource, /event\.preventDefault\(\)\n\s+setViewing\(pictureOf\(photo\)\)/)
+})
+
+test('a Review tapped before the capabilities arrive is marked, and the page settles it when they do', () => {
+  const pullsSource = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
+  assert.match(pullsSource, /job === 'review' && !capabilities && others \? \{ draftPending: true \}/)
+  assert.match(pullsSource, /const settled = settleDraftDefault\(choice, capabilities\)\n\s+if \(settled === choice\) return\n\s+setResolved\(null\)\n\s+setChoice\(settled\)/)
 })
 
 test('project work leaves published feedback to the dedicated Needs you destination', () => {

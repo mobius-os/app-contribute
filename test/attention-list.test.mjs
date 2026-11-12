@@ -64,10 +64,11 @@ test('a related group is one row that names the affected PR and its group', asyn
   if (!render) return
   const affected = pr(117, { type: 'github_activity', message: 'New review from a reviewer.', detected_at: new Date().toISOString() })
   const group = item('g', 'private_review', affected, [affected, pr(118, null), pr(119, null)])
-  assert.equal(groupNote(group), 'On #117 · 3 related PRs: #117, #118, #119')
+  // The row's facts line leads with the PR the reason is about, so the note names only the group.
+  assert.equal(groupNote(group), '3 related PRs: #117, #118, #119')
   assert.equal(groupNote(item('s', 'private_review', affected)), '')
   const html = render({ items: [group], heading })
-  assert.match(html, /On #117 · 3 related PRs/)
+  assert.match(html, /3 related PRs: #117, #118, #119/)
   assert.match(html, /just now/)
   assert.doesNotMatch(html, /Show the other/)
 })

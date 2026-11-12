@@ -31,6 +31,14 @@ export const checkWords = commit => {
   return text ? { text, tone } : null
 }
 
+// What the commit changed, for the row before it is opened. GitHub leaves the file count out for a commit it
+// cannot count (an old or huge one): the row then says nothing rather than "0 files".
+export function commitStats(commit) {
+  const whole = value => Number.isInteger(value) && value >= 0
+  if (!whole(commit?.changedFilesIfAvailable) || !whole(commit.additions) || !whole(commit.deletions)) return null
+  return { files: commit.changedFilesIfAvailable, additions: commit.additions, deletions: commit.deletions }
+}
+
 const dayOf = value => (Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '')
 
 // Rows grouped by the day they were committed, in the order GitHub lists them (oldest first).

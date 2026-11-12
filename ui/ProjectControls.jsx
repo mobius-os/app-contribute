@@ -9,6 +9,7 @@ import { useProjectCycle } from './useProjectCycle.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
 import { DateLabel } from './PullRequestDetail.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
+import { NAMES } from '../names.js'
 
 const CYCLE_CSS = `
 .co-cycle-outlet{margin:12px 0 20px;border-bottom:1px solid var(--border)}
@@ -62,7 +63,7 @@ function CycleNotice({ cycle, label, waiting, workflow }) {
   const started = cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="started " /></> : null
   return <div className="co-task-progress" role="status">
     <strong>{waiting ? 'Your agent has a question' : label}</strong>
-    <p>{cycle.title || 'Project work'}{started}.{nextStep ? ` ${nextStep}` : ''}</p>
+    <p>{cycle.title || NAMES.agentRun}{started}.{nextStep ? ` ${nextStep}` : ''}</p>
     <div className="co-cycle-actions">
       <button type="button" className={'co-btn' + (nextStep ? '' : ' co-btn-primary')} onClick={() => workflow.open()}>{waiting ? 'Answer question' : 'Open conversation'}</button>
       {CANCELLABLE_PHASES.includes(cycle.phase) ? <button type="button" className="co-btn" onClick={workflow.stop}>{cancelLabel(cycle.phase)}</button> : null}
@@ -101,9 +102,9 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
     } catch { setError('Could not start. Try again.') }
   }
   const canStart = !loading && !checking && !active && !waiting
-  const blockedReason = checking ? 'Checking saved work before another cycle can start.'
-    : active || waiting ? 'Current work must finish or be cancelled before another cycle starts.'
-    : loading ? 'Project status is still loading.' : ''
+  const blockedReason = checking ? 'Checking saved work before another agent run can start.'
+    : active || waiting ? 'Current work must finish or be cancelled before another agent run starts.'
+    : loading ? 'Repository status is still loading.' : ''
   // Cycle status and history appear once there is work to show; an idle
   // project configures new work from its Prepare action instead.
   const hasCycle = Boolean(cycle.chatId || cycle.unsent || cycle.history?.length || cycle.phase === 'unknown')
@@ -111,14 +112,14 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
     <button type="button" className="co-btn co-btn-primary" disabled={cycle.phase === 'starting'} onClick={() => workflow.sendAgain()}>Send again</button>
     <p className="co-task-footnote">Sends the same saved work and model. If it already arrived, it is not sent twice.</p>
   </div> : null
-  const progressRow = hasCycle ? <section className="co-cycle-outlet" aria-label="Project work">
+  const progressRow = hasCycle ? <section className="co-cycle-outlet" aria-label={NAMES.agentRuns}>
     <button type="button" className="co-work-progress-row" onClick={() => task?.open('task:cycle')} aria-expanded={task?.activeId === 'task:cycle'} aria-busy={active}>
       <span className={moving ? 'co-working-icon' : ''}><Icon name={waiting ? 'feedback' : 'prepare'} size={18} /></span>
-      <span><strong>{cycle.chatId ? cycle.title || 'Agent job' : 'Agent jobs'}</strong><small>{cycle.unsent && !moving ? 'A start needs sending' : !cycle.chatId ? 'Past jobs and their conversations' : waiting ? 'Your agent has a question' : moving ? 'Agent working' : statusLabel}</small></span><Icon name="right" size={16} />
+      <span><strong>{cycle.chatId ? cycle.title || NAMES.agentRun : NAMES.agentRuns}</strong><small>{cycle.unsent && !moving ? 'A start needs sending' : !cycle.chatId ? 'Past agent runs and their conversations' : waiting ? 'Your agent has a question' : moving ? 'Agent working' : statusLabel}</small></span><Icon name="right" size={16} />
     </button>
     <TaskPane id="task:cycle" dock={false}>
-      <h3>Agent jobs</h3>
-      {cycle.chatId ? <p><strong>Current:</strong> {cycle.title || 'Project work'} · {statusLabel}{cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="Started " /></> : null}</p> : <p>No agent job is running.</p>}
+      <h3>{NAMES.agentRuns}</h3>
+      {cycle.chatId ? <p><strong>Current:</strong> {cycle.title || NAMES.agentRun} · {statusLabel}{cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="Started " /></> : null}</p> : <p>No agent run is active.</p>}
       <div className="co-cycle-actions">
         <button type="button" className="co-btn" disabled={['checking', 'restoring', 'starting', 'stopping'].includes(cycle.phase)} onClick={workflow.recheck}><Icon name="refresh" /> Check again</button>
         {cycle.chatId && cycle.phase !== 'deleted' ? <button type="button" className="co-btn" onClick={() => workflow.open()}>{waiting ? 'Answer question' : 'Open current conversation'}</button> : null}
@@ -127,10 +128,10 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
       {pendingRecovery}
       {fullCycleAction ? <>
         <AgentModelSettings token={token} defaultHint="Your chat default" choice={cycleAgent} onChange={next => { setCycleAgent(next); return true }} />
-        <button type="button" className="co-btn co-btn-primary co-task-primary" disabled={!canStart} onClick={() => start(fullCycleAction, cycleAgent)}>Start fresh full merge cycle</button>
+        <button type="button" className="co-btn co-btn-primary co-task-primary" disabled={!canStart} onClick={() => start(fullCycleAction, cycleAgent)}>Start fresh full merge run</button>
       </> : null}
       {blockedReason || cycle.error || error ? <p role="status">{blockedReason || cycle.error || error}</p> : null}
-      {cycle.history?.length ? <details><summary>Past jobs ({cycle.history.length})</summary><ul className="co-cycle-history">{cycle.history.map((item, index) => <li key={`${index}:${item.started_at || item.chat_id}`}><button type="button" className="co-btn co-btn-quiet" onClick={() => workflow.open(item.chat_id)}>{item.title || 'Previous project work'}{item.started_at ? <> · <DateLabel value={item.started_at} prefix="Started " /></> : null}</button></li>)}</ul></details> : null}
+      {cycle.history?.length ? <details><summary>Past agent runs ({cycle.history.length})</summary><ul className="co-cycle-history">{cycle.history.map((item, index) => <li key={`${index}:${item.started_at || item.chat_id}`}><button type="button" className="co-btn co-btn-quiet" onClick={() => workflow.open(item.chat_id)}>{item.title || 'Previous agent run'}{item.started_at ? <> · <DateLabel value={item.started_at} prefix="Started " /></> : null}</button></li>)}</ul></details> : null}
     </TaskPane>
   </section> : null
   const progress = cycle.chatId && (active || waiting || ['paused', 'failed'].includes(cycle.phase))

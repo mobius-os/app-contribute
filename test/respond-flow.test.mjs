@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { approveResponse, discardResponse } from '../respond-flow.js'
-import { clearDecision, loadResponses, readFreshResult, writeDecision } from '../respond-store.js'
-import { normalizeResult, planSteps, POST_OFF_REASON } from '../respond-result.js'
+import { clearDecision, loadResponses, readFreshResult, writeDecision, writeFindings } from '../respond-store.js'
+import { normalizeResult, planSteps, POST_OFF_REASON, postOffReason } from '../respond-result.js'
 
 const example = () => JSON.parse(readFileSync(new URL('./fixtures/respond-result.example.json', import.meta.url), 'utf8'))
 const HEAD = 'b'.repeat(40)
@@ -59,6 +59,20 @@ test('the fresh read reaches the server and an offline answer is not trusted', a
   assert.equal((await readFreshResult(SLUG, fakeStorage(saved()))).id, example().id)
   assert.equal(await readFreshResult(SLUG, fakeStorage(saved(), { offline: true })), null)
   assert.equal(await readFreshResult(SLUG, fakeStorage({})), null)
+})
+
+test('the saved review travels as a whole file, written only when a ticked item has one, and only counted when the server has it', async () => {
+  const item = (patch = {}) => ({ key: 'findings', checked: true, file: 'respond-findings/o__r__7.md', text: 'x'.repeat(50000), ...patch })
+  const storage = fakeStorage()
+  assert.deepEqual(await writeFindings([item()], storage), { ok: true })
+  assert.deepEqual(storage.calls, [['write', 'respond-findings/o__r__7.md', 'x'.repeat(50000)]], 'every character, nothing cut')
+  const idle = fakeStorage()
+  assert.deepEqual(await writeFindings([item({ checked: false }), { key: 'threads', checked: true, refs: [] }], idle), { ok: true })
+  assert.deepEqual(idle.calls, [], 'an unticked review, or items with no file, write nothing')
+  const queued = await writeFindings([item()], fakeStorage({}, { queued: true }))
+  assert.equal(queued.ok, false)
+  assert.match(queued.error, /copy of the findings was not saved online/)
+  assert.match((await writeFindings([item()], fakeStorage({}, { writeFails: true }))).error, /could not be saved/)
 })
 
 test('a decision is a durable write that only counts when the server accepted it', async () => {
@@ -145,13 +159,13 @@ test('Post does nothing until the host confirms it on its own sheet: no approval
     for (const again of [false, true]) {
       const storage = fakeStorage(saved())
       const out = await approveResponse({ ...view({ capabilities }), slug: SLUG, token: 't', storage, again, deliver: deliverOk })
-      assert.deepEqual(out, { ok: false, error: POST_OFF_REASON }, name)
+      assert.deepEqual(out, { ok: false, error: postOffReason(again ? 'approved' : 'ready') }, name)
       assert.deepEqual(storage.calls, [], `${name}: the storage was not even read`)
       assert.deepEqual(asked, [], `${name}: and the shell was not asked`)
     }
   }
   assert.equal(delivered.length, 0)
-  assert.match(POST_OFF_REASON, /^Post is off for now: Möbius cannot yet confirm it was you who pressed it\..*Reply in chat\.$/)
+  assert.match(POST_OFF_REASON, /^Post is off on this Möbius: it cannot yet confirm that it was you who pressed it\. .*Copy replies.*Reply in chat\.$/)
 })
 
 test('Discard needs no confirmation: it publishes nothing', async () => {

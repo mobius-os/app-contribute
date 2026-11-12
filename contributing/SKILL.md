@@ -49,7 +49,7 @@ Three rules never bend. Every mode file assumes them and points back here.
 
 ## The common path
 
-Most requests are one PR, new or an update to an open one. After the adapter:
+Most requests are one independent PR on the default branch, new or an update to an open one; never a stack. After the adapter:
 check related work ([prepare.md](prepare.md); prefer updating the owner's own
 open PR over a duplicate), build the locked review worktree on the fresh base
 or the PR head ([branch.md](branch.md)), run the focused tests, review and
@@ -67,7 +67,7 @@ stage with one verdict ([ledger.md](ledger.md)), then publish once approved:
 | Build the review branch: refresh upstream, scratch vs `/data/contrib` checkouts, the locked review worktree, updating an existing open PR; **cleanup ownership** of any clone, worktree, install, or build output you create | [branch.md](branch.md) |
 | Read or write ledger records: **stage** a PR, record a verdict, CAS updates, `chat_ids`, `type`/`status` values | [ledger.md](ledger.md) |
 | Publish after approval: the green light, **Send/Open PR**, issue/discussion comments, editing a PR's title or description, autopilot grants, the failure table | [publish.md](publish.md) |
-| Work that needs upstream push or merge rights: PR stacks, **Review**, pinned **Review & merge**, and scoped **Review, fix & merge** of selected public PRs (`review_prs.py`), **Prepare & merge**, publishing an app into its own `mobius-os/app-<id>` repository and the post-merge `connect_app` | [maintainer.md](maintainer.md) |
+| Work that needs upstream push or merge rights: existing stacks, **Review**, pinned **Review & merge**, and scoped **Review, fix & merge** of selected public PRs (`review_prs.py`), **Prepare & merge**, publishing an app into its own `mobius-os/app-<id>` repository and the post-merge `connect_app` | [maintainer.md](maintainer.md) |
 | Link a public PR in chat so the owner can open it in Contribute (`pr_block.py`, read-only; no rights needed) | [maintainer.md](maintainer.md) “Link a PR in chat” |
 | Check results: required checks, local checks before staging, inspecting failed CI (prefer `/data/platform/scripts/ci-failures.sh <owner/repo> <pr-number\|run-id>` over full `gh run view --log` dumps) | [ci.md](ci.md) |
 | Any record with `submission_mode: "mobius-bot"` (legacy relay records only) | [legacy-bot.md](legacy-bot.md) |

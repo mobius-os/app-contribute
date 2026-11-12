@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { frontendModules, renderModule } from './render-harness.mjs'
 import { attachSourceProjects } from '../source-map.js'
-import { deskCounts, projectNeedsCount, needsCount, railBadge } from '../desk.js'
+import { NEEDS_CHIPS, deskCounts, projectNeedsCount, needsCount, railBadge } from '../desk.js'
 
 // A badge, a tab number and a label each equal the rows they open (finding M4).
 let renderer
@@ -19,8 +19,14 @@ async function ui(t) {
   return renderer
 }
 
-const pull = (number, extra = {}) => ({ number, title: `Thing ${number}`, author: { login: 'maker' }, repository: { nameWithOwner: 'acme/widgets' }, labels: { nodes: [] }, comments: { totalCount: 0 }, headRefName: `h${number}`, baseRefName: 'main', updatedAt: '2026-11-02T08:00:00Z', isDraft: false, ...extra })
-const entry = (number, repo, bucket) => ({ id: `${repo}#${number}`, bucket, at: number, run: { created_at: '2026-11-03T08:00:00Z' }, item: { repo, number, title: `Run ${number}` }, chips: [{ label: 'Needs you', tone: 'owner' }] })
+const HEAD = 'a'.repeat(40)
+// A PR GitHub read completely: the shared decision reads a PR without these facts as "could not be read".
+const pull = (number, extra = {}) => ({ number, title: `Thing ${number}`, author: { login: 'maker' }, repository: { nameWithOwner: 'acme/widgets', viewerPermission: 'WRITE' }, labels: { nodes: [] }, comments: { totalCount: 0 }, headRefName: `h${number}`, baseRefName: 'main', updatedAt: '2026-11-02T08:00:00Z', isDraft: false,
+  headRefOid: HEAD, state: 'OPEN', mergeable: 'MERGEABLE', latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, ...extra })
+const opinion = state => ({ latestOpinionatedReviews: { nodes: [{ state, author: { login: 'octocat' }, commit: { oid: HEAD } }] } })
+// A review of someone else's PR that comes back to its owner: new commits since the review (the shared decision's "review again").
+const reviewAgain = { role: 'reviewer', turn: 'you', state: 'reviewer.re_review', next: 'review' }
+const entry = (number, repo, bucket) => ({ id: `${repo}#${number}`, bucket, at: number, run: { created_at: '2026-11-03T08:00:00Z' }, item: { repo, number, title: `Run ${number}` }, chips: [{ label: 'Needs you', tone: 'owner' }], decision: reviewAgain })
 const rowsIn = html => (html.match(/class="co-desk-row(?: is-[a-z_]+)*"/g) || []).length
 
 // Review requests (1, 2), feedback card on #3, own PRs: #4 fails, #5 ready (a row each), #6 just waiting,
@@ -28,7 +34,7 @@ const rowsIn = html => (html.match(/class="co-desk-row(?: is-[a-z_]+)*"/g) || []
 function scene() {
   const incoming = [
     pull(1, { reviewRequested: true, author: { login: 'octocat' } }), pull(2, { reviewRequested: true, author: { login: 'octocat' } }),
-    pull(3, { reviewDecision: 'CHANGES_REQUESTED' }), pull(4, { reviewDecision: 'CHANGES_REQUESTED' }), pull(5, { reviewDecision: 'APPROVED' }), pull(6),
+    pull(3, opinion('CHANGES_REQUESTED')), pull(4, opinion('CHANGES_REQUESTED')), pull(5, opinion('APPROVED')), pull(6),
   ]
   const feedback = { id: 'f3', kind: 'public_attention', label: 'Feedback on three', record: { repo: 'acme/widgets', number: 3 } }
   const entries = [entry(1, 'acme/widgets', 'waiting'), entry(7, 'acme/widgets', 'waiting'), entry(8, 'acme/widgets', 'stalled'), entry(9, 'acme/widgets', 'running')]
@@ -47,7 +53,18 @@ test('a repository\'s rail badge is exactly the rows its Needs you card shows, a
   assert.equal(rowsIn(html), badge)
   // The same rows the desk sums into its Needs you badge.
   const counts = deskCounts({ projects, decisions: [{ ...feedback }], incoming, records: [], login: 'maker', reviewEntries: entries })
-  assert.equal(counts.agent, 2)
+  assert.deepEqual([counts.requests, counts.questions, counts.fix, counts.merge, counts.again], [2, 1, 1, 1, 2])
+  assert.equal(needsCount(counts), badge, 'the rail badge is the chips\' sum')
+})
+
+test('each chip\'s number is the rows its step shows, and the steps together are the rail badge', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const { incoming, feedback, entries, projects } = scene()
+  const counts = deskCounts({ projects, decisions: [feedback], incoming, records: [], login: 'maker', reviewEntries: entries })
+  const rows = needsFilter => rowsIn(api.view({ projects, records: [], login: 'maker', decisionsFor: () => [feedback], lastLooked: '', query: '', reviews: { entries }, counts: {}, view: 'needs', needsFilter, onOpenProject() {}, onOpenPull() {}, onOpenRecord() {} }))
+  for (const chip of NEEDS_CHIPS) assert.equal(rows(chip.key), chip.count(counts), chip.label)
+  assert.equal(rows(''), railBadge('needs', counts))
 })
 
 test('without agent runs the badge and the rows still agree', async t => {
@@ -82,18 +99,18 @@ test('the Local changes tab counts files, in words, not a bare number beside rev
   assert.match(api.tabs({ ...props, editsCount: 1 }), /<span class="co-tab-count is-files">1 file<\/span>/)
 })
 
-test('the Finished label counts every row the tab renders, saved agent work included', async t => {
+test('the Waiting on you label counts every row the tab renders, saved agent work included', async t => {
   const api = await ui(t)
   if (!api) return
   const { feedback, entries, projects } = scene()
   const saved = [feedback, { id: 'f9', kind: 'private_review', label: 'Saved review', record: { repo: 'acme/widgets', number: 9 } }]
   const html = api.view({ projects, records: [], login: 'maker', decisionsFor: () => saved, lastLooked: '', query: '', reviews: { entries: entries.filter(item => item.bucket !== 'running'), counts: {} }, counts: {}, view: 'runs', onOpenProject() {}, onOpenPull() {}, onOpenRecord() {} })
-  const label = Number(/aria-pressed="true">Finished<span class="co-pr-filter-count">(\d+)<\/span>/.exec(html)?.[1])
-  assert.equal(label, 3 + 2, 'three finished runs and two saved-work rows')
+  const label = Number(/aria-pressed="true">Waiting on you<span class="co-pr-filter-count">(\d+)<\/span>/.exec(html)?.[1])
+  assert.equal(label, 3 + 2, 'two runs waiting on you, one stopped, and two saved-work rows')
   assert.equal(rowsIn(html), label)
   assert.equal((html.match(/aria-label="Widgets"/g) || []).length, 2, 'the runs card and the saved-work card are two sections')
   assert.match(html, /<section class="co-envelope" aria-label="Widgets"><header class="co-envelope-head">(?:(?!<\/header>).)*Prepared work/, 'the saved-work card says what it holds')
-  const running = api.view({ projects, records: [], login: 'maker', decisionsFor: () => saved, lastLooked: '', query: '', reviews: { entries, counts: {} }, counts: {}, view: 'runs', onOpenProject() {}, onOpenPull() {}, onOpenRecord() {} })
-  assert.match(running, /aria-pressed="true">Running<span class="co-pr-filter-count">1</)
-  assert.match(running, /aria-pressed="false">Finished<span class="co-pr-filter-count">5</, 'the other tab already says what it holds')
+  const all = api.view({ projects, records: [], login: 'maker', decisionsFor: () => saved, lastLooked: '', query: '', reviews: { entries, counts: {} }, counts: {}, view: 'runs', onOpenProject() {}, onOpenPull() {}, onOpenRecord() {} })
+  assert.match(all, /aria-pressed="false">Running<span class="co-pr-filter-count">1</, 'the other tabs already say what they hold')
+  assert.match(all, /aria-pressed="false">Finished<span class="co-pr-filter-count">0</, 'nothing here is over')
 })

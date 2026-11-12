@@ -251,6 +251,19 @@ async function fetchVerifiedScreenshot(token, shot, url) {
   }
 }
 
+// One file of a repository, as GitHub's contents answer (base64 inside JSON), read through the platform's
+// read-only GitHub route: the frame itself never asks GitHub's other hosts for anything. `repo` and `ref` come
+// from image-source.js already checked; null when it cannot be read.
+export async function fetchRepoFile(token, { repo, ref, path }) {
+  const url = `/api/github/api/repos/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`
+  try {
+    const response = await fetchRead(url, { headers: { ...authHeaders(token), Accept: 'application/vnd.github+json' } })
+    return response.ok ? await response.json() : null
+  } catch {
+    return null
+  }
+}
+
 // POSTs one read-only GraphQL document; returns response.data or null.
 // Callers leave records stale on null — the refresh is best-effort polish,
 // and GitHub returns null nodes (not errors) for anything inaccessible.
@@ -776,7 +789,7 @@ export async function markContributionReady({ appId, token, rec }) {
     if (detail && typeof detail === 'object') {
       return {
         uncertain: response.status === 503 && detail.code === 'ready_unconfirmed',
-        error: detail.message || 'Could not request review for this pull request.',
+        error: detail.message || 'Could not open for review.',
         record: detail.record || null,
         failure: { status: response.status, code: detail.code || '' },
       }
@@ -784,7 +797,7 @@ export async function markContributionReady({ appId, token, rec }) {
     return {
       error: typeof detail === 'string'
         ? detail
-        : 'Could not request review for this pull request.',
+        : 'Could not open for review.',
       failure: { status: response.status, code: '' },
     }
   } catch {

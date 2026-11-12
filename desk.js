@@ -1,9 +1,10 @@
 // The Desk home: pure logic for the side views, their counts, and the
 // per-project grouping the envelopes render. UI stays in ui/Desk.jsx and
 // ui/DeskViews.jsx; everything here is testable without a DOM.
-import { checkSummary, prKey } from './collaboration.js'
+import { prKey } from './collaboration.js'
 import { attentionListItems } from './run.js'
 import { NAMES } from './names.js'
+import { standingFor } from './pr-standing.js'
 import { projectIsQuiet } from './source-map.js'
 
 // The four views (finding 2). Every other place a PR can be lives inside one of them.
@@ -20,23 +21,11 @@ export const DESK_VIEWS = [
 export const FOLDED_VIEWS = { confirm: 'needs', edits: 'needs', merged: 'mine', work: 'runs', reviews: 'runs' }
 export const deskViewKey = key => FOLDED_VIEWS[key] || key
 
-const sameLogin = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+export const sameLogin = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
 
-// The next step on a PR the owner authored, in plain words. Passing checks are
-// never a review verdict; an approval on a draft still waits on Mark ready.
-export function authoredPullState(pr) {
-  const checks = checkSummary(pr)
-  if (checks?.failed) {
-    return { key: 'failing', label: `${checks.failed} failing ${checks.failed === 1 ? 'check' : 'checks'}`, tone: 'blocker' }
-  }
-  if (pr?.mergeable === 'CONFLICTING') return { key: 'conflict', label: 'Merge blocked', tone: 'blocker' }
-  if (pr?.reviewDecision === 'CHANGES_REQUESTED') return { key: 'changes', label: 'Changes requested', tone: 'blocker' }
-  if (pr?.reviewDecision === 'APPROVED') {
-    if (pr.isDraft) return { key: 'approved_draft', label: 'Approved, still a draft', tone: 'ready' }
-    return { key: 'ready', label: 'Approved, ready to merge', tone: 'ready' }
-  }
-  return { key: 'waiting', label: 'Waiting on reviewers', tone: 'quiet' }
-}
+// The one decision (pr-standing.js) the repository list and the PR page read for a PR, so a desk row says what they say.
+// `facts` are what it is decided from besides the PR: the saved reviews, live conversations, answers and set-aside notes.
+export const deskStanding = (pr, login, facts = {}) => standingFor({ pr, login, ...facts })
 
 // PRs the owner authored, out of everything GitHub says involves them.
 export function authoredPulls(incoming, login) {
@@ -91,36 +80,7 @@ export function feedbackPullKeys(items) {
   return new Set((items || []).map(feedbackPull).filter(Boolean).map(pullKey))
 }
 
-// What a project's card lists in Needs you, as one definition for the card
-// and for the project's number in the rail: review requests, feedback cards,
-// and the owner's own PRs that need a step and have no feedback card already.
-export function needsPulls(project, items, login) {
-  const covered = feedbackPullKeys(items)
-  return authoredPulls(project.incomingReviews, login)
-    .filter(pr => !covered.has(pullKey(pr)))
-    .map(pr => [pr, authoredPullState(pr)])
-    .filter(([, state]) => state.tone !== 'quiet' && state.key !== 'approved_draft')
-}
-
 export const sameRepo = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase()
-
-// The agent-run rows a project's Needs you card renders: its repository's runs that wait on
-// the owner, except those on a PR the card already lists as a row of its own.
-export function projectAgentRuns(project, reviewEntries, items, login) {
-  const shown = new Set([
-    ...(project.reviewRequests || []).map(pullKey),
-    ...feedbackPullKeys(items),
-    ...needsPulls(project, items, login).map(([pr]) => pullKey(pr)),
-  ])
-  return agentRunsWaiting((reviewEntries || []).filter(entry => sameRepo(entry.item.repo, project.canonical_repo)), shown)
-}
-
-// A repository's rail badge is exactly the rows its Needs you card shows (finding 4).
-export function projectNeedsCount(project, decisions, login, reviewEntries = []) {
-  const items = attentionListItems(decisions)
-  return (project.reviewRequests?.length || 0) + items.length + needsPulls(project, items, login).length
-    + projectAgentRuns(project, reviewEntries, items, login).length
-}
 
 // A review run that waits on you (its result, a draft to send, a question, a stop)
 // and is not already a row of its own in Needs you.
@@ -128,37 +88,67 @@ const AGENT_WAITS = new Set(['waiting', 'stalled'])
 export const agentRunsWaiting = (entries, shownKeys) => (entries || [])
   .filter(entry => AGENT_WAITS.has(entry.bucket) && !shownKeys.has(entry.id))
 
-// The PR keys Needs you already lists as rows: review requests, feedback cards, and
-// your own PRs with a step. An agent run on one of them is not counted twice.
-export function needsRowKeys(incoming, questionItems, login) {
-  const covered = feedbackPullKeys(questionItems)
-  const own = authoredPulls(incoming, login)
-    .filter(pr => !covered.has(pullKey(pr)))
-    .filter(pr => { const state = authoredPullState(pr); return state.tone === 'blocker' || state.key === 'ready' })
-  return new Set([...covered, ...(incoming || []).filter(pr => pr.reviewRequested).map(pullKey), ...own.map(pullKey)])
+// Drafts are a quiet line, not a number (deskCounts). A PR GitHub could not be read completely has no step to act on yet.
+const QUIET_DRAFTS = new Set(['author.draft', 'author.draft_ready'])
+const waitsOnYou = decision => decision.turn === 'you' && !QUIET_DRAFTS.has(decision.state) && decision.state !== 'unknown'
+
+// The Needs you step (the key of a NEEDS_CHIPS chip) a PR's shared decision puts it under: Merge when merging is the next
+// step, otherwise Fix on your own PR and Review again on someone else's that you reviewed.
+export const stepOf = decision => (decision.next === 'merge' ? 'merge' : decision.role === 'author' ? 'fix' : 'again')
+
+// Everything Needs you lists, as one definition for a project's card, the project's number in the rail and the
+// chips (deskCounts), so they cannot disagree. One row per PR or saved decision, in the first of these that holds it:
+// a review request (Review), a saved feedback card (To look at), your own PR whose decision waits on you, then a review
+// run that waits on you. Your own PRs and the runs sit under the step of their shared decision (stepOf).
+export function needsRows({ requests = [], pulls = [], decisions = [], entries = [], login = '', facts = {} }) {
+  const items = attentionListItems(decisions)
+  const covered = feedbackPullKeys(items)
+  const own = authoredPulls(pulls, login).filter(pr => !covered.has(pullKey(pr)))
+  const decided = own.map(pr => ({ pr, decision: deskStanding(pr, login, facts) })).filter(({ decision }) => waitsOnYou(decision))
+  // A run is left out only when its PR already is a row. The incoming PRs and the review list read GitHub separately, so a PR can
+  // read as "waiting on reviewers" here (no row) while the review list's newer read says its review waits on you: that run stays.
+  const listed = new Set([...covered, ...requests.map(pullKey), ...decided.map(({ pr }) => pullKey(pr))])
+  // A run's own decision, read from the newer PR, is held to the same rule as a PR's: a draft ready to open is a quiet line, not a row.
+  const runs = agentRunsWaiting(entries, listed).filter(entry => !entry.decision || waitsOnYou(entry.decision))
+  return [
+    ...requests.map(pr => ({ step: 'review', pr })),
+    ...items.map(item => ({ step: 'look', item })),
+    ...decided.map(({ pr, decision }) => ({ step: stepOf(decision), pr, decision })),
+    // A Respond conversation has no decision of its own here, and it is always on your own PR.
+    ...runs.map(entry => ({ step: entry.decision ? stepOf(entry.decision) : 'fix', entry })),
+  ]
 }
 
+// A repository's Needs you rows (finding 4); its rail badge is how many there are.
+export function projectNeedsRows(project, decisions, login, reviewEntries = [], facts = {}) {
+  return needsRows({
+    requests: project.reviewRequests || [], pulls: project.incomingReviews || [], decisions, login, facts,
+    entries: (reviewEntries || []).filter(entry => sameRepo(entry.item.repo, project.canonical_repo)),
+  })
+}
+
+export const projectNeedsCount = (...args) => projectNeedsRows(...args).length
+
 // The counts of the Needs you chips: one per next step. The rail badge is their sum
-// (needsCount), so the two can never disagree. A PR whose feedback card is listed
-// counts once, as that card. Drafts ready to open and local files are not urgent:
+// (needsCount), so the two can never disagree. A PR counts once, under the step of its
+// shared decision (needsRows). Drafts ready to open and local files are not urgent:
 // they get a quiet line and the project banner, never a number here.
-export function deskCounts({ projects = [], decisions = [], incoming = [], records = [], login = '', reviews = null, reviewEntries = [] } = {}) {
-  const questionItems = attentionListItems(decisions)
-  const covered = feedbackPullKeys(questionItems)
+export function deskCounts({ decisions = [], incoming = [], records = [], login = '', reviews = null, reviewEntries = [], runs, chats, responses, ignored } = {}) {
+  const facts = { runs, chats, responses, ignored }
+  const rows = needsRows({ requests: (incoming || []).filter(pr => pr.reviewRequested), pulls: incoming || [], decisions, entries: reviewEntries, login, facts })
+  const inStep = step => rows.filter(row => row.step === step).length
   const pulls = authoredPulls(incoming, login)
-  const open = pulls.filter(pr => !covered.has(pullKey(pr))).map(authoredPullState)
-  const states = pulls.map(authoredPullState)
   return {
-    questions: questionItems.length,
-    requests: (incoming || []).filter(pr => pr.reviewRequested).length,
-    merge: open.filter(state => state.key === 'ready').length,
-    fix: open.filter(state => state.tone === 'blocker').length,
-    agent: agentRunsWaiting(reviewEntries, needsRowKeys(incoming, questionItems, login)).length,
-    drafts: states.filter(state => state.key === 'approved_draft').length,
+    questions: inStep('look'),
+    requests: inStep('review'),
+    merge: inStep('merge'),
+    fix: inStep('fix'),
+    again: inStep('again'),
+    drafts: pulls.filter(pr => deskStanding(pr, login, facts).state === 'author.draft_ready').length,
     mine: pulls.length,
     merged: mergedRecently(records).length,
     reviewsRunning: reviews?.running || 0,
-    reviewsFinished: (reviewEntries || []).length - (reviews?.running || 0),
+    reviewsFinished: reviews?.done || 0,
   }
 }
 
@@ -168,7 +158,7 @@ export const NEEDS_CHIPS = [
   { key: 'review', label: 'Review', count: counts => counts.requests },
   { key: 'merge', label: 'Merge', count: counts => counts.merge },
   { key: 'fix', label: 'Fix', count: counts => counts.fix },
-  { key: 'agent', label: NAMES.agentRuns, count: counts => counts.agent || 0 },
+  { key: 'again', label: NAMES.reviewAgain, count: counts => counts.again || 0 },
 ]
 
 export const needsCount = counts => NEEDS_CHIPS.reduce((total, chip) => total + chip.count(counts), 0)

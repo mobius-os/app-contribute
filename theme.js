@@ -15,7 +15,7 @@ export const CSS = `
   --co-radius-control: 10px;  /* buttons and rows */
   --co-radius-panel: 12px;    /* cards, panels and windows */
   --co-radius-round: 999px;   /* state pills, labels and counts */
-  --co-radius-window: 24px;   /* a window over the page: confirmations and agent jobs (20 on a phone) */
+  --co-radius-window: 24px;   /* a window over the page: confirmations, agent jobs and pictures (20 on a phone) */
   --co-text-meta: 14px;
   --co-text-body: 16px;
   --co-text-section: 22px;
@@ -1169,8 +1169,7 @@ export const CSS = `
 .co-run-row-action { min-width: 62px; padding: 0 9px; white-space: nowrap; }
 .co-run-row > .co-agent-handoff { min-width: 0; }
 .co-run-row > .co-agent-handoff .co-run-row-action { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-.co-run-row > .co-agent-handoff-error,
-.co-run-row-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: var(--co-text-meta); }
+.co-run-row > .co-agent-handoff-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: var(--co-text-meta); }
 .co-run-empty {
   min-height: 78px; display: grid; grid-template-columns: 28px minmax(0, 1fr);
   align-items: center; gap: 2px 10px; padding: 12px 13px;
@@ -1241,8 +1240,7 @@ export const CSS = `
 .co-run-focus-summary.is-check_attention {
   border-color: color-mix(in srgb, var(--co-warn) 38%, var(--border));
 }
-.co-run-source-choices,
-.co-run-focus-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.co-run-source-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 .co-run-source-choices small { flex-basis: 100%; }
 .co-run-stack-records { display: grid; gap: 9px; margin-top: 9px; }
 .co-run-stack-records > div { min-width: 0; }

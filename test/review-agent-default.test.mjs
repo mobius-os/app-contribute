@@ -83,16 +83,18 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub will see is one icon in the window’s corner, and the words stay in the page for a screen reader', async t => {
+test('what GitHub sees is one labelled icon at the top of the window, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
   assert.match(html, /class="co-rw-tools"><span class="co-rw-seen is-public">/)
-  assert.match(html, /role="tooltip"[^>]*><strong>Seen on GitHub:<\/strong> one approve, request changes or comment, posted by the agent from your account as you allowed/)
+  assert.match(html, /<button type="button" class="co-btn co-btn-quiet is-toned co-rw-seen-btn" aria-describedby="[^"]*" aria-pressed="false"><span>What GitHub sees<\/span><svg/, 'the icon is named in words, and the words come before it so the card’s arrow stays under the icon')
+  assert.doesNotMatch(html, /Seen on GitHub/)
+  assert.match(html, /role="tooltip"[^>]*><strong>What GitHub sees:<\/strong> one approve, request changes or comment, posted by the agent from your account as you allowed/)
   assert.doesNotMatch(html, /co-rw-public/, 'the full-width box is gone')
   const quiet = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review' }, onModeChange() {}, onCancel() {} })
   assert.match(quiet, /co-rw-seen is-private/)
-  assert.match(quiet, /<strong>Seen on GitHub:<\/strong> nothing\. Only you see the review\./)
+  assert.match(quiet, /<strong>What GitHub sees:<\/strong> nothing\. Only you see the review\./)
   // The fix window says the same thing the same way.
   const fix = api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} })
   assert.match(fix, /co-rw-seen is-private/)
@@ -122,10 +124,18 @@ test('the hover card is anchored to the header and sized from the dialog, never 
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
   const card = css.match(/\.co-rw-seen-card \{([^}]*)\}/)[1]
   assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:28px; position:relative;/, 'the header is what the card is positioned against')
-  assert.match(css, /\.co-rw-seen \{ display:grid; \}/, 'the icon wrapper is not a positioned ancestor')
-  assert.match(card, /right:10px; width:min\(300px,calc\(100% - 20px\)\)/, 'the card keeps the corner’s distance of room on each side')
+  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1; margin-bottom:6px; \}/, 'the icon wrapper is not a positioned ancestor')
+  assert.match(card, /left:var\(--rw-edge\); right:var\(--rw-edge\); margin-inline:auto; width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side and sits in the middle')
   assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and header insets and clips the card on a narrow phone')
   assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:20px;/, 'the phone card has the smaller edge')
+})
+
+test('the lock’s label sits beside its icon as the first line of the head, centred, with the card’s arrow pointing at it', () => {
+  const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 12px; cursor:help; \}/)
+  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1;/, 'it comes before the purple line, so it never sits over a long title')
+  assert.match(css, /\.co-rw-seen-card::before \{[^}]*left:50%;/, 'the arrow is under the middle of the centred lock')
+  assert.doesNotMatch(css, /@media\(max-width:450px\) \{\n \.co-rw-tools \{ display:contents; \}/, 'there is no second narrow layout for it any more')
 })
 
 test('a new Review or Fix window is started from the saved agent, and only when there is one', () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, reviewIntent, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { awaitsGithub, earlierReviewForPull, pullAction, mergePull, offersDraft, reviewIntent, settleDraftDefault, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
@@ -43,9 +43,9 @@ const FILTERS = [['all', 'All'], ['authored', 'Opened by me'], ['drafts', 'Draft
 
 // Saved agent review conversations for this project, shown in My work.
 function AgentReviewHistory({ runs, pulls, listState, onOpen }) {
-  if (!runs.length) return <p className="co-pr-note co-mywork-empty">No agent reviews in this project yet.</p>
+  if (!runs.length) return <p className="co-pr-note co-mywork-empty">No agent runs in this project yet.</p>
   return <details className="co-run-fold co-review-history">
-    <summary><span>Agent reviews</span><b>{runs.length}</b><Icon name="chevron" size={14} /></summary>
+    <summary><span>{NAMES.agentRuns}</span><b>{runs.length}</b><Icon name="chevron" size={14} /></summary>
     <p className="co-pr-note">Saved findings apply only to their recorded versions. Open a conversation to answer questions or check an unresolved outcome.</p>
     <div>{runs.map(run => <button key={run.id} type="button" className="co-review-history-entry" data-review-run={run.id} onClick={() => onOpen(run)}>
       <strong>{reviewRunTitle(run)}</strong>
@@ -199,6 +199,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [ownRunError, setOwnRunError] = useState('')
   const [linkedError, setLinkedError] = useState('')
   const runError = ownRunError || runsError || linkedError
+  // What an action did that is not a failure, such as an approval whose merge did not carry on.
+  const [runNotice, setRunNotice] = useState('')
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -328,6 +330,13 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     collaborationRequest(token, appId, 'review-presets').then(value => { if (alive) setCapabilities(value.capabilities || {}) }, () => {})
     return () => { alive = false }
   }, [conn.state, token, appId])
+  // A Review tapped before the capabilities arrived opens on "Only me"; the draft default follows once they are known.
+  useEffect(() => {
+    const settled = settleDraftDefault(choice, capabilities)
+    if (settled === choice) return
+    setResolved(null)
+    setChoice(settled)
+  }, [capabilities, choice])
   useEffect(() => {
     if (conn.state !== 'connected') return
     // A repository already read this session reopens from its cache with no
@@ -460,12 +469,24 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       setActing({ intent: job === MERGE_OPTIONS ? 'merge' : job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record, viaShell, oneTap: viaShell && job !== MERGE_OPTIONS })
       return
     }
-    const { mode, intent, options } = reviewIntent(job)
+    // Someone else's PR opens on "Draft for me" where this Möbius offers it; your own PRs only ever get the private check.
+    const others = !pulls.every(pr => isOwnPull(pr, conn.login))
+    const draftFirst = offersDraft(capabilities) && others
+    const { mode, intent, options } = reviewIntent(job, draftFirst)
     setResolved(null)
     task?.open('task:review')
     setAssigning(null)
-    setChoice({ pulls: pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), mode, intent, ...(options ? { options } : {}), ...(defaultAgent?.model ? { agent: defaultAgent } : {}), anchor, ...scopeFor(mode), request_id: crypto.randomUUID() })
+    setChoice({ pulls: pulls.map(pr => ({ ...pr, repository: { ...pr.repository } })), mode, intent, ...(options ? { options } : {}), ...(job === 'review' && !capabilities && others ? { draftPending: true } : {}), ...reviewHistory(pulls, job), ...(defaultAgent?.model ? { agent: defaultAgent } : {}), anchor, ...scopeFor(mode), request_id: crypto.randomUUID() })
     setError('')
+  }
+  // What the review window says about one PR's earlier review: the machine's own name for the action (Review again),
+  // and which review it was when the PR has changed since.
+  function reviewHistory(pulls, job) {
+    if (pulls.length !== 1 || !['review', 'check_my_pr'].includes(job)) return {}
+    const [pr] = pulls
+    const title = standingOf(pr).actions.find(action => action.id === job)?.title
+    const earlier = statusFor(pr) ? null : earlierReviewForPull(relevantRuns, pr)
+    return { ...(title ? { title } : {}), ...(earlier ? { since: { head: earlier.item.head_sha, at: earlier.run.created_at } } : {}) }
   }
   async function start() {
     setBusy(true); setError('')
@@ -475,7 +496,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       const result = await collaborationRequest(token, appId, 'review-runs', reviewRunRequest({ ...choice, pulls, options:resolved.options, agent:resolved.agent, preview_sha256:resolved.preview.preview_sha256 }))
       onRunPatched?.(result.run)
       void onRunsChanged?.()
-      setChoice(null); setSelected(new Set())
+      closeReview(); setSelected(new Set())
     } catch (error) {
       setError(error.message)
       if (error.code === 'changed') void load()
@@ -487,7 +508,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // action Möbius's own sheet confirms first, for exactly this body: a cancel sends nothing, a refusal is shown.
   async function runAction(run, action, body = {}, confirmAs = null) {
     if (busy) return null
-    setBusy(true); setOwnRunError('')
+    setBusy(true); setOwnRunError(''); setRunNotice('')
     linkedEpoch.current++ // a linked read issued before the action cannot land after it
     try {
       const stopped = confirmAs && shellConfirm ? await shellConfirm(confirmAs, { run_id: run.id }, body) : null
@@ -510,7 +531,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   async function decideVerdict(run, item, proposal, decision, extra = {}) {
     const result = await runAction(run, 'verdict', { repo: item.repo, number: item.number, head_sha: item.head_sha, proposal_id: proposal.id, decision, ...extra }, 'verdict')
     if (result?.verdict?.state === 'posted') onReviewPosted?.(item.repo, item.number)
-    if (result?.merge_resumed === false) setOwnRunError('Approved on GitHub. Open the review chat and ask it to continue to the merge.')
+    // The approval itself went through: it is a notice, not an error, and says the one thing left to do.
+    if (result?.merge_resumed === false) setRunNotice('Approved on GitHub. The merge did not continue by itself. Merge it yourself from Actions.')
   }
   // The owner's own Push or Don't push for fixes an agent prepared. The platform pushes exactly
   // that commit, once, and only if the branch has not moved; the agent never pushes by itself.
@@ -584,7 +606,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     if (started?.ok && started.chatId) onRespondStarted?.({ repo: pr.repository.nameWithOwner.toLowerCase(), number: pr.number, chat_id: started.chatId })
     return started
   }
-  const addressDialog = addressing && onStartAgent ? <ReviewDialog onClose={() => setAddressing(null)}><AddressFeedbackWindow pr={addressing.pr} findings={addressing.findings} response={addressing.response} token={token} appId={appId} defaultAgent={defaultAgent} onStart={action => startRespond(addressing.pr, action)} onClose={() => setAddressing(null)} /></ReviewDialog> : null
+  const addressDialog = addressing && onStartAgent ? <ReviewDialog onClose={() => setAddressing(null)}><AddressFeedbackWindow pr={addressing.pr} findings={addressing.findings} response={addressing.response} token={token} appId={appId} defaultAgent={defaultAgent} ownerGrant={ownerConfirmOffered(capabilities)} onStart={action => startRespond(addressing.pr, action)} onClose={() => setAddressing(null)} /></ReviewDialog> : null
   const closeIgnore = () => setIgnoring(null)
   // A posted review changes what the run shows (a link to it, and whose turn it is), so the runs are read again.
   const refreshRuns = () => onRunsChanged?.()
@@ -624,8 +646,12 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // Saved reviews compare with the loaded PRs, so a failed read shows on every tab.
   const loadError = data.error ? <div className="co-alert" role="alert"><strong>Couldn’t load pull requests</strong><p className="co-alert-text">{data.error}</p><button className="co-btn" disabled={data.loading} onClick={() => { void load(); void onRunsChanged?.() }}>Try again</button></div> : null
   if (scope === 'edits' || scope === 'prepared') return null
-  if (scope === 'mine') return <section className="co-public-work is-mine" aria-label="Agent reviews">
+  const runNotes = <>
+    {runNotice ? <p className="co-pr-note" role="status">{runNotice}</p> : null}
     {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
+  </>
+  if (scope === 'mine') return <section className="co-public-work is-mine" aria-label={NAMES.agentRuns}>
+    {runNotes}
     {loadError}
     {relevantRuns.map(runPane)}
     {reviewDialog}
@@ -638,7 +664,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   if (presentation === 'page') {
     return <section className="co-public-work is-page" aria-label="Pull request">
       {focusRead ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusRead.message}</p> : null}
-      {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
+      {runNotes}
       {loadError}
       {assignPane}
       {/* The saved agent-review record never leads the page: its outcome shows
@@ -646,7 +672,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       {detailPr ? (
         // The detail is the page itself, not a swappable pane: the review
         // window overlays it and the assignment pane opens above it.
-        <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} initialTab={focusPull?.tab === 'review' ? 'review' : 'conversation'} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, opened || prKey(detailPr))} onAssign={() => assignSelection([detailPr], opened || prKey(detailPr))} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={null} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} holdUntilLoaded />
+        <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} initialTab={focusPull?.tab === 'review' ? 'review' : 'conversation'} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, opened || prKey(detailPr))} onAssign={() => assignSelection([detailPr], opened || prKey(detailPr))} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={null} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} holdUntilLoaded />
       ) : data.loading || data.error || focusKey ? <Skeleton lines={8} label="Loading the pull request" /> : <p className="co-pr-note" role="status">This pull request is not in the open list. It may be closed. {NAMES.sync} to check.</p>}
       {/* A desk row's Fix these findings opens the PR straight into its fix window. */}
       {focusPull?.intent === 'fix' && onStartAgent ? <RunOnce ready={!!detailPr} nonce={focusPull.nonce} run={() => choose([detailPr], 'respond', prKey(detailPr))} /> : null}
@@ -667,7 +693,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     {scope === 'requests' ? <p className="co-pr-intro">PRs where someone asked for your review. Start an agent review, or open the PR yourself.</p> : null}
     {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
     {focusRead ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusRead.message}{focusRow ? ' Showing the previous snapshot.' : ''}</p> : null}
-    {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
+    {runNotes}
     {loadError}
     <div className={'co-pr-box' + (selection.length ? ' has-selection' : '')}>
     <SelectionTray selection={selection} decisions={selection.map(standingOf)} visible={selectableVisible} shown={data.hasNextPage ? data.total || visible.length : visible.length} loading={data.loading} busy={busy} onClear={() => setSelected(new Set())} onSelectVisible={() => setSelected(old => { const next = new Set(old); const all = selectableVisible.every(pr => next.has(prKey(pr))); selectableVisible.forEach(pr => all ? next.delete(prKey(pr)) : next.add(prKey(pr))); return next })} onReview={choose} onAssign={() => assignSelection()} />
@@ -716,7 +742,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
         </div>
         {assignAnchor === key ? assignPane : null}
         {relevantRuns.filter(run => runAnchor(run) === key).map(runPane)}
-        {opened === key ? <TaskPane id="task:detail" dock={false}>{detailPr ? <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, key)} onAssign={() => assignSelection([detailPr], key)} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} /> : <p>This pull request is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane> : null}
+        {opened === key ? <TaskPane id="task:detail" dock={false}>{detailPr ? <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, key)} onAssign={() => assignSelection([detailPr], key)} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} /> : <p>This pull request is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane> : null}
       </article></ReviewFrame>
     })}</div>
     </div>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { RESEND_AFTER_MS, WATCH_MS, changesFrontEnd, chatStarting, normalizeDecision, normalizeResult, planSteps, stepDone, POST_COMMAND, postMessage, postingSoon, resultSlug, responseFor, responseOutbox, responseStatus, responseView } from '../respond-result.js'
+import { RESEND_AFTER_MS, WATCH_MS, changesFrontEnd, chatStarting, normalizeDecision, normalizeResult, planSteps, repliesText, stepDone, POST_COMMAND, postMessage, postingSoon, resultSlug, responseFor, responseOutbox, responseStatus, responseView } from '../respond-result.js'
 import { OWNER_CONFIRM_CAPABILITY, ownerConfirmOffered } from '../owner-grant.js'
 
 // The example the Python helper's own tests also pin the digest of: one file, both sides of the contract.
@@ -150,6 +150,15 @@ test('the message that tells the chat to post is exact, names the one command, a
   assert.equal(POST_COMMAND(result()), 'python3 /data/apps/contribute/respond_result.py post --pr owner/repo#7 --id r-3f9a1c2b04d5')
   assert.match(message, /Do not push, comment, reply or edit anything on GitHub by hand\. If it refuses, say why and stop\./)
   assert.match(message, /checks the approval and the PR head itself/)
+})
+
+test('the replies to copy come whole and in order, each with the thread or the conversation it answers', () => {
+  const text = repliesText(result())
+  const [first, second] = text.split('\n\n---\n\n')
+  assert.match(first, /^Reply 1 of 2 \(a new comment on the PR: https:\/\/github\.com\/owner\/repo\/pull\/7\)\n\n@alex both findings were real/)
+  assert.match(second, /^Reply 2 of 2 \(answers review comment 4242: https:\/\/github\.com\/owner\/repo\/pull\/7#discussion_r4242\)\n\n@sam the helper keeps its name/)
+  for (const reply of example().replies) assert.ok(text.includes(reply.body), 'a reply is never shortened')
+  assert.equal(repliesText(result({ replies: [] })), '', 'an answer of commits alone has nothing to copy')
 })
 
 // ---- the seconds after Post

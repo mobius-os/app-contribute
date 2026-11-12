@@ -52,9 +52,9 @@ belongs upstream.
    an existing record, preserve its original `chat_id` and CAS-add both the
    original and current chat to `chat_ids`; one review can then reconcile every
    source chat without duplicating or moving the contribution. Independent
-   changes become independent PRs; a stack is only for truly dependent changes
-   and needs upstream push permission
-   ([maintainer.md](maintainer.md)). The source chat is the parent
+   changes become independent PRs against the default branch, never a stack:
+   dependent changes are one PR with clear commits, or the next PR opens after
+   the previous one has merged. The source chat is the parent
    and final integrator for chat-scoped work. Ordinary preparation stays in
    that turn. If, after inspection, genuinely independent project work can
    proceed in parallel, use the installed Subagents app's durable background

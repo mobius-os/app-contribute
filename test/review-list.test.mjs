@@ -85,6 +85,18 @@ test('a clean private review is done, and a push after it puts the PR back to re
   assert.equal(read(clean, live({ headRefOid: 'b'.repeat(40), author: { login: 'owner' } })).bucket, 'done', 'your own PR is not nagged about an older clean check')
 })
 
+test('a review saved without its PR\'s title reads it from GitHub once the PR is read, and keeps a saved one', () => {
+  const untitled = { ...item('all_clear'), title: '' }
+  const entry = { run: run({ items: [untitled] }), item: untitled }
+  const read = classifyReview(entry, { login: 'owner', live: live({ title: 'Real title on GitHub' }), runs: [entry.run] })
+  assert.equal(read.item.title, 'Real title on GitHub')
+  assert.equal(read.pull.title, 'Real title on GitHub', 'the row also reads the PR\'s author and state from it')
+  assert.equal(untitled.title, '', 'the saved review is not changed')
+  const saved = { run: run({ items: [item('all_clear')] }), item: item('all_clear') }
+  assert.equal(classifyReview(saved, { login: 'owner', live: live({ title: 'Renamed on GitHub' }), runs: [saved.run] }).item.title, 'Update bundled agent runtimes')
+  assert.equal(classifyReview(entry, { login: 'owner', live: null, runs: [entry.run] }).item, undefined, 'a PR GitHub did not return stays as saved')
+})
+
 test('a PR GitHub did not return is unknown, never classified from the saved review', () => {
   const entry = { run: run(), item: item('verdict_pending') }
   const unknown = classifyReview(entry, { login: 'owner', live: null, runs: [entry.run] })
@@ -161,10 +173,12 @@ test('Agent runs is a view of its own: its badge says how many agents are runnin
   assert.ok(DESK_VIEWS.some(view => view.key === 'runs' && view.label === 'Agent runs'))
   assert.equal(railBadge('runs', { reviewsRunning: 3 }), 3)
   assert.equal(railBadge('runs', {}), 0)
-  const entries = [row(7, 'o/r', 'waiting', []), row(8, 'o/r', 'running', []), row(9, 'o/r', 'done', [])]
-  const counts = deskCounts({ reviews: { running: 1 }, reviewEntries: entries })
-  assert.deepEqual([counts.agent, counts.reviewsRunning, counts.reviewsFinished], [1, 1, 2])
-  assert.deepEqual([deskCounts().agent, deskCounts().reviewsRunning], [0, 0])
+  // A review of someone else's PR with new commits since it: its shared decision is "review again".
+  const again = { role: 'reviewer', turn: 'you', state: 'reviewer.re_review', next: 'review' }
+  const entries = [{ ...row(7, 'o/r', 'waiting', []), decision: again }, row(8, 'o/r', 'running', []), row(9, 'o/r', 'done', [])]
+  const counts = deskCounts({ reviews: reviewCounts(entries), reviewEntries: entries })
+  assert.deepEqual([counts.again, counts.reviewsRunning, counts.reviewsFinished], [1, 1, 1], 'Finished is only what is over: not what waits on you')
+  assert.deepEqual([deskCounts().again, deskCounts().reviewsRunning], [0, 0])
 })
 
 import { frontendModules, renderModule } from './render-harness.mjs'
@@ -187,31 +201,48 @@ const row = (number, repo, bucket, chips, extra = {}) => ({ id: reviewKey(repo, 
 const reviews = (entries, checking = false) => ({ entries, checking, counts: reviewCounts(entries) })
 const base = { view: 'runs', projects, records: [], login: 'owner', decisionsFor: () => [], lastLooked: '', query: '', runs: [], onOpenProject() {}, onOpenPull() {} }
 
-test('Agent runs puts what is running first, and keeps everything else, waiting on you first, on Finished', async t => {
+const tabsOf = html => [...html.matchAll(/aria-pressed="(true|false)">([A-Za-z ]+)<span class="co-pr-filter-count">(\d+)</g)].map(([, on, label, count]) => `${on === 'true' ? '>' : ''}${label} ${count}`)
+
+test('Agent runs has three tabs, Waiting on you, Running and Finished, and holds in Finished only what is over', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { view } = await screens()
-  const entries = [
-    row(2021, 'mobius-os/mobius', 'running', [{ label: 'Reviewing', tone: 'running' }]),
-    row(2005, 'mobius-os/mobius', 'waiting', [{ label: 'Needs you', tone: 'owner' }]),
-    row(239, 'mobius-os/mobius.you', 'done', [{ label: 'Approved', tone: 'good' }]),
-  ]
-  const html = view({ ...base, reviews: reviews(entries) })
-  assert.match(html, /aria-pressed="true">Running<span class="co-pr-filter-count">1<\/span>/)
-  assert.match(html, /aria-pressed="false">Finished<span class="co-pr-filter-count">2<\/span>/)
-  assert.match(html, /Review of 2021/)
-  assert.match(html, /co-desk-chip is-you">Reviewing/)
-  assert.doesNotMatch(html, /Review of 2005|Review of 239/, 'finished and waiting runs are on the Finished tab')
-  assert.match(html, /aria-label="Möbius"/)
-  assert.doesNotMatch(html, /aria-label="mobius\.you"/, 'a project with nothing running has no card')
+  const running = row(2021, 'mobius-os/mobius', 'running', [{ label: 'Reviewing', tone: 'running' }])
+  const waiting = row(2005, 'mobius-os/mobius', 'waiting', [{ label: 'Needs you', tone: 'owner' }])
+  const stopped = row(2007, 'mobius-os/mobius', 'stalled', [{ label: 'Agent stopped', tone: 'owner' }])
+  const done = row(239, 'mobius-os/mobius.you', 'done', [{ label: 'Merged', tone: 'good' }])
+  const all = view({ ...base, reviews: reviews([running, waiting, stopped, done]) })
+  assert.deepEqual(tabsOf(all), ['>Waiting on you 2', 'Running 1', 'Finished 1'], 'a PR waiting on you is not "Finished", and a stopped agent waits on you too')
+  assert.ok(all.indexOf('Review of 2005') < all.indexOf('Review of 2007'), 'your move comes before a stopped agent')
+  assert.match(all, /co-desk-chip is-waiting">Needs you/)
+  assert.doesNotMatch(all, /Review of 2021|Review of 239/, 'the running and finished runs are on their own tabs')
+  assert.match(all, /aria-label="Möbius"/)
+  assert.doesNotMatch(all, /aria-label="mobius\.you"/, 'a project with nothing waiting has no card')
+  // The page opens on the first tab with rows.
+  const only = rows => view({ ...base, reviews: reviews(rows) })
+  assert.deepEqual(tabsOf(only([running, done])), ['Waiting on you 0', '>Running 1', 'Finished 1'])
+  assert.match(only([running, done]), /Review of 2021/)
+  assert.deepEqual(tabsOf(only([done])), ['Waiting on you 0', 'Running 0', '>Finished 1'])
+  assert.match(only([done]), /co-desk-chip is-ready">Merged/)
+  assert.deepEqual(tabsOf(only([])), ['>Waiting on you 0', 'Running 0', 'Finished 0'], 'with nothing anywhere it stays on the tab that waits on you')
+  assert.match(only([]), /Nothing is waiting on you/)
 })
 
-test('with nothing running the page opens on Finished, waiting on you first, and a PR run is never left out', async t => {
+test('a PR GitHub could not be read waits on you, with its note and Try again, not among the finished', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { view } = await screens()
-  const finished = view({ ...base, reviews: reviews([row(239, 'mobius-os/mobius.you', 'done', [{ label: 'Approved', tone: 'good' }]), row(2005, 'mobius-os/mobius', 'waiting', [{ label: 'Needs you', tone: 'owner' }])]) })
+  const unread = row(2008, 'mobius-os/mobius', 'unknown', [{ label: 'Couldn’t read', tone: 'quiet' }])
+  const html = view({ ...base, reviews: { ...reviews([unread, row(239, 'mobius-os/mobius.you', 'done', [])]), retry() {} } })
+  assert.deepEqual(tabsOf(html), ['>Waiting on you 1', 'Running 0', 'Finished 1'])
+  assert.match(html, /One pull request could not be read from GitHub/)
+  assert.match(html, /Review of 2008/)
+})
+
+test('with nothing waiting or running the page opens on Finished, and a PR run is never left out', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { view } = await screens()
+  const finished = view({ ...base, reviews: reviews([row(239, 'mobius-os/mobius.you', 'done', [{ label: 'Merged', tone: 'good' }]), row(2005, 'mobius-os/mobius', 'done', [{ label: 'Waiting on someone-else', tone: 'quiet' }])]) })
   assert.match(finished, /aria-pressed="true">Finished<span class="co-pr-filter-count">2<\/span>/)
-  assert.ok(finished.indexOf('Review of 2005') < finished.indexOf('Review of 239'), 'waiting on you leads')
-  assert.match(finished, /co-desk-chip is-waiting">Needs you/)
+  assert.match(finished, /Review of 2005/)
 })
 
 test('a repository the desk does not know still gets its card on Agent runs', async t => {
@@ -222,9 +253,20 @@ test('a repository the desk does not know still gets its card on Agent runs', as
   assert.match(html, /aria-label="mobius\.you"/)
   assert.match(html, /aria-label="someone\/else"/)
   assert.match(html, /co-desk-chip is-ready">Approved/)
-  assert.match(view({ ...base, reviews: reviews([]) }), /No finished agent runs yet/)
+  assert.match(view({ ...base, reviews: reviews([]) }), /Nothing is waiting on you/)
   assert.match(view({ ...base, query: 'zzz', reviews: reviews([row(239, 'mobius-os/mobius.you', 'done', [])]) }), /Nothing matches your search/)
   assert.match(view({ ...base, reviews: reviews([row(1, 'o/r', 'checking', [])], true) }), /Checking which of these pull requests are still open/)
+})
+
+test('a review row reads like every desk row: title, #number · who · when, status; and a missing title reads Pull request #n only until its PR is read', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { view } = await screens()
+  const pull = { title: 'Read from GitHub', author: { login: 'someone-else' }, state: 'MERGED' }
+  const html = view({ ...base, reviews: reviews([{ ...row(112, 'mobius-os/mobius', 'done', [{ label: 'Merged', tone: 'good' }], { title: 'Read from GitHub' }), pull }]) })
+  assert.match(html, /co-desk-row-title">Read from GitHub</)
+  assert.match(html, /co-desk-row-meta"><span>#112 · someone-else · <time[^>]*>you reviewed /)
+  assert.ok(html.indexOf('co-desk-row-meta') < html.indexOf('co-row-pills'))
+  assert.match(view({ ...base, reviews: reviews([row(113, 'mobius-os/mobius', 'done', [], { title: '' })]) }), /Pull request #113/, 'a PR GitHub could not read keeps the plain fallback')
 })
 
 test('a long history folds behind Show earlier, and the rail names Agent runs with a spinner while agents work', async t => {
@@ -332,7 +374,7 @@ test('a standalone Respond conversation stays a visible agent run when its quest
 test('a Respond conversation that asks you is a row of Agent runs, counted in Needs you, and never twice with its PR\'s review', () => {
   const entries = respondEntries([respondOn('needs_answer')], [], [])
   assert.equal(entries[0].item.title, '', 'the PR was not read: the row still stands, without a title')
-  assert.equal(deskCounts({ reviewEntries: entries, reviews: reviewCounts(entries) }).agent, 1, 'it waits on the owner')
-  assert.equal(deskCounts({ reviewEntries: respondEntries([respondOn('running')], [], []) }).agent, 0, 'one at work waits on nobody')
+  assert.equal(deskCounts({ reviewEntries: entries, reviews: reviewCounts(entries) }).fix, 1, 'it waits on the owner, on their own PR')
+  assert.equal(deskCounts({ reviewEntries: respondEntries([respondOn('running')], [], []) }).fix, 0, 'one at work waits on nobody')
   assert.deepEqual(respondEntries([respondOn('needs_answer')], [{ id: 'mobius-os/mobius#2019' }], []), [], 'a PR with a review of its own is classified with it')
 })

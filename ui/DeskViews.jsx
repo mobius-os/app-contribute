@@ -1,17 +1,18 @@
 import { useState } from 'react'
-import { authoredPullState, authoredPulls, chainPulls, feedbackPull, mergedRecently, needsPulls, newSince, projectAgentRuns } from '../desk.js'
-import { attentionListItems } from '../run.js'
+import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows } from '../desk.js'
 import { conversationCount, prKey, reviewForPull } from '../collaboration.js'
 import { savedFindings } from '../address-feedback.js'
 import { frameState, reviewForRecord } from '../review-frame.js'
 import { ReviewFrame } from './ReviewFrame.jsx'
-import { chipOf, frameOf, standingFor } from '../pr-standing.js'
+import { chipOf, frameOf } from '../pr-standing.js'
+import { decisionChip } from '../review-list.js'
 import { actionOf } from '../pr-machine.js'
 import { recordsForProject } from '../source-map.js'
 import { STATUS_LABELS } from '../domain.js'
 import { groupNote, lookAtReason } from './AttentionList.jsx'
 import { ChecksBadge, PullLabels, PullStateIcon, TimeAgo } from './GithubParts.jsx'
 import { Icon } from './Icons.jsx'
+import { DeskRow, DotLine, StatusPill, whoOf } from './DeskRow.jsx'
 import { Envelope, EmptyView } from './Envelope.jsx'
 import { AgentRunsView, ReviewRow } from './ReviewsView.jsx'
 import { NAMES } from '../names.js'
@@ -24,89 +25,79 @@ function NewDot({ value, lastLooked }) {
   return <span className="co-newdot" title="Changed since you last looked" />
 }
 
-// One PR under its project's card. The whole row opens the PR on its own page;
-// a PR with a review running or waiting wears the comet frame, says so in a chip,
-// and opens on its Review tab.
-function DeskPullRow({ project, pr, chip, order, lastLooked, runs, chats, responses, onOpenPull, login, ignored }) {
+const requestChip = { label: 'Asks for your review', tone: 'you' }
+
+// One PR under its project's card. The whole row opens the PR on its own page. Its status is the shared decision's
+// label (the repository list and the PR page say the same, whatever the screen); a review request keeps its own pill
+// beside it, and a PR with a review running or waiting wears the comet frame and opens on its Review tab.
+function DeskPullRow({ project, pr, request = false, order = '', lastLooked, facts, onOpenPull, login }) {
   const comments = conversationCount(pr)
-  const standing = standingFor({ pr, login, runs: runs || [], chats: chats || [], responses: responses || [], ignored })
-  const framed = frameOf(standing)
-  // While an agent works the travelling frame says it; a move of yours also gets its words.
-  const standingChip = framed === 'verdict' ? chipOf(standing) : null
+  const decision = deskStanding(pr, login, facts)
+  const framed = frameOf(decision)
+  // No decision pill while an agent works: the travelling frame says it, and a running review wears no tag (the owner's choice,
+  // 3 Nov). A request's own pill already says "your turn" while the PR rests; the decision adds its words when it has some.
+  const labelled = framed !== 'reviewing' && (!request || chipOf(decision))
+  const pills = [...(request ? [requestChip] : []), ...(labelled ? [decisionChip(decision)] : [])]
+  const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} /> : null]
   return (
     <ReviewFrame state={framed} inset={3} radius={10}>
-    <button type="button" className="co-desk-row" onClick={() => onOpenPull(project, pr, framed === 'idle' ? 'conversation' : 'review')}>
-      <PullStateIcon pr={pr} />
-      <span className="co-desk-row-main">
-        <span className="co-desk-row-title"><NewDot value={pr.updatedAt} lastLooked={lastLooked} />{pr.title}</span>
-        <span className="co-desk-row-meta">
+      <DeskRow
+        icon={<PullStateIcon pr={pr} />}
+        title={<><NewDot value={pr.updatedAt} lastLooked={lastLooked} />{pr.title}</>}
+        facts={<>
           {order ? <span className="co-desk-order">{order}</span> : null}
-          <span>#{pr.number} · {pr.author?.login || 'Contributor'}{pr.updatedAt ? <TimeAgo prefix=", updated " value={pr.updatedAt} /> : null}</span>
+          <span><DotLine parts={who} /></span>
           {pr.isDraft ? <span>Draft</span> : null}
           <ChecksBadge pr={pr} />
           {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
-        </span>
-        <span className="co-pr-labels"><PullLabels pr={pr} /></span>
-        {chip || standingChip ? <span className="co-row-pills">
-          {chip ? <span className={'co-desk-chip is-' + chip.tone}>{chip.label}</span> : null}
-          {standingChip ? <span className="co-desk-chip is-waiting">{standingChip.label}</span> : null}
-        </span> : null}
-      </span>
-      {comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={15} />{comments}</span> : null}
-    </button>
+        </>}
+        labels={<span className="co-pr-labels"><PullLabels pr={pr} /></span>}
+        pills={pills.map(chip => <StatusPill key={chip.label} chip={chip} />)}
+        aside={comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={15} />{comments}</span> : null}
+        onOpen={() => onOpenPull(project, pr, framed === 'idle' ? 'conversation' : 'review')}
+      />
     </ReviewFrame>
   )
 }
 
-// A saved-work card (review feedback, a decision) in the same shape as a PR
-// row: icon, title, one muted line on why it is here, then its state chip on a line of its own.
-function DeskAttentionRow({ item, onSelect, action = null }) {
+// A saved-work card (review feedback, a decision) in the same layout as a PR row. About a PR that was read, its
+// status is that PR's shared decision, as on every other screen; its saved note is the row's one-line reason.
+function DeskAttentionRow({ item, pr, decision, login, onSelect, action = null }) {
   const reason = lookAtReason(item)
   const detectedAt = item.record?.attention?.detected_at
-  const group = groupNote(item)
-  const row = (
-    <button type="button" className={'co-desk-row is-' + reason.key} onClick={() => onSelect(item)}>
-      <Icon name="info" size={16} className="co-desk-attention-icon" />
-      <span className="co-desk-row-main">
-        <span className="co-desk-row-title">{item.label}</span>
-        {item.detail ? <span className="co-desk-row-why">{item.detail}</span> : null}
-        <span className="co-desk-row-meta">
-          {group ? <span>{group}</span> : null}
-          {detectedAt ? <TimeAgo prefix="Detected " value={detectedAt} /> : null}
-        </span>
-        <span className="co-row-pills"><span className="co-desk-chip is-tone">{reason.label}</span></span>
-      </span>
-    </button>
+  const number = item.record?.number
+  const facts = [number ? `#${number}` : null, pr ? whoOf(pr.author?.login, login) : null, detectedAt ? <TimeAgo prefix="detected " value={detectedAt} /> : null, groupNote(item)]
+  return (
+    <DeskRow
+      tone={reason.key}
+      icon={pr ? <PullStateIcon pr={pr} /> : <Icon name="info" size={16} className="co-desk-attention-icon" />}
+      title={number ? item.label.replace(/^#\d+\s+/, '') : item.label}
+      facts={<span><DotLine parts={facts} /></span>}
+      pills={[decision ? <StatusPill key="status" chip={decisionChip(decision)} /> : <span key="reason" className="co-desk-chip is-tone">{reason.label}</span>]}
+      reason={item.detail}
+      // The row's own answer sits beside it, never inside the button that opens the PR.
+      action={action ? <button type="button" className="co-btn co-btn-primary co-desk-row-action" onClick={action.run}>{action.label}</button> : null}
+      onOpen={() => onSelect(item)}
+    />
   )
-  // The row's own answer sits beside it, never inside the button that opens the PR.
-  return action ? <div className="co-desk-row-split">{row}<button type="button" className="co-btn co-btn-primary co-desk-row-action" onClick={action.run}>{action.label}</button></div> : row
 }
 
-const requestChip = { label: 'Asks for your review', tone: 'you' }
-
-// Rows per project and view, each tagged with the Needs you chip that counts it
-// (desk.js NEEDS_CHIPS): review requests first, then the owner's saved-work
-// decisions, their own PRs with a step, and agent runs that wait on them.
+// Rows per project and view. In Needs you each row is tagged with the step (desk.js NEEDS_CHIPS) that counts it:
+// the rows are desk.js needsRows, the same list the chips and the rail count.
 function projectRows(view, project, { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries, onOpenPull, onOpenRecord }) {
   const rows = []
+  const facts = { runs, chats, responses, ignored }
   // The search finds a project by its name too: a name match keeps all of its rows.
   const keep = (...parts) => matches(query, project.name, ...parts)
-  const pull = (pr, chip, order, chipKey = '') => {
-    rows.push({ chip: chipKey, el: <DeskPullRow key={`pr:${pr.number}`} project={project} pr={pr} chip={chip} order={order} lastLooked={lastLooked} runs={runs} chats={chats} responses={responses} onOpenPull={onOpenPull} login={login} ignored={ignored} /> })
-  }
-  const requests = view === 'needs' || view === 'requests'
-    ? (project.reviewRequests || []).filter(pr => keep(pr.title, String(pr.number), pr.author?.login)) : []
+  const pullRow = (pr, step, extra = {}) => ({ chip: step, el: <DeskPullRow key={`pr:${pr.number}`} project={project} pr={pr} lastLooked={lastLooked} facts={facts} onOpenPull={onOpenPull} login={login} {...extra} /> })
   const all = decisionsFor(project)
-  const decisions = (view === 'work' ? all : view === 'needs' ? attentionListItems(all) : [])
-    .filter(item => keep(item.label, String(item.record?.number || '')))
+  const ownPulls = authoredPulls(project.incomingReviews, login)
   // Your own agent review of your own PR found problems at its current version:
   // the row offers the fix itself, and opens the PR straight into it.
-  const fixAction = item => {
-    const target = feedbackPull(item)
-    const pr = target && authoredPulls(project.incomingReviews, login).find(candidate => prKey(candidate) === prKey(target))
+  const fixAction = (target, pr, decision) => {
     if (!pr || !savedFindings(reviewForPull(runs, pr), ignored)) return null
     // The machine decides whether Respond may start; a draft that already deals with the findings turns it off.
-    if (!actionOf(standingFor({ pr, login, runs: runs || [], chats: chats || [], responses: responses || [], ignored }), 'respond')?.enabled) return null
+    if (!actionOf(decision, 'respond')?.enabled) return null
     return { label: NAMES.fixFindings, run: () => onOpenPull(project, target, 'review', 'fix') }
   }
   const openDecision = item => {
@@ -116,52 +107,53 @@ function projectRows(view, project, { login, decisionsFor, lastLooked, query, ru
   }
   const decisionRow = item => {
     const target = feedbackPull(item)
+    const pr = target && ownPulls.find(candidate => prKey(candidate) === prKey(target))
+    const decision = pr ? deskStanding(pr, login, facts) : null
     return { chip: 'look', el: (
       <ReviewFrame key={`decision:${item.id}`} state={frameState(reviewForRecord(runs, item.record), { own: true, ignored })} inset={3} radius={10}>
-        <DeskAttentionRow item={item} onSelect={openDecision} action={fixAction(item)} />
+        <DeskAttentionRow item={item} pr={pr || null} decision={decision} login={login} onSelect={openDecision} action={fixAction(target, pr, decision)} />
       </ReviewFrame>
     ) }
   }
-  requests.forEach(pr => pull(pr, requestChip, '', 'review'))
-  decisions.forEach(item => rows.push(decisionRow(item)))
+  // [what the search looks in, the row] for one row of Needs you.
+  const needsEntry = row => {
+    if (row.item) return [[row.item.label, String(row.item.record?.number || '')], decisionRow(row.item)]
+    if (row.entry) return [[row.entry.item.title, String(row.entry.item.number)], { chip: row.step, el: <ReviewRow key={`run:${row.entry.id}`} entry={row.entry} project={project} login={login} onOpenPull={onOpenPull} /> }]
+    return [[row.pr.title, String(row.pr.number), row.pr.author?.login], pullRow(row.pr, row.step, { request: row.step === 'review' })]
+  }
+  if (view === 'requests') {
+    (project.reviewRequests || []).filter(pr => keep(pr.title, String(pr.number), pr.author?.login)).forEach(pr => rows.push(pullRow(pr, 'review', { request: true })))
+  }
+  if (view === 'work') {
+    all.filter(item => keep(item.label, String(item.record?.number || ''))).forEach(item => rows.push(decisionRow(item)))
+  }
   if (view === 'needs') {
-    // A PR that already has its feedback card above is listed once, there.
-    needsPulls(project, attentionListItems(all), login)
-      .filter(([pr]) => keep(pr.title, String(pr.number), pr.author?.login))
-      .forEach(([pr, state]) => pull(pr, state, '', state.key === 'ready' ? 'merge' : 'fix'))
-    projectAgentRuns(project, reviewEntries, attentionListItems(all), login)
-      .filter(entry => keep(entry.item.title, String(entry.item.number)))
-      .forEach(entry => rows.push({ chip: 'agent', el: <ReviewRow key={`run:${entry.id}`} entry={entry} project={project} onOpenPull={onOpenPull} /> }))
+    projectNeedsRows(project, all, login, reviewEntries, facts).map(needsEntry).filter(([parts]) => keep(...parts)).forEach(([, row]) => rows.push(row))
   }
   if (view === 'mine') {
-    const mine = authoredPulls(project.incomingReviews, login).filter(pr => keep(pr.title, String(pr.number), pr.author?.login))
-    chainPulls(mine).forEach(chain => chain.forEach((pr, index) => pull(
-      pr, authoredPullState(pr), chain.length > 1 ? `${index + 1} of ${chain.length}` : '',
-    )))
+    const mine = ownPulls.filter(pr => keep(pr.title, String(pr.number), pr.author?.login))
+    chainPulls(mine).forEach(chain => chain.forEach((pr, index) => rows.push(pullRow(pr, '', { order: chain.length > 1 ? `Part ${index + 1} of ${chain.length}` : '' }))))
   }
   return rows
 }
 
-function MergedRows({ project, records, query, lastLooked }) {
+// A merged PR keeps its page: the row opens it, read-only because the PR no longer accepts actions.
+function MergedRows({ project, records, query, lastLooked, onOpenPull }) {
   return records
     .filter(record => matches(query, project.name, record.title, String(record.number || '')))
-    .map(record => (
-      <div key={record.id} className="co-desk-row is-static">
-        <Icon name="merge" size={16} className="co-desk-merged-icon" />
-        <span className="co-desk-row-main">
-          <span className="co-desk-row-title"><NewDot value={record.updated_at} lastLooked={lastLooked} />{record.title || 'Untitled contribution'}</span>
-          <span className="co-desk-row-meta">
-            {record.number ? <span>#{record.number}</span> : null}
-            <span>{STATUS_LABELS[record.status] || record.status}</span>
-            <TimeAgo value={record.updated_at || record.created_at} />
-          </span>
-        </span>
-      </div>
-    ))
+    .map(record => {
+      const repo = record.repo || record.plan?.repo
+      return <DeskRow key={record.id}
+        icon={<Icon name="merge" size={16} className="co-desk-merged-icon" />}
+        title={<><NewDot value={record.updated_at} lastLooked={lastLooked} />{record.title || 'Untitled contribution'}</>}
+        facts={<span><DotLine parts={[record.number ? `#${record.number}` : null, 'yours', <TimeAgo value={record.updated_at || record.created_at} />]} /></span>}
+        pills={[<StatusPill key="status" chip={{ label: STATUS_LABELS[record.status] || record.status, tone: 'quiet' }} />]}
+        onOpen={record.number && repo ? () => onOpenPull(project, { number: record.number, repository: { nameWithOwner: repo } }) : null} />
+    })
 }
 
 const EMPTY = {
-  needs: { title: 'Nothing needs you right now', hint: 'Review requests, approved work, failing checks and agent runs that wait on you land here.' },
+  needs: { title: 'Nothing needs you right now', hint: 'Review requests, approved work, failing checks and reviews that wait on you land here.' },
   filtered: { title: 'Nothing left for this step', hint: 'Tap the step again to see everything that needs you.' },
   requests: { icon: 'feedback', title: 'No review requests', hint: 'When someone asks for your review, the PR appears here.' },
   mine: { icon: 'pull', title: 'No open PRs of yours', hint: 'PRs you open on GitHub appear here with their next step.' },
@@ -180,7 +172,7 @@ function viewEnvelopes(view, projects, { records, query, lastLooked, needsFilter
   const envelopes = []
   for (const project of projects) {
     const rows = view === 'merged'
-      ? MergedRows({ project, records: mergedRecently(recordsForProject(records, project)), query, lastLooked })
+      ? MergedRows({ project, records: mergedRecently(recordsForProject(records, project)), query, lastLooked, onOpenPull: context.onOpenPull })
       : projectRows(view, project, context).filter(row => !needsFilter || row.chip === needsFilter).map(row => row.el)
     if (rows.length) envelopes.push(
       <Envelope key={project.key} project={project} count={rows.length} foldable={rows.length > 1} onOpenProject={onOpenProject}>{rows}</Envelope>,
@@ -193,7 +185,7 @@ function viewEnvelopes(view, projects, { records, query, lastLooked, needsFilter
 export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', onOpenProject, onOpenPull, onOpenRecord }) {
   const [mineFilter, setMineFilter] = useState('open')
   const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], onOpenPull, onOpenRecord }
-  if (view === 'runs') return <AgentRunsView reviews={reviews} projects={projects} query={query} decisionsFor={decisionsFor} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} />
+  if (view === 'runs') return <AgentRunsView reviews={reviews} projects={projects} query={query} login={login} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} />
   const shownView = view === 'mine' && mineFilter === 'merged' ? 'merged' : view
   const envelopes = viewEnvelopes(shownView, projects, { records, query, lastLooked, needsFilter: view === 'needs' ? needsFilter : '', context, onOpenProject })
   const filter = view === 'mine' ? <MineFilter value={mineFilter} counts={counts} onChange={setMineFilter} /> : null
