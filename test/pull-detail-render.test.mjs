@@ -9,7 +9,8 @@ async function render(t, name, props) {
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { decide } from './pr-machine.js'
-    import { PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated } from './ui/PullRequestDetail.jsx'
+    import { PullRequestDetail, PullFiles, PullThreads, PullRelated } from './ui/PullRequestDetail.jsx'
+    import { PullChecks } from './ui/PullChecks.jsx'
     import { PullEscalation } from './ui/PullEscalation.jsx'
     const components = { decide, PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated, PullEscalation }
     export function render(name, props) { return name === 'decide' ? decide(props) : renderToStaticMarkup(React.createElement(components[name], props)) }
@@ -65,11 +66,50 @@ test('check outcomes stay written and partial source absence never claims succes
   const html = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 2, groups: [{ name: 'Check runs', total: 102, hasMore: false, items: [{ id: 1, name: 'Unit tests', status: 'completed', conclusion: 'failure', details_url: 'javascript:alert(1)' }, { id: 2, name: 'Build', status: 'queued' }] }] } })
   if (!html) return
   assert.match(html, /Unit tests/)
-  assert.match(html, /failure/)
-  assert.match(html, /queued/)
+  assert.match(html, /<b>Failed<\/b>/)
+  assert.match(html, /<b>Queued<\/b>/)
   assert.match(html, /page 2/)
   assert.match(html, /not an all-clear review/)
   assert.doesNotMatch(html, /href="javascript:/)
+  assert.doesNotMatch(html, /<a /, 'a check whose link is not safe has no link')
+})
+
+test('a read that found no checks says so, and one that could not read them never says there were none', async t => {
+  const none = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 1, groups: [{ name: 'Check runs', total: 0, hasMore: false, items: [] }, { name: 'Commit statuses', total: 0, hasMore: false, items: [] }], errors: [] } })
+  if (!none) return
+  assert.match(none, /No checks reported for this version/)
+  assert.doesNotMatch(none, /co-check-ring|co-pr-filters/, 'nothing to draw or filter')
+  assert.doesNotMatch(none, />0</, 'a count of nothing is never printed as a bare 0')
+  const failed = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 1, groups: [], errors: ['Check runs: Could not load this information from GitHub (HTTP 503). Try again.'] } })
+  assert.match(failed, /Checks could not be read/)
+  assert.doesNotMatch(failed, /No checks reported/)
+})
+
+test('the Checks tab leads with a summary and Check again, then the chips, then the checks by what needs the owner', async t => {
+  const at = minutes => new Date(Date.now() - minutes * 60000).toISOString()
+  const run = (id, name, extra = {}) => ({ id, name, status: 'completed', conclusion: 'success', started_at: at(12), completed_at: new Date(Date.parse(at(12)) + 363000).toISOString(), details_url: 'https://github.com/team/repo/actions/runs/9/job/' + id, ...extra })
+  const passed = Array.from({ length: 8 }, (_, index) => run(10 + index, 'backend-tests (' + (index + 1) + ')'))
+  const items = [...passed, run(30, 'e2e', { conclusion: 'skipped' }), run(40, 'upgrade-path', { status: 'in_progress', conclusion: null, completed_at: null, started_at: at(4) })]
+  const data = { head: 'a1b2c3d4e5'.repeat(4), page: 1, readAt: at(1), groups: [{ name: 'Check runs', total: items.length, hasMore: false, items },
+    { name: 'Commit statuses', total: 1, hasMore: false, items: [{ id: 60, context: 'ci/package', state: 'pending', created_at: at(10), updated_at: at(9), target_url: 'https://ci.example/package/60' }] }], errors: [] }
+  const html = await render(t, 'PullChecks', { data, onCheckAgain: () => {} })
+  if (!html) return
+  assert.match(html, /<strong>2 running · 8 passed · 1 skipped<\/strong>/)
+  assert.match(html, /For commit <code>a1b2c3d<\/code> · <time[^>]*>read 1 minute ago<\/time>/)
+  assert.match(html, /aria-label="9 of 11 checks passed or skipped"/, 'the ring says it as the tab badge does')
+  assert.ok(html.indexOf('co-checks-summary') < html.indexOf('co-pr-note') && html.indexOf('co-pr-note') < html.indexOf('co-pr-filters') && html.indexOf('co-pr-filters') < html.indexOf('co-check-group'), 'summary, then the note, the chips, the checks')
+  assert.match(html, /<\/svg>.*Check again<\/button>/, 'Check again is in the summary')
+  const chips = [...html.matchAll(/<button type="button"( class="is-empty")? aria-pressed="(\w+)">(\w+)<span class="co-pr-filter-count">(\d+)/g)].map(match => [match[3], match[4], !!match[1], match[2]])
+  assert.deepEqual(chips, [['All', '11', false, 'true'], ['Failing', '0', true, 'false'], ['Running', '2', false, 'false'], ['Passed', '8', false, 'false'], ['Skipped', '1', false, 'false']], 'a state with no checks steps back')
+  assert.deepEqual([...html.matchAll(/<section class="co-check-group is-(\w+)"/g)].map(match => match[1]), ['running', 'passed', 'skipped'], 'running first, then passed, then skipped; no failing group when nothing fails')
+  assert.equal((html.match(/class="co-check is-passed"/g) || []).length, 3, 'eight passed checks show three and fold the rest')
+  assert.match(html, /aria-expanded="false">Show 5 more</)
+  assert.match(html, /<b><span class="co-shine"[^>]*>Running<\/span><\/b><span class="co-check-time"><time[^>]*>started 4 minutes ago/, 'a running check shines and says when it started')
+  assert.match(html, /<b>Passed<\/b><span class="co-check-time">6m 03s<\/span>/, 'a finished one says how long it took')
+  assert.match(html, /<b>Skipped<\/b><\/span>/, 'a skipped check has no time')
+  assert.match(html, /<span class="co-check-name">ci\/package<\/span><span class="co-check-meta"><b>Pending<\/b><\/span>/, 'a commit status is a row like the others, and one still pending reads Pending')
+  assert.match(html, /aria-label="View on GitHub: upgrade-path" data-tip="View on GitHub"/, 'the GitHub icon names itself, and the tooltip says the same')
+  assert.doesNotMatch(html, />View on GitHub</, 'no row spends a line on the words')
 })
 
 test('a failed check shows why: failed step names and annotations as text, with View on GitHub as the way to the log', async t => {
@@ -81,7 +121,7 @@ test('a failed check shows why: failed step names and annotations as text, with 
   assert.match(html, /Failed steps: <code>Run unit tests<\/code><code>Upload &lt;b&gt;report&lt;\/b&gt;<\/code>/)
   assert.match(html, /<code>test\/a\.test\.mjs:12<\/code> not ok 412 - desk counts a ready PR once/)
   assert.equal((html.match(/co-check-why/g) || []).length, 1, 'a failed check with no readable reason shows no empty box')
-  assert.equal((html.match(/>View on GitHub</g) || []).length, 2, 'every check keeps its link out')
+  assert.equal((html.match(/aria-label="View on GitHub: (Unit tests|Lint)"/g) || []).length, 2, 'every check keeps its link out')
   assert.doesNotMatch(html, /View result/)
 })
 

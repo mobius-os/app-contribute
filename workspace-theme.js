@@ -110,6 +110,55 @@ export const WORKSPACE_CSS = `
 .co-check-why p { margin:0; }
 .co-check-why ul { margin:4px 0 0; padding-left:18px; }
 .co-check-why code { margin-right:6px; font:var(--co-text-meta) var(--mono,monospace); }
+/* The Checks tab (DESIGN.md, The Checks Rule): a summary, the chips of the PR list, then the checks by what needs the owner. */
+.co-checks-summary { display:flex; align-items:center; gap:14px; margin:4px 0 6px; }
+.co-checks-summary-text { flex:1 1 auto; min-width:0; display:grid; gap:2px; }
+.co-checks-summary-text strong { font-size:var(--co-text-body); font-weight:600; overflow-wrap:anywhere; }
+.co-checks-summary-text span { color:var(--muted); font-size:var(--co-text-meta); }
+.co-checks-summary-text code { font:var(--co-text-meta) var(--mono,monospace); }
+.co-checks-summary .co-btn { flex:none; }
+.co-check-ring { flex:none; }
+.co-check-ring circle { fill:none; stroke-width:4; stroke:var(--border); }
+.co-check-ring circle.is-failing { stroke:var(--danger); }
+.co-check-ring circle.is-running { stroke:var(--co-warn,#b38235); }
+.co-check-ring circle.is-passed { stroke:var(--green); }
+.co-check-ring circle.is-skipped { stroke:color-mix(in srgb,var(--green) 38%,var(--border)); }
+.co-check-group h4 { display:flex; align-items:baseline; gap:8px; margin:18px 0 8px; color:var(--muted); font-size:var(--co-text-meta); font-weight:600; }
+.co-check-count { font-weight:500; font-variant-numeric:tabular-nums; }
+.co-check-group > ul { margin:0; padding:0; list-style:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
+.co-check { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; grid-template-areas:'icon name meta link' '. why why why'; align-items:center; column-gap:12px; padding:0 6px 0 14px; min-height:var(--co-tap-height); }
+.co-check + .co-check, .co-check + .co-check-fold { border-top:1px solid var(--border); }
+.co-check-icon { grid-area:icon; display:inline-flex; }
+.co-check-icon .co-icon { vertical-align:middle; }
+.co-check.is-failing .co-check-icon { color:var(--danger); }
+.co-check.is-running .co-check-icon { color:var(--co-warn,#b38235); }
+.co-check.is-passed .co-check-icon { color:var(--green); }
+.co-check.is-skipped .co-check-icon { color:var(--muted); }
+.co-check-name { grid-area:name; min-width:0; padding:8px 0; font-weight:600; overflow-wrap:anywhere; }
+.co-check-meta { grid-area:meta; display:inline-flex; flex-wrap:wrap; justify-content:flex-end; align-items:baseline; gap:0 10px; color:var(--muted); font-size:var(--co-text-meta); font-variant-numeric:tabular-nums; }
+.co-check-meta b { font-weight:600; }
+.co-check.is-failing .co-check-meta b { color:var(--danger-text,var(--danger)); }
+.co-check.is-passed .co-check-meta b { color:var(--green-text,var(--green)); }
+.co-check > .co-btn { grid-area:link; }
+.co-check > .co-check-why { grid-area:why; margin:0 0 10px; }
+.co-check-fold button { display:flex; align-items:center; justify-content:space-between; width:100%; min-height:var(--co-tap-height); padding:0 14px; border:0; background:none; color:var(--muted); font:600 var(--co-text-meta) var(--font); cursor:pointer; }
+.co-check-fold button:hover { color:var(--text); }
+.co-check-fold button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:var(--co-radius-panel); }
+.co-check-fold button[aria-expanded=true] .co-icon { transform:rotate(180deg); }
+/* The five chips never scroll sideways: on a phone they wrap, their tap boxes kept apart (The Compact Phone Rule). */
+.co-checks .co-pr-filters { flex-wrap:wrap; overflow:visible; row-gap:calc(2 * var(--co-tap-reach)); mask-image:none; -webkit-mask-image:none; animation:none; }
+@media (max-width:680px) {
+  .co-check { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'icon name link' '. meta meta' '. why why'; }
+  .co-check-meta { justify-content:flex-start; padding-bottom:8px; }
+  .co-checks-summary { display:grid; grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'ring head head' 'ring meta again'; align-items:center; column-gap:12px; }
+  .co-checks-summary-text { display:contents; }
+  .co-checks-summary-text strong { grid-area:head; }
+  .co-checks-summary-text span { grid-area:meta; }
+  .co-checks-summary .co-check-ring { grid-area:ring; }
+  .co-checks-summary .co-btn { grid-area:again; }
+}
+.co-check-fold .co-icon { transition:transform .15s; }
+@media (prefers-reduced-motion:reduce) { .co-check-fold .co-icon { transition:none; } }
 .co-group-members { margin-top:20px; }
 .co-group-member { border-bottom:1px solid var(--border); padding:10px 0; }
 .co-group-member > summary { cursor:pointer; min-height:44px; font-size:var(--co-text-body); align-content:center; }

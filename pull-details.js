@@ -131,7 +131,7 @@ export async function loadPullChecks(token, pr, page = 1, signal) {
   const mismatch = results.find(result => result.status === 'rejected' && result.reason.code === 'stale')
   if (mismatch) throw mismatch.reason
   const groups = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
-  return { groups, page, head: pr.headRefOid, hasMore: page < 100 && groups.some(group => group.hasMore),
+  return { groups, page, head: pr.headRefOid, readAt: new Date().toISOString(), hasMore: page < 100 && groups.some(group => group.hasMore),
     capped: page === 100 && groups.some(group => group.hasMore), paginationUnknown: groups.some(group => group.paginationUnknown),
     errors: results.flatMap((result, index) => result.status === 'rejected' ? [`${sources[index][0]}: ${result.reason.message}`] : []) }
 }

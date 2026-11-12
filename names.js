@@ -89,3 +89,12 @@ export const NAMES = Object.freeze({
 const REVIEW_JOBS = new Set(['review', 'review_merge'])
 // The words for starting a stopped agent job over: a review is reviewed again.
 export const rerunName = kind => (REVIEW_JOBS.has(kind) ? NAMES.reviewAgain : NAMES.runAgain)
+
+// The Checks tab. A state's name is the word of its group, its filter and the summary line ("1 running"); a row says GitHub's
+// own result for that one check, so a state is never colour alone. A result GitHub has not settled, or one not listed here, reads Pending.
+export const CHECK_STATE_WORDS = Object.freeze({ all: 'All', failing: 'Failing', running: 'Running', passed: 'Passed', skipped: 'Skipped' })
+export const CHECK_RESULT_WORDS = Object.freeze({
+  success: 'Passed', failure: 'Failed', error: 'Failed', startup_failure: 'Failed to start', timed_out: 'Timed out', cancelled: 'Cancelled',
+  action_required: 'Needs action', stale: 'Stale', skipped: 'Skipped', neutral: 'Neutral', in_progress: 'Running', queued: 'Queued', waiting: 'Waiting',
+  pending: 'Pending',
+})
