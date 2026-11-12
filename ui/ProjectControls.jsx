@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { contributionCycleAction } from '../review.js'
 import { mayMerge } from '../collaboration.js'
-import { localChangeSummary, projectCycleIdentity, projectUpstreamLine } from '../source-map.js'
-import { projectUpdater } from '../updates.js'
+import { localChangeSummary, projectCycleIdentity } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
@@ -23,19 +22,6 @@ const CYCLE_CSS = `
 .co-task-content .co-task-progress p{margin:4px 0 0;font-size:var(--co-text-meta)}
 .co-task-progress .co-cycle-actions{margin:12px 0 0}
 `
-
-// The project screen's only status row: shown while GitHub needs the owner (a conflict, files not here yet, new
-// commits since the last check) and nowhere else, so a quiet project opens straight on its tabs.
-function UpstreamWarning({ project, check }) {
-  const line = projectUpstreamLine(project, check)
-  if (line?.tone !== 'warn') return null
-  const updater = line.update ? projectUpdater(project) : null
-  return <div className="co-upstream-warning" role="group" aria-label="Updates from GitHub">
-    <span className="co-upstream-warning-icon" aria-hidden="true"><Icon name="refresh" size={18} /></span>
-    <p><strong>{line.strong}</strong>{line.text}</p>
-    {updater ? <div className="co-upstream-warning-actions"><button type="button" className="co-btn" onClick={updater.open}><Icon name="settings" size={15} />{updater.label}</button></div> : null}
-  </div>
-}
 
 const STATUS_LABELS = {
   restoring: 'Checking saved work', checking: 'Checking work status', starting: 'Starting agent', stopping: 'Stopping work',
@@ -71,7 +57,7 @@ function CycleNotice({ cycle, label, waiting, workflow }) {
   </div>
 }
 
-export function ProjectControls({ appId, token, project, run, onStart, loading, check = null, children }) {
+export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
   const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
   const { cycle } = workflow
@@ -141,7 +127,6 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>
     <style>{CYCLE_CSS}</style>
-    <UpstreamWarning project={project} check={check} />
     {local ? <SourceConversations project={project} appId={appId} token={token} /> : null}
     <TaskPane id="task:prepare" dock={false}>
       <h3>Make PRs from local changes</h3>

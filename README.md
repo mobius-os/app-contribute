@@ -38,12 +38,13 @@ contribution. This app is the dashboard for that loop:
   contextual task, with a compact project switcher rather than another sidebar.
   What is local ("2 files changed on this Möbius") and **Make PRs from local
   changes** are in the **Local changes**
-  tab, which appears only while files really differ; GitHub gets a row above the
-  tabs only when an update or conflict needs a look.
+  tab, which appears only while files really differ. The project screen has no
+  status row above its tabs; the project's row on the Repositories list flags
+  an update or conflict from GitHub.
   A permitted maintainer can choose **Follow through to merge** without granting
   unknown future public actions. Contribute does not update projects itself:
-  when GitHub has updates it links to the place that applies them, Settings →
-  Updates for Möbius and the App Store for apps. On phones, a task takes the
+  Settings → Updates applies them for Möbius and the App Store for apps, and a
+  merged run links to the right one. On phones, a task takes the
   screen and **Back to project** restores the same inventory.
 - **Sync with GitHub** (in the header) — reloads this Möbius and asks GitHub, read-only, whether
   each project's repository has commits newer than the one this Möbius last
