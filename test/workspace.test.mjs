@@ -152,9 +152,8 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 file<\/strong> changed on this Möbius\./)
-  assert.match(html, /Local changes and GitHub/)
-  assert.match(html, /See the files/)
+  // The local-change count, the files and the Make PRs button live in the Local changes tab, not above the tabs.
+  assert.doesNotMatch(html, /changed on this Möbius|Local changes and GitHub|See the files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
@@ -348,14 +347,20 @@ test('SSR selecting a focused contribution retains the project inventory and his
     recent: [work('Accepted work', 'done', 'merged')], archive: [work('Historical work', 'archived', 'abandoned')],
   })
   for (const selectedId of ['', privateWork.id, 'task:pulls', 'task:review']) {
-    // Selecting never hides inventory: All PRs keeps saved public work, My work keeps history.
-    const tabs = { all: ['Private work', 'Published work'], mine: ['Private work', 'Accepted work', 'Historical work'] }
+    // Selecting never hides inventory: All PRs keeps saved public work, Prepared PRs its list, My work its history.
+    const tabs = { all: ['Published work', 'Prepared PRs'], prepared: ['Private work'], mine: ['Accepted work', 'Historical work'] }
     for (const [defaultTab, labels] of Object.entries(tabs)) {
       const html = ui.render('ContributionRun', { run: current, selectedId, defaultTab }, { activeId: selectedId, host: null })
       for (const label of labels) assert.match(html, new RegExp(label), `${label} remains listed on ${defaultTab} for ${selectedId}`)
       assert.doesNotMatch(html, /This contribution moved|Archived proposals/)
     }
   }
+  const all = ui.render('ContributionRun', { run: current, defaultTab: 'all' }, { host: null })
+  assert.doesNotMatch(all, /<strong>Private work<\/strong>/)
+  // Opening the row selects it above the tabs, like any other decision; no tab holds a second copy of its detail.
+  const selected = ui.render('ContributionRun', { run: current, selectedId: privateWork.id, defaultTab: 'all' }, { activeId: privateWork.id, host: null })
+  assert.match(selected, /Prepared PRs/)
+  assert.match(selected, /co-task-content|co-run-focus-detail/)
 })
 
 test('SSR reviewed work waiting on a source check asks the owner, with the reason and the right action', async t => {
@@ -376,8 +381,8 @@ test('SSR reviewed work waiting on a source check asks the owner, with the reaso
     assert.equal(item.kind, 'check_attention')
     const props = { run: current, reviewStatus, githubState: 'connected', onRefresh: async () => {} }
     const list = ui.render('ContributionRun', { ...props, selectedId: '' }, { activeId: '', host: null })
-    assert.match(list, /aria-label="To look at"[\s\S]*Change one/, code)
-    assert.doesNotMatch(list, /Prepared work/, code)
+    assert.match(list, /Prepared PRs/, code)
+    assert.doesNotMatch(list, /aria-label="To look at"/, code)
     const focus = ui.render('ContributionRun', { ...props, selectedId: item.id }, { activeId: item.id, host: null })
     assert.match(focus, message, code)
     assert.doesNotMatch(focus, /Private review needed|Review all|>Review</, code)
@@ -429,12 +434,37 @@ test('SSR public review inventory replaces duplicate public rows but retains pri
   assert.match(html, /aria-label="Filter pull requests"/)
   assert.match(html, />Opened by me</)
   assert.match(html, />Assigned to me</)
-  for (const label of ['Private work', 'Still preparing', 'Unfetched PR', 'Different repository']) assert.match(html, new RegExp(label))
+  for (const label of ['Still preparing', 'Unfetched PR', 'Different repository']) assert.match(html, new RegExp(label))
+  assert.match(html, /Prepared PRs/)
   assert.doesNotMatch(html, /Duplicate open row|Duplicate draft row|This contribution moved/)
   const mine = ui.renderPublicRun({ run: current, githubState: 'connected', defaultTab: 'mine' }, {
     appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
   }, { host: null, publicKeys: new Set(['owner/project#7', 'owner/project#8']) })
   assert.match(mine, /Accepted work/)
+  const prepared = ui.renderPublicRun({ run: current, githubState: 'connected', defaultTab: 'prepared' }, {
+    appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
+  }, { host: null, publicKeys: new Set(['owner/project#7', 'owner/project#8']) })
+  assert.match(prepared, /Private work/)
+})
+
+test('SSR saved open PRs wait for the PR list to be read before any of them is Shared work', async t => {
+  const ui = await rendered(t)
+  if (!ui) return
+  const current = run({ working: [
+    work('Shown in list', 'public', 'open'), work('Not in list', 'public', 'open', { number: 9 }),
+    work('Saved issue', 'public', 'open', { type: 'issue', number: 10 }),
+  ] })
+  const render = publicKeys => ui.renderPublicRun({ run: current, githubState: 'connected' }, {
+    appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
+  }, { host: null, publicKeys })
+  // null: the list is still being read, so which PRs it shows is not known yet. An issue is never in the PR list, so it is not held back.
+  const waiting = render(null)
+  assert.doesNotMatch(waiting, /Shared work|Shown in list|Not in list/)
+  assert.match(waiting, /Saved issue/)
+  const read = render(new Set(['owner/project#7']))
+  assert.match(read, /Shared work/)
+  assert.match(read, /Not in list/)
+  assert.doesNotMatch(read, /Shown in list/)
 })
 
 test('SSR unavailable GitHub cannot hide saved public contributions behind an empty review inventory', async t => {

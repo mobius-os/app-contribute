@@ -150,7 +150,7 @@ export function ConnectionCard({
               <span className="co-set-tile" aria-hidden="true"><Icon name={stageWords(newPrStage).icon} size={18} /></span>
               <div className="co-set-text" id="co-new-pr-stage">
                 <strong>New pull requests start as</strong>
-                <small>{newPrStage === 'draft' ? 'Nobody is asked to review a PR until you open it for review.' : 'Reviewers are asked as soon as a PR opens.'} Pick the other one for a single send from its arrow.</small>
+                <small>{newPrStage === 'draft' ? 'A PR stays a draft until you open it for review.' : 'A PR opens ready for review straight away.'} Pick the other one for a single send from its arrow.</small>
               </div>
               <div className="co-seg" role="radiogroup" aria-labelledby="co-new-pr-stage">
                 {['draft', 'ready'].map(stage => <button key={stage} type="button" role="radio" aria-checked={newPrStage === stage}

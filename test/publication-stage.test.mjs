@@ -24,7 +24,7 @@ test('the words name the result and keep the count, for one PR and for several',
   assert.equal(ready.onGithub(2), 'Open 2 for review on GitHub')
   assert.equal(draft.heading(1), 'Open 1 reviewed pull request as a draft?')
   assert.equal(ready.heading(2), 'Send 2 reviewed pull requests?')
-  assert.match(draft.description, /open as drafts: nobody is asked to review them until you open them for review/)
+  assert.match(draft.description, /open as drafts, so they are not ready for review yet/)
   assert.match(ready.description, /open ready for review/)
   assert.equal(stageWords('nonsense').line, ready.line)
 })

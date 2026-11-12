@@ -1,9 +1,11 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Fourteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Sixteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
+// runProjectWarningChecks (the project fixture: the project screen's one GitHub row shows only for a conflict or an update),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
+// runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -41,6 +43,8 @@ import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ProjectEdits } from './ui/ProjectEdits.jsx'
+import { localChangeSentence, localChangeSummary } from './source-map.js'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { ReviewPlan } from './ui/ContributionCard.jsx'
@@ -384,6 +388,7 @@ function Fixture() {
   }
   async function send(record) {
     calls.publications.push(structuredClone(record))
+    if (window.holdSend) await window.holdSend
     const shared = { ...record, status: 'open', number: 9, url: 'https://github.com/owner/project/pull/9' }
     pulls.push(pull(9, { title: record.title }))
     setRecords(old => old.map(item => item.id === record.id ? shared : item))
@@ -409,11 +414,12 @@ function Fixture() {
   return <SyncHubContext.Provider value={hub}><div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     <button type="button" className="co-btn co-toolbar-refresh" onClick={syncFromHeader} disabled={syncing} aria-busy={syncing} aria-label="Sync with GitHub">Sync with GitHub</button>
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
-      loadProjectDiff={loadProjectDiff} onRetry={retryAll}
       addProject={quiet => <RepositoryPicker quiet={quiet} token="fixture-only" connected onAdded={repositoryAdded} />}
       renderActivity={(project, navigation) => project ? <><GithubPullsUnavailable conn={conn} onRetry={retryGithub} /><ProjectControls key={project.key} appId="fixture-app" token="fixture-only" project={project}
         run={runFor(project)} mergeRun={runFor(project)} onStart={start}>
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
+        edits={localChangeSentence(project).edits ? <ProjectEdits key={'fixture-'+refreshKey} project={project} run={runFor(project)} loadProjectDiff={loadProjectDiff} onRefresh={retryAll} /> : null}
+        editsCount={localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
         githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={view => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project} scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal}
@@ -496,6 +502,11 @@ async function chooseDraftThenMergeSwitch() {
   ensure(mergeSwitch && !mergeSwitch.checked,'Drafting a verdict did not offer an unchecked merge switch')
   return mergeSwitch
 }
+// Make PRs from local changes sits in the Local changes tab, so open the tab to reach it.
+async function makePrsButton() {
+  await openTab('Local changes')
+  return button('Make PRs from local changes')
+}
 async function openTab(name) {
   const tab = [...document.querySelectorAll('[role=tab]')].find(node => text(node).startsWith(name))
   ensure(tab, 'Tab missing: ' + name)
@@ -521,6 +532,45 @@ async function inventory() {
   const close=query('.co-inline-close')
   if (close) await click(close)
 }
+// The project screen has no status panel; its one GitHub row exists only while an update or a conflict needs the owner.
+window.runProjectWarningChecks = async () => {
+  const checks = []
+  const row = () => query('.co-upstream-warning')
+  const setFixture = fields => window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, ...fields } : project))
+  try {
+    await until(() => query('.co-source-row'), 'Project list did not render')
+    await click(query('.co-source-row'))
+    await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab]'), 'Project did not settle')
+    await frame(); await frame()
+    await captureShot('project-clean')
+    ensure(!row(), 'A project with nothing from GitHub showed a row above its tabs')
+    checks.push({ name: 'a project with nothing from GitHub opens straight on its tabs', status: 'pass' })
+    setFixture({ conflictFiles: 1 })
+    await until(() => document.querySelectorAll('.co-pr-row').length === 2, 'Project did not settle after the conflict')
+    await frame(); await frame()
+    await captureShot('project-conflict')
+    await until(row, 'A conflict with GitHub showed no row above the tabs')
+    ensure(text(row().querySelector('p')) === 'An update from GitHub conflicts with your local changes.', 'The warning read: ' + text(row()))
+    ensure(row().compareDocumentPosition(query('[role=tablist]')) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not above the tabs')
+    const action = button('Open App Store', row()), box = row().getBoundingClientRect(), actionBox = action.getBoundingClientRect()
+    ensure(Math.round(actionBox.height) >= 44 && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px')
+    ensure(box.left >= 0 && Math.round(box.right) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The row makes the page scroll sideways')
+    const asked = []
+    const listen = event => asked.push(event.data)
+    window.addEventListener('message', listen)
+    await click(action)
+    await until(() => asked.length, 'Open App Store asked the host for nothing')
+    window.removeEventListener('message', listen)
+    ensure(asked[0]?.type === 'moebius:open-app' && asked[0].appId === 'store', 'Open App Store asked for ' + JSON.stringify(asked[0]))
+    checks.push({ name: 'a conflict with GitHub is one row above the tabs, with a button to the App Store', status: 'pass' })
+    setFixture({ conflictFiles: 0 })
+    await until(() => !row(), 'The row stayed after the conflict was gone')
+    checks.push({ name: 'the row goes when the conflict does', status: 'pass' })
+    return { status: 'pass', checks }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 2000) }
+  }
+}
 async function chooseProject(name) {
   await inventory()
   const switcher = query('select[aria-label="Switch project"]')
@@ -537,6 +587,9 @@ async function chooseProject(name) {
 }
 window.runWorkspaceChecks = async () => {
   const checks = []
+  const savedPr = (id, number, title, repo = 'owner/project') => ({ id, type: 'pr', status: 'open', repo, number, title, summary: title,
+    url: 'https://github.com/' + repo + '/pull/' + number, plan: { action: 'pr', repo, title } })
+  const sharedWork = () => query('details[aria-label="Shared work"]')
   async function check(name, run) {
     await run()
     const page=query('.co-page')
@@ -553,9 +606,31 @@ window.runWorkspaceChecks = async () => {
       ensure(search && search.querySelector('svg') && filters.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING, 'The project search is not the shared search field under the filters')
       ensure(button('All',filters).getAttribute('aria-pressed')==='true', 'The active project filter is not exposed')
       await click(query('.co-source-row'))
-      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && button('Make PRs from local changes') && !button('Make PRs from local changes').disabled, 'Project did not settle')
+      await until(() => document.querySelectorAll('.co-pr-row').length === 2 && query('[role=tab][data-tab="edits"]'), 'Project did not settle')
       ensure(query('.co-workspace-inventory') && !query('.co-task-content'), 'Opening a project displayed task work')
       ensure(!query('.co-task-content') && calls.starts.length === 0 && mutationRequests().length === 0, 'Opening project started work or opened an action')
+    })
+    await check('the prepared-PR bar keeps Open for review at its right edge and shows its whole menu', async () => {
+      const bar = query('.co-decisions > .co-run-primary'), split = bar?.querySelector('.co-split')
+      ensure(split && button('Open for review', split), 'Fixture: the prepared-PR bar no longer offers Open for review as a split button')
+      const more = split.querySelector('.co-split-more')
+      // The last visible button, not its wrapper: a stretched wrapper still ends at the edge while its buttons sit in the middle.
+      const edge = bar.getBoundingClientRect().right - more.getBoundingClientRect().right
+      await captureShot('prepared-bar')
+      ensure(edge <= 16, 'Open for review floats ' + Math.round(edge) + 'px inside the bar instead of sitting at its right edge')
+      await click(more)
+      await until(() => split.querySelector('[role=menuitem]'), 'The open-for-review menu did not open')
+      const items = [...split.querySelectorAll('[role=menuitem]')]
+      ensure(items.length === 2, 'Open for review lost one of its two ways to open')
+      items.at(-1).scrollIntoView({ block: 'nearest' }); await frame()
+      ensure(items.at(-1).getBoundingClientRect().bottom > bar.getBoundingClientRect().bottom, 'Fixture: the menu no longer reaches past the prepared-PR bar')
+      await captureShot('prepared-bar-menu')
+      for (const item of items) {
+        const rect = item.getBoundingClientRect()
+        ensure(item.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 6)), 'The bar clipped the open-for-review menu')
+      }
+      await click(more)
+      await until(() => !split.querySelector('[role=menuitem]'), 'The open-for-review menu did not close')
     })
     const originalInventory = query('.co-workspace-inventory'), originalRow = query('.co-pr-row')
     let originalList = query('.co-pr-list')
@@ -565,7 +640,8 @@ window.runWorkspaceChecks = async () => {
     const inventoryNavigationDepth = navigation.length
     await check('project tabs lead with All PRs, whose filter chips offer each view and change totals stay visible', async () => {
       const tabs=[...document.querySelectorAll('[role=tab]')].map(node => text(node).replace(/\d+$/, ''))
-      ensure(tabs.join('|')==='All PRs|Review requests|Agent runs','Project tabs drifted: '+tabs.join('|'))
+      // The fixture project has one edited file, so the fourth tab is on offer.
+      ensure(tabs.join('|')==='All PRs|Prepared PRs|Review requests|Agent runs|Local changes1 file','Project tabs drifted: '+tabs.join('|'))
       ensure([...document.querySelectorAll('[role=tab]')][0].getAttribute('aria-selected')==='true','All PRs is not the default tab')
       const chips=[...query('.co-pr-filters').querySelectorAll('button')].map(node => text(node).replace(/\d+$/, '').trim())
       ensure(chips.join('|')==='All|Opened by me|Drafts|Failing checks|Bots|Unassigned|Assigned to me','PR filter choices drifted: '+chips.join('|'))
@@ -853,16 +929,29 @@ window.runWorkspaceChecks = async () => {
       await closeReview(); await click(query('[aria-label="Clear selection"]'))
     })
     await check('explicit send joins the same public inventory without implying merge', async () => {
-      await inventory(); await click(button(opens))
+      await inventory(); await openTab('Prepared PRs')
+      await captureShot('prepared-tab')
+      await click(query('.co-prepared-tab .co-run-quiet-row'))
+      await until(() => button(opens), 'Prepared PR details did not offer publication')
+      await click(button(opens))
       await until(() => button(sends),'Publication confirmation missing')
       ensure(calls.publications.length===0,'Opening publication sent work')
+      // Browsing the tabs must not drop a confirmation, nor a send that is still running, nor its outcome.
+      await openTab('All PRs'); await openTab('Prepared PRs')
+      ensure(button(sends) && !button(opens),'A tab switch dropped the publication confirmation')
+      let release; window.holdSend = new Promise(resolve => { release = resolve })
       await click(button(sends))
-      await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
+      await until(() => calls.publications.length===1 && text(query('.co-run-approval')).includes('Sending'),'The held publication did not show as sending')
+      await openTab('All PRs'); await openTab('Prepared PRs')
+      ensure(!button(opens) && !button(sends) && text(query('.co-run-approval')).includes('Sending') && calls.publications.length===1,'A tab switch dropped the pending publication or offered it again')
+      window.holdSend = null; release()
+      await until(() => button('Done') && text(query('.co-run-approval')).includes('Sent to GitHub'),'Publication outcome missing')
       ensure(calls.publications.length===1 && calls.publications[0].plan.head_sha===HEAD,'Publication duplicated or lost reviewed head')
-      ensure(query('.co-pr-list')===originalList,'Publication replaced inventory')
-      await until(() => button('Done') && text(query('.co-task-content')).includes('Sent to GitHub'),'Publication outcome missing')
       ensure(!button(sends) && !button(opens),'Settled publication remained actionable')
       await click(button('Done'))
+      await openTab('All PRs')
+      await until(() => query('input[aria-label="Select owner/project #9"]'),'Published record absent')
+      originalList = query('.co-pr-list')
       ensure(query('input[aria-label="Select owner/project #9"]').getClientRects().length,'Published PR not selectable')
     })
     await check('dismissed work is discoverable without a link and only explicit Restore changes its local state', async () => {
@@ -882,8 +971,43 @@ window.runWorkspaceChecks = async () => {
       await until(()=>calls.restores.length===1 && !query('.co-run-fold.is-recent'),'Restore did not move exact record out of history')
       ensure(calls.restores[0]==='fixture-dismissed' && calls.publications.length===publications && mutationRequests().length===before,'Restore published work or restored another record')
       await inventory()
-      ensure(button(opens),'Restored record did not return to private preparation')
+      await openTab('Prepared PRs')
+      ensure(query('.co-prepared-tab .co-run-quiet-row'),'Restored record did not return to private preparation')
       await backToPrs()
+    })
+    await check('saved public PRs wait for the open-PR list before any of them counts as Shared work', async () => {
+      // A list opened for the first time: the saved PRs are in the records before the project is opened, so it is a fresh read.
+      await chooseProject('Other project')
+      window.setRecordsFixture(old => [...old, savedPr('fixture-listed', 7, 'Saved listed PR'), savedPr('fixture-shared', 99, 'Saved shared PR')])
+      window.holdPulls = true
+      await chooseProject('Fixture project')
+      // #7 is in the live list once it is read; #99 is not.
+      await until(() => window.releasePulls && query('.co-pr-skel'), 'The PR list did not start loading')
+      await captureShot('shared-work-while-loading')
+      ensure(!sharedWork(), 'Saved public PRs showed as Shared work while the list was still loading: ' + text(sharedWork()))
+      window.holdPulls = false; window.releasePulls(); window.releasePulls = null
+      await until(() => document.querySelectorAll('.co-pr-row').length >= 2 && sharedWork(), 'The list did not load, or the PR it does not show was not kept as Shared work')
+      await captureShot('shared-work-after-loading')
+      ensure(text(sharedWork()).includes('Saved shared PR') && !text(sharedWork()).includes('Saved listed PR'), 'Shared work should hold only the PR the list does not show: ' + text(sharedWork()))
+      window.setRecordsFixture(old => old.filter(record => !['fixture-listed', 'fixture-shared'].includes(record.id)))
+      await until(() => !sharedWork() && !window.releasePulls && !query('.co-pr-skel'), 'Removing the saved PRs did not settle')
+      originalList = query('.co-pr-list') // opening the project again mounted a new list
+    })
+    await check('a reload of a list that has been read keeps its Shared work, even when the list is empty', async () => {
+      window.emptyPulls = true
+      await click(checkButton())
+      await until(() => text(query('.co-pr-empty')).includes('No pull requests'), 'Empty inventory missing')
+      window.setRecordsFixture(old => [...old, savedPr('fixture-shared', 99, 'Saved shared PR')])
+      await until(() => sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Saved PR missing from Shared work beside an empty list')
+      window.holdPulls = true
+      await click(checkButton())
+      await until(() => window.releasePulls, 'The reload did not start')
+      await captureShot('shared-work-while-reloading')
+      ensure(sharedWork() && text(sharedWork()).includes('Saved shared PR'), 'Shared work emptied while an already-read list reloaded')
+      window.holdPulls = false; window.emptyPulls = false; window.releasePulls(); window.releasePulls = null
+      await until(() => document.querySelectorAll('.co-pr-row').length >= 2 && !query('.co-pr-skel'), 'The list did not reload')
+      window.setRecordsFixture(old => old.filter(record => record.id !== 'fixture-shared'))
+      await until(() => !sharedWork(), 'Removing the saved PR did not settle')
     })
     await check('PR inventory distinguishes failed refresh, empty results and loading without mutations', async () => {
       const before=mutationRequests().length
@@ -910,29 +1034,28 @@ window.runWorkspaceChecks = async () => {
       await fill(search,'')
       ensure(mutationRequests().length===before && query('.co-pr-list')===originalList,'Read states mutated work or remounted inventory')
     })
-    await check('local comparison is lazy, versioned, read-only and distinguishes loading, failure, empty and stale', async () => {
+    await check('local comparison is lazy, read-only and distinguishes loading, failure, empty and stale', async () => {
       const before=mutationRequests().length
       ensure(calls.diffs.length===0,'Local source diff loaded before inspection')
       window.holdDiff=true; window.diffMode='error'
-      const local=()=>button('See the files')
+      const local=()=>query('[role="tab"][data-tab="edits"]')
       await click(local())
       await until(()=>window.releaseDiff && query('.co-project-diff-loading'),'Comparison loader missing')
       window.holdDiff=false; window.releaseDiff(); window.releaseDiff=null
       await until(()=>button('Could not load diffs · try again'),'Comparison error missing')
       window.diffMode='empty'; await click(button('Could not load diffs · try again'))
       await until(()=>text(query('.co-project-diff-empty')).includes('No changed files'),'Empty comparison missing')
-      await inventory(); window.diffMode='stale'; await click(local())
+      // Leaving and re-opening the tab is what reads the comparison again.
+      await openTab('All PRs'); window.diffMode='stale'; await click(local())
       await until(()=>button('Project changed · check again'),'Stale comparison not distinguished')
       window.diffMode='ready'; await click(button('Project changed · check again'))
       await until(()=>text(query('.diff-view')).includes('local improvement'),'Fresh comparison did not recover')
-      await click(query('.co-position-details summary'))
-      ensure(text(query('.co-position-details')).includes('aaaaaaa') && text(query('.co-position-details')).includes('bbbbbbb'),'Compared versions missing')
       ensure(calls.diffs.every(call=>call.key==='app:fixture' && call.head===HEAD && call.base===BASE),'Comparison drifted to another source')
       ensure(mutationRequests().length===before && calls.starts.length===0,'Read-only comparison started work')
-      await inventory()
+      await openTab('All PRs')
     })
     await check('source conversation scope loads lazily and remains separate from project preparation', async () => {
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       await until(() => query('[data-task="task:prepare"]'),'Preparation did not open')
       const scope = query('.co-prepare-scope')
       ensure(text(scope).includes('1 edited file'),'Preparation did not show the collocated file scope')
@@ -969,12 +1092,12 @@ window.runWorkspaceChecks = async () => {
       const pane = () => query('[data-task="task:cycle"]')
       await until(() => pane() && button('Open current conversation', pane()), 'Cycle status hidden without merge rights')
       ensure(!button('Start fresh full merge cycle', pane()), 'A read-only project offered a new merge cycle')
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       ensure(!text(query('[data-task="task:prepare"]')).includes('Follow through to merge'), 'A read-only project offered follow-through to merge')
       window.setProjectsFixture(old => old.map(project => project.key === 'app:fixture' ? { ...project, viewerPermission: 'WRITE' } : project))
     })
     await check('effort choices are 44px targets on every viewport', async () => {
-      await chooseProject('Other project'); await click(button('Make PRs from local changes'))
+      await chooseProject('Other project'); await click(await makePrsButton())
       await until(() => query('[data-task="task:prepare"] .co-agent-trigger'), 'Make PRs launch did not open')
       const pane = query('[data-task="task:prepare"]')
       await click(pane.querySelector('.co-agent-trigger'))
@@ -1003,7 +1126,7 @@ window.runWorkspaceChecks = async () => {
       const starts = calls.starts.length
       window.lostStart = true
       const startIn = () => button('Start', query('[data-task="task:prepare"]'))
-      await click(button('Make PRs from local changes')); await until(() => startIn() && !startIn().disabled, 'Make PRs did not settle')
+      await click(await makePrsButton()); await until(() => startIn() && !startIn().disabled, 'Make PRs did not settle')
       await click(startIn())
       await openTab('Agent runs')
       await until(() => text(query('.co-work-progress-row')).includes('A start needs sending'), 'An unconfirmed start was not offered again')
@@ -1026,7 +1149,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length, starts=calls.starts.length
       const pane=()=>query('[data-task="task:prepare"]'), start=()=>button('Start', pane())
       ensure(!button('Pull updates') && !button('Start pull'),'Contribute still offered its own pull')
-      await click(button('Make PRs from local changes'))
+      await click(await makePrsButton())
       await until(()=>start() && !start().disabled,'Make PRs action did not settle')
       ensure(calls.starts.length===starts && mutationRequests().length===before,'Opening preparation started or published work')
       window.failStart=true; await click(start())
@@ -1751,6 +1874,15 @@ window.runWorkspaceChecks = async () => {
         window.fetch = original
         root.render(null)
       }
+    })
+    // The wait for the PR list must never hide saved public work the list will not show: with GitHub unreachable no read is pending.
+    await check('saved public PRs still show as Shared work when GitHub cannot be read', async () => {
+      root.render(<Fixture />)
+      await until(() => query('.co-source-row'), 'Project list did not render')
+      window.setConnectionFixture({ state: 'unknown' })
+      window.setRecordsFixture(old => [...old, savedPr('fixture-offline', 5, 'Saved PR while GitHub is unreachable', 'owner/other')])
+      await click([...document.querySelectorAll('.co-source-row')].find(node => text(node.querySelector('strong')) === 'Other project'))
+      await until(() => sharedWork() && text(sharedWork()).includes('Saved PR while GitHub is unreachable'), () => 'GitHub unreachable hid the saved public PR: ' + text(sharedWork()))
     })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, calls: { reads: calls.requests.length - mutationRequests().length,
@@ -2710,6 +2842,53 @@ window.runReviewRequestChecks = async () => {
   }
 }
 
+// The header's "Last synced" stands only on reads that came back: the review requests are one of them, on the first
+// load and on a manual Sync alike (the hub settles a failed read without throwing, so nothing else reports it).
+window.runSyncNoteChecks = async () => {
+  const checks = []
+  const note = () => query('.co-sync-note')?.textContent || ''
+  const syncButton = () => query('.co-toolbar-refresh')
+  const incomingReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeIncomingReviews')).length
+  const syncAgain = async () => {
+    await until(() => syncButton() && !syncButton().disabled, 'The Sync button never settled')
+    const before = incomingReads()
+    await click(syncButton())
+    await until(() => incomingReads() > before, 'Sync did not read the review requests')
+    await until(() => !syncButton().disabled, 'Sync did not finish')
+  }
+  try {
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]
+    window.failIncoming = true
+    await mountDeskApp()
+    await until(() => note(), 'The first load left no sync note')
+    await captureShot('sync-note-failed-read')
+    ensure(note() === 'Couldn’t sync', 'A first load whose review-request read failed said: ' + note())
+    ensure(syncButton().getAttribute('aria-describedby') === query('.co-sync-note').id && !query('.co-sync-note[role]'), 'The note is not the Sync button\'s description')
+    checks.push({ name: 'a first load whose review-request read failed does not say Last synced', status: 'pass' })
+    await syncAgain()
+    ensure(note() === 'Couldn’t sync', 'A Sync whose review-request read failed said: ' + note())
+    checks.push({ name: 'a manual Sync whose review-request read failed does not say Last synced', status: 'pass' })
+    window.failIncoming = false
+    await syncAgain()
+    await until(() => note().startsWith('Last synced'), 'A Sync that read everything did not say Last synced: ' + note())
+    checks.push({ name: 'a Sync that read everything says Last synced', status: 'pass' })
+    window.failIncoming = true
+    await syncAgain()
+    ensure(note().startsWith('Couldn’t sync · Last synced'), 'A failed retry lost the last successful time: ' + note())
+    checks.push({ name: 'a failed retry keeps the last successful time beside it', status: 'pass' })
+    // A phone header has no room for the long form: it keeps the failure and drops the time.
+    ensure(window.innerWidth > 480 || query('.co-sync-note').innerText.trim() === 'Couldn’t sync', 'The failure note grew past the button on a phone: ' + query('.co-sync-note').innerText)
+    checks.push({ name: 'on a phone a failed retry says only that it could not sync', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    window.failIncoming = false
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -2973,7 +3152,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectWarningChecks']
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }].filter(size => !process.env.WORKSPACE_BROWSER_VIEWPORT || size.name === process.env.WORKSPACE_BROWSER_VIEWPORT)
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
       const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' })

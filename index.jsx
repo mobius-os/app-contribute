@@ -52,7 +52,6 @@ import {
   contributionStackDecision,
 } from './contribution-policy.js'
 import {
-  assignIncomingReview,
   fetchIncomingReviews,
   fetchGithubStatus,
   githubRemainingPoints,
@@ -80,7 +79,7 @@ import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { SyncHubContext, useDeskReviewRuns, useReviewList } from './ui/useReviewList.js'
 import { useRespondResults } from './ui/useRespondResults.js'
-import { SyncNote } from './ui/GithubParts.jsx'
+import { SyncNote, SYNC_NOTE_ID } from './ui/GithubParts.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { NAMES } from './names.js'
 import { BootProgress } from './ui/BootProgress.jsx'
@@ -356,6 +355,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // Whether the last ledger read was complete. The manual refresh reports
   // failure from it, so a still-partial feed never reads as "updated".
   const ledgerCurrentRef = useRef(false)
+  // Whether the last read of the review requests came back; the hub settles a failed read without throwing.
+  const incomingReadOkRef = useRef(true)
   useEffect(() => { connRef.current = conn }, [conn])
   useEffect(() => { sourceSnapshotRef.current = sourceSnapshot }, [sourceSnapshot])
 
@@ -592,8 +593,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         if (!rows) throw new Error('The review requests could not be read')
         return rows
       },
-      apply: rows => setIncomingReviews(connRef.current.state === 'connected' ? rows : []),
-      failed: () => {}, // the list stays as it was
+      apply: rows => { incomingReadOkRef.current = true; setIncomingReviews(connRef.current.state === 'connected' ? rows : []) },
+      failed: () => { incomingReadOkRef.current = false }, // the list stays as it was
     })
   }, [hub, token, sendOnly])
   const refreshIncomingReviews = useCallback(() => hub.refresh('incoming'), [hub])
@@ -1322,36 +1323,31 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [])
 
 
-  const onAssignIncomingReview = useCallback(async (item) => {
+  // Reviewing someone's PR never touches its GitHub assignees: an assignee is the person
+  // responsible for the PR, and a review request is a separate GitHub action.
+  const onReviewIncoming = useCallback(async (item) => {
     const repo = item?.repository?.nameWithOwner || ''
-    const outcome = await assignIncomingReview({ appId, token, repo, number: item?.number })
-    if (!outcome.ok) return outcome
     const started = await startAgentTask({
-      event: 'assign_and_review_incoming_pr',
+      event: 'review_incoming_pr',
       title: `Review ${repo} #${item.number}`,
       count: 1,
       draft: [
         `Thoroughly review ${item.url}.`,
         '',
-        'The owner explicitly assigned this exact pull request to themselves from Contribute.',
+        'The owner chose to review this exact pull request from Contribute. Nothing was assigned or posted on GitHub.',
         'Inspect the complete current diff with expanding scope for correctness, maintainability, simplicity, tests, security/privacy, and avoidable technical debt.',
         'Do not change the author’s branch. Prepare specific, actionable suggestions for sound findings and review again if the author updates it.',
         'Do not submit a GitHub review or comment without the owner’s exact approval for that public action.',
       ].join('\n'),
     })
-    if (!started.ok) {
-      return {
-        ...started,
-        error: 'Assigned on GitHub, but the review chat did not start. Try again to resume it.',
-      }
-    }
-    // The assignment settled after any earlier incoming-review request began.
-    // Invalidate that request before hiding this row so its stale response
-    // cannot put the just-assigned review back into the queue.
+    if (!started.ok) return started
+    // The review chat started after any earlier incoming-review read began.
+    // Invalidate that read before hiding this row so its stale response
+    // cannot put the row back into the queue.
     hub.supersede('incoming')
     setIncomingReviews((current) => current.filter((row) => row.url !== item.url))
     return { ok: true }
-  }, [appId, token, startAgentTask, hub])
+  }, [startAgentTask, hub])
 
   // One explicit confirmation advances the exact current phase of an already-
   // reviewed chain. The response may contain partial progress, so merge every
@@ -1714,6 +1710,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       }} />
   }
 
+  // The reads the header's "Last synced" depends on all came back: a cached ledger or a failed
+  // review-request read is not a sync. The first load and every Sync ask this same question.
+  const syncReadsCurrent = () => ledgerCurrentRef.current && (connRef.current.state !== 'connected' || incomingReadOkRef.current)
+
   // The one refresh path after the open-time sync: the header's Refresh and
   // the header's Refresh renews everything on screen — local
   // sources, the contribution feed, review requests, repositories, upstream
@@ -1730,7 +1730,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       if (checked.ok) setUpstreamChecks(checked.results)
     }
     setRefreshKey(value => value + 1)
-    return { ok: sourceOk && ledgerCurrentRef.current, upstream }
+    return { ok: sourceOk && syncReadsCurrent(), upstream }
   }
   const [refreshingAll, setRefreshingAll] = useState(false)
   // Whether the last input was the keyboard or a pointer. A row shows its
@@ -1745,17 +1745,19 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     document.addEventListener('pointerdown', pointer, true)
     return () => { document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', pointer, true) }
   }, [])
-  // What the last Refresh found, shown under the page title.
+  // The first successful load and later explicit refreshes share one header history.
   const [refreshNote, setRefreshNote] = useState(null)
   async function refreshAll() {
     if (refreshingAll) return undefined
     setRefreshingAll(true)
     try {
       const outcome = await refreshEverything()
-      setRefreshNote({ outcome, at: new Date().toISOString() })
+      setRefreshNote(old => outcome?.ok && outcome?.upstream?.ok !== false
+        ? { at: new Date().toISOString(), failed: false }
+        : { at: old?.at || null, failed: true })
       return outcome
     } catch {
-      setRefreshNote({ outcome: null, at: new Date().toISOString() })
+      setRefreshNote(old => ({ at: old?.at || null, failed: true }))
       return null
     } finally { setRefreshingAll(false) }
   }
@@ -1766,7 +1768,11 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // later manual refresh never drops the app back to the opening screen.
   const [booted, setBooted] = useState(false)
   const bootReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady
-  useEffect(() => { if (bootReady) setBooted(true) }, [bootReady])
+  useEffect(() => {
+    if (!bootReady || booted) return
+    setBooted(true)
+    if (conn.state === 'connected') setRefreshNote(old => old || (!sourceError && syncReadsCurrent() ? { at: new Date().toISOString(), failed: false } : { at: null, failed: true }))
+  }, [bootReady, booted, conn.state, sourceError])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
@@ -1858,11 +1864,12 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       <style>{CSS}</style>
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
-          <SyncNote note={refreshNote} />
-          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label="Sync with GitHub">
+          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label="Sync with GitHub" aria-describedby={refreshNote?.at || refreshNote?.failed ? SYNC_NOTE_ID : undefined}>
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-label-long">{refreshingAll ? 'Syncing…' : 'Sync with GitHub'}</span>
-            <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? 'Syncing…' : 'Sync with GitHub'}</span>
+              <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
+              <SyncNote note={refreshNote} />
+            </span>
           </button>
           <ConnectionSettings
             appId={appId} conn={conn} token={token} onChanged={refreshConnection}
@@ -1878,7 +1885,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus} desk={desk}
           onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}
-          onRetry={refreshAll} checks={upstreamChecks} attention={projectAttention} loadProjectDiff={loadProjectDiff}
+          checks={upstreamChecks} attention={projectAttention}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
@@ -1893,7 +1900,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? view => renderPullRequests(project, navigation, view) : null}
               reviewRequestCount={project?.reviewRequests?.length || 0}
-              edits={project && localChangeSentence(project).edits ? <ProjectEdits project={project} run={projectRun(project)} loadProjectDiff={loadProjectDiff} onRefresh={refreshAll} /> : null}
+              edits={project && localChangeSentence(project).edits ? <ProjectEdits key={sourceSnapshot?.generated_at} project={project} run={projectRun(project)} loadProjectDiff={loadProjectDiff} onRefresh={refreshAll} /> : null}
               editsCount={project && localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
               controls={controls}
               projectProgress={progress}
@@ -1906,7 +1913,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
-              onAssignIncomingReview={onAssignIncomingReview} onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
+              onReviewIncoming={onReviewIncoming} onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}
               focusReady={focusedReviewReady && !sourceLoading}
               onFocusConsumed={consumeReviewFocus}

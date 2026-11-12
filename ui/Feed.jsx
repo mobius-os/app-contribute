@@ -12,12 +12,10 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
-import { feedbackPull } from '../desk.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   contributionTitle,
   findRunItemByRecord,
-  attentionListItems,
   isPublicFeedback,
   runPrimaryRecord,
   runUnitKey,
@@ -30,7 +28,6 @@ import { OpenSplitButton } from './OpenSplitButton.jsx'
 import { DEFAULT_STAGE, stageApplies, stageWords } from '../publication-stage.js'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { ProjectTabs } from './ProjectTabs.jsx'
-import { AttentionList } from './AttentionList.jsx'
 import { NAMES } from '../names.js'
 
 function itemProject(item) {
@@ -115,7 +112,7 @@ export function publicationRouteProblem(item, publicationPreference, githubState
   if (item?.kind === 'mark_ready') {
     return githubState === 'connected'
       ? ''
-      : 'Reconnect GitHub in Möbius Settings → Accounts before requesting review for these drafts.'
+      : 'Reconnect GitHub in Möbius Settings → Accounts before opening these drafts for review.'
   }
   if (item?.kind !== 'publish') return ''
   const records = item?.unit?.type === 'stack'
@@ -282,7 +279,7 @@ function ExactActionList({
                 </span>
                 <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
                   || PROGRESS_TEXT[mode]?.[progress[record.id]]
-                  || (mode === 'ready' ? 'Request review' : publicationLine(record, publicationPreference, githubState, stage))}</em>
+                  || (mode === 'ready' ? NAMES.openForReview : publicationLine(record, publicationPreference, githubState, stage))}</em>
                 {meta ? <code>{meta.baseBranch} → {record?.plan?.branch || record?.branch}</code> : null}
                 {typeof onSelect === 'function' ? (
                   <button type="button" onClick={() => onSelect(item)}>Details</button>
@@ -455,7 +452,7 @@ function ExactBatchAction({
         <span className="co-run-primary-mark" aria-hidden="true">
           <Icon name={mode === 'ready' ? 'review' : 'send'} size={19} />
         </span>
-        <div>
+        <div className="co-run-primary-text">
           <strong>{mode === 'ready'
             ? `${count === 1 ? 'Your draft is' : `${count} drafts are`} ready for review`
             : `${count} prepared ${count === 1 ? 'PR' : 'PRs'}`}</strong>
@@ -478,7 +475,7 @@ function ExactBatchAction({
     <section
       className="co-run-approval"
       role="alertdialog"
-      aria-label={mode === 'ready' ? 'Confirm requesting review' : 'Confirm reviewed contribution publication'}
+      aria-label={mode === 'ready' ? 'Confirm opening for review' : 'Confirm reviewed contribution publication'}
       aria-describedby={descriptionId}
     >
       <header>
@@ -486,7 +483,7 @@ function ExactBatchAction({
           ? `Mark ${count === 1 ? 'this draft' : `${count} drafts`} ready for review?`
           : staged ? stageWords(stage).heading(count) : `Send ${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'}?`}</h3>
         <p id={descriptionId}>{mode === 'ready'
-          ? 'GitHub takes it out of draft and tells the reviewers. Nothing merges.'
+          ? 'GitHub takes it out of draft. It does not ask anyone to review it, unless the repository has code owners. Nothing merges.'
           : stageWords(stage).description}</p>
       </header>
       <ExactActionList
@@ -518,20 +515,20 @@ function ExactBatchAction({
   )
 }
 
-function IncomingAction({ item, onAssign }) {
+function IncomingAction({ item, onReview }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
-  async function assign() {
+  async function review() {
     setBusy(true)
     setNote('')
-    const outcome = await onAssign?.(item)
+    const outcome = await onReview?.(item)
     if (!outcome?.ok) setNote(outcome?.error || 'Could not start this review.')
     setBusy(false)
   }
   return (
     <>
-      <button type="button" className="co-btn co-btn-primary co-run-row-action" disabled={busy} onClick={assign}>
-        {busy ? 'Assigning…' : 'Assign & review'}
+      <button type="button" className="co-btn co-btn-primary co-run-row-action" disabled={busy} onClick={review}>
+        {busy ? 'Starting…' : NAMES.review}
       </button>
       {note ? <small className="co-run-row-error" role="status">{note}</small> : null}
     </>
@@ -566,7 +563,7 @@ const DECISION_ACTION_LABELS = {
 function DecisionRow({
   item,
   onSelect,
-  onAssignIncomingReview,
+  onReviewIncoming,
 }) {
   return (
     <article className={'co-run-row is-' + item.kind}>
@@ -578,7 +575,7 @@ function DecisionRow({
         </span>
       </button>
       {item.kind === 'incoming_review' ? (
-        <IncomingAction item={item.item} onAssign={onAssignIncomingReview} />
+        <IncomingAction item={item.item} onReview={onReviewIncoming} />
       ) : (
         <button
           type="button"
@@ -715,7 +712,7 @@ function ReadyAttentionFocus({ item, onMarkReady, onFeedback }) {
   )
 }
 
-function IncomingFocus({ item, onAssignIncomingReview }) {
+function IncomingFocus({ item, onReviewIncoming }) {
   const pull = item?.item || {}
   return (
     <section className="co-run-focus-summary is-incoming_review">
@@ -723,7 +720,7 @@ function IncomingFocus({ item, onAssignIncomingReview }) {
       <h3>{itemHeading(item)}</h3>
       <p>{item.detail}</p>
       <div className="co-run-focus-actions">
-        <IncomingAction item={pull} onAssign={onAssignIncomingReview} />
+        <IncomingAction item={pull} onReview={onReviewIncoming} />
         {pull.url ? <a className="co-btn" href={pull.url} target="_blank" rel="noopener noreferrer">Open on GitHub ↗</a> : null}
       </div>
     </section>
@@ -797,7 +794,7 @@ export function FocusedItem({
   onSetAutopilot,
   onWithdraw,
   onMarkReady,
-  onAssignIncomingReview,
+  onReviewIncoming,
   onRefresh,
   loadDiff,
 }) {
@@ -806,7 +803,7 @@ export function FocusedItem({
     return <CheckAttentionFocus item={item} reviewStatus={reviewStatus} onRefresh={onRefresh} onFeedback={onFeedback} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} />
   }
   if (item.kind === 'incoming_review') {
-    return <IncomingFocus item={item} onAssignIncomingReview={onAssignIncomingReview} />
+    return <IncomingFocus item={item} onReviewIncoming={onReviewIncoming} />
   }
   if (item.kind === 'ready_attention') {
     return <ReadyAttentionFocus item={item} onMarkReady={onMarkReady} onFeedback={onFeedback} />
@@ -913,7 +910,7 @@ export function ContributionRun({
   onRestore,
   onSetAutopilot,
   onWithdraw,
-  onAssignIncomingReview,
+  onReviewIncoming,
   onRefresh,
   loadDiff,
   presentation = 'project',
@@ -977,22 +974,14 @@ export function ContributionRun({
 
   function selectRunItem(item) { onSelect?.(item.id) }
 
-  // Feedback on a published PR reads best on the PR page itself; anything
-  // without a PR behind it keeps its saved decision card.
-  function openAttentionItem(item) {
-    const target = feedbackPull(item)
-    if (target && onOpenPull) onOpenPull(target)
-    else selectRunItem(item)
-  }
-
-
   const decisions = projectedDecisions
   const privateItems = decisions.filter(item => item.kind === 'private_review' && !isPublicFeedback(item))
   const working = run?.working || []
-  const visibleWorking = renderPublicWork ? working.filter(item => {
-    return !runUnitRecords(item).every(record => record?.type === 'pr' && ['open', 'draft'].includes(record.status)
-      && task?.publicKeys?.has(`${(record.repo || record.plan?.repo || '').toLowerCase()}#${record.number}`))
-  }) : working
+  // The PR list shows an open or draft PR itself, so saved work for it is Shared work only when the list does not show it. Until the
+  // list has been read (publicKeys is null) that is not known, and the saved PR waits instead of appearing here and then moving.
+  const listShows = record => record?.type === 'pr' && ['open', 'draft'].includes(record.status)
+    && (task?.publicKeys === null || task?.publicKeys?.has(`${(record.repo || record.plan?.repo || '').toLowerCase()}#${record.number}`))
+  const visibleWorking = renderPublicWork ? working.filter(item => !runUnitRecords(item).every(listShows)) : working
   // An open issue/PR is inventory, not evidence that an agent is working.
   const agentActivity = visibleWorking.filter(item => ['review_in_progress', 'autopilot'].includes(item.kind))
   const actionsInProgress = visibleWorking.filter(item => ['publishing', 'connecting', 'checking_source'].includes(item.kind))
@@ -1002,13 +991,12 @@ export function ContributionRun({
   const history = [...(run?.recent || []), ...(run?.archive || [])]
   const publishItems = decisions.filter(item => item.kind === 'publish')
   const readyItems = decisions.filter(item => item.kind === 'mark_ready')
-  const ownerDecisions = attentionListItems(decisions)
   const preparedItems = [...privateItems, ...decisions.filter(item => item.kind === 'request')]
 
-  // What needs the owner opens by itself; it can still be folded away.
-  const needsYou = presentation === 'project'
-    ? <AttentionList items={ownerDecisions} heading={itemHeading} onSelect={openAttentionItem} />
-    : null
+  // Prepared PRs are one row each in their own tab; opening a row selects it like any other
+  // decision. Publication stays with the one send bar below, so a tab switch never drops it.
+  const preparedPrItems = decisions.filter(item => runUnitRecords(item).some(record => record?.type === 'pr' && record?.status === 'prepared'))
+  const otherPreparedItems = preparedItems.filter(item => !preparedPrItems.includes(item))
 
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
   const focus = (selected || missingTarget || missingSelection) ? (
@@ -1032,7 +1020,7 @@ export function ContributionRun({
             onSetAutopilot={onSetAutopilot}
             onWithdraw={onWithdraw}
             onMarkReady={onMarkReady}
-            onAssignIncomingReview={onAssignIncomingReview}
+            onReviewIncoming={onReviewIncoming}
             onRefresh={onRefresh}
             loadDiff={loadDiff}
           />
@@ -1071,10 +1059,7 @@ export function ContributionRun({
       {focus}
       {!actionCount(publishItems) && !batchOwnership.send ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
       {!readyCount(readyItems) && !batchOwnership.ready ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
-      {/* What needs the owner comes first, in one box that disappears when
-          there is nothing to act on; the project's status sits under it. */}
       <div className="co-decisions" aria-label="Ready for you">
-      {needsYou}
       <ExactBatchAction
         key="send"
         records={currentBatchRecords}
@@ -1100,14 +1085,17 @@ export function ContributionRun({
         onMarkReady={onMarkReady}
         onSelect={selectRunItem}
       />
-      {presentation === 'project' && preparedItems.length ? <details className="co-run-fold co-prepared-work" aria-label="Prepared work">
-        <summary><span>Prepared work</span><b>{preparedItems.length}</b><Icon name="chevron" size={14} /></summary>
-        <div className="co-run-list">{preparedItems.map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+      {presentation === 'project' && otherPreparedItems.length ? <details className="co-run-fold co-prepared-work" aria-label="Prepared work">
+        <summary><span>Prepared work</span><b>{otherPreparedItems.length}</b><Icon name="chevron" size={14} /></summary>
+        <div className="co-run-list">{otherPreparedItems.map(item => <DecisionRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
       </details> : null}
       </div>
       {presentation === 'project' ? controls : null}
 
-      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} /> : null}
+      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedPrItems.length} prepared={<section className="co-prepared-tab" aria-label="Prepared PRs">
+        <p className="co-inventory-note">Prepared on your Möbius for you to inspect. Open one to see what would be sent.</p>
+        <div className="co-run-list">{preparedPrItems.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+      </section>} /> : null}
       {presentation !== 'project' ? renderPublicWork?.() : null}
       {omittedCount > 0 ? <p className="co-run-maintenance">{omittedCount} contribution records could not be shown.</p> : null}
     </section>

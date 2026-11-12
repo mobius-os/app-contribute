@@ -48,11 +48,14 @@ test('publication copy describes automatic GitHub identity without picker langua
   assert.match(sourceMapSource, /\['updates', 'Behind GitHub'\]/)
 })
 
-test('incoming upstream work is surfaced at project level and sent to the place that updates it', () => {
+test('incoming upstream work is flagged on the project list and in the project screen\'s one warning row, and sent to the place that updates it', () => {
   const controlsSource = readFileSync(new URL('../ui/ProjectControls.jsx', import.meta.url), 'utf8')
   const updatesSource = readFileSync(new URL('../updates.js', import.meta.url), 'utf8')
+  // The project screen carries no status rows, only one warning row for an update or a conflict (project-board.test.mjs).
   assert.match(controlsSource, /projectUpstreamLine\(project, check\)/)
+  assert.match(controlsSource, /line\?\.tone !== 'warn'/)
   assert.match(controlsSource, /line\.update \? projectUpdater\(project\) : null/)
+  assert.doesNotMatch(controlsSource, /co-project-position|co-status-/)
   assert.doesNotMatch(controlsSource, /Pull updates|Start pull|task:update/)
   // Settings owns Möbius updates and the App Store owns app updates.
   assert.match(updatesSource, /type: 'moebius:open-settings'/)
@@ -170,20 +173,26 @@ test('only project drill-down owns reversible navigation; inline actions preserv
   assert.match(sourceMapSource, /workTriggerRef\.current = document\.activeElement/)
 })
 
-test('an assigned incoming review stays recoverable until its conversation starts', () => {
+test('an incoming review stays recoverable until its conversation starts', () => {
   assert.match(
     appSource,
-    /const started = await startAgentTask\([\s\S]*if \(!started\.ok\)[\s\S]*Assigned on GitHub[\s\S]*setIncomingReviews/,
+    /const started = await startAgentTask\([\s\S]*if \(!started\.ok\) return started[\s\S]*setIncomingReviews/,
   )
 })
 
-test('contribution details retain their project parent and refresh only source diffs', () => {
+test('reviewing someone else’s PR never assigns the owner to it', () => {
+  assert.doesNotMatch(appSource, /assignIncomingReview|assign_and_review/)
+  assert.match(feedSource, /\{busy \? 'Starting…' : NAMES\.review\}/)
+  assert.doesNotMatch(feedSource, /Assign & review|Assigning…/)
+})
+
+test('contribution details retain their project parent; only the Local changes tab reads source diffs, again after each refresh', () => {
   assert.equal((appSource.match(/<SourceMap/g) || []).length, 1)
   assert.match(sourceMapSource, /\? projects\.find\(\(project\) => project\.key === selected\)/)
-  assert.match(sourceMapSource, /<ProjectFileChanges key=\{sourceRevision\}/)
+  assert.doesNotMatch(sourceMapSource, /ProjectFileChanges|task:files/)
+  assert.match(appSource, /<ProjectEdits key=\{sourceSnapshot\?\.generated_at\}/)
   assert.match(projectEditsSource, /initiallyOpenFirst/)
   assert.doesNotMatch(sourceMapSource, /Review file diffs|\+\{rows\.length - preview\.length\} more files/)
-  assert.match(sourceMapSource, /sourceRevision=\{snapshot\?\.generated_at\}/)
   assert.match(sourceMapSource, /renderActivity\?\.\(project, navigation\)/)
   assert.match(appSource, /selectedId=\{navigation.selectedId\}/)
 })
@@ -412,7 +421,7 @@ test('project chrome consolidates navigation, refresh, files, and preparation ch
   assert.doesNotMatch(sourceMapSource, /RefreshNote|refreshNote/)
   assert.doesNotMatch(sourceMapSource, /Refresh project status|Refresh projects/)
   assert.doesNotMatch(sourceMapSource, /Files, branch and versions <Icon/)
-  assert.match(controlsSource, /className="co-btn co-btn-icon" onClick=\{\(\) => task\?\.open\('task:files'\)\} aria-label="See the files" title="See the files"><Icon name="file" size=\{16\} \/>/)
+  assert.doesNotMatch(controlsSource, /See the files|task:files/)
 })
 
 test('private proposals have one actionable home without another merge workflow', () => {
@@ -430,12 +439,16 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(refresh, /hub\.refresh\('ledger'\)/)
   assert.match(refresh, /reviewList\.syncPulls\(\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
-  assert.match(refresh, /return \{ ok: sourceOk && ledgerCurrentRef\.current, upstream \}/)
-  assert.match(appSource, /onRetry=\{refreshAll\} checks=\{upstreamChecks\}/)
-  // The sync says when it last ran, beside its own button, and is named for what it does.
-  assert.match(appSource, /<SyncNote note=\{refreshNote\} \/>\s*<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"/)
+  assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
+  assert.match(appSource, /checks=\{upstreamChecks\}/)
+  // The sync keeps its last successful time inside the header control, including on phones.
+  assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label="Sync with GitHub"[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
+  // A failed review-request read is a failed sync, on a manual Sync and on the first load alike (the hub settles it without throwing).
+  assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
+  assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
+  assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
   assert.match(appSource, /Sync with GitHub/)
-  assert.match(appSource, /setRefreshNote\(\{ outcome, at: new Date\(\)\.toISOString\(\) \}\)/)
+  assert.match(appSource, /setRefreshNote\(old => outcome\?\.ok/)
   assert.match(appSource, /onClick=\{refreshAll\}/)
 })
 
@@ -449,7 +462,7 @@ test('GitHub is synced once per open: no hidden foreground re-sync, one explicit
 
 test('the workspace opens only after its first sync and never falls back to the boot screen', () => {
   assert.match(appSource, /const bootReady = ledgerReady && !sourceLoading && conn\.state !== 'checking'/)
-  assert.match(appSource, /if \(bootReady\) setBooted\(true\)/)
+  assert.match(appSource, /if \(!bootReady \|\| booted\) return\s*setBooted\(true\)/)
   // The opening screen names the same five reads bootReady waits for, so its progress cannot drift from it.
   assert.match(appSource, /<BootProgress ledgerReady=\{ledgerReady\} projectsReady=\{!sourceLoading\} accountReady=\{conn\.state !== 'checking'\}/)
   assert.match(appSource, /pullsReady=\{incomingReady\} runsReady=\{runsReady\}/)
@@ -527,9 +540,9 @@ test('an external image in GitHub markdown becomes a labelled link, never a brok
   assert.match(markdownSource, /linkExternalImages\(DOMPurify\.sanitize/)
 })
 
-test('To look at feedback on a published PR opens the PR page, not the saved card', () => {
-  assert.match(feedSource, /function openAttentionItem\(item\) \{\s*\n\s*const target = feedbackPull\(item\)/)
-  assert.match(feedSource, /onSelect=\{openAttentionItem\}/)
+test('project work leaves published feedback to the dedicated Needs you destination', () => {
+  assert.doesNotMatch(feedSource, /<AttentionList|openAttentionItem/)
+  assert.match(appSource, /renderActivity=\{\(project, navigation\) =>/)
 })
 
 test('the stale-feed note says offline only when the device is offline', () => {
@@ -557,8 +570,7 @@ test('feedback on a published pull request is news for the owner, not a private 
   assert.match(runSource, /export const isPublicFeedback = item => item\.kind === 'private_review'/)
   assert.match(feedSource, /privateItems = decisions\.filter\(item => item\.kind === 'private_review' && !isPublicFeedback\(item\)\)/)
   assert.match(runSource, /attentionListItems = \(decisions = \[\]\) => decisions\.filter\(item => isPublicFeedback\(item\) \|\| !\[/)
-  assert.match(feedSource, /ownerDecisions = attentionListItems\(decisions\)/)
-  assert.match(feedSource, /<AttentionList items=\{ownerDecisions\}/)
+  assert.doesNotMatch(feedSource, /ownerDecisions = attentionListItems\(decisions\)|<AttentionList items=\{ownerDecisions\}/)
 })
 
 

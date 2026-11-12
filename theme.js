@@ -164,9 +164,10 @@ export const CSS = `
   width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--muted);
 }
-.co-toolbar-refresh { gap: 7px; white-space: nowrap; }
+.co-toolbar-refresh { gap: 7px; white-space: nowrap; text-align:left; }
+.co-sync-copy { display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
 .co-label-short { display: none; }
-.co-sync-note { color: var(--muted); font-size: var(--co-text-meta); white-space: nowrap; }
+.co-sync-note { color: var(--muted); font-size: var(--co-text-meta); white-space: nowrap; font-weight:500; }
 .co-boot {
   min-height: 70dvh; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px;
@@ -418,34 +419,6 @@ export const CSS = `
 .co-project-files-toggle .co-icon { transition: transform .16s ease; }
 .co-project-files-toggle[aria-expanded="true"] .co-icon { transform: rotate(180deg); }
 
-.co-local-position {
-  display: flex; flex-direction: column; gap: 3px; margin-top: 14px;
-  padding: 13px 2px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-}
-.co-local-position strong { font-size: var(--co-text-meta); }
-.co-local-position span { color: var(--muted); font-size: var(--co-text-meta); line-height: 1.5; }
-
-.co-position-details { border-top: 1px solid var(--border); }
-.co-position-details > summary {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  min-height: 46px; padding: 4px 2px; list-style: none; cursor: pointer;
-  color: var(--muted); font-size: var(--co-text-meta); font-weight: 650;
-}
-.co-position-details > summary::-webkit-details-marker { display: none; }
-.co-position-details > summary .co-icon { transition: transform .16s ease; }
-.co-position-details[open] > summary .co-icon { transform: rotate(180deg); }
-.co-position-details dl { margin: 0 0 12px; }
-.co-position-details dl > div {
-  display: grid; grid-template-columns: minmax(92px, .45fr) minmax(0, 1fr);
-  gap: 12px; padding: 7px 2px;
-}
-.co-position-details dl > div + div { border-top: 1px solid var(--border); }
-.co-position-details dt { color: var(--muted); font-size: var(--co-text-meta); }
-.co-position-details dd { min-width: 0; margin: 0; text-align: right; }
-.co-position-details code {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text); font-family: var(--mono, var(--font)); font-size: var(--co-text-meta);
-}
 .co-source-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48dvh; color: var(--muted); }
 .co-source-loading > div { display: flex; flex-direction: column; gap: 3px; }
 .co-source-loading strong { color: var(--text); font-size: var(--co-text-meta); }
@@ -1159,11 +1132,6 @@ export const CSS = `
   background: color-mix(in srgb, var(--green) 12%, var(--surface)); color: var(--green);
 }
 .co-run-primary > div { min-width: 0; }
-.co-run-primary small {
-  display: block; margin-bottom: 2px; color: var(--accent); font-size: var(--co-text-meta);
-  font-weight: 750; letter-spacing: .045em; text-transform: uppercase;
-}
-.co-run-primary.is-ready small { color: var(--green); }
 .co-run-primary strong { display: block; font-size: var(--co-text-body); line-height: 1.35; text-wrap: pretty; }
 .co-run-primary p { margin: 3px 0 0; color: var(--muted); font-size: var(--co-text-meta); line-height: 1.4; }
 .co-run-primary > .co-btn { min-width: 112px; }
@@ -1464,7 +1432,8 @@ export const CSS = `
   .co-toolbar { gap: 3px; }
   .co-toolbar-check { width: 32px; padding: 0; justify-content: center; }
   /* Sync and Settings keep a word on a phone: an icon alone is not a label (DESIGN.md). */
-  .co-toolbar .co-label-long, .co-sync-note { display: none; }
+  .co-toolbar .co-label-long { display: none; }
+  .co-sync-last { display: none; }
   .co-toolbar .co-label-short { display: inline; }
   .co-toolbar-refresh { min-width: 40px; justify-content: center; }
   .co-project-control { max-width: 108px; padding-inline: 8px; }

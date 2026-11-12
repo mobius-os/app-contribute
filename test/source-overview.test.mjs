@@ -39,7 +39,7 @@ const runRenderer = () => renderModule(`
       onSetAutopilot: noop,
       onWithdraw: noop,
       onConnectApp: noop,
-      onAssignIncomingReview: noop,
+      onReviewIncoming: noop,
       onViewProject: noop,
       loadDiff: noop,
     })))
@@ -56,7 +56,7 @@ const runRenderer = () => renderModule(`
       onWithdraw: noop,
       onConnectApp: noop,
       onMarkReady: noop,
-      onAssignIncomingReview: noop,
+      onReviewIncoming: noop,
       loadDiff: noop,
     }))
   }
@@ -75,7 +75,7 @@ function record(id, extra = {}) {
   }
 }
 
-test('the Run renders one batch action without a duplicate publish row', async (t) => {
+test('a prepared PR is a row in its own tab and is sent only from the one send bar', async (t) => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun } = await runRenderer()
   const rec = record('One reviewed change')
@@ -84,15 +84,47 @@ test('the Run renders one batch action without a duplicate publish row', async (
     unit: { type: 'record', id: rec.id, record: rec, records: [rec] },
     label: rec.title, detail: rec.repo,
   }
-  const html = renderRun({
-    decisions: [item], working: [], recent: [], archive: [], projects: [],
-    privateAction: null,
-  })
+  const run = { decisions: [item], working: [], recent: [], archive: [], projects: [], privateAction: null }
+  const html = renderRun(run)
 
-  assert.equal((html.match(/co-run-primary is-send/g) || []).length, 1)
+  assert.match(html, /data-tab="prepared"[^>]*>Prepared PRs<span class="co-tab-count">1<\/span>/)
   assert.doesNotMatch(html, /co-run-row is-publish/)
-  assert.match(html, /Open for review/)
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
+  // The send bar is the only publication owner: it stays above the tabs, so a tab switch never drops it.
+  assert.equal((html.match(/co-run-primary is-send/g) || []).length, 1)
+  assert.doesNotMatch(html, /Nothing has gone to GitHub/)
+  const listed = renderRun(run, { tab: 'prepared' })
+  assert.match(listed, /co-prepared-tab[\s\S]*One reviewed change/)
+  assert.equal((listed.match(/co-run-primary is-send/g) || []).length, 1)
+  const focused = renderRun(run, { selectedId: item.id })
+  assert.match(focused, /Open for review/)
+})
+
+test('several prepared PRs of one project are sent together from the one send bar', async (t) => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const items = ['First change', 'Second change'].map(name => {
+    const rec = record(name)
+    return { id: 'publish:' + name, kind: 'publish', record: rec, unit: { type: 'record', id: rec.id, record: rec, records: [rec] }, label: name, detail: rec.repo }
+  })
+  const html = renderRun({ decisions: items, working: [], recent: [], archive: [], projects: [], privateAction: null })
+  assert.match(html, /2 prepared PRs/)
+  assert.match(html, /Open 2 for review/)
+  assert.match(html, /data-tab="prepared"[^>]*>Prepared PRs<span class="co-tab-count">2<\/span>/)
+})
+
+test('the Prepared PRs count is the number of rows, a stack counting once', async (t) => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const layers = ['Layer one', 'Layer two'].map(name => record(name))
+  const stack = {
+    id: 'publish:stack', kind: 'publish', record: layers[0],
+    unit: { type: 'stack', id: 'stack', record: layers[0], records: layers },
+    label: 'A stack', detail: 'mobius-os/mobius',
+  }
+  const html = renderRun({ decisions: [stack], working: [], recent: [], archive: [], projects: [], privateAction: null }, { tab: 'prepared' })
+  assert.match(html, /data-tab="prepared"[^>]*>Prepared PRs<span class="co-tab-count">1<\/span>/)
+  assert.equal((html.match(/co-run-quiet-row/g) || []).length, 1)
 })
 
 test('a mixed-route publication batch stays behind one exact preflight', async (t) => {
@@ -109,7 +141,7 @@ test('a mixed-route publication batch stays behind one exact preflight', async (
   const html = renderRun({
     decisions: items, working: [], recent: [], archive: [], projects: [],
     privateAction: null,
-  }, { publicationPreference: 'mobius', githubState: 'connected' })
+  }, { publicationPreference: 'mobius', githubState: 'connected', presentation: 'overview' })
 
   assert.match(html, /3 prepared PRs/)
   assert.match(html, /Privately reviewed. Nothing shared yet/)
@@ -209,14 +241,14 @@ test('the Run keeps project identity without duplicating Projects navigation', a
     })),
     privateAction: { label: 'Prepare all', count: 2, draft: 'Prepare both projects' },
   }
-  const html = renderRun(run)
+  const html = renderRun(run, { tab: 'prepared' })
 
-  assert.match(html, /Prepared work/)
+  assert.match(html, /Prepared PRs/)
   assert.doesNotMatch(html, /Prepare &amp; review|Run full cycle|Inspect changes/)
   assert.match(html, /owner\/one/)
   assert.match(html, /owner\/two/)
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
-  assert.match(html, /co-run-row is-private_review/)
+  assert.match(html, /co-run-quiet-row/)
   assert.doesNotMatch(html, /projects represented in this snapshot/)
   assert.doesNotMatch(html, /Browse projects/)
   assert.doesNotMatch(html, /<select|Filter by project|All projects/)
@@ -235,13 +267,13 @@ test('pending private review proposals do not become agent tasks merely because 
   const html = renderRun({
     decisions: [item], working: [], recent: [], archive: [], projects: [],
     privateAction: { label: 'Fix', count: 1, draft: 'Fix private work' },
-  }, { cycle: { phase: 'running', runtime: { running: true } } })
+  }, { cycle: { phase: 'running', runtime: { running: true } }, tab: 'prepared' })
 
-  assert.match(html, /Prepared work/)
+  assert.match(html, /Prepared PRs/)
   assert.doesNotMatch(html, /Agent activity|is-review_in_progress|Private run in progress/)
   assert.doesNotMatch(html, /Needs you|No decisions waiting/)
   assert.doesNotMatch(html, /co-run-private-items/)
-  assert.match(html, /co-run-row is-private_review/)
+  assert.match(html, /co-run-quiet-row/)
 })
 
 test('focused batch and private items are inspectable but cannot bypass their one owner', async (t) => {
@@ -422,15 +454,17 @@ test('seven open issues are shared inventory, never seven agent tasks', async t 
   for (let index = 1; index <= 7; index++) assert.match(html, new RegExp(`Open issue ${index}`))
 })
 
-test('private proposals and PR revisions share an actionable prepared-work home', async t => {
+test('prepared PRs have a counted tab while public follow-ups keep their own work home', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderRun } = await runRenderer()
   const records = [record('New private proposal'), record('Private revision', { plan: { action: 'pr_update' } }),
     record('Public PR follow-up', { status: 'open' })]
   const html = renderRun({ decisions: records.map(rec => ({ id: rec.id, kind: 'private_review', record: rec, label: rec.title, detail: rec.repo })) })
-  assert.match(html, /Prepared work/)
-  assert.equal((html.match(/co-run-row-action/g) || []).length, 3)
-  assert.equal((html.match(/<strong>Private revision<\/strong>/g) || []).length, 1)
+  assert.match(html, /Prepared PRs<span class="co-tab-count">2<\/span>/)
+  assert.equal((html.match(/co-run-row-action/g) || []).length, 1)
+  const prepared = renderRun({ decisions: records.map(rec => ({ id: rec.id, kind: 'private_review', record: rec, label: rec.title, detail: rec.repo })) }, { tab: 'prepared' })
+  assert.match(prepared, /<strong>Private revision<\/strong>/)
+  assert.match(prepared, /<strong>New private proposal<\/strong>/)
   assert.equal((html.match(/<strong>Public PR follow-up<\/strong>/g) || []).length, 1)
 })
 
@@ -458,4 +492,16 @@ test('only recorded work activity moves; queued agent follow-up stays still', as
   assert.doesNotMatch(queued, /co-working-icon|Agent handling public follow-up/)
   const responding = renderRun({ working: [{ ...item, record: { ...rec, autopilot: { enabled: true, state: 'responding' } } }] }, { tab: 'mine' })
   assert.match(responding, /co-working-icon/)
+})
+
+test('a focused incoming review offers Review, not an assignment', async (t) => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderFocus } = await runRenderer()
+  const html = renderFocus({
+    id: 'incoming:https://github.com/team/repo/pull/7', kind: 'incoming_review',
+    item: { number: 7, url: 'https://github.com/team/repo/pull/7', repository: { nameWithOwner: 'team/repo' } },
+    label: 'Fix the thing', detail: 'team/repo #7',
+  })
+  assert.match(html, />Review</)
+  assert.doesNotMatch(html, /Assign/)
 })
