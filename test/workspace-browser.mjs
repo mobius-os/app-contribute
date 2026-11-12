@@ -469,6 +469,9 @@ const closeReview = () => click(review().querySelector('[aria-label="Close"]'))
 const checkButton = () => query('.co-toolbar-refresh')
 const batchAction = () => [...document.querySelectorAll('.co-public-work .co-work-progress-row')].find(node => text(node).includes('Review or assign'))
 const ensure = (condition, message) => { if (!condition) throw new Error(message) }
+// A 44px tap: a control is drawn 44 tall on a desktop and 38 on a phone with a 44px tap box around it, so ask where a tap 21px above and
+// below its middle lands (the drawn height says nothing about the tap).
+const tapsFortyFour = node => { const box = node.getBoundingClientRect(); return [-21, 21].every(reach => node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2 + reach))) }
 // CDP delivers the real browser key default; dispatchEvent would not toggle a
 // checkbox natively and must not be used as keyboard-selection evidence.
 const nativeSpace = () => new Promise((resolve, reject) => {
@@ -589,9 +592,7 @@ window.runProjectWarningChecks = async () => {
     ensure(text(row().querySelector('p')) === 'An update from GitHub conflicts with your local changes.', 'The warning read: ' + text(row()))
     ensure(row().compareDocumentPosition(query('[role=tablist]')) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not above the tabs')
     const action = button('Open App Store', row()), box = row().getBoundingClientRect(), actionBox = action.getBoundingClientRect()
-    // A 44px target: drawn 44 tall on a desktop, drawn 38 on a phone with a 44px tap box, so ask where a tap 21px above and below the middle lands.
-    const middle = actionBox.top + actionBox.height / 2, centre = actionBox.left + actionBox.width / 2
-    ensure([-21, 21].every(reach => action.contains(document.elementFromPoint(centre, middle + reach))) && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px drawn')
+    ensure(tapsFortyFour(action) && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px drawn')
     ensure(box.left >= 0 && Math.round(box.right) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The row makes the page scroll sideways')
     const asked = []
     const listen = event => asked.push(event.data)
@@ -2509,7 +2510,7 @@ window.runDeskListChecks = async () => {
     ensure(fix && text(fix) === 'Fix these findings' && !button.contains(fix), 'The row with findings offers no Fix these findings beside it')
     const [fixBox, rowBox, noteBox] = [fix, button, fixing.querySelector('.co-desk-note')].map(node => node.getBoundingClientRect())
     ensure(window.innerWidth > 680 ? fixBox.left >= rowBox.right - 1 : fixBox.top >= noteBox.bottom - 1 && fixBox.width > rowBox.width * 0.8, 'Fix these findings sits in the wrong place: ' + JSON.stringify([fixBox, rowBox, noteBox].map(box => [box.left, box.top, box.width, box.height].map(Math.round))))
-    ensure(Math.round(fixBox.height) >= 44 && fixBox.right <= window.innerWidth + 1, 'Fix these findings is not a control on the screen')
+    ensure(tapsFortyFour(fix) && fixBox.right <= window.innerWidth + 1, 'Fix these findings is not a control on the screen')
     checks.push({ name: 'a row\'s own answer sits beside it, or under it on a phone', status: 'pass' })
     // The saved note is one line, and Show more reveals all of it without opening the PR.
     const card = rowOf('Own change with a note')
@@ -2517,7 +2518,7 @@ window.runDeskListChecks = async () => {
     await until(() => card.querySelector('.co-desk-note button'), 'A long saved note has no Show more')
     ensure(line.getBoundingClientRect().height <= oneLine * 1.2, 'The note is ' + Math.round(line.getBoundingClientRect().height) + 'px tall, not one line of ' + Math.round(oneLine))
     const more = card.querySelector('.co-desk-note button')
-    ensure(text(more) === 'Show more' && Math.round(more.getBoundingClientRect().height) >= 44, 'Show more is not a 44px control: ' + Math.round(more.getBoundingClientRect().height))
+    ensure(text(more) === 'Show more' && tapsFortyFour(more), 'Show more is not a 44px control: ' + Math.round(more.getBoundingClientRect().height))
     await captureShot('desk-needs-you')
     await captureShot('desk-needs-you-fix', rowOf('Change with findings'))
     await click(more)
