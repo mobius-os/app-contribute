@@ -542,7 +542,7 @@ export function ReviewPlan({ rec, loadDiff }) {
       <PriorWorkEvidence priorWork={plan.prior_work} />
       <PlanLabels rec={rec} />
       <p className="co-review-assurance">Prepared from the source conversation. Publication and merging remain separate approvals.</p>
-      <details className="co-pr-metadata"><summary>Technical details</summary><div className="co-pr-metadata-body"><PlanMeta rec={rec} /><p>Prepared head: <code>{plan.head_sha || 'Not recorded'}</code></p></div></details>
+      <details className="co-pr-metadata"><summary>Technical details</summary><div className="co-pr-metadata-body"><PlanMeta rec={rec} /><p>Prepared version: <small><code>{plan.head_sha || 'Not recorded'}</code></small></p></div></details>
     </> : null}
     {typeof plan.target_url === 'string' && plan.target_url.startsWith('https://github.com/') ? <a className="co-review-link" href={plan.target_url} target="_blank" rel="noopener noreferrer">View target on GitHub</a> : null}
   </>
@@ -602,7 +602,7 @@ function ReviewActions({
       }
     } catch {
       setAccepted(false)
-      setNote('The result could not be confirmed. Sync before trying again.')
+      setNote(`The result could not be confirmed. ${NAMES.sync} before trying again.`)
     } finally {
       setSending(false)
     }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { frontendModules, renderModule } from './render-harness.mjs'
-import { normalizeDecision, normalizeResult, POST_OFF_REASON, responseView } from '../respond-result.js'
+import { COPY_REPLIES, normalizeDecision, normalizeResult, POST_OFF_REASON, postOffReason, responseView } from '../respond-result.js'
 import { standingFor } from '../pr-standing.js'
 import { NAMES } from '../names.js'
 
@@ -44,7 +44,9 @@ test('a ready answer shows each point and how it ended, the replies word for wor
   if (!html) return
   const text = texts(html)
   assert.match(text, /Replies ready/)
-  assert.match(text, /4 points answered · built on bbbbbbb/)
+  assert.match(text, /4 points answered · built on the version of .+, \d\d:\d\d/, 'the date first (the answer’s own time)')
+  assert.match(html, /<span class="co-review-version">bbbbbbb<\/span>/, 'and the id small beside the heading')
+  assert.doesNotMatch(text, /built on bbbbbbb/)
   assert.match(text, /The PR has not changed since this answer/)
   for (const point of example().points) assert.ok(text.includes(point.title), point.title)
   assert.equal((html.match(/data-ending="fixed"/g) || []).length, 2)
@@ -88,8 +90,8 @@ test('without the host’s owner grant Post is off, with the reason in words, an
   if (!html) return
   assert.match(html, new RegExp(`<button type="button" class="co-btn co-btn-primary" disabled="">${NAMES.postAnswer}</button>`))
   assert.ok(texts(html).includes(POST_OFF_REASON), 'the reason is on the card: ' + texts(html))
-  assert.match(html, /role="status"[^>]*>Post is off for now: Möbius cannot yet confirm it was you who pressed it\./)
-  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, NAMES.replyInChat, NAMES.discard].includes(label)), [NAMES.postAnswer, NAMES.replyInChat, NAMES.discard])
+  assert.match(html, /role="status"[^>]*>Post is off on this Möbius: it cannot yet confirm that it was you who pressed it\./)
+  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, COPY_REPLIES, NAMES.replyInChat, NAMES.discard].includes(label)), [NAMES.postAnswer, COPY_REPLIES, NAMES.replyInChat, NAMES.discard])
   assert.doesNotMatch(html, new RegExp(`class="co-btn[^"]*"[^>]*disabled="">(${NAMES.replyInChat}|${NAMES.discard})<`), 'Reply in chat and Discard stay available')
   for (const point of example().points) assert.ok(texts(html).includes(point.title), point.title)
   assert.ok(texts(html).includes('@alex both findings were real and are fixed in new commits on this branch.'), 'the replies stay readable, word for word')
@@ -97,18 +99,40 @@ test('without the host’s owner grant Post is off, with the reason in words, an
   const without = await card(t, response(), { ownerGrant: undefined })
   assert.match(without, new RegExp(`disabled="">${NAMES.postAnswer}<`), 'a caller that says nothing gets Post off')
   const granted = await card(t, response())
-  assert.doesNotMatch(texts(granted), /Post is off for now/)
+  assert.doesNotMatch(texts(granted), /Post is off/)
+  assert.ok(!buttons(granted).includes(COPY_REPLIES), 'where Post is on, the card is what it was')
+})
+
+test('where Post is off the card has the Copy replies button its reason names, and only then', async t => {
+  const off = await card(t, response(), { ownerGrant: false })
+  if (!off) return
+  assert.match(off, /<button type="button" class="co-btn"><svg[\s\S]*?<\/svg><span>Copy replies<\/span><\/button>/, 'a live button, not a disabled one')
+  assert.ok(texts(off).includes(`Use ${COPY_REPLIES} to post the replies yourself, or ${NAMES.replyInChat}.`), 'the reason names only controls that are there')
+  for (const control of [COPY_REPLIES, NAMES.replyInChat, NAMES.postAnswer]) assert.ok(buttons(off).includes(control), control)
+  const approved = await card(t, response('ready', {}, approval('approved')), { ownerGrant: false })
+  const failed = await card(t, response('failed', { receipts: { push: null, replies: [], description: null, rerequest: null }, error: { step: 'replies', message: 'GitHub refused the comment.' } }, approval('approved')), { ownerGrant: false })
+  for (const html of [approved, failed]) assert.ok(buttons(html).includes(COPY_REPLIES), 'wherever the reason shows, the button shows')
+  // Once Post was pressed the only chat button is Open chat, so that is what the reason names.
+  for (const html of [approved, failed]) {
+    assert.ok(texts(html).includes(`Use ${COPY_REPLIES} to post the replies yourself, or ${NAMES.openChat}.`), 'the reason names the chat button that is there: ' + texts(html))
+    assert.ok(!texts(html).includes(NAMES.replyInChat), 'Reply in chat is not on this card')
+  }
+  const held = await card(t, response(), { ownerGrant: true, chat: { state: 'running', chat_id: 'respond-chat-1' } })
+  assert.ok(!buttons(held).includes(COPY_REPLIES), 'another reason for a disabled Post does not offer a copy')
+  const commitsOnly = await card(t, response('ready', { replies: [] }), { ownerGrant: false })
+  assert.match(commitsOnly, /disabled=""><svg[\s\S]*?<\/svg><span>Copy replies<\/span>/, 'with no replies the button is there but has nothing to copy')
+  assert.ok(texts(commitsOnly).includes(`Use ${NAMES.replyInChat} to talk it over.`) && !texts(commitsOnly).includes(`Use ${COPY_REPLIES}`), 'and the reason does not send you to a button with nothing to copy')
 })
 
 test('Send again and Try again are off for the same reason, with the reason on the card', async t => {
   const approved = await card(t, response('ready', {}, approval('approved')), { ownerGrant: false })
   if (!approved) return
   assert.match(approved, new RegExp(`disabled="">${NAMES.sendAgain}<`))
-  assert.ok(texts(approved).includes(POST_OFF_REASON))
+  assert.ok(texts(approved).includes(postOffReason('approved')))
   const receipts = { push: null, replies: [], description: null, rerequest: null }
   const failed = await card(t, response('failed', { receipts, error: { step: 'replies', message: 'GitHub refused the comment.' } }, approval('approved')), { ownerGrant: false })
   assert.match(failed, new RegExp(`disabled="">${NAMES.tryAgain}<`))
-  assert.ok(texts(failed).includes(POST_OFF_REASON))
+  assert.ok(texts(failed).includes(postOffReason('failed')))
   assert.match(failed, new RegExp(`>${NAMES.openChat}<`), 'the conversation is still one button away')
 })
 
@@ -223,7 +247,7 @@ test('the Review tab puts the answer first, then the live conversation, then an 
   const html = await render(t, 'ReviewTab', { pr, status: null, own: true, standing: standingWith(view), response: view, onPostResponse() {}, onDiscardResponse() {} })
   if (!html) return
   assert.match(texts(html), /Replies ready/)
-  assert.doesNotMatch(html, /No review yet|Use Agent above/)
+  assert.doesNotMatch(html, /No review yet|Use Actions above/)
   assert.match(html, /data-frame="verdict"/, 'the Desk’s amber frame for a draft to send')
   const older = { run: { id: 'r1', state: 'complete', execution_state: 'completed', mode: 'review', chat_id: 'chat-1', created_at: new Date().toISOString() }, item: { repo: 'owner/repo', number: 7, head_sha: HEAD, base_ref: 'main', state: 'all_clear' } }
   const stacked = await render(t, 'ReviewTab', { pr, status: older, own: true, standing: standingWith(view), response: view, onPostResponse() {}, onDiscardResponse() {} })
@@ -240,7 +264,7 @@ test('the Review tab hands the host’s owner grant to the card: Post is on with
   assert.ok(texts(off).includes(POST_OFF_REASON))
   const on = await render(t, 'ReviewTab', { ...props, ownerGrant: true })
   assert.match(on, new RegExp(`<button type="button" class="co-btn co-btn-primary">${NAMES.postAnswer}</button>`))
-  assert.doesNotMatch(texts(on), /Post is off for now/)
+  assert.doesNotMatch(texts(on), /Post is off/)
 })
 
 test('with no saved answer the Review tab is exactly what it was', async t => {
@@ -284,7 +308,7 @@ test('under a ready answer that took the check’s findings on, the check card k
   }
   const covered = await shown('Agent review'); if (!covered) return
   assert.match(covered, /covers these findings/)
-  for (const gone of ['Fix these findings', 'Ignore…', 'Review again']) assert.doesNotMatch(covered, new RegExp(gone), gone)
+  for (const gone of ['Fix these findings', 'Set aside…', 'Review again']) assert.doesNotMatch(covered, new RegExp(gone), gone)
   const other = await shown('alex')
   assert.doesNotMatch(other, /covers these findings/)
   assert.match(other, /Fix these findings/)

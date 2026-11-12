@@ -76,4 +76,5 @@ export async function markCarriedApprovals(token, data) {
   return data
 }
 
+// Not called by the app: tests clear what was asked so one case's lookups never answer the next.
 export const forgetSameWork = () => asked.clear()

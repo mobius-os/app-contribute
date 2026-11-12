@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as collaboration from '../collaboration.js'
+import { reviewDate } from '../review-copy.js'
 
 test('execution labels outrank aggregate progress without discarding unknown saved states', () => {
   const label = collaboration.reviewRunStateLabel
@@ -78,15 +79,19 @@ test('one shared run detail keeps recorded versions, posted reviews and the owni
   const pr = { number: 7, repository: { nameWithOwner: 'owner/repo' }, headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRef: { target: { oid: 'c'.repeat(40) } } }
   const html = render({ run: { id: 'run-1', mode: 'review', state: 'complete', chat_id: 'chat-1', items: [item] }, pulls: [pr], listState: {} })
   assert.match(html, /Recorded status: Complete/)
-  assert.match(html, /Older base version · Recorded version <code>aaaaaaa → main \(bbbbbbb\)<\/code>/)
+  assert.match(html, /Older base version · Reviewed an earlier version <small><code>aaaaaaa → main \(bbbbbbb\)<\/code><\/small>/)
   assert.match(html, /Saved findings are not a new approval/)
+  // The day comes first in plain words; the short ids follow, small.
+  const dated = render({ run: { id: 'run-1', mode: 'review', state: 'complete', chat_id: 'chat-1', created_at: '2026-10-23T09:00:00Z', items: [item] }, pulls: [pr], listState: {} })
+  assert.ok(dated.includes(`Reviewed the version of ${reviewDate('2026-10-23T09:00:00Z', true)} <small><code>aaaaaaa`), dated)
+  assert.doesNotMatch(html, /Recorded version|owning/)
   assert.match(html, /href="https:\/\/github.com\/owner\/repo\/pull\/7#pullrequestreview-1"/)
   assert.match(html, /Open chat/)
   const stopped = render({ run: { id: 'run-2', mode: 'review', state: 'reviewing', execution_state: 'stopped', can_stop: true, chat_id: 'chat-2', items: [{ ...item, state: 'reviewing', public_review: null }] },
     pulls: [pr], listState: {}, retryPulls: [pr], onRetry: () => {}, onStop: () => {} })
   assert.match(stopped, /#7 · Not finished/)
   assert.match(stopped, /Review again/)
-  assert.doesNotMatch(stopped, /Stop workflow/, 'a halted run cannot be stopped again')
+  assert.doesNotMatch(stopped, /Stop agent run/, 'a halted run cannot be stopped again')
 })
 
 test('a finding you set aside stops waiting on you for that exact version, and only for it', () => {
@@ -95,7 +100,7 @@ test('a finding you set aside stops waiting on you for that exact version, and o
   assert.deepEqual(Object.keys(notes), [`team/repo#9@${'a'.repeat(40)}`])
   assert.deepEqual(collaboration.ignoredNote(item, notes), { reason: 'Not a problem', at: '2026-11-04T10:00:00Z' })
   const ignored = collaboration.reviewItemProgress(run(), item, { ignored: notes })
-  assert.deepEqual(ignored, { label: 'Ignored', halted: false, waiting: false, settled: true, turn: 'none' })
+  assert.deepEqual(ignored, { label: 'Set aside', halted: false, waiting: false, settled: true, turn: 'none' })
   // A new version of the PR is reviewed and judged afresh.
   assert.equal(collaboration.ignoredNote({ ...item, head_sha: 'b'.repeat(40) }, notes), null)
   // Only findings can be set aside: a clear review has none, and Undo brings it back.

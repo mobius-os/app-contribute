@@ -39,7 +39,6 @@ const runRenderer = () => renderModule(`
       onSetAutopilot: noop,
       onWithdraw: noop,
       onConnectApp: noop,
-      onReviewIncoming: noop,
       onViewProject: noop,
       loadDiff: noop,
     })))
@@ -56,7 +55,6 @@ const runRenderer = () => renderModule(`
       onWithdraw: noop,
       onConnectApp: noop,
       onMarkReady: noop,
-      onReviewIncoming: noop,
       loadDiff: noop,
     }))
   }
@@ -492,16 +490,4 @@ test('only recorded work activity moves; queued agent follow-up stays still', as
   assert.doesNotMatch(queued, /co-working-icon|Agent handling public follow-up/)
   const responding = renderRun({ working: [{ ...item, record: { ...rec, autopilot: { enabled: true, state: 'responding' } } }] }, { tab: 'mine' })
   assert.match(responding, /co-working-icon/)
-})
-
-test('a focused incoming review offers Review, not an assignment', async (t) => {
-  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
-  const { renderFocus } = await runRenderer()
-  const html = renderFocus({
-    id: 'incoming:https://github.com/team/repo/pull/7', kind: 'incoming_review',
-    item: { number: 7, url: 'https://github.com/team/repo/pull/7', repository: { nameWithOwner: 'team/repo' } },
-    label: 'Fix the thing', detail: 'team/repo #7',
-  })
-  assert.match(html, />Review</)
-  assert.doesNotMatch(html, /Assign/)
 })

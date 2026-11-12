@@ -30,7 +30,7 @@ test('the review window names the job and the exact PR, and waits for the workfl
   assert.match(html, /<h3[^>]*>Review<\/h3>/)
   assert.match(html, /#42 Keep PR actions stable/)
   assert.match(html, /What happens/)
-  assert.match(html, /Seen on GitHub:<\/strong> nothing\. Only you see the review\./)
+  assert.match(html, /What GitHub sees:<\/strong> nothing\. Only you see the review\./)
   assert.match(html, /Exact versions/)
   assert.match(html, /disabled="">Start private review/)
   const takeover = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review_fix_merge', intent:'take_over' }, onModeChange:() => {}, onReasonChange:() => {} })
@@ -46,16 +46,18 @@ test('no automatic-continuation option is offered, because the platform does not
   assert.doesNotMatch(html, /Continue private review automatically|autopilot/i)
 })
 
-test('Merge after I approve is a switch only where it can be turned on; otherwise its reason is a plain line, and the versions say commit', async t => {
+test('Merge after I approve is always a switch: dimmed and off with its reason where it cannot be turned on, and the versions say commit', async t => {
   const caps = { post_review:true, propose_verdict:true }
   const options = { post_review:true, propose_verdict:true }
   const blocked = await render(t, 'ReviewConfirmation', { choice:{ pulls:[{...pr,isDraft:true}], mode:'review', intent:'review', options }, capabilities:caps, busy:false, onModeChange:() => {}, onOptionsChange:() => {} })
   if (!blocked) return
-  assert.match(blocked, /class="co-rw-option is-line"><strong>Merge after I approve<\/strong><small>Not available for drafts\.<\/small>/)
-  assert.doesNotMatch(blocked, /role="switch"/, 'a switch that cannot be turned on is not drawn')
+  assert.match(blocked, /<label class="co-rw-option is-off"><span><strong>Merge after I approve<\/strong><small>Not available for drafts\.<\/small><\/span><input type="checkbox" role="switch" class="co-switch"[^>]*disabled=""/)
+  assert.match(blocked, /role="switch"[^>]*aria-checked="false"/, 'the switch is drawn off, not missing')
+  const privately = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', intent:'review', options:{ post_review:false, propose_verdict:false } }, capabilities:caps, busy:false, onModeChange:() => {}, onOptionsChange:() => {} })
+  assert.match(privately, /<small>Merging follows your own approval: choose “Draft for me”\.<\/small><\/span><input type="checkbox" role="switch" class="co-switch"[^>]*disabled=""/, 'on Only me the reason sits on a dimmed, off switch')
   const open = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', intent:'review', options:{ ...options, agent_submits_verdict:false } }, capabilities:{ ...caps, agent_submits_verdict:true }, busy:false, bindCurrentTarget:true, onModeChange:() => {}, onOptionsChange:() => {} })
   assert.match(open, /<strong>Merge after I approve<\/strong>/)
-  assert.doesNotMatch(open, /is-line/)
+  assert.doesNotMatch(open, /role="switch"[^>]*disabled=""/, 'where merging works the switch can be turned on')
   assert.match(open, /Commit this review covers/)
   assert.match(blocked, /Exact versions/, 'a pinned approval keeps its own name')
   assert.doesNotMatch(open, /Versions it starts from/)
@@ -149,8 +151,7 @@ test('a takeover of a draft never marks it ready, even from an older saved draft
 
 test('drafting a review for GitHub is an opt-in inside Review only, shown only when the server supports it', async t => {
   const source = await import('node:fs').then(fs => fs.readFileSync(new URL('../ui/ReviewConfirmation.jsx', import.meta.url), 'utf8'))
-  const canDraft = /const canDraft = !!onOptionsChange && capabilities\?\.post_review === true && capabilities\?\.propose_verdict === true/
-  assert.match(source, canDraft)
+  assert.match(source, /const canDraft = !!onOptionsChange && offersDraft\(capabilities\)/)
   // Agents never post a comment on their own: the old switches that allowed one are gone.
   assert.doesNotMatch(source, /Allow posting the review on GitHub|Allow approve or request changes/)
   const unresolved = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', request_id:'fixed' }, onModeChange:()=>{}, onOptionsChange:()=>{} })
@@ -217,7 +218,7 @@ test('Review starts private and offers who sees it; Review and merge asks only w
   assert.match(privateHtml, /role="radiogroup" aria-label="Who sees the result"/)
   assert.match(privateHtml, /aria-checked="true" class="is-on"[^>]*>Only me</)
   assert.match(privateHtml, /Merging follows your own approval: choose “Draft for me”\./, 'merging needs your own approval tap')
-  assert.match(privateHtml, /Seen on GitHub:<\/strong> nothing/)
+  assert.match(privateHtml, /What GitHub sees:<\/strong> nothing/)
   assert.match(privateHtml, /Start private review/)
   const drafting = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', intent:'review', options:{ post_review:true, propose_verdict:true } }, capabilities:caps, onModeChange:()=>{}, onOptionsChange:()=>{} })
   assert.match(drafting, /aria-checked="true" class="is-on"[^>]*>Draft for me</)
@@ -233,6 +234,20 @@ test('Review starts private and offers who sees it; Review and merge asks only w
   assert.match(merge, />Merge after I approve</)
 })
 
+test('a re-review window is titled Review again, says what changed since your review, and opens on Draft for me, never on Agent posts', async t => {
+  const caps = { post_review:true, post_review_merge:true, propose_verdict:true, agent_submits_verdict:true }
+  const choice = { pulls:[pr], mode:'review', intent:'review', title:'Review again', since:{ head:'c'.repeat(40), at:'2026-11-03T09:30:00Z' }, options:{ post_review:true, propose_verdict:true, agent_submits_verdict:false } }
+  const html = await render(t, 'ReviewConfirmation', { token:'t', choice, capabilities:caps, onModeChange:()=>{}, onOptionsChange:()=>{} })
+  if (!html) return
+  assert.match(html, /<h3[^>]*>Review again<\/h3>/)
+  assert.match(html, /<p class="co-rw-note" role="status">This PR changed since your review of [^<]*3[^<]*\.<\/p>/, 'the count joins this line once GitHub has answered; the line is true without it')
+  assert.match(html, /aria-checked="true" class="is-on"[^>]*>Draft for me</)
+  assert.doesNotMatch(html, /aria-checked="true" class="is-on"[^>]*>Agent posts</)
+  const first = await render(t, 'ReviewConfirmation', { token:'t', choice:{ ...choice, title:undefined, since:undefined }, capabilities:caps, onModeChange:()=>{}, onOptionsChange:()=>{} })
+  assert.match(first, /<h3[^>]*>Review<\/h3>/, 'a first review keeps its plain name')
+  assert.doesNotMatch(first, /since your review/)
+})
+
 test('on your own PR the window only checks it for you: nothing to choose, nothing posted or merged', async t => {
   const caps = { post_review:true, post_review_merge:true, propose_verdict:true }
   const own = { ...pr, author:{ login:'me' } }
@@ -241,5 +256,5 @@ test('on your own PR the window only checks it for you: nothing to choose, nothi
   assert.match(html, /This is your own PR, so the agent only checks it for you\. Nothing is posted, proposed or merged\./)
   assert.doesNotMatch(html, /Merge after I approve|Who sees the result|Draft for me|Agent posts/)
   assert.match(html, /Start private review/)
-  assert.match(html, /Seen on GitHub:<\/strong> nothing/)
+  assert.match(html, /What GitHub sees:<\/strong> nothing/)
 })

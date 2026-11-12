@@ -211,6 +211,19 @@ test('the co-author trailer is the default and an opt-out is explicit and disclo
   assert.match(prose, /unless the reviewed plan set `coauthor_trailer: false`/)
 })
 
+test('agents prepare independent PRs on the default branch and never build a stack', () => {
+  assert.match(core, /one independent PR on the default branch[^.]*never a stack/)
+  assert.match(prose, /Every PR you prepare is independent and targets the repository's default branch; never a stack/)
+  assert.match(prose, /Never write `plan\.stack` and never publish `stack\/\*\*` branches/)
+  assert.match(prose, /A PR set already published as a stack is finished as it is: do not retarget or close it/)
+  // An existing stack is still sent and repaired; no file tells an agent how or when to start one.
+  assert.doesNotMatch(prose, /### Prepare a stack|Choose one privacy-safe stack id|Use a stack when|a stack is only for truly dependent/)
+  const docs = ['README.md', 'PRODUCT.md'].map(read).join('\n').replace(/\s+/g, ' ')
+  assert.match(docs, /agents are told never to build a stack/)
+  assert.match(docs, /prepared as independent pull requests against the default branch, never as a stack/)
+  assert.doesNotMatch(docs, /Dependent PRs can be prepared as a \*\*stack\*\*/)
+})
+
 test('skill text states rules rather than incident history', () => {
   assert.doesNotMatch(prose, /second doorway|Older platforms may still require|parallel Möbius-maintainer roster|chat-settlement|older boot cleaners|baked boot cleaner|ecosystem is young/)
 })

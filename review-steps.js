@@ -4,10 +4,13 @@
 // It marks a position, not a record: earlier steps are shown as passed, never ticked as done.
 // Pure, so every state is tested without a browser.
 
+export const STEPS_LABEL = 'Your next steps'
 const STEPS = ['Answer feedback', 'Check', 'Fix', 'Reviewers']
+// A comment-only review (author.commented) leaves the PR with its reviewers, like the other waiting states:
+// without it the strip would vanish the moment a reviewer comments.
 const STEP_OF_STATE = {
   'author.feedback': 0, 'author.draft': 1, 'author.findings': 2, 'author.blocked': 2, 'author.draft_ready': 3,
-  'author.waiting_review': 3, 'author.waiting_rereview': 3, 'author.looked_again': 3, 'author.approval_stale': 3,
+  'author.waiting_review': 3, 'author.waiting_rereview': 3, 'author.looked_again': 3, 'author.commented': 3, 'author.approval_stale': 3,
   'author.approved': 3, 'author.approved_checks': 3, 'author.approved_no_rights': 3,
 }
 // An agent job is on the step its kind does; Finish it for me moves between checking and

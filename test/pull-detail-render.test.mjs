@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { CSS } from '../theme.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 let renderer
 async function render(t, name, props) {
@@ -8,8 +9,9 @@ async function render(t, name, props) {
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { decide } from './pr-machine.js'
-    import { PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated, PullFileTotals } from './ui/PullRequestDetail.jsx'
-    const components = { decide, PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated, PullFileTotals }
+    import { PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated } from './ui/PullRequestDetail.jsx'
+    import { PullEscalation } from './ui/PullEscalation.jsx'
+    const components = { decide, PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated, PullEscalation }
     export function render(name, props) { return name === 'decide' ? decide(props) : renderToStaticMarkup(React.createElement(components[name], props)) }
   `)
   return (await renderer).render(name, props)
@@ -25,6 +27,13 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
   assert.match(html, /by <b>/)
   assert.match(html, /Loading the conversation/)
   assert.match(html, /aria-label="Choose an action for PR \d+"/)
+  assert.match(html, /class="co-pr-detail-body"[^>]*data-tab="conversation"/, 'the page tells its CSS which tab is open')
+})
+
+test('an open PR page lifts the lists\' column and its header, Files changed keeps the whole width and every other tab a reading width', () => {
+  assert.match(CSS, /\.co-projects-view:has\(\.co-pull-page\), \.co-root:has\(\.co-pull-page\) \.co-header \{ max-width:none; \}/)
+  assert.match(CSS, /\.co-pr-detail-body:not\(\[data-tab="files"\]\) > \* \{ max-width:var\(--co-read-width\); \}/)
+  assert.match(CSS, /\.co-projects-view \{ width:100%; max-width:1192px;/, 'the lists keep their own column')
 })
 for (const items of [[], [{ __typename: 'Issue', number: 2, title: 'Usable issue', url: 'https://github.com/team/repo/issues/2', repository: { nameWithOwner: 'team/repo' }, relationships: ['May close'] }]]) {
   test(`partial related context warns and retries with ${items.length} usable items`, async t => {
@@ -61,6 +70,19 @@ test('check outcomes stay written and partial source absence never claims succes
   assert.match(html, /page 2/)
   assert.match(html, /not an all-clear review/)
   assert.doesNotMatch(html, /href="javascript:/)
+})
+
+test('a failed check shows why: failed step names and annotations as text, with View on GitHub as the way to the log', async t => {
+  const why = { steps: ['Run unit tests', 'Upload <b>report</b>'], annotations: [{ where: 'test/a.test.mjs:12', text: 'not ok 412 - desk counts a ready PR once' }] }
+  const html = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 1, groups: [{ name: 'Check runs', total: 2, hasMore: false, items: [
+    { id: 1, name: 'Unit tests', status: 'completed', conclusion: 'failure', details_url: 'https://github.com/team/repo/actions/runs/9/job/1', why },
+    { id: 2, name: 'Lint', status: 'completed', conclusion: 'failure', details_url: 'https://github.com/team/repo/actions/runs/9/job/2' }] }] } })
+  if (!html) return
+  assert.match(html, /Failed steps: <code>Run unit tests<\/code><code>Upload &lt;b&gt;report&lt;\/b&gt;<\/code>/)
+  assert.match(html, /<code>test\/a\.test\.mjs:12<\/code> not ok 412 - desk counts a ready PR once/)
+  assert.equal((html.match(/co-check-why/g) || []).length, 1, 'a failed check with no readable reason shows no empty box')
+  assert.equal((html.match(/>View on GitHub</g) || []).length, 2, 'every check keeps its link out')
+  assert.doesNotMatch(html, /View result/)
 })
 
 test('inline review UI distinguishes resolution, old lines, outdated location and truncated replies', async t => {
@@ -304,4 +326,34 @@ test('the Commits banner hands its Review again to the foot bar on a phone only 
   assert.match(html, /class="co-decision-bar"[^>]*>.*Review again/)
   const quiet = await render(t, 'PullRequestDetail', props(await render(t, 'decide', { ...facts, role: 'author', author: 'sam' })))
   assert.doesNotMatch(quiet, /co-commits-again is-pinned/)
+})
+
+test('a saved escalation shows on the PR page with its reason as plain text and the existing Resume', async t => {
+  const escalated = { id: 'rec-1', needs_attention: true, attention: { type: 'human_required', message: 'A reviewer raised a trade-off. <b>Decide</b> first.' } }
+  const html = await render(t, 'PullEscalation', { record: escalated, appId: 5, token: 'x' })
+  if (!html) return
+  assert.match(html, /The agent needs your decision/)
+  assert.match(html, /A reviewer raised a trade-off\. &lt;b&gt;Decide&lt;\/b&gt; first\./, 'the reason is text, never markup')
+  assert.match(html, /<button type="button" class="co-btn">Resume<\/button>/)
+  // Nothing to resume: no record, another kind of attention, an escalation already cleared, or a PR that is closed.
+  for (const props of [{ record: undefined }, { record: { id: 'r', needs_attention: true, attention: { type: 'github_activity' } } },
+    { record: { ...escalated, needs_attention: false } }, { record: escalated, readOnly: true }]) {
+    assert.equal(await render(t, 'PullEscalation', { appId: 5, token: 'x', ...props }), '')
+  }
+})
+
+test('a detail page for an escalated PR carries the escalation under its description', async t => {
+  const html = await render(t, 'PullRequestDetail', {
+    pr: { number: 7, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', url: 'https://github.com/team/repo/pull/7' },
+    record: { id: 'rec-1', needs_attention: true, attention: { type: 'human_required', message: 'Needs a call.' } }, appId: 5, token: 'x',
+    cacheStore: { entries: {
+      'description:1': { data: { body: 'Description' }, loading: false },
+      'activity:1': { data: { items: [] }, loading: false },
+      'threads:': { data: { threads: [] }, loading: false },
+      related: { data: { items: [] }, loading: false },
+    } },
+  })
+  if (!html) return
+  assert.ok(html.indexOf('Needs a call.') > html.indexOf('co-gh-description'), 'under the description')
+  assert.match(html, />Resume<\/button>/)
 })

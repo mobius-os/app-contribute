@@ -179,7 +179,7 @@ export function confirmationItem(record, stage) {
 // relay request that cannot bind the confirmed snapshot on the server, so it
 // is never confirmable from chat; Contribute itself still sends it.
 const relayed = record => record?.submission_mode === 'mobius-bot'
-export const RELAY_NOTE = 'This contribution is sent through the Möbius relay, which chat cannot send with a confirmed snapshot. Open Contribute to send it.'
+export const RELAY_NOTE = 'Möbius sends this contribution from its own account, and chat cannot do that from the copy you confirmed. Open Contribute to send it.'
 // A ready card names nothing; a held one marks the row that holds it with one
 // short pill, and its action asks the agent to fix it (`ask-v1`) or opens
 // Contribute. Only a reason no row explains is a line of text.

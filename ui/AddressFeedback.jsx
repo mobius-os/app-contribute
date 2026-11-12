@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { addressItems, respondAction, respondScope } from '../address-feedback.js'
+import { addressItems, coverageLine, respondAction, respondScope } from '../address-feedback.js'
+import { writeFindings } from '../respond-store.js'
 import { requestOptions } from '../collaboration.js'
 import { loadWorkflowOptions, previewWorkflow, reviewOptions } from '../review-prompts.js'
 import { loadAllPullActivity, loadAllPullThreads } from '../pull-details.js'
@@ -13,7 +14,7 @@ import { NAMES } from '../names.js'
 
 // The window behind Agent > Respond to feedback. It reads what the PR asks for, then sends an agent
 // conversation a written brief. There is one way to go: the agent saves a result, and the owner posts it from the Review tab.
-export function AddressFeedbackWindow({ pr, findings = null, response = null, token, appId, defaultAgent = null, onStart, onClose }) {
+export function AddressFeedbackWindow({ pr, findings = null, response = null, token, appId, defaultAgent = null, ownerGrant = false, onStart, onClose }) {
   const root = useRef(null)
   const [state, setState] = useState({ phase: 'loading', items: [], partial: false })
   // One id for this window: pressing Start twice is one message, not two. A second pass is a new window and a new id.
@@ -55,7 +56,10 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
   async function start() {
     setBusy(true); setError('')
     try {
-      const result = await onStart(respondAction({ pr, items: state.items, cid, agent, answered: !!response }))
+      // The agent reads the whole saved review from a file, so it is written before the brief that names it goes out.
+      const saved = await writeFindings(state.items)
+      if (!saved.ok) { setError(saved.error); return }
+      const result = await onStart(respondAction({ pr, items: state.items, appId, cid, agent, answered: !!response }))
       if (result?.ok) setStarted(result)
       else setError(result?.error || 'Could not start the agent. Try again.')
     } catch { setError('Could not start the agent. Try again.') }
@@ -65,7 +69,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
   if (started) return <section ref={root} tabIndex={-1} className="co-review-window" aria-label="Respond to feedback started">
     {heading()}
     <div className="co-rw-body">
-      <p className="co-rw-note">{started.reused ? 'An agent is already working on this PR.' : 'The agent is on it.'} When it finishes, its answers, the changed files and the commits appear in this PR’s Review tab. Nothing is sent to GitHub until you press <b>{NAMES.postAnswer}</b> there.</p>
+      <p className="co-rw-note">{started.reused ? 'An agent is already working on this PR.' : 'The agent is on it.'} When it finishes, its answers, the changed files and the commits appear in this PR’s Review tab. Nothing is sent to GitHub{ownerGrant ? <> until you press <b>{NAMES.postAnswer}</b> there</> : ''}.</p>
     </div>
     <footer className="co-rw-foot"><div className="co-rw-actions">
       <button type="button" className="co-btn" onClick={onClose}>Close</button>
@@ -73,16 +77,18 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     </div></footer>
   </section>
   return <section ref={root} tabIndex={-1} className="co-review-window" aria-label="Respond to feedback">
-    {heading(<SeenOnGithub tone="private" text="nothing. It works in a private copy; nothing goes out until you press Post." />)}
+    {heading(<SeenOnGithub tone="private" text={`nothing. It works in a private copy; nothing goes out${ownerGrant ? ` until you press ${NAMES.postAnswer}` : ''}.`} />)}
     <div className="co-rw-body">
+      {ownerGrant ? null : <p className="co-rw-blocker" role="status" data-post-off><b>Heads-up:</b> {NAMES.postAnswer} is off on this Möbius. The answer will wait in this PR’s Review tab, where you can copy the replies.</p>}
       <h4 className="co-rw-label">What should it address?</h4>
       {state.phase === 'loading' ? <p className="co-rw-note" role="status">Reading the reviews and threads…</p> : null}
       {state.phase === 'error' ? <p className="co-rw-blocker" role="alert">Could not read this PR’s reviews and threads from GitHub. Close this and try again.</p> : null}
       {state.phase === 'ready' && !state.items.length ? <p className="co-rw-note">Nothing to address was found: no requested changes, open threads, failing checks or conflict. Use Review if you want a fresh look.</p> : null}
       {state.items.length ? <TickList label="What it will address" items={state.items} onToggle={toggle} disabled={busy} /> : null}
       {state.partial && state.phase === 'ready' ? <p className="co-rw-note">Some of this PR’s feedback could not be read, so the list may be incomplete.</p> : null}
+      {ticked ? <p className="co-rw-note">{coverageLine(state.items)}</p> : null}
       <p className="co-rw-note co-rw-callout"><b>It does not review the PR again.</b> It answers only what is ticked, fixes it in a private copy and runs the tests.</p>
-      <p className="co-rw-note co-rw-callout"><b>Then:</b> the answers, changed files and commits appear in this PR’s Review tab. Nothing is pushed or posted until you press <b>{NAMES.postAnswer}</b>.</p>
+      <p className="co-rw-note co-rw-callout"><b>Then:</b> the answers, changed files and commits appear in this PR’s Review tab. Nothing is pushed or posted{ownerGrant ? <> until you press <b>{NAMES.postAnswer}</b></> : ''}.</p>
       {response ? <><p className="co-rw-note co-rw-callout">This replaces the answer that is waiting.</p><ConversationAgent token={token} scope={respondScope(pr.repository.nameWithOwner, pr.number)} /></>
         : <AgentModelSettings token={token} choice={agent} defaultChoice={ownDefault || defaultChoice} explicitDefault={!!ownDefault}
           defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={next => { setAgent(next); return true }} />}

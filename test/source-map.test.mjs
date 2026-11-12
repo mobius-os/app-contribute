@@ -5,21 +5,17 @@ import {
   proposalSourceCommits,
   actionableSourceProjects,
   attachSourceProjects,
-  projectDetailSummary,
   projectCycleIdentity,
   projectForks,
   projectIconUrl,
-  projectMatchesFilter,
   projectNeedsPreparation,
   projectNeedsSorting,
   projectOverview,
   projectPreparationState,
   projectReadyToPrepare,
-  projectRowFacts,
   projectSourceState,
   projectStatus,
   projectWorkRevision,
-  sourcePathRelationship,
   localChangeSentence,
   localChangeSummary,
   projectIsQuiet,
@@ -113,8 +109,6 @@ test('working drafts stay visible without becoming changes or attention', () => 
   assert.equal(notes.key, 'app:7')
   assert.equal(notes.attention, false)
   assert.deepEqual(projectStatus(notes), { label: 'Editing', tone: 'quiet' })
-  assert.equal(projectMatchesFilter(notes, 'editing'), true)
-  assert.equal(projectMatchesFilter(notes, 'changed'), false)
   assert.deepEqual(actionableSourceProjects([notes]), [])
 })
 
@@ -149,8 +143,6 @@ test('a locally built app with only new files is kept as real source work', () =
 
   assert.ok(local)
   assert.equal(local.builtHere, true)
-  assert.equal(projectMatchesFilter(local, 'editing'), true)
-  assert.equal(projectMatchesFilter(local, 'changed'), false)
 })
 
 test('committed differences remain visible while another file is being edited', () => {
@@ -174,8 +166,6 @@ test('committed differences remain visible while another file is being edited', 
   assert.deepEqual(projectStatus(notes), { label: 'Local changes', tone: 'accent' })
   assert.deepEqual(actionableSourceProjects([notes]), [notes])
   assert.equal(projectNeedsPreparation(notes), true)
-  assert.equal(projectMatchesFilter(notes, 'editing'), true)
-  assert.equal(projectMatchesFilter(notes, 'changed'), true)
 })
 
 test('shared changes remain decision-bearing in the inbox overview', () => {
@@ -193,7 +183,6 @@ test('shared changes remain decision-bearing in the inbox overview', () => {
   }, []).find((project) => project.key === 'app:7')
 
   assert.equal(incoming.attention, true)
-  assert.equal(projectMatchesFilter(incoming, 'changed'), true)
   assert.deepEqual(actionableSourceProjects([incoming]), [incoming])
   assert.equal(projectNeedsPreparation(incoming), false)
 })
@@ -219,7 +208,6 @@ test('tree equality wins over bookkeeping-only ahead history', () => {
   assert.equal(contribute.ahead, 1)
   assert.equal(contribute.different, false)
   assert.equal(projectStatus(contribute).label, 'Aligned')
-  assert.equal(projectMatchesFilter(contribute, 'changed'), false)
 })
 
 test('semantic receipt separates landed, local, incoming, and residual paths', () => {
@@ -261,13 +249,10 @@ test('semantic receipt separates landed, local, incoming, and residual paths', (
   assert.equal(projectStatus(project).label, '1 file needs a choice')
   assert.equal(projectSourceState(project), 'conflict')
   assert.equal(projectOverview(project).tone, 'danger')
-  assert.match(projectDetailSummary(project), /remaining overlapping files/)
-  assert.ok(projectRowFacts(project).includes('1 needs a choice'))
-  assert.equal(sourcePathRelationship(project, 'local.js'), 'local')
-  assert.equal(sourcePathRelationship(project, 'incoming.js'), 'incoming')
-  assert.equal(sourcePathRelationship(project, 'compatible.js'), 'compatible')
-  assert.equal(sourcePathRelationship(project, 'choice.js'), 'conflict')
-  assert.equal(sourcePathRelationship(project, 'outside-preview.js'), 'changed')
+  assert.deepEqual(
+    [project.localOnlyPaths, project.incomingPaths, project.compatiblePaths, project.conflictPaths],
+    [['local.js'], ['incoming.js'], ['compatible.js'], ['choice.js']],
+  )
   assert.equal(projectNeedsSorting(project), true)
 })
 
@@ -383,7 +368,6 @@ test('installed apps ignore full-repository origin projections', () => {
   assert.equal(projectStatus(notes).label, 'Aligned')
   assert.equal(projectOverview(notes), null)
   assert.equal(projectNeedsPreparation(notes), false)
-  assert.equal(projectMatchesFilter(notes, 'changed'), false)
 })
 
 test('exact canonical tree equality outranks a stale installer marker', () => {
@@ -434,8 +418,8 @@ test('a moved canonical source is compared before local work is prepared', () =>
   assert.equal(projectSourceState(project), 'comparison_needed')
   assert.equal(projectStatus(project).label, 'Needs comparison')
   assert.equal(projectOverview(project).label, 'Compare before contributing')
-  assert.match(projectDetailSummary(project), /Compare both versions/)
-  assert.ok(projectRowFacts(project).includes('Compare shared source'))
+  // Plain words, not "recorded baseline" or "comparison point".
+  assert.equal(projectOverview(project).detail, 'The shared repository and the version this app started from are different')
   assert.equal(projectNeedsSorting(project), true)
 })
 
@@ -493,7 +477,6 @@ test('keeps locally built apps at the bottom as publishing candidates', () => {
   }, [])
   assert.equal(projects.at(-1).name, 'Local scratchpad')
   assert.equal(projectStatus(projects.at(-1)).label, 'Local only')
-  assert.equal(projectMatchesFilter(projects.at(-1), 'changed'), false)
   assert.equal(projects.length, 3)
 })
 
@@ -557,7 +540,6 @@ test('install-managed deltas are visible without counting as customization', () 
   assert.equal(adapted.different, false)
   assert.equal(adapted.adapted, true)
   assert.equal(projectStatus(adapted).label, 'Install-managed')
-  assert.ok(projectRowFacts(adapted).includes('Installed normally'))
 })
 
 test('formats authoritative endpoint tree delta', () => {
@@ -711,7 +693,6 @@ test('working-only projects with active reviews describe the edits instead of ze
   }])[0]
 
   assert.equal(projectNeedsSorting(changed), true)
-  assert.match(projectRowFacts(changed).join(' · '), /Being edited/)
 })
 
 test('preparation candidates exclude incoming-only projects', () => {

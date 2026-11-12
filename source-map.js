@@ -548,28 +548,6 @@ export function projectForks(project, contributions = []) {
   return [...forks.values()].sort((a, b) => a.repo.localeCompare(b.repo))
 }
 
-export function projectMatchesFilter(project, filter) {
-  if (filter === 'attention') return project.attention
-  if (filter === 'changed') {
-    return project.different || project.incomingFiles > 0
-  }
-  if (filter === 'editing') return project.workingFiles > 0
-  return true
-}
-
-export function sourcePathRelationship(project, path) {
-  if (!project?.semanticAvailable || !path) return 'changed'
-  const conflict = project.conflictPaths?.includes(path)
-  const local = project.localOnlyPaths?.includes(path)
-  const incoming = project.incomingPaths?.includes(path)
-  const compatible = project.compatiblePaths?.includes(path)
-  if (conflict) return 'conflict'
-  if (compatible) return 'compatible'
-  if (local) return 'local'
-  if (incoming) return 'incoming'
-  return 'changed'
-}
-
 export function projectSourceState(project) {
   if (!project) return 'unknown'
   if (project.kind === 'external') return 'external'
@@ -705,7 +683,7 @@ export function projectOverview(project) {
   if (state === 'comparison_needed') {
     return {
       label: 'Compare before contributing',
-      detail: 'The shared source and this app’s recorded baseline are different',
+      detail: 'The shared repository and the version this app started from are different',
       tone: 'warn',
     }
   }
@@ -743,69 +721,6 @@ export function projectOverview(project) {
     }
   }
   return null
-}
-
-export function projectDetailSummary(project) {
-  const state = projectSourceState(project)
-  if (state === 'built_here') {
-    return 'This app was built on your Möbius and does not have a shared GitHub repository yet.'
-  }
-  if (state === 'local_only') {
-    return 'This project has a GitHub repository, but no shared update source is configured here.'
-  }
-  if (state === 'external') {
-    return 'This project is not installed here, but it still has a contribution in review.'
-  }
-  if (state === 'conflict') {
-    return project.conflictFiles > 0
-      ? 'Shared submissions are already accounted for; only the remaining overlapping files need a choice.'
-      : 'An update needs attention before this project can move forward.'
-  }
-  if (state === 'comparison_needed') {
-    return 'The shared source does not match this app’s recorded comparison point. Compare both versions before treating local work as a contribution.'
-  }
-  if (state === 'working') return 'This project is currently being edited in your Möbius.'
-  if (state === 'both_changed') {
-    return 'Shared submissions are already accounted for. Genuine local and incoming changes remain.'
-  }
-  if (state === 'incoming') return 'A newer shared version is available.'
-  if (state === 'local_changes') {
-    return project.contributions.length > 0
-      ? 'These are the committed changes that remain local after landed submissions; active reviews are shown separately below.'
-      : 'These committed changes remain local after landed submissions. They are not working-tree edits.'
-  }
-  if (state === 'detached' || state === 'branch') {
-    return 'This Möbius is using a version other than the shared main branch.'
-  }
-  if (state === 'unavailable') return 'No inspectable local source is available.'
-  return project.kind === 'app'
-    ? 'Your installed app has no local changes.'
-    : 'Your version matches the shared source.'
-}
-
-export function projectRowFacts(project) {
-  const facts = []
-  const state = projectSourceState(project)
-  if (state === 'built_here') facts.push('Not on GitHub yet')
-  else if (state === 'local_only') facts.push('No shared update source')
-  if (project.workingFiles) facts.push('Being edited')
-  if (state === 'comparison_needed') {
-    facts.push('Compare shared source')
-  }
-  if (project.provenShared) facts.push(`${project.provenShared} landed recognized`)
-  if (project.incomingFiles) facts.push('Update available')
-  if (project.localFiles) facts.push(localCount(project.localFiles))
-  if (project.compatibleFiles) facts.push(`${project.compatibleFiles} combine cleanly`)
-  if (project.conflictFiles) {
-    facts.push(`${project.conflictFiles} ${project.conflictFiles === 1 ? 'needs' : 'need'} a choice`)
-  }
-  if (project.contributions.length) {
-    const reviews = project.contributions.length
-    facts.push(`${reviews} ${reviews === 1 ? 'review' : 'reviews'}`)
-  }
-  if (!facts.length && project.managedFiles) facts.push('Installed normally')
-  if (!facts.length) facts.push(project.available ? 'Up to date' : 'Not tracked')
-  return facts
 }
 
 export function actionableSourceProjects(projects) {

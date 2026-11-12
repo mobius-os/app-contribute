@@ -1,5 +1,5 @@
 // Reading the saved Respond-to-feedback results and writing the owner's decision, through the app's storage.
-// The helper writes `respond-results/`; the app writes `respond-decisions/`; neither writes the other's folder.
+// The helper writes `respond-results/`; the app writes `respond-decisions/` and `respond-findings/`; neither writes the other's folder.
 import { DECISION_FOLDER, RESULT_FOLDER, normalizeDecision, normalizeResult, postingSoon, resultSlug } from './respond-result.js'
 import { SYNC_POLICY } from './refresh.js'
 
@@ -38,14 +38,24 @@ export async function readFreshResult(slug, storage = storageOf()) {
   return loaded?.offline ? null : normalizeResult(loaded?.value)
 }
 
-// The owner's decision, accepted only when the server has it: the helper reads it from disk before it posts anything.
-export async function writeDecision(slug, { result_id: resultId, digest, decision, at }, storage = storageOf()) {
+// A file the helper or the agent reads from disk, accepted only when the server has it. `what` names it in the sentence the owner reads.
+async function writeDurably(path, value, what, storage) {
   try {
-    const receipt = await storage.durableWrite(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at })
-    return receipt?.durability === 'synced' ? { ok: true } : { ok: false, error: 'This decision was not saved online. Sync before trying again.' }
+    const receipt = await storage.durableWrite(path, value)
+    return receipt?.durability === 'synced' ? { ok: true } : { ok: false, error: `This ${what} was not saved online. Sync before trying again.` }
   } catch {
-    return { ok: false, error: 'This decision could not be saved. Sync and try again.' }
+    return { ok: false, error: `This ${what} could not be saved. Sync and try again.` }
   }
+}
+
+// The owner's decision: the helper reads it from disk before it posts anything.
+export const writeDecision = (slug, { result_id: resultId, digest, decision, at }, storage = storageOf()) =>
+  writeDurably(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at }, 'decision', storage)
+
+// The whole saved review of a ticked item, where its brief tells the agent to read it (address-feedback.js). Nothing to write when none is ticked.
+export function writeFindings(items, storage = storageOf()) {
+  const item = items.find(item => item.checked && item.file)
+  return item ? writeDurably(item.file, item.text, 'copy of the findings', storage) : { ok: true }
 }
 
 export async function clearDecision(slug, storage = storageOf()) {
