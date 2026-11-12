@@ -50,7 +50,10 @@ test('compact on a phone keeps a 44px tap, 16px typing text and nothing under 12
   const css = sheets.map(([, text]) => text).join('\n')
   const compact = css.slice(css.indexOf('Compact on a phone (DESIGN.md, The Compact Phone Rule)'))
   assert.match(compact, /\.co-root input:not\(\[type=checkbox\]\),\.co-root textarea,\.co-root select \{ font-size:var\(--co-text-entry\); \}/)
-  assert.match(compact, /::before \{ content:''; position:absolute; inset:calc\(-1 \* var\(--co-tap-reach\)\) 0; \}/)
+  // What a thumb lands on is proved in a browser (runTapBoxChecks in test/workspace-browser.mjs); these are the rules it proves.
+  assert.match(compact, /::before \{ content:''; position:absolute; inset:calc\(50% - var\(--co-tap-height\) \/ 2\) 0; \}/, 'one tap box, tap-height tall, centred on the control')
+  assert.match(compact, /\.co-btn-icon::before \{ inset-inline:calc\(50% - var\(--co-tap-height\) \/ 2\); \}/, 'an icon button is tapped tap-height wide too')
+  assert.match(compact, /\.co-desk-seg \{ row-gap:calc\(2 \* var\(--co-tap-reach\)\); \}/, 'wrapped rows keep their tap boxes apart')
   assert.match(theme, /--co-tap-height: calc\(var\(--co-control-height\) \+ 2 \* var\(--co-tap-reach\)\);/)
   assert.match(theme, /\.co-icon \{ zoom: var\(--co-icon-scale\); \}/, 'icons scale in the stylesheet, with no inline style')
 })

@@ -1113,10 +1113,18 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(max-width:680px) {
  .co-root { line-height:1.4; }
  .co-root input:not([type=checkbox]),.co-root textarea,.co-root select { font-size:var(--co-text-entry); }
- /* Drawn one control tall, tapped 44 tall: the tap area reaches past the drawn edge above and below.
-    :where() keeps these at no weight, so a button that already places itself keeps its own position. */
- :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button) { position:relative; }
- :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button)::before { content:''; position:absolute; inset:calc(-1 * var(--co-tap-reach)) 0; }
+ /* Drawn one control tall, tapped 44 tall: a box --co-tap-height tall, centred on the control, so it is 44 whatever the control's own
+    border is (an inset from the padding edge would fall short by it). An icon button is tapped 44 wide too. Every inset is given, so the
+    control's own alignment (a grid that centres its children) cannot move the box. :where() keeps the position at no weight, so a
+    button that already places itself keeps its own position. */
+ :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button,.co-desk-chips-projects) { position:relative; }
+ :where(.co-btn,.co-seg button,.co-desk-seg button,.co-pr-filters button,.co-filter-line button,.co-desk-chips-projects)::before { content:''; position:absolute; inset:calc(50% - var(--co-tap-height) / 2) 0; }
+ .co-btn-icon::before { inset-inline:calc(50% - var(--co-tap-height) / 2); }
+ /* A tap box reaches --co-tap-reach past what is drawn, so what holds controls keeps twice that between them (the boxes meet and never cross, so
+    no control's drawn face is another's tap) and a scrolling box keeps that much inside its edge (it clips what reaches past). */
+ .co-desk-seg { row-gap:calc(2 * var(--co-tap-reach)); }
+ .co-rw-tools { gap:calc(2 * var(--co-tap-reach)); }
+ .co-pr-filters { padding-block:var(--co-tap-reach); }
  .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b { line-height:20px; }
  .co-desk-chips { margin-bottom:6px; padding:4px 0; }
  .co-filter-line { margin:0 0 4px; }
