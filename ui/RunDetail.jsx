@@ -6,6 +6,7 @@ import { Icon } from './Icons.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { ResolvedPrompt } from './ReviewPromptSettings.jsx'
 import { NAMES, rerunName } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 // Saved conversations outlive the open-PR inventory. Its current snapshot
 // provides context, never new approval or a fresh verdict for old findings.
@@ -38,7 +39,7 @@ export function VerdictProposal({ proposal, mode, busy, onDecide, onCheck = null
       <details className="co-task-details" open><summary>What it would post</summary><MarkdownView markdown={asComment ? proposal.comment_body : proposal.body} /></details>
       <p className="co-task-footnote">{own ? 'This is your own PR, so it cannot be approved or sent back to yourself. Discard it, then fix what it found or set it aside.' : copy.note}</p>
       <div className="co-verdict-actions">
-        {own ? null : <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={() => onDecide(proposal, 'submit', asComment ? { event: 'COMMENT' } : {})}>{busy ? 'Working…' : copy.submit}</button>}
+        {own ? null : <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={() => onDecide(proposal, 'submit', asComment ? { event: 'COMMENT' } : {})}>{busy ? <Shine>Working…</Shine> : copy.submit}</button>}
         {own || !canComment ? null : <button type="button" className="co-btn" aria-pressed={asComment} disabled={busy} onClick={() => setAsComment(value => !value)}>{asComment ? 'Send the verdict instead' : copy.comment}</button>}
         <button type="button" className="co-btn" disabled={busy} onClick={() => onDecide(proposal, 'discard')}>Discard</button>
       </div>
@@ -58,7 +59,7 @@ export function RepairProposal({ item, busy, onDecide }) {
     {repair.files.length ? <details className="co-task-details"><summary>{repair.files.length === 1 ? '1 file' : `${repair.files.length} files`}</summary><ul>{repair.files.map(file => <li key={file.path || file}><code>{file.path || file}</code></li>)}</ul></details> : null}
     <p className="co-task-footnote">Pushes commit <code>{short(repair.commit)}</code> on top of <code>{short(repair.base || item.head_sha)}</code>. If the branch moved, nothing is pushed.</p>
     {onDecide ? <div className="co-verdict-actions">
-      <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={() => onDecide(repair, 'push')}>{busy ? 'Working…' : 'Push fix'}</button>
+      <button type="button" className="co-btn co-btn-primary" disabled={busy} onClick={() => onDecide(repair, 'push')}>{busy ? <Shine>Working…</Shine> : 'Push fix'}</button>
       <button type="button" className="co-btn" disabled={busy} onClick={() => onDecide(repair, 'discard')}>{NAMES.discard}</button>
     </div> : null}
   </div>
@@ -72,7 +73,7 @@ function UnconfirmedVerdict({ busy, onCheck, onDismiss }) {
   async function check() { setChecked(!!await onCheck()) }
   return <>
     <div className="co-verdict-actions">
-      <button type="button" className="co-btn" disabled={busy} onClick={check}>{busy ? 'Checking…' : NAMES.checkAgain}</button>
+      <button type="button" className="co-btn" disabled={busy} onClick={check}>{busy ? <Shine>Checking…</Shine> : NAMES.checkAgain}</button>
       {onDismiss ? <button type="button" className="co-btn" disabled={busy} onClick={onDismiss}>{NAMES.discard}</button> : null}
     </div>
     {checked ? <p className="co-task-footnote" role="status">Checked just now: GitHub shows no review from this attempt.</p> : null}
@@ -104,7 +105,7 @@ export function RunDetail({ run, pulls, listState, busy = false, error = '', onS
       <p className="co-pr-note">{savedVersion(item, pulls, listState)} · {reviewedOn} <small><code>{item.head_sha?.slice(0, 7) || 'unknown'} → {item.base_ref || 'unknown'} ({item.base_sha?.slice(0, 7) || 'unknown'})</code></small>.{elsewhere ? '' : ' Saved findings are not a new approval.'}</p>
       {item.summary ? <MarkdownView markdown={item.summary} /> : elsewhere ? null : <p>The agent’s findings will appear here.</p>}
       {item.public_review?.state === 'posted' && item.public_review.url ? <a href={item.public_review.url} target="_blank" rel="noopener noreferrer">View the posted review on GitHub</a>
-        : item.public_review?.state === 'posting' ? <p className="co-task-footnote">Posting the review on GitHub…</p>
+        : item.public_review?.state === 'posting' ? <p className="co-task-footnote"><Shine>Posting the review on GitHub…</Shine></p>
         : item.public_review?.summary ? <p className="co-task-footnote">{item.public_review.summary}</p> : null}
       {item.verdict_proposal ? <VerdictProposal proposal={item.verdict_proposal} mode={run.mode} busy={busy}
         onDecide={onVerdict && !elsewhere ? (proposal, decision, extra) => onVerdict(item, proposal, decision, extra) : null}

@@ -480,7 +480,7 @@ test('on a phone the four views are one segmented bar with every segment on scre
 test('the phone keeps Sync and Settings labelled, a sticky review footer and decision bar, and an unsqueezed group header', () => {
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const theme = read('theme.js'), work = read('workspace-theme.js'), app = read('index.jsx')
-  assert.match(app, /<span className="co-label-short">\{refreshingAll \? 'Syncing…' : NAMES\.syncShort\}<\/span>/)
+  assert.match(app, /<span className="co-label-short">\{refreshingAll \? <Shine>Syncing…<\/Shine> : NAMES\.syncShort\}<\/span>/)
   assert.equal(NAMES.syncShort, 'Sync', 'the phone keeps the short word; the full name is Sync with GitHub')
   assert.match(theme, /\.co-toolbar \.co-label-short \{ display: inline; \}/)
   assert.doesNotMatch(work, /\.co-header \.co-settings > summary > span \{ display:none; \}/, 'Settings keeps its word on a phone')

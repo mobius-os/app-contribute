@@ -11,6 +11,7 @@ import { WindowHead } from './WindowHead.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
 import { focusActionRegion } from './TaskPane.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 // The window behind Agent > Respond to feedback. It reads what the PR asks for, then sends an agent
 // conversation a written brief. There is one way to go: the agent saves a result, and the owner posts it from the Review tab.
@@ -81,7 +82,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     <div className="co-rw-body">
       {ownerGrant ? null : <p className="co-rw-blocker" role="status" data-post-off><b>Heads-up:</b> {NAMES.postAnswer} is off on this Möbius. The answer will wait in this PR’s Review tab, where you can copy the replies.</p>}
       <h4 className="co-rw-label">What should it address?</h4>
-      {state.phase === 'loading' ? <p className="co-rw-note" role="status">Reading the reviews and threads…</p> : null}
+      {state.phase === 'loading' ? <p className="co-rw-note" role="status"><Shine>Reading the reviews and threads…</Shine></p> : null}
       {state.phase === 'error' ? <p className="co-rw-blocker" role="alert">Could not read this PR’s reviews and threads from GitHub. Close this and try again.</p> : null}
       {state.phase === 'ready' && !state.items.length ? <p className="co-rw-note">Nothing to address was found: no requested changes, open threads, failing checks or conflict. Use Review if you want a fresh look.</p> : null}
       {state.items.length ? <TickList label="What it will address" items={state.items} onToggle={toggle} disabled={busy} /> : null}
@@ -97,7 +98,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       <p>It reads the PR as it is now. If the PR changes while the agent works, it stops and tells you.</p>
       <div className="co-rw-actions">
         <button type="button" className="co-btn" disabled={busy} onClick={onClose}>{NAMES.cancel}</button>
-        <button type="button" className="co-btn co-btn-primary" disabled={busy || state.phase !== 'ready' || !ticked} onClick={start}>{busy ? 'Starting…' : response ? NAMES.respondAgain : 'Start'}</button>
+        <button type="button" className="co-btn co-btn-primary" disabled={busy || state.phase !== 'ready' || !ticked} onClick={start}>{busy ? <Shine>Starting…</Shine> : response ? NAMES.respondAgain : 'Start'}</button>
       </div>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
     </footer>

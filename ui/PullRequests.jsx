@@ -29,6 +29,7 @@ import { ACTION_COPY, methodToSend } from '../action-copy.js'
 import { projectUpdater } from '../updates.js'
 import { NAMES } from '../names.js'
 import { SearchField } from './SearchField.jsx'
+import { Shine } from './Shine.jsx'
 
 // A takeover's one scope: repairs to the named PR, each push approved by the owner.
 const scopeFor = mode => mode === 'review_fix_merge' ? { confirmation_scope: TAKEOVER_SCOPE } : {}
@@ -137,7 +138,7 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onClose }) 
       {matching.filter(person => query || person.login !== own?.login).map(person => <PersonOption key={person.login} label={person.name || person.login} login={person.login} hint={person.name ? person.login : ''} ariaLabel={`Assign to ${person.login}`} disabled={busy || !people.can_assign} onPick={assign} />)}
     </div>
     {!people.loading && !matching.length ? <p>No matching people in the loaded results.</p> : null}
-    {busy ? <p role="status">Assigning…</p> : null}
+    {busy ? <p role="status"><Shine>Assigning…</Shine></p> : null}
     {people.next_page ? <button className="co-btn" disabled={busy || people.loading} onClick={() => load(people.next_page)}>Load more people</button> : null}
     {outcomes.filter(result => !result.ok).map(result => <p key={result.key} role="alert" className="co-run-error">{result.key}: {result.error}</p>)}
     {outcomes.some(result => result.ok) ? <p role="status">{outcomes.filter(result => result.ok).length} assigned. Only remaining PRs will be retried.</p> : null}

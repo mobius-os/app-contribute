@@ -9,6 +9,7 @@ import { TaskPane, useProjectTask } from './TaskPane.jsx'
 import { DateLabel } from './PullRequestDetail.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 const CYCLE_CSS = `
 .co-cycle-outlet{margin:12px 0 20px;border-bottom:1px solid var(--border)}
@@ -131,7 +132,7 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
     <TaskPane id="task:prepare" dock={false}>
       <h3>Make PRs from local changes</h3>
       <p>An agent groups your local changes into PRs and checks them. The PRs stay private on your Möbius. Nothing goes to GitHub until you press Send on each one.</p>
-      {cycle.phase === 'restoring' ? <p role="status">Checking existing work…</p> : null}
+      {cycle.phase === 'restoring' ? <p role="status"><Shine>Checking existing work…</Shine></p> : null}
       {local ? <button type="button" className="co-prepare-scope" onClick={() => task?.open('task:scope')}><span><small>Includes</small><strong>{changedFiles ? `${changedFiles} edited ${changedFiles === 1 ? 'file' : 'files'}` : 'All your edits'}</strong></span><Icon name="right" size={16} /></button> : null}
       {fullCycleAction ? <label className="co-workflow-option co-follow-merge"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /><span><strong>Follow through to merge</strong><small>Keep the agent with this change through review. You still approve sharing and merging.</small></span></label> : null}
       {progress}{startHeld ? null : <>

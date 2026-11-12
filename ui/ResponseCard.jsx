@@ -11,6 +11,7 @@ import { reviewDate } from '../review-copy.js'
 import { COPY_REPLIES, SCREENSHOT_FOLDER, changesFrontEnd, chatStarting, planSteps, postOffReason, repliesText, stepDone } from '../respond-result.js'
 import { screenshotCountText } from '../domain.js'
 import { useScreenshots } from './useScreenshots.js'
+import { Shine } from './Shine.jsx'
 
 // A saved Respond-to-feedback answer on its PR's Review tab: what each point came to, the replies word for word, the commits and
 // changed files, and what Post will do. Reading it is the owner's side of the approval; Post only writes the decision (respond-flow.js).
@@ -152,10 +153,10 @@ function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onP
   const chatButton = label => <button key={label} type="button" className="co-btn" onClick={() => openAgentConversation(result.chat_id)}>{label}</button>
   if (readOnly || status === 'posted') return null
   const buttons = {
-    ready: [<button key="post" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(false)}>{busy ? 'Working…' : NAMES.postAnswer}</button>, copy, chatButton(NAMES.replyInChat),
+    ready: [<button key="post" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(false)}>{busy ? <Shine>Working…</Shine> : NAMES.postAnswer}</button>, copy, chatButton(NAMES.replyInChat),
       <button key="discard" type="button" className="co-btn co-btn-quiet" disabled={busy} onClick={onDiscard}>{NAMES.discard}</button>],
-    approved: starting ? [copy, chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.sendAgain}</button>, copy, chatButton(NAMES.openChat)],
-    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? 'Working…' : NAMES.tryAgain}</button>, copy, chatButton(NAMES.openChat)],
+    approved: starting ? [copy, chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.sendAgain}</button>, copy, chatButton(NAMES.openChat)],
+    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.tryAgain}</button>, copy, chatButton(NAMES.openChat)],
     posting: [chatButton(NAMES.openChat)],
     // A second pass is offered only when the PR logic still allows one.
     stale: [onRespondAgain ? <button key="again" type="button" className="co-btn co-btn-primary" disabled={busy} onClick={onRespondAgain}>{NAMES.respondAgain}</button> : null,
@@ -182,7 +183,7 @@ export function ResponseCard({ pr, response: view, chat = null, busy = false, er
       <RunTag kind={NAMES.respond} at={result.created_at} />
       <div className="co-review-head">
         {status === 'posting' || starting ? <span className="co-arc" aria-hidden="true" /> : null}
-        <h4>{starting ? STARTING.heading : HEADINGS[status]}</h4>
+        <h4>{status === 'posting' && !starting ? <Shine>{HEADINGS.posting}</Shine> : starting ? STARTING.heading : HEADINGS[status]}</h4>
         <span className="co-review-version">{short(result.pr.head_sha)}{status === 'posted' && result.tip_sha ? ` → ${short(result.tip_sha)}` : ''}</span>
       </div>
       <p className="co-review-note">{statusLine(view, pr, starting)}</p>

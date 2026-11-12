@@ -124,8 +124,8 @@ test('a missing approval, failing checks or a conflict show as blockers, and you
 
 test('the finished sheet says merged or queued, from what the platform answered', () => {
   const done = mergeCopy(approved()).done
-  assert.deepEqual(done({ state: 'merged' }), { title: 'Merged', text: '#9 is now in main.' })
-  assert.deepEqual(done({ state: 'queued' }), { title: 'Added to the merge queue', text: 'GitHub merges #9 into main when the queue reaches it.' })
+  assert.deepEqual(done({ state: 'merged' }), { title: 'Merged', text: '**#9** is now in `main`.' })
+  assert.deepEqual(done({ state: 'queued' }), { title: 'Added to the merge queue', text: 'GitHub merges **#9** into `main` when the queue reaches it.' })
 })
 
 test('Merge goes to the platform for this exact version and returns the outcome shapes the sheet reads', async () => {
@@ -302,7 +302,7 @@ test('the post sheet names what it posts, keeps its button off until the words a
   assert.match(ready.footnote, /Contribute cannot take it back/)
   assert.equal(ready.disabled, undefined)
   assert.match(postFindingsCopy(target, { preview, own: true }).facts[0].text, /your own PR/)
-  assert.deepEqual(ready.done({ ok: true, url: 'https://github.com/team/repo/pull/9#pullrequestreview-1' }), { title: 'Posted on GitHub', text: 'Your review is on #9 now.', link: { href: 'https://github.com/team/repo/pull/9#pullrequestreview-1', label: 'View the review on GitHub' } })
+  assert.deepEqual(ready.done({ ok: true, url: 'https://github.com/team/repo/pull/9#pullrequestreview-1' }), { title: 'Posted on GitHub', text: 'Your review is on **#9** now.', link: { href: 'https://github.com/team/repo/pull/9#pullrequestreview-1', label: 'View the review on GitHub' } })
   assert.equal(ready.done({ ok: true }).link, undefined, 'no address, no link')
   const loading = postFindingsCopy(target)
   const refused = postFindingsCopy(target, { error: 'The pull request changed since you looked. Refresh and check it again.' })

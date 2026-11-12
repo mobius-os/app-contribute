@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { launchOptions, loadWorkflowOptions, oversizedPrompt, previewWorkflow, promptBytes, PROMPT_BYTE_LIMIT, saveWorkflowOptions, reviewOptions, workflowAgent } from '../review-prompts.js'
 import { requestOptions } from '../collaboration.js'
+import { Shine } from './Shine.jsx'
 
 const PROMPTS = [['review_prompt','Review'],['fix_prompt','Fix'],['merge_prompt','Merge decision']]
 export const PROMPT_CSS = `
@@ -76,7 +77,7 @@ export function ReviewPromptSettings({ token, appId }) {
   const tooLong = data ? oversizedPrompt(data.options) : ''
   return <section className="co-prompt-settings" aria-label="Review workflow settings"><style>{PROMPT_CSS}</style>
     <div className="co-prompt-head"><h3>Agent prompts</h3>{data ? <PromptChoices active={active} onChange={setActive} /> : null}</div>
-    {!data && !error ? <div className="co-settings-skeleton" role="status">Loading settings…</div> : null}
+    {!data && !error ? <div className="co-settings-skeleton" role="status"><Shine>Loading settings…</Shine></div> : null}
     {data ? <>
       <div className="co-prompt-editor-group">
         <label className="co-visually-hidden" htmlFor={`co-${active}`}>{PROMPTS.find(([key]) => key === active)[1]} prompt. Guidance for new runs; existing runs stay unchanged.</label>

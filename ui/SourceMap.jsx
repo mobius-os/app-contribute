@@ -17,6 +17,7 @@ import { SearchField } from './SearchField.jsx'
 import { FilterLine } from './FilterLine.jsx'
 import { DeskView } from './DeskViews.jsx'
 import { openGithubSettings } from '../github-connection.js'
+import { Shine } from './Shine.jsx'
 
 const FILTERS = [
   ['all', 'All'],
@@ -174,7 +175,7 @@ function PullPageTask({ children }) {
 }
 
 function LoadingState() {
-  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong>Checking repositories…</strong><span>Comparing local, shared, and prepared work.</span></div></div>
+  return <div className="co-source-loading" role="status"><span className="ma-spinner" aria-hidden="true" /><div><strong><Shine>Checking repositories…</Shine></strong><span>Comparing local, shared, and prepared work.</span></div></div>
 }
 
 export function SourceMap({

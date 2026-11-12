@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icons.jsx'
+import { Shine } from './Shine.jsx'
 
 const PROVIDER_ORDER = ['codex', 'claude', 'mobius']
 const effortRows = rows => rows.map(([value, label]) => ({ value, label }))
@@ -216,7 +217,7 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
           {isSelected && selectedEfforts.length ? <div className="co-effort-indent"><EffortTrack efforts={selectedEfforts} value={selectedEffort} onChange={chooseEffort} disabled={!configured} label={`Reasoning effort for ${model.label || model.id}`} /></div> : null}
         </div>
       })}
-      {!registry && !error ? <p className="co-model-note" role="status">Loading models…</p> : null}
+      {!registry && !error ? <p className="co-model-note" role="status"><Shine>Loading models…</Shine></p> : null}
       {error ? <p className="co-model-note" role="alert">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : null}
     </div> : null}
   </section>

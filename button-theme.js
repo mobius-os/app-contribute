@@ -13,7 +13,7 @@ export const BUTTON_CSS = `
   transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 .co-btn:disabled { opacity: .5; cursor: default; }
-.co-btn.is-sending:disabled { opacity: 1; cursor: progress; }
+.co-btn[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }
 .co-btn-primary { border-color: var(--accent-hover, var(--accent)); background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 .co-btn-quiet { border-color: transparent; background: transparent; color: var(--co-btn-tone, var(--muted)); padding-inline: 8px; }
 /* A quiet button can carry a tone (--co-btn-tone and its fill) without any rule of its own overriding the type. */

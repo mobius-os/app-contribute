@@ -979,23 +979,25 @@ export const CSS = `
 .co-secondary-action { gap: 7px; }
 .co-review-btn { min-width: 92px; gap: 7px; }
 .co-icon { display: block; pointer-events: none; }
-.co-action-label { position: relative; display: inline-block; white-space: nowrap; }
-.co-action-label-sweep { display: none; }
+/* Words for something under way (ui/Shine.jsx): a light passes over them. The moving copy is the same words drawn
+   over the still ones from data-text and masked to a band, so the line never changes size and the words exist once.
+   It needs motion and text masks; without either the still words are all there is. A button label keeps to one
+   line; a line in a window may wrap. */
+.co-shine { position: relative; display: inline-block; }
+.co-btn .co-shine { white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   @supports ((-webkit-mask-image: linear-gradient(#000, #000)) or (mask-image: linear-gradient(#000, #000))) {
-    .is-sending .co-action-label-sweep {
-      display: block; position: absolute; inset: 0; overflow: hidden;
-      pointer-events: none; white-space: nowrap;
-      color: color-mix(in srgb, var(--text) 88%, var(--accent));
+    .co-shine::after {
+      content: attr(data-text); content: attr(data-text) / "";
+      position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+      color: var(--co-shine, color-mix(in srgb, var(--text) 88%, var(--accent)));
       -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 32%, transparent 50%);
       mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 32%, transparent 50%);
       -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
       -webkit-mask-size: 300% 100%; mask-size: 300% 100%;
       animation: co-action-sweep 2.4s steps(48, end) infinite;
     }
-    .co-btn-primary.is-sending .co-action-label-sweep {
-      color: color-mix(in srgb, var(--accent-fg) 86%, white);
-    }
+    .co-btn-primary .co-shine { --co-shine: color-mix(in srgb, var(--accent-fg) 86%, white); }
   }
 }
 @keyframes co-action-sweep {
@@ -1004,7 +1006,7 @@ export const CSS = `
   100% { -webkit-mask-position: -50% 0; mask-position: -50% 0; }
 }
 @media (forced-colors: active) {
-  .co-action-label-sweep { display: none !important; }
+  .co-shine::after { display: none !important; }
 }
 .co-published-action {
   display: flex;

@@ -3,6 +3,7 @@ import { discoverRepository } from '../collaboration.js'
 import { followRepository } from '../repositories.js'
 import { NAMES } from '../names.js'
 import { Icon } from './Icons.jsx'
+import { Shine } from './Shine.jsx'
 
 // `quiet`: the last row of the rail's Projects block; otherwise a secondary button (an empty state).
 export function RepositoryPicker({ token, connected, onAdded, quiet = false }) {
@@ -42,7 +43,7 @@ export function RepositoryPicker({ token, connected, onAdded, quiet = false }) {
       <header><strong>Add a GitHub repository</strong><button type="button" className="co-btn co-btn-quiet" onClick={() => setOpen(false)}><Icon name="close" size={17} /> Close</button></header>
       <label htmlFor="co-repository-name">Repository name or link</label>
       <div><input id="co-repository-name" value={value} onChange={event => setValue(event.target.value)} placeholder="owner/project or GitHub URL" disabled={busy} autoComplete="off" required />
-      <button className="co-btn" disabled={busy || !value.trim()}>{busy ? 'Adding…' : 'Add'}</button></div>
+      <button className="co-btn" disabled={busy || !value.trim()}>{busy ? <Shine>Adding…</Shine> : 'Add'}</button></div>
       <p>Follow contributions here without installing the project.</p>
       {error ? <p className="co-run-error" role="alert">{error}</p> : null}
     </form> : <p className="co-repository-note">To add a repository, go to Möbius Settings → Accounts and connect GitHub.</p> : null}

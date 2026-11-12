@@ -3,6 +3,7 @@ import { Envelope, EmptyView } from './Envelope.jsx'
 import { DeskRow, DotLine, StatusPill, whoOf } from './DeskRow.jsx'
 import { PullStateIcon, TimeAgo } from './GithubParts.jsx'
 import { NAMES } from '../names.js'
+import { Shine } from './Shine.jsx'
 
 // What waits on you leads, in the order it wants you: your move, an agent that stopped, a PR GitHub did not answer for.
 const ORDER = { waiting: 0, stalled: 1, unknown: 2 }
@@ -74,7 +75,7 @@ export function AgentRunsView({ reviews, projects, query, login = '', renderWork
     <div className="co-pr-filters" role="group" aria-label="Agent runs">
       {tabs.map(([key, label, count]) => <button key={key} type="button" aria-pressed={tab === key} onClick={() => setPicked(key)}>{label}<span className="co-pr-filter-count">{count}</span></button>)}
     </div>
-    {reviews?.checking && !shown.length ? <p className="co-pr-note" role="status">Checking which of these pull requests are still open…</p> : null}
+    {reviews?.checking && !shown.length ? <p className="co-pr-note" role="status"><Shine>Checking which of these pull requests are still open…</Shine></p> : null}
     {reviews?.counts?.unknown && tab === 'waiting' ? <p className="co-pr-note" role="status">{reviews.counts.unknown === 1 ? 'One pull request' : `${reviews.counts.unknown} pull requests`} could not be read from GitHub, so where {reviews.counts.unknown === 1 ? 'it stands' : 'they stand'} is unknown. {reviews.retry ? <button type="button" className="co-btn co-btn-quiet" onClick={reviews.retry}>Try again</button> : null}</p> : null}
     {empty && !reviews?.checking
       ? <EmptyView icon="cycle" title={query.trim() ? 'Nothing matches your search' : EMPTY[tab].title} hint={query.trim() ? 'Try a PR number, a title word or a repository.' : EMPTY[tab].hint} />

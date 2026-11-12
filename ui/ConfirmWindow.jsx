@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import { ReviewDialog } from './ReviewDialog.jsx'
 import { WindowHead } from './WindowHead.jsx'
+import { Shine } from './Shine.jsx'
 
 // A question that must be answered before something that cannot be taken back (Withdraw a PR, Discard a draft): the
 // shared window with the purple line, the question, one sentence and two equal buttons. Keep, the safe one, has
@@ -16,7 +17,7 @@ export function ConfirmWindow({ label, eyebrow, title, text, keep, confirm, busy
       <div className="co-rw-body"><p id={textId} className="co-rw-lede">{text}</p></div>
       <footer className="co-rw-foot"><div className="co-rw-actions">
         <button type="button" ref={keepRef} className="co-btn" disabled={busy} onClick={onKeep}>{keep}</button>
-        <button type="button" className="co-btn co-btn-danger" disabled={busy} onClick={onConfirm}>{busy ? working : confirm}</button>
+        <button type="button" className="co-btn co-btn-danger" disabled={busy} onClick={onConfirm}>{busy ? <Shine>{working}</Shine> : confirm}</button>
       </div></footer>
     </section>
   </ReviewDialog>

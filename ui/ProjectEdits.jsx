@@ -4,6 +4,7 @@ import { Icon } from './Icons.jsx'
 import UnifiedDiff from './diff/UnifiedDiff.jsx'
 import { parseUnifiedDiff } from './diff/parseUnifiedDiff.js'
 import { useProjectTask } from './TaskPane.jsx'
+import { Shine } from './Shine.jsx'
 
 export function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
   const [state, setState] = useState({ phase: 'loading', data: null })
@@ -43,7 +44,7 @@ export function ProjectFileChanges({ project, loadProjectDiff, onRefresh }) {
           />
         </> : <p className="co-project-diff-empty">No changed files in this comparison.</p>
       ) : state.phase === 'loading' ? (
-        <div className="co-project-diff-loading" role="status"><span className="ma-spinner is-compact" aria-hidden="true" /> Loading file diffs…</div>
+        <div className="co-project-diff-loading" role="status"><span className="ma-spinner is-compact" aria-hidden="true" /> <Shine>Loading file diffs…</Shine></div>
       ) : (
         <button
           type="button"

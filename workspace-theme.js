@@ -620,7 +620,7 @@ export const WORKSPACE_CSS = `
 .co-rw-pr strong { display:block; font-weight:500; overflow-wrap:anywhere; }
 /* The branch line (BranchFlow) under the PR name: the same markup as the PR page, as two small chips that wrap on a phone rather than stack. */
 .co-rw-lines .co-branch-flow { flex-direction:row; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; margin:2px 0 0; color:var(--muted); }
-.co-rw-lines .co-branch-flow code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
+.co-rw-lines .co-branch-flow code,.co-chip-code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
 .co-rw-list { width:100%; margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:var(--co-text-meta); text-align:left; }
 .co-rw-list li span { display:block; font-size:var(--co-text-meta); }
 .co-rw-close { position:absolute; top:10px; right:10px; display:grid; place-items:center; width:40px; height:40px; }
@@ -693,7 +693,22 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-facts .is-bad .co-icon { color:var(--danger,#e5534b); }
 .co-rw-head.is-done .co-rw-icon { background:color-mix(in srgb,var(--green) 16%,transparent); color:var(--green); }
 .co-rw-lede { margin:0; color:var(--muted); font-size:var(--co-text-body); line-height:1.5; text-align:center; }
-.co-rw-result { margin:0 0 4px; font-size:var(--co-text-body); line-height:1.5; }
+/* The two lines a window speaks in once you have pressed the action. Both sit in the middle, under the centred head:
+   working is quieter than the words around it (the light in ui/Shine.jsx passes over it), the result is plain text
+   with the PR number bold and the branch as a chip. */
+.co-rw-status { margin:0; padding:4px 0 24px; color:var(--muted); font-size:var(--co-text-body); font-weight:550; letter-spacing:.005em; line-height:1.5; text-align:center; }
+.co-rw-result { margin:0 0 4px; font-size:var(--co-text-body); line-height:1.5; text-align:center; }
+.co-rw-result b { font-weight:700; font-variant-numeric:tabular-nums; }
+/* The result arrives once: the check pops in and draws itself, the title and the line rise after it. */
+@media (prefers-reduced-motion:no-preference) {
+ .co-rw-head.is-done .co-rw-icon { animation:co-pop .42s cubic-bezier(.2,1.4,.4,1) both; }
+ .co-rw-head.is-done .co-rw-icon path { stroke-dasharray:24; stroke-dashoffset:24; animation:co-draw .32s .22s ease-out forwards; }
+ .co-rw-head.is-done h3 { animation:co-rise .3s .12s ease-out both; }
+ .co-rw-result { animation:co-rise .34s .3s ease-out both; }
+}
+@keyframes co-pop { from { transform:scale(.5); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes co-draw { to { stroke-dashoffset:0; } }
+@keyframes co-rise { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
 .co-split { position:relative; display:inline-flex; }
 .co-split .co-split-main { border-top-right-radius:0; border-bottom-right-radius:0; }
 .co-split .co-split-more { min-width:40px; padding:0 10px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid color-mix(in srgb,var(--accent-fg,#fff) 35%,transparent); }

@@ -93,6 +93,7 @@ import { collaborationRequest, discoverRepositories, discoverRepository } from '
 import { chatBlockTarget, validRecordId } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
+import { Shine } from './ui/Shine.jsx'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -156,7 +157,7 @@ export function GithubPullsUnavailable({ conn, onRetry }) {
     <button type="button" className="co-btn" disabled={retrying} onClick={async () => {
       setRetrying(true)
       try { await onRetry?.() } finally { setRetrying(false) }
-    }}>{retrying ? 'Checking…' : NAMES.checkAgain}</button></section>
+    }}>{retrying ? <Shine>Checking…</Shine> : NAMES.checkAgain}</button></section>
 }
 
 // Preflight rejection did not enter a public write. Keep it distinct from a
@@ -1842,8 +1843,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed ? SYNC_NOTE_ID : undefined}>
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? 'Syncing…' : NAMES.sync}</span>
-              <span className="co-label-short">{refreshingAll ? 'Syncing…' : NAMES.syncShort}</span>
+            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.sync}</span>
+              <span className="co-label-short">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
               <SyncNote note={refreshNote} />
             </span>
           </button>
