@@ -479,6 +479,7 @@ function ExactBatchAction({
       aria-describedby={descriptionId}
     >
       <header>
+        <small>{mode === 'ready' ? NAMES.openForReview : NAMES.sendToGitHub}</small>
         <h3>{mode === 'ready'
           ? `Mark ${count === 1 ? 'this draft' : `${count} drafts`} ready for review?`
           : staged ? stageWords(stage).heading(count) : `Send ${count} reviewed ${count === 1 ? 'pull request' : 'pull requests'}?`}</h3>

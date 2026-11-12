@@ -30,10 +30,12 @@ test('every corner radius and type size names a token, never a raw value', () =>
 const phoneSet = theme => /@media \(max-width: 680px\) \{\s*:root \{([^}]*)\}/.exec(theme)?.[1] || ''
 const sizesIn = text => Object.fromEntries([...text.matchAll(/--co-text-([a-z]+):\s*(\d+)px/g)].map(match => [match[1], Number(match[2])]))
 
-test('the token sheet holds five radii and its type sizes, with one compact set for a phone', () => {
+test('the token sheet holds six radii and its type sizes, with one compact set for a phone', () => {
   const theme = readFileSync(new URL('theme.js', root), 'utf8')
+  // The Window Rule (DESIGN.md): the one big radius is a window over the page, 24px, and 20px on a phone.
   const radii = [...theme.matchAll(/--co-radius-[a-z]+:\s*(\d+)px/g)].map(match => Number(match[1]))
-  assert.deepEqual(radii, [6, 8, 10, 12, 999])
+  // The Window Rule (DESIGN.md): the one big radius is a window over the page, 24px, and 20px on a phone.
+  assert.deepEqual(radii, [6, 8, 10, 12, 999, 24, 20])
   const phone = phoneSet(theme)
   assert.deepEqual(sizesIn(theme.replace(phone, '')), { meta: 14, body: 16, section: 22, title: 28, chip: 14, entry: 16, reading: 13, code: 12 })
   assert.deepEqual(sizesIn(phone), { meta: 13, body: 15, section: 20, title: 22, chip: 12 })

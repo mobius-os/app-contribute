@@ -15,6 +15,7 @@ export const CSS = `
   --co-radius-control: 10px;  /* buttons and rows */
   --co-radius-panel: 12px;    /* cards, panels and windows */
   --co-radius-round: 999px;   /* state pills, labels and counts */
+  --co-radius-window: 24px;   /* a window over the page: confirmations, agent jobs and pictures (20 on a phone) */
   --co-text-meta: 14px;
   --co-text-body: 16px;
   --co-text-section: 22px;
@@ -53,6 +54,7 @@ export const CSS = `
     --co-icon-scale: .875;
   }
 }
+@media (max-width: 680px) { :root { --co-radius-window: 20px; } }
 .co-root {
   box-sizing: border-box; position: relative; min-height: 0; height: 100%;
   /* clip, not hidden: a hidden box is still a scroll container, so opening a
@@ -1004,14 +1006,6 @@ export const CSS = `
 @media (forced-colors: active) {
   .co-action-label-sweep { display: none !important; }
 }
-/* Two-tap confirmation before a consequential lifecycle action. History is
-   reversible; bot withdrawal is not, so both keep the safe choice focused. */
-.co-confirm {
-  display: flex; flex-direction: column; gap: 10px; padding: 12px;
-  border-radius: var(--co-radius-control);
-  border: 1px solid color-mix(in srgb, var(--co-warn) 34%, var(--border));
-  background: color-mix(in srgb, var(--co-warn) 7%, var(--surface));
-}
 .co-published-action {
   display: flex;
   flex-wrap: wrap;
@@ -1022,14 +1016,6 @@ export const CSS = `
 .co-published-action .co-review-error {
   flex: 1 0 100%;
   margin: 0;
-}
-.co-card > .co-confirm { margin-top: 12px; }
-.co-confirm-text { margin: 0; font-size: var(--co-text-meta); line-height: 1.45; color: var(--text); }
-.co-confirm-actions { display: flex; gap: 8px; }
-.co-confirm-actions .co-btn { flex: 1 1 0; min-width: 0; }
-.co-confirm.is-safe {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
 /* Restore lives on an archived card in History — a single, content-width button. */
 .co-history-actions { display: flex; gap: 8px; margin-top: 2px; }
@@ -1535,9 +1521,6 @@ export const CSS = `
   .co-focus-view .co-review-btn,
   .co-focus-view .co-send-btn { width: 100%; min-width: 0; }
   .co-focus-view .co-secondary-action { width: auto; flex: 0 0 auto; padding-inline: 11px; }
-  .co-card-footer:has(.co-confirm) { align-items: stretch; flex-direction: column; }
-  .co-card-footer:has(.co-confirm) .co-details-toggle { align-self: flex-start; }
-  .co-action-block:has(.co-confirm) { width: 100%; align-items: stretch; }
   .co-action-block .co-review-note,
   .co-action-block .co-review-error { width: 100%; }
   .co-agent-started { align-items: flex-start; flex-direction: column; }

@@ -484,7 +484,7 @@ test('the phone keeps Sync and Settings labelled, a sticky review footer and dec
   assert.equal(NAMES.syncShort, 'Sync', 'the phone keeps the short word; the full name is Sync with GitHub')
   assert.match(theme, /\.co-toolbar \.co-label-short \{ display: inline; \}/)
   assert.doesNotMatch(work, /\.co-header \.co-settings > summary > span \{ display:none; \}/, 'Settings keeps its word on a phone')
-  assert.match(work, /\.co-rw-foot \{ position:sticky; bottom:0;/)
+  assert.match(work, /\.co-rw-foot \{ position:sticky; bottom:0;/, 'the review window\'s button stays on screen at every width: the card scrolls, its footer does not (finding 3)')
   assert.match(work, /\.co-decision-bar \{ display:flex; position:sticky; bottom:0;/)
   assert.match(work, /\.co-envelope-head \.co-project-icon,\.co-envelope-head \.co-source-tag,\.co-envelope-head \.co-rail-count \{ flex:none; \}/)
   assert.match(work, /\.co-envelope-head strong \{ min-width:0;/)

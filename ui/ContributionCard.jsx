@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   ATTENTION_DETAIL,
   ATTENTION_HEADLINE,
@@ -10,6 +10,7 @@ import {
   timeAgo,
 } from '../domain.js'
 import { parseDiffStat } from '../diff.js'
+import { ConfirmWindow } from './ConfirmWindow.jsx'
 import { contributionLabelOutcome } from '../labels.js'
 import { contributionTitle } from '../run.js'
 import {
@@ -570,14 +571,6 @@ function ReviewActions({
   const attentionBlocked = rec.needs_attention === true
   const submitFailed = sendNeedsAttention(rec)
   const reviewIncomplete = isPr && recordReviewIncomplete(rec)
-  const keepButtonRef = useRef(null)
-  const confirmDescriptionId = useId()
-
-  // The confirm replaces the action row. Move focus to the safe choice so
-  // keyboard and switch users never land on the state-changing action by default.
-  useEffect(() => {
-    if (confirmingDismiss) keepButtonRef.current?.focus()
-  }, [confirmingDismiss])
 
   async function send() {
     if (!isPr || blocked || submitFailed || reviewIncomplete) return
@@ -655,118 +648,99 @@ function ReviewActions({
         />
       ) : null}
       {confirmingDismiss ? (
-        <div
-          className="co-confirm"
-          role="alertdialog"
-          aria-label="Confirm dismissal"
-          aria-describedby={confirmDescriptionId}
-        >
-          <p id={confirmDescriptionId} className="co-confirm-text">
-            {NAMES.discard} this {isPr ? 'prepared pull request' : 'draft'}? It will leave
-            your active list and can be restored from Dismissed.
-          </p>
-          <div className="co-confirm-actions">
-            <button
-              type="button"
-              ref={keepButtonRef}
-              className="co-btn"
-              disabled={dismissing}
-              onClick={() => setConfirmingDismiss(false)}
-            >
-              Keep
-            </button>
-            <button
-              type="button"
-              className="co-btn co-btn-danger"
-              disabled={dismissing}
-              onClick={dismiss}
-            >
-              {dismissing ? 'Discarding…' : NAMES.discard}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="co-review-actions" role="group" aria-label="PR actions">
-          {blocked ? (
-            <button
-              type="button"
-              className="co-btn co-btn-primary co-refresh-btn"
-              aria-label="Fix this contribution in chat"
-              title="Fix in chat"
-              onClick={feedback}
-            >
-              <Icon name="feedback" />
-              <span>Fix in chat</span>
-            </button>
-          ) : isPr ? (
-            <>
-              {reviewIncomplete && typeof onReview === 'function' ? (
-                <AgentHandoffButton
-                  action={reviewAction || reviewAllAction([rec])}
-                  onStart={onReview}
-                  className="co-btn co-btn-primary co-review-btn"
-                  icon="review"
-                />
-              ) : null}
-              {!reviewIncomplete && !submitFailed && typeof onSend === 'function' ? (
-                <button
-                  type="button"
-                  className={'co-btn co-btn-primary co-send-btn' + (sending ? ' is-sending' : '')}
-                  disabled={sending}
-                  onClick={send}
-                  aria-busy={sending}
-                  aria-label={sending
-                    ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
-                    : (isUpdate ? 'Send pull request update' : 'Send pull request')}
-                  title={isUpdate ? 'Send update' : 'Send PR'}
-                >
-                  <Icon name="send" />
-                  <span className="co-action-label">
-                    <span>{sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
-                    {sending ? (
-                      <span className="co-action-label-sweep" aria-hidden="true">
-                        Sending…
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              ) : null}
-            </>
-          ) : typeof onFeedback === 'function' ? (
-            <button
-              type="button"
-              className="co-btn co-btn-primary co-send-btn"
-              onClick={feedback}
-              aria-label="Open this request's source conversation"
-              title="Open source conversation"
-            >
-              <Icon name="feedback" />
-              <span>Chat</span>
-            </button>
-          ) : null}
-          {!blocked && !attentionBlocked && isPr ? (
-            <button
-              type="button"
-              className="co-btn co-secondary-action"
-              onClick={feedback}
-              aria-label="Open source chat"
-              title="Open source chat"
-            >
-              <Icon name="feedback" />
-              <span>Chat</span>
-            </button>
-          ) : null}
+        <ConfirmWindow
+          label="Confirm dismissal"
+          eyebrow={recordWhere(rec)}
+          title={`${NAMES.discard} this ${isPr ? 'prepared pull request' : 'draft'}?`}
+          text="It will leave your active list and can be restored from Dismissed."
+          keep="Keep"
+          confirm={NAMES.discard}
+          working="Discarding…"
+          busy={dismissing}
+          onKeep={() => setConfirmingDismiss(false)}
+          onConfirm={dismiss}
+        />
+      ) : null}
+      <div className="co-review-actions" role="group" aria-label="PR actions">
+        {blocked ? (
           <button
             type="button"
-            className={isPr ? 'co-btn co-btn-danger co-secondary-action co-history-action' : 'co-request-history'}
-            onClick={() => setConfirmingDismiss(true)}
-            aria-label={isPr ? 'Discard prepared PR' : 'Discard request draft'}
-            title={NAMES.discard}
+            className="co-btn co-btn-primary co-refresh-btn"
+            aria-label="Fix this contribution in chat"
+            title="Fix in chat"
+            onClick={feedback}
           >
-            {isPr ? <span>{NAMES.discard}</span> : NAMES.discard}
+            <Icon name="feedback" />
+            <span>Fix in chat</span>
           </button>
-        </div>
-      )}
+        ) : isPr ? (
+          <>
+            {reviewIncomplete && typeof onReview === 'function' ? (
+              <AgentHandoffButton
+                action={reviewAction || reviewAllAction([rec])}
+                onStart={onReview}
+                className="co-btn co-btn-primary co-review-btn"
+                icon="review"
+              />
+            ) : null}
+            {!reviewIncomplete && !submitFailed && typeof onSend === 'function' ? (
+              <button
+                type="button"
+                className={'co-btn co-btn-primary co-send-btn' + (sending ? ' is-sending' : '')}
+                disabled={sending}
+                onClick={send}
+                aria-busy={sending}
+                aria-label={sending
+                  ? (isUpdate ? 'Sending pull request update' : 'Sending pull request')
+                  : (isUpdate ? 'Send pull request update' : 'Send pull request')}
+                title={isUpdate ? 'Send update' : 'Send PR'}
+              >
+                <Icon name="send" />
+                <span className="co-action-label">
+                  <span>{sending ? 'Sending…' : (isUpdate ? 'Send update' : 'Send PR')}</span>
+                  {sending ? (
+                    <span className="co-action-label-sweep" aria-hidden="true">
+                      Sending…
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            ) : null}
+          </>
+        ) : typeof onFeedback === 'function' ? (
+          <button
+            type="button"
+            className="co-btn co-btn-primary co-send-btn"
+            onClick={feedback}
+            aria-label="Open this request's source conversation"
+            title="Open source conversation"
+          >
+            <Icon name="feedback" />
+            <span>Chat</span>
+          </button>
+        ) : null}
+        {!blocked && !attentionBlocked && isPr ? (
+          <button
+            type="button"
+            className="co-btn co-secondary-action"
+            onClick={feedback}
+            aria-label="Open source chat"
+            title="Open source chat"
+          >
+            <Icon name="feedback" />
+            <span>Chat</span>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={isPr ? 'co-btn co-btn-danger co-secondary-action co-history-action' : 'co-request-history'}
+          onClick={() => setConfirmingDismiss(true)}
+          aria-label={isPr ? 'Discard prepared PR' : 'Discard request draft'}
+          title={NAMES.discard}
+        >
+          {isPr ? <span>{NAMES.discard}</span> : NAMES.discard}
+        </button>
+      </div>
       {!isPr && rec.status === 'prepared' ? (
         <p className="co-review-note">
           Requests stay connected to their source conversation, where you can refine or publish them with the full context intact.
@@ -930,20 +904,20 @@ function AutopilotPanel({ rec, onSetAutopilot }) {
   )
 }
 
+// repo, optionally with a #number; both tolerate absence.
+function recordWhere(rec) {
+  const repo = rec.repo || ''
+  return repo && rec.number ? `${repo} #${rec.number}` : repo
+}
+
 function WithdrawAction({ rec, onWithdraw }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
-  const keepRef = useRef(null)
-  const descriptionId = useId()
   const eligible = rec.submission_mode === 'mobius-bot' &&
     ['draft', 'open'].includes(rec.status) &&
     typeof rec.relay_contribution_id === 'string' &&
     typeof onWithdraw === 'function'
-
-  useEffect(() => {
-    if (confirming) keepRef.current?.focus()
-  }, [confirming])
 
   if (!eligible) return null
 
@@ -961,51 +935,30 @@ function WithdrawAction({ rec, onWithdraw }) {
     }
   }
 
-  if (!confirming) {
-    return (
-      <div className="co-published-action">
-        <button
-          type="button"
-          className="co-btn"
-          onClick={() => { setNote(''); setConfirming(true) }}
-        >
-          Withdraw PR
-        </button>
-        {note ? <p className="co-review-error" role="status">{note}</p> : null}
-      </div>
-    )
-  }
-
   return (
-    <div
-      className="co-confirm"
-      role="alertdialog"
-      aria-label="Confirm contribution withdrawal"
-      aria-describedby={descriptionId}
-    >
-      <p id={descriptionId} className="co-confirm-text">
-        Withdraw this pull request? Möbius will close it and remove its bot
-        branch. The local record stays intact; nothing will be merged.
-      </p>
-      <div className="co-confirm-actions">
-        <button
-          type="button"
-          ref={keepRef}
-          className="co-btn"
-          disabled={busy}
-          onClick={() => setConfirming(false)}
-        >
-          Keep open
-        </button>
-        <button
-          type="button"
-          className="co-btn co-btn-danger"
-          disabled={busy}
-          onClick={withdraw}
-        >
-          {busy ? 'Withdrawing…' : 'Withdraw PR'}
-        </button>
-      </div>
+    <div className="co-published-action">
+      <button
+        type="button"
+        className="co-btn"
+        onClick={() => { setNote(''); setConfirming(true) }}
+      >
+        Withdraw PR
+      </button>
+      {note ? <p className="co-review-error" role="status">{note}</p> : null}
+      {confirming ? (
+        <ConfirmWindow
+          label="Confirm contribution withdrawal"
+          eyebrow={recordWhere(rec)}
+          title="Withdraw this pull request?"
+          text="Möbius will close it and remove its bot branch. The local record stays intact; nothing will be merged."
+          keep="Keep open"
+          confirm="Withdraw PR"
+          working="Withdrawing…"
+          busy={busy}
+          onKeep={() => setConfirming(false)}
+          onConfirm={withdraw}
+        />
+      ) : null}
     </div>
   )
 }
@@ -1119,9 +1072,7 @@ export function ContributionCard({
     if (expanded) window.mobius?.signal?.('contribution_reviewed', { id: rec.id })
   }, [expanded])
 
-  // repo, optionally with a #number; both tolerate absence.
-  let where = rec.repo || ''
-  if (where && rec.number) where += ' #' + rec.number
+  const where = recordWhere(rec)
   const meta = [typeLabel, where, when].filter(Boolean)
 
   const title = rec.title || where || 'Untitled contribution'

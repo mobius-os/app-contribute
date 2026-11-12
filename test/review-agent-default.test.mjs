@@ -83,7 +83,7 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub will see is one labelled icon beside Close, and the words stay in the page for a screen reader', async t => {
+test('what GitHub sees is one labelled icon at the top of the window, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
@@ -98,7 +98,7 @@ test('what GitHub will see is one labelled icon beside Close, and the words stay
   // The fix window says the same thing the same way.
   const fix = api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} })
   assert.match(fix, /co-rw-seen is-private/)
-  assert.equal((fix.match(/aria-label="Close"/g) || []).length, 1)
+  assert.equal((fix.match(/>Cancel<\/button>/g) || []).length, 1, 'and the fix window has one way out, Cancel')
 })
 
 test('Who sees the result sits on one row: the question on the left, the three choices on the right', async t => {
@@ -123,20 +123,19 @@ test('the dialog styles give the row, the steps and the hover card their room', 
 test('the hover card is anchored to the header and sized from the dialog, never the viewport', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
   const card = css.match(/\.co-rw-seen-card \{([^}]*)\}/)[1]
-  assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:20px; position:relative;/, 'the header is what the card is positioned against')
-  assert.match(css, /\.co-rw-seen \{ display:grid; \}/, 'the icon wrapper is not a positioned ancestor')
-  assert.match(card, /right:var\(--rw-edge\); width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side')
+  assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:28px; position:relative;/, 'the header is what the card is positioned against')
+  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1; margin-bottom:6px; \}/, 'the icon wrapper is not a positioned ancestor')
+  assert.match(card, /left:var\(--rw-edge\); right:var\(--rw-edge\); margin-inline:auto; width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side and sits in the middle')
   assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and header insets and clips the card on a narrow phone')
-  assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:16px;/, 'the narrow sheet has the smaller edge')
+  assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:20px;/, 'the phone card has the smaller edge')
 })
 
-test('the lock’s label sits left of its icon, which stays beside Close; on a narrow phone it takes its own row under the title', () => {
+test('the lock’s label sits beside its icon as the first line of the head, centred, with the card’s arrow pointing at it', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 calc\(\(var\(--co-control-height\) - 20px\) \/ 2\) 0 10px; \}/, 'the icon keeps its place a button’s width in from the edge, so the card’s arrow still points at it')
-  const narrow = css.match(/@media\(max-width:450px\) \{\n \.co-rw-tools \{ display:contents; \}([^@]*)\n\}/)?.[1] || ''
-  assert.match(narrow, /\.co-rw-head \.co-rw-close \{ grid-column:3; grid-row:1; \}/, 'Close stays at the top right')
-  assert.match(narrow, /\.co-rw-seen \{ grid-column:2 \/ -1; grid-row:2;/, 'the label has the width of the title column and wider, on its own row')
-  assert.match(narrow, /\.co-rw-seen-card::before \{ display:none; \}/, 'an arrow that cannot point at the icon is not drawn')
+  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 12px; cursor:help; \}/)
+  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1;/, 'it comes before the purple line, so it never sits over a long title')
+  assert.match(css, /\.co-rw-seen-card::before \{[^}]*left:50%;/, 'the arrow is under the middle of the centred lock')
+  assert.doesNotMatch(css, /@media\(max-width:450px\) \{\n \.co-rw-tools \{ display:contents; \}/, 'there is no second narrow layout for it any more')
 })
 
 test('a new Review or Fix window is started from the saved agent, and only when there is one', () => {

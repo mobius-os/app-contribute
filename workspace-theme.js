@@ -75,19 +75,8 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-run-fold { border-radius:0; border:0; border-bottom:1px solid var(--border); }
 .co-public-work { margin-top:22px; }
 /* Non-modal selection shelf; fixed only within this mini-app iframe. */
-.co-page.is-sources { padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); scroll-padding-bottom:max(var(--co-selection-height,0px),var(--co-task-height,0px)); }
-.co-workspace .co-task-dock { position:fixed; left:50%; right:auto; top:auto; bottom:max(16px,env(safe-area-inset-bottom)); width:calc(100% - 48px); max-width:800px; margin:0; z-index:20; background:var(--surface); border:1px solid color-mix(in srgb,var(--border) 72%,var(--text)); border-radius:var(--co-radius-panel); box-shadow:0 18px 58px color-mix(in srgb,#000 34%,transparent); transform:translateX(-50%); }
+.co-page.is-sources { padding-bottom:var(--co-selection-height,0px); scroll-padding-bottom:var(--co-selection-height,0px); }
 
-.co-workspace .co-task-dock { width:min(720px,calc(100% - 48px)); padding:28px; max-height:78dvh; overflow:auto; overscroll-behavior:contain; }
-.co-task-dock .co-inline-close { position:sticky; top:0; float:right; margin:-12px -10px 0 12px; background:var(--surface); z-index:1; }
-.co-workspace .co-task-dock > .co-run-approval { margin:0; overflow:visible; border:0; border-radius:0; background:transparent; }
-.co-workspace .co-task-dock > .co-run-approval > header { padding:0 36px 16px 0; }
-.co-workspace .co-task-dock > .co-run-approval h3 { margin:0; font-size:var(--co-text-section); line-height:1.3; letter-spacing:-.02em; }
-.co-workspace .co-task-dock > .co-run-approval header p { margin:8px 0 0; font-size:var(--co-text-body); line-height:1.55; }
-.co-workspace .co-task-dock > .co-run-approval .co-run-approval-list { max-height:min(35dvh,320px); border:1px solid var(--border); border-radius:var(--co-radius-control); }
-.co-workspace .co-task-dock > .co-run-approval .co-run-approval-list li { background:var(--surface-2); }
-.co-workspace .co-task-dock > .co-run-approval .co-run-approval-list strong { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-.co-workspace .co-task-dock > .co-run-approval .co-run-approval-actions { padding:16px 0 0; }
 
 
 .co-detail-tabs { width:fit-content; max-width:100%; background:none; padding:0; gap:16px; border-bottom:1px solid var(--border); }
@@ -158,18 +147,13 @@ export const WORKSPACE_CSS = `
 .co-workspace .co-run-row-main small { white-space:normal; }
 
 .co-workspace .co-run-fold { background:none; }
-.co-task-dock:focus-visible,.co-task-dock [tabindex="-1"]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 /* Inline panes take focus only so keyboard users land in them; their border
    already marks them, so the browser ring would trace a second, tight frame. */
 .co-task-content:not(.co-task-dock):focus,.co-task-content:not(.co-task-dock) [tabindex="-1"]:focus { outline:none; }
-.co-workspace .co-task-dock { animation:co-dock-arrive .18s cubic-bezier(.16,1,.3,1); }
 .co-connect-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:0 0 20px; padding:16px 18px; border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border)); border-radius:var(--co-radius-panel); background:color-mix(in srgb,var(--accent-dim) 42%,var(--surface)); }
 .co-connect-banner strong { display:block; font-size:var(--co-text-body); font-weight:650; }
 .co-connect-banner p { margin:4px 0 0; max-width:64ch; color:var(--muted); font-size:var(--co-text-meta); line-height:1.5; }
 @media(max-width:680px) { .co-connect-banner { align-items:stretch; flex-direction:column; gap:12px; margin-bottom:16px; } .co-connect-banner .co-btn { width:100%; justify-content:center; } }
-@keyframes co-dock-arrive { from { transform:translate(-50%,12px); } to { transform:translate(-50%,0); } }
-@keyframes co-dock-arrive-mobile { from { transform:translateY(12px); } to { transform:translateY(0); } }
-@media(prefers-reduced-motion:reduce) { .co-workspace .co-task-dock { animation:none; } }
 @media(max-width:680px) {
  .co-header { padding:6px 18px; }
  .co-header::after { left:18px; right:18px; }
@@ -178,8 +162,6 @@ export const WORKSPACE_CSS = `
  .co-workspace-title h2 { font-size:var(--co-text-section); }
  .co-task-content { padding:20px; }
  .co-pr-detail { padding:12px 0; }
- .co-workspace .co-task-dock { left:8px; right:8px; width:auto; bottom:max(8px,env(safe-area-inset-bottom)); border-radius:var(--co-radius-panel); transform:none; }
- .co-workspace .co-task-dock { padding:20px; max-height:76dvh; animation-name:co-dock-arrive-mobile; }
 }
 .co-other-repositories { margin-top:28px; border-top:1px solid var(--border); }
 .co-other-repositories > summary { display:flex; align-items:center; gap:12px; min-height:56px; font-size:var(--co-text-body); cursor:pointer; }
@@ -599,8 +581,8 @@ export const WORKSPACE_CSS = `
    run off a side or hide behind the screen's edge, and the dimmed page behind it makes its edge plain. */
 .co-agent-menu-scrim,.co-agent-menu-list .co-agent-menu-cancel { display:none; }
 @media(max-width:680px) {
-  .co-agent-menu-scrim { display:block; position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.6); }
-  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(86dvh,640px); overflow-y:auto; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:2px solid var(--accent); border-radius:var(--co-radius-panel) var(--co-radius-panel) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
+  .co-agent-menu-scrim { display:block; position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(86dvh,640px); overflow-y:auto; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
   .co-agent-menu-list::before { content:''; display:block; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
   .co-agent-menu-list button:not(.co-agent-menu-cancel) { min-height:48px; margin:5px 0; border:1px solid var(--border); }
   .co-agent-menu-list button.is-rec { border-color:var(--accent); }
@@ -609,20 +591,40 @@ export const WORKSPACE_CSS = `
 }
 
 /* The agent review window: protected focus for a consent with public effects. */
-.co-dialog-backdrop { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.6); }
-.co-dialog { width:min(580px,100%); max-height:calc(100% - 40px); overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); box-shadow:0 24px 60px rgba(0,0,0,.45); animation:co-dialog-in .16s ease-out; }
+/* The Window Rule (DESIGN.md): every pop-up over the page is one blurred, darkened backdrop and one round card with a faint accent edge. */
+.co-dialog-backdrop { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+.co-dialog { width:min(520px,100%); max-height:calc(100% - 40px); overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); box-shadow:0 28px 90px rgba(0,0,0,.42); animation:co-dialog-in .16s ease-out; }
 .co-dialog::-webkit-scrollbar { display:none; }
+/* A project action (Send to GitHub, Mark ready) is a window like the rest: it sits in a .co-dialog and its own card chrome is gone. */
+.co-dialog > .co-task-dock { position:relative; margin:0; padding:32px 28px 28px; border:0; background:none; }
+.co-task-dock:focus-visible,.co-task-dock [tabindex="-1"]:focus-visible { outline:2px solid var(--accent); outline-offset:-4px; }
+.co-task-dock > .co-run-approval { margin:0; overflow:visible; border:0; border-radius:0; background:transparent; text-align:center; }
+.co-task-dock > .co-run-approval > header { display:grid; gap:8px; padding:0 0 16px; }
+.co-task-dock > .co-run-approval > header small { color:var(--co-you-text); font-size:var(--co-text-meta); font-weight:800; letter-spacing:.08em; }
+.co-task-dock > .co-run-approval h3 { margin:0; font-size:var(--co-text-section); font-weight:650; line-height:1.2; letter-spacing:-.03em; }
+.co-task-dock > .co-run-approval header p { margin:0; font-size:var(--co-text-body); line-height:1.5; }
+.co-task-dock > .co-run-approval .co-run-approval-list { max-height:min(35dvh,320px); border:1px solid var(--border); border-radius:var(--co-radius-panel); text-align:left; }
+.co-task-dock > .co-run-approval .co-run-approval-list li { background:var(--bg); }
+.co-task-dock > .co-run-approval .co-run-approval-list strong { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.co-task-dock > .co-run-approval .co-run-approval-actions { gap:10px; padding:20px 0 0; }
+.co-task-dock > .co-run-approval .co-run-approval-actions .co-btn { flex:1 1 0; min-width:0; justify-content:center; }
 @keyframes co-dialog-in { from { opacity:0; transform:translateY(8px) scale(.985); } to { opacity:1; transform:none; } }
 .co-review-window { outline:none; }
-.co-rw-head { --rw-edge:20px; position:relative; display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:14px; align-items:start; padding:var(--rw-edge) var(--rw-edge) 16px; border-bottom:1px solid var(--border); }
-.co-rw-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:var(--co-radius-panel); background:var(--accent-dim); color:var(--accent); }
-.co-rw-head h3 { margin:0; font-size:var(--co-text-section); font-weight:680; letter-spacing:-.015em; line-height:1.25; overflow-wrap:anywhere; }
-.co-rw-pr { margin:4px 0 0; font-size:var(--co-text-body); line-height:1.45; }
-.co-rw-pr strong { display:block; font-weight:600; overflow-wrap:anywhere; }
-.co-rw-pr span,.co-rw-list li span { display:block; color:var(--muted); font-size:var(--co-text-meta); }
-.co-rw-list { margin:6px 0 0; padding-left:18px; font-size:var(--co-text-meta); }
-.co-rw-close { display:grid; place-items:center; width:40px; height:40px; }
-.co-rw-body { display:flex; flex-direction:column; gap:18px; padding:18px 20px 4px; }
+.co-rw-head { --rw-edge:28px; position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:calc(var(--rw-edge) + 4px) var(--rw-edge) 4px; text-align:center; }
+.co-rw-lines { display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0; max-width:100%; }
+.co-rw-head:has(.co-rw-close) .co-rw-lines { padding:0 var(--co-control-height); }
+.co-rw-icon { display:grid; place-items:center; width:44px; height:44px; margin-bottom:4px; border-radius:var(--co-radius-round); background:var(--accent-dim); color:var(--accent); }
+.co-rw-eyebrow { margin:0; color:var(--co-you-text); font-size:var(--co-text-meta); font-weight:800; letter-spacing:.08em; text-transform:uppercase; overflow-wrap:anywhere; }
+.co-rw-head h3 { margin:0; font-size:var(--co-text-section); font-weight:650; letter-spacing:-.03em; line-height:1.2; overflow-wrap:anywhere; }
+.co-rw-pr { margin:0; color:var(--muted); font-size:var(--co-text-body); line-height:1.4; }
+.co-rw-pr strong { display:block; font-weight:500; overflow-wrap:anywhere; }
+/* The branch line (BranchFlow) under the PR name: the same markup as the PR page, as two small chips that wrap on a phone rather than stack. */
+.co-rw-lines .co-branch-flow { flex-direction:row; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; margin:2px 0 0; color:var(--muted); }
+.co-rw-lines .co-branch-flow code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
+.co-rw-list { width:100%; margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:var(--co-text-meta); text-align:left; }
+.co-rw-list li span { display:block; font-size:var(--co-text-meta); }
+.co-rw-close { position:absolute; top:10px; right:10px; display:grid; place-items:center; width:40px; height:40px; }
+.co-rw-body { display:flex; flex-direction:column; gap:18px; padding:20px var(--rw-edge, 28px) 4px; }
 .co-rw-options { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
 .co-rw-who { display:flex; flex-direction:column; gap:12px; }
 .co-rw-who-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px; }
@@ -660,33 +662,37 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-note,.co-rw-blocker { margin:0; padding:12px 14px; border-radius:var(--co-radius-panel); font-size:var(--co-text-body); }
 .co-rw-note { border:1px dashed var(--border); color:var(--muted); }
 .co-rw-blocker { background:color-mix(in srgb,var(--co-warn) 12%,transparent); color:var(--text); }
-.co-rw-label { margin:0 0 -8px; color:var(--muted); font-size:var(--co-text-meta); font-weight:650; }
-.co-rw-steps { margin:0; padding:0; list-style:none; }
+.co-rw-label { margin:0 0 -8px; color:var(--muted); font-size:var(--co-text-meta); font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.co-rw-steps { margin:0; padding:14px; list-style:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
 .co-rw-steps li { position:relative; display:grid; grid-template-columns:26px minmax(0,1fr); gap:12px; align-items:start; padding:0 0 18px; font-size:var(--co-text-body); line-height:1.45; }
 .co-rw-steps li:last-child { padding-bottom:0; }
 .co-rw-steps li:not(:last-child)::before { content:''; position:absolute; left:12px; top:28px; bottom:2px; width:2px; border-radius:var(--co-radius-pill); background:var(--border); }
-.co-rw-steps b { display:grid; place-items:center; width:26px; height:26px; border:1px solid var(--border); border-radius:50%; background:var(--bg); font-size:var(--co-text-meta); font-weight:700; }
+.co-rw-steps b { display:grid; place-items:center; width:26px; height:26px; border:1px solid var(--border); border-radius:50%; background:var(--surface); font-size:var(--co-text-meta); font-weight:700; }
 .co-rw-steps li.is-added b { border-color:var(--accent); color:var(--accent); }
 .co-rw-steps span { padding-top:2px; }
-.co-rw-tools { display:flex; align-items:center; gap:2px; }
-.co-rw-seen { display:grid; }
+/* The tools are not boxes of their own, so the lock's hover card is placed against the head. */
+.co-rw-tools { display:contents; }
+.co-rw-seen { display:grid; order:-1; margin-bottom:6px; }
 .co-rw-seen.is-public { --seen:var(--co-warn); }
 .co-rw-seen.is-private { --seen:var(--green); }
 /* The lock (green: nothing reaches GitHub) and the globe (amber: something does) keep their own colour over the quiet button's. */
 .co-rw-seen { --co-btn-tone:var(--seen); --co-btn-tone-fill:color-mix(in srgb,var(--seen) 14%,transparent); }
-.co-btn.co-rw-seen-btn { display:grid; place-items:center; cursor:help; }
-/* Anchored to the header, one edge in from its right and one button plus a gap below it; the arrow points at the lock's centre (the seen button, a gap, then the close button sit left of the edge). */
-.co-rw-seen-card { position:absolute; z-index:3; top:calc(var(--rw-edge) + var(--co-control-height) + 10px); right:var(--rw-edge); width:min(300px,calc(100% - 2 * var(--rw-edge))); padding:12px 14px; border:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-radius:var(--co-radius-panel); background:var(--surface-2,var(--surface)); box-shadow:0 14px 36px rgba(0,0,0,.4); color:var(--text); font-size:var(--co-text-meta); line-height:1.5; opacity:0; visibility:hidden; transform:translateY(-4px); pointer-events:none; transition:opacity .14s ease,transform .14s ease,visibility 0s .14s; }
-.co-rw-seen-card::before { content:''; position:absolute; top:-6px; right:calc(var(--co-control-height) * 1.5 - 3px); width:10px; height:10px; border-top:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-left:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); background:var(--surface-2,var(--surface)); transform:rotate(45deg); }
+/* The lock reads "What GitHub sees": it is the first line of the head, centred, and the card's arrow points at it from below. */
+.co-btn.co-rw-seen-btn { display:flex; gap:8px; padding:0 12px; cursor:help; }
+/* Anchored to the header, centred, one button plus a gap below the lock, with its arrow pointing at the lock's centre. */
+.co-rw-seen-card { position:absolute; z-index:3; top:calc(var(--rw-edge) + 4px + var(--co-control-height) + 6px); left:var(--rw-edge); right:var(--rw-edge); margin-inline:auto; width:min(300px,calc(100% - 2 * var(--rw-edge))); text-align:left; padding:12px 14px; border:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-radius:var(--co-radius-panel); background:var(--surface-2,var(--surface)); box-shadow:0 14px 36px rgba(0,0,0,.4); color:var(--text); font-size:var(--co-text-meta); line-height:1.5; opacity:0; visibility:hidden; transform:translateY(-4px); pointer-events:none; transition:opacity .14s ease,transform .14s ease,visibility 0s .14s; }
+.co-rw-seen-card::before { content:''; position:absolute; top:-6px; left:50%; margin-left:-5px; width:10px; height:10px; border-top:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); border-left:1px solid color-mix(in srgb,var(--seen) 40%,var(--border)); background:var(--surface-2,var(--surface)); transform:rotate(45deg); }
 .co-rw-seen-btn:focus-visible + .co-rw-seen-card,.co-rw-seen.is-pinned .co-rw-seen-card { opacity:1; visibility:visible; transform:none; transition-delay:0s; }
 @media (hover:hover) and (pointer:fine) { .co-rw-seen-btn:hover + .co-rw-seen-card { opacity:1; visibility:visible; transform:none; transition-delay:0s; } }
-.co-rw-facts { margin:0; padding:0; list-style:none; display:grid; gap:10px; }
-.co-rw-facts li { display:grid; grid-template-columns:20px minmax(0,1fr); gap:10px; align-items:start; font-size:var(--co-text-body); line-height:1.45; }
+.co-rw-facts { margin:0; padding:2px 14px; list-style:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
+.co-rw-facts li { display:grid; grid-template-columns:20px minmax(0,1fr); gap:10px; align-items:start; padding:10px 0; font-size:var(--co-text-body); line-height:1.45; }
+.co-rw-facts li + li { border-top:1px solid var(--border); }
 .co-rw-facts .co-icon { margin-top:2px; }
 .co-rw-facts .is-ok .co-icon { color:var(--green); }
 .co-rw-facts .is-warn .co-icon { color:var(--co-warn); }
 .co-rw-facts .is-bad .co-icon { color:var(--danger,#e5534b); }
 .co-rw-head.is-done .co-rw-icon { background:color-mix(in srgb,var(--green) 16%,transparent); color:var(--green); }
+.co-rw-lede { margin:0; color:var(--muted); font-size:var(--co-text-body); line-height:1.5; text-align:center; }
 .co-rw-result { margin:0 0 4px; font-size:var(--co-text-body); line-height:1.5; }
 .co-split { position:relative; display:inline-flex; }
 .co-split .co-split-main { border-top-right-radius:0; border-bottom-right-radius:0; }
@@ -703,21 +709,22 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-reason { display:block; width:100%; min-height:48px; padding:0 16px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); color:var(--text); font:600 var(--co-text-body) var(--font); text-align:left; cursor:pointer; }
 .co-rw-reason:hover { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 8%,var(--bg)); }
 .co-rw-reason:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.co-rw-foot { display:flex; flex-direction:column; gap:12px; margin-top:14px; padding:16px 20px 20px; border-top:1px solid var(--border); }
-.co-rw-foot > p { margin:0; color:var(--muted); font-size:var(--co-text-meta); line-height:1.45; }
-.co-rw-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+.co-rw-foot { position:sticky; bottom:0; z-index:1; display:flex; flex-direction:column; gap:14px; margin-top:6px; padding:16px var(--rw-edge,28px) var(--rw-edge,28px); background:var(--surface); }
+.co-rw-foot > p { margin:0; color:var(--muted); font-size:var(--co-text-meta); line-height:1.45; text-align:center; }
+.co-rw-actions { display:flex; gap:10px; }
+.co-rw-actions > .co-btn { flex:1 1 0; min-width:0; justify-content:center; }
 .co-rw-versions { margin:0; font-size:var(--co-text-meta); color:var(--muted); }
 .co-rw-versions p { margin:6px 0 0; }
 .co-selection-page .co-review-window { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 @media(max-width:680px) {
- .co-dialog-backdrop { align-items:flex-end; padding:0; }
- .co-dialog { width:100%; max-height:92%; border-bottom:0; border-radius:var(--co-radius-panel) var(--co-radius-panel) 0 0; }
- .co-rw-head { --rw-edge:16px; grid-template-columns:40px minmax(0,1fr) auto; gap:12px; }
- .co-rw-icon { width:40px; height:40px; }
- .co-rw-body { padding:16px 16px 4px; }
- /* The review window's button stays on screen: the sheet scrolls, its footer does not (finding 3). */
- .co-rw-foot { position:sticky; bottom:0; z-index:1; margin-top:0; padding:14px 16px calc(18px + env(safe-area-inset-bottom)); background:var(--surface); }
+ .co-dialog-backdrop { align-items:flex-end; padding:12px 12px max(22px,env(safe-area-inset-bottom)); }
+ .co-dialog { width:100%; max-height:100%; }
+ .co-rw-head { --rw-edge:20px; }
+  .co-rw-icon { width:40px; height:40px; }
+ .co-rw-foot { margin-top:0; padding-top:14px; }
  .co-rw-actions { flex-direction:column-reverse; align-items:stretch; }
+ .co-dialog > .co-task-dock { padding:24px 20px 20px; }
+ .co-task-dock > .co-run-approval .co-run-approval-actions { display:flex; flex-direction:column-reverse; align-items:stretch; }
 }
 /* Too narrow for the label beside the choices: the choices take their own full line. */
 @media(max-width:450px) {
@@ -964,10 +971,12 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-markdown .co-md-photo { display:block; width:fit-content; max-width:min(100%,360px); margin:6px 0; padding:0; border:1px solid var(--border); border-radius:var(--co-radius-field); background:var(--surface); overflow:hidden; cursor:zoom-in; line-height:0; }
 .co-markdown .co-md-photo img { display:block; width:auto; height:auto; max-width:100%; max-height:240px; }
 .co-markdown .co-md-photo:hover, .co-markdown .co-md-photo:focus-visible { border-color:var(--accent); }
-.co-picture-viewer { max-width:min(96vw,1400px); max-height:94dvh; padding:12px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); color:var(--text); }
-.co-picture-viewer::backdrop { background:rgba(0,0,0,.65); }
+.co-picture-viewer { max-width:min(96vw,1400px); max-height:94dvh; padding:12px; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); color:var(--text); box-shadow:0 28px 90px rgba(0,0,0,.42); }
+.co-picture-viewer::backdrop { background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+.co-picture-viewer img { border-radius:var(--co-radius-panel); }
 .co-picture-viewer img { display:block; max-width:100%; max-height:calc(94dvh - 96px); margin:0 auto; object-fit:contain; }
-.co-picture-tools { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:12px; }
+.co-picture-tools { display:flex; gap:10px; margin-top:12px; }
+.co-picture-tools > * { flex:1 1 0; min-width:0; justify-content:center; text-align:center; }
 /* Inline discussions and Related issues & PRs are not comments: a rule and a
    quiet heading separate each from the conversation above it. */
 .co-related-section { margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
@@ -1122,16 +1131,6 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  }
 }
 @media(prefers-reduced-motion:reduce) { .co-pr-sticky > button { transition:none; } }
-/* The lock reads "What GitHub sees". The label sits left of the icon, which keeps its place beside the close button, so the card's arrow still points at it. */
-.co-btn.co-rw-seen-btn { display:flex; gap:8px; padding:0 calc((var(--co-control-height) - 20px) / 2) 0 10px; }
-/* Too narrow for it beside the title: the labelled button takes its own row under the title and the close button stays on top. */
-@media(max-width:450px) {
- .co-rw-tools { display:contents; }
- .co-rw-head .co-rw-close { grid-column:3; grid-row:1; }
- .co-rw-seen { grid-column:2 / -1; grid-row:2; justify-self:start; }
- .co-btn.co-rw-seen-btn { flex-direction:row-reverse; padding:0 10px 0 calc((var(--co-control-height) - 20px) / 2); margin-left:-14px; }
- .co-rw-seen-card::before { display:none; }
-}
 /* One desk row layout. The row's reason is one clamped line under its button, with Show more beside it; the hover covers the whole item. */
 .co-desk-item { display:grid; grid-template-columns:minmax(0,1fr); }
 .co-desk-item:hover { background:var(--surface-2); }

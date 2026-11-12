@@ -1,8 +1,10 @@
 import { createContext, useContext, useId, useLayoutEffect, useRef } from 'react'
 import { Icon } from './Icons.jsx'
+import { ReviewDialog } from './ReviewDialog.jsx'
 
-// One nonmodal work surface preserves project browsing and exact workflow scope.
-// The project owns selection; each workflow owns its durable state and consent.
+// A work surface for one project action. A docked one (Send to GitHub, Mark ready) is a window over the page (DESIGN.md,
+// The Window Rule); the others sit inline and keep project browsing and exact workflow scope. The project owns
+// selection; each workflow owns its durable state and consent.
 export const TaskContext = createContext(null)
 export const useProjectTask = () => useContext(TaskContext)
 
@@ -30,19 +32,11 @@ export function TaskPane({ id, children, dock = true }) {
     if (heading) heading.id = headingId
     if (visible && task?.explicit) focusActionRegion(content.current)
   }, [visible, task?.explicit, headingId])
-  useLayoutEffect(() => {
-    const node = content.current
-    if (!visible || !dock || !node) return
-    const root = node.closest('.co-root')
-    const measure = () => root?.style.setProperty('--co-task-height', `${node.getBoundingClientRect().height + 32}px`)
-    const observer = new ResizeObserver(measure)
-    observer.observe(node); measure()
-    return () => { observer.disconnect(); root?.style.removeProperty('--co-task-height') }
-  }, [visible, dock])
   if (!task) return children
   if (!visible) return null
-  return <section ref={content} tabIndex={-1} className={'co-task-content' + (dock ? ' co-task-dock' : '')} data-task={id} role={dock ? "dialog" : "region"} aria-modal={dock ? "false" : undefined} aria-label="Project action" aria-labelledby={headingId} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); task.close() } }}>
+  const pane = <section ref={content} tabIndex={-1} className={'co-task-content' + (dock ? ' co-task-dock' : '')} data-task={id} role="region" aria-labelledby={headingId} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); task.close() } }}>
     <button className="co-btn co-btn-quiet co-btn-icon co-inline-close" aria-label="Close action" onClick={task.close}><Icon name="close" size={18} /></button>
     {children}
   </section>
+  return dock ? <ReviewDialog label="Project action" onClose={task.close}>{pane}</ReviewDialog> : pane
 }

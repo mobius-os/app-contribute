@@ -28,7 +28,7 @@ test('the review window names the job and the exact PR, and waits for the workfl
   const html = await render(t, 'ReviewConfirmation', { choice:{ pulls:[pr], mode:'review', request_id:'fixed' }, busy:false, disabled:true, onModeChange:() => {} })
   if (!html) return
   assert.match(html, /<h3[^>]*>Review<\/h3>/)
-  assert.match(html, /#42 Keep PR actions stable/)
+  assert.match(html, /team\/repo · #42[\s\S]*Keep PR actions stable/, "the window names the repository, the number and the PR")
   assert.match(html, /What happens/)
   assert.match(html, /What GitHub sees:<\/strong> nothing\. Only you see the review\./)
   assert.match(html, /Exact versions/)

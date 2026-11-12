@@ -88,15 +88,23 @@ test('Escape hides an icon button tooltip until the pointer or focus leaves that
   assert.match(detail, /className=\{'co-pr-detail-actions' \+ tips\.className\} onPointerOut=\{tips\.onPointerOut\} onBlur=\{tips\.onBlur\}/)
 })
 
-test('every agent and confirm window starts with the same head: the job, then #number and name, then the repository', async t => {
+test('every agent and confirm window starts with the same head: repository and number, then the job, then the PR name', async t => {
   const mod = await load(t)
   if (!mod) return
   const pr = { number: 1923, title: 'Example PR name', repository: { nameWithOwner: 'team/repo' } }
-  const one = mod.head({ icon: 'review', title: 'Review', titleId: 'x', pulls: [pr], withClose: true })
-  assert.match(one, /<h3 id="x">Review<\/h3><p class="co-rw-pr"><strong>#1923 Example PR name<\/strong><span>team\/repo<\/span><\/p>/)
+  const one = mod.head({ title: 'Review', titleId: 'x', pulls: [pr], withClose: true })
+  assert.match(one, /<p class="co-rw-eyebrow">team\/repo · #1923<\/p><h3 id="x">Review<\/h3><p class="co-rw-pr"><strong>Example PR name<\/strong><\/p>/)
   assert.match(one, /class="co-rw-tools"><button[^>]*aria-label="Close"/)
-  const several = mod.head({ icon: 'review', title: 'Review', pulls: [pr, { ...pr, number: 2 }] })
-  assert.match(several, /<strong>2 PRs<\/strong>/)
+  // The branches the PR merges from and into sit under its name, as on the PR page (one shared BranchFlow).
+  const branched = mod.head({ title: 'Merge #1923 into main?', pulls: [{ ...pr, headRefName: 'feat/window', baseRefName: 'main' }] })
+  assert.match(branched, /<p class="co-rw-pr"><strong>Example PR name<\/strong><\/p><p class="co-branch-flow" aria-label="Branches"><code>feat\/window<\/code><span class="co-branch-to">[\s\S]*?<code>main<\/code><\/span><\/p>/)
+  assert.doesNotMatch(one, /co-branch-flow/, 'a PR whose branches are not known shows no branch line')
+  const several = mod.head({ title: 'Review', pulls: [{ ...pr, headRefName: 'a', baseRefName: 'main' }, { ...pr, number: 2, headRefName: 'b', baseRefName: 'main' }] })
+  assert.doesNotMatch(several, /co-branch-flow/, 'a window over several PRs lists them and names no one branch')
+  assert.match(several, /<p class="co-rw-eyebrow">2 PRs<\/p>/)
+  const detail = readFileSync(new URL('../ui/PullRequestDetail.jsx', import.meta.url), 'utf8')
+  assert.match(detail, /<BranchFlow pr=\{pr\} \/>/, 'the PR page and the windows draw the branches with the same component')
+  assert.match(mod.head({ title: 'Withdraw this pull request?', eyebrow: 'team/repo #4' }), /<p class="co-rw-eyebrow">team\/repo #4<\/p><h3>Withdraw this pull request\?<\/h3><\/div>/, 'a record that is not a PR on GitHub names itself and shows no PR line')
   const dir = new URL('../ui/', import.meta.url)
   const own = readdirSync(dir).filter(file => file.endsWith('.jsx') && file !== 'WindowHead.jsx')
     .filter(file => readFileSync(new URL(file, dir), 'utf8').includes('className="co-rw-head'))
