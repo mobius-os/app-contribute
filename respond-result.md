@@ -169,7 +169,8 @@ Standard library only; `gh` and `git` are used the way the other helpers use the
 ### `save --pr owner/repo#N --repo-path DIR --input FILE [--chat-id ID]`
 
 You run this when the work is finished, from your private copy (`--repo-path`), then stop.
-`--chat-id` defaults to `$CHAT_ID`. `FILE` is the part only you can write:
+`--chat-id` defaults to `$CHAT_ID`. Post can message only a chat Contribute started (the "Respond to feedback on #N" conversation), so
+save refuses any other chat; if Möbius cannot be asked, it warns and saves. `FILE` is the part only you can write:
 
 ```json
 {

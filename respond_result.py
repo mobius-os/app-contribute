@@ -435,6 +435,25 @@ def require_chat_id(option: str | None) -> str:
   return chat_id
 
 
+def require_chat_started_by_contribute(chat_id: str) -> None:
+  """Post wakes this chat with Contribute's own token, and Möbius lets an app message only the chats it started, so a result
+  saved for any other chat could never be sent. A lookup that fails or answers unexpectedly only warns: save must not need the host."""
+  try:
+    core = load_core()
+    chat = core.api(f"/api/chats/{chat_id}?limit=1")
+    if not isinstance(chat, dict) or "created_by_app_id" not in chat:
+      raise ValueError("the answer names no owner of the chat")
+    started_by_contribute = chat["created_by_app_id"] == find_app_id(core)
+  except Exception as error:  # fail open, whatever the reason
+    print(f"respond_result: could not check that Contribute started chat {chat_id} ({scrub(str(error), 120)}); saving anyway.", file=sys.stderr)
+    return
+  if not started_by_contribute:
+    raise BadInput(
+      f"Chat {chat_id} was not started by Contribute, and Contribute can only message chats it started, so Post could not send this answer. "
+      'Save it from the "Respond to feedback on #N" conversation, or pass that conversation\'s id with --chat-id.'
+    )
+
+
 def resolve_commit(prefix: str | None, commits: list[dict[str, str]], label: str) -> str | None:
   """A point's commit as a full SHA: the prefix must match exactly one commit of the range."""
   if prefix is None:
@@ -702,6 +721,7 @@ def save_summary(result: dict[str, Any]) -> str:
 def save_command(args: argparse.Namespace) -> int:
   pull = parse_pull(args.pr)
   chat_id = require_chat_id(args.chat_id)
+  require_chat_started_by_contribute(chat_id)
   proposal = parse_input(args.input)
   store = open_store()
   try:
