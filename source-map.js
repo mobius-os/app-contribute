@@ -324,28 +324,6 @@ export function projectBoardFacts(project) {
   return { work: work.join(' '), shared: sharedFact(project), publicReviews, prepared, hasWork }
 }
 
-// The project screen's second status line. File-level reconciliation stays
-// the answer to "is there an update"; a fresh GitHub check only adds whether
-// the shared repository moved past the commit this Möbius last compared with.
-// `update` marks lines whose next step belongs to Settings or the App Store.
-export function projectUpstreamLine(project, check = null) {
-  if (!project || project.builtHere || project.kind === 'external' || !project.canonical_repo) return null
-  if (!project.available) return { tone: 'muted', strong: 'The local files', text: ' could not be read.' }
-  if (project.conflictFiles > 0 || project.state === 'conflict') {
-    return { tone: 'warn', strong: 'An update from GitHub', text: ' conflicts with your local changes.', update: true }
-  }
-  if (projectHasSharedUpdates(project)) {
-    const count = Number((project.semanticAvailable ? project.incomingFiles : project.originBehind) || 0)
-    return { tone: 'warn', strong: incomingCount(project), text: ` from GitHub ${verbFor(count, 'is', 'are')} not on this Möbius yet.`, update: true }
-  }
-  if (check?.newCommits > 0) {
-    return { tone: 'warn', strong: countOf(check.newCommits, 'new commit', 'new commits'), text: ' on GitHub since the last check.', update: true }
-  }
-  if (project.sourceComparisonRequired) return { tone: 'muted', strong: 'Not compared', text: ' with GitHub yet.' }
-  if (check) return { tone: 'ok', strong: 'Up to date', text: ' with GitHub.' }
-  return { tone: 'ok', strong: 'Up to date', text: ' at the last check.' }
-}
-
 // A project with nothing for the owner: no local changes, proposals, shared
 // contributions, review requests, incoming updates or conflicts. Quiet rows
 // follow the projects that have something going on.
