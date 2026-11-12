@@ -627,6 +627,9 @@ export const WORKSPACE_CSS = `
 .co-rw-head h3 { margin:0; font-size:var(--co-text-section); font-weight:650; letter-spacing:-.03em; line-height:1.2; overflow-wrap:anywhere; }
 .co-rw-pr { margin:0; color:var(--muted); font-size:var(--co-text-body); line-height:1.4; }
 .co-rw-pr strong { display:block; font-weight:500; overflow-wrap:anywhere; }
+/* The branch line (BranchFlow) under the PR name: the same markup as the PR page, as two small chips that wrap on a phone rather than stack. */
+.co-rw-lines .co-branch-flow { flex-direction:row; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; margin:2px 0 0; color:var(--muted); }
+.co-rw-lines .co-branch-flow code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
 .co-rw-list { width:100%; margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:var(--co-text-meta); text-align:left; }
 .co-rw-list li span { display:block; font-size:var(--co-text-meta); }
 .co-rw-close { position:absolute; top:10px; right:10px; display:grid; place-items:center; width:40px; height:40px; }

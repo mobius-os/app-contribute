@@ -55,8 +55,9 @@ test('the confirm sheet has one way out, Cancel, and one button that names the r
   assert.equal((html.match(/>Cancel<\/button>/g) || []).length, 1, 'Cancel is the one way out')
   assert.doesNotMatch(html, /aria-label="Close"/, 'and there is no X beside it')
   assert.match(html, /You can turn it back into a draft later/)
-  const merge = render({ pr: approved(), copy: mergeCopy(approved()), onConfirm: () => {}, onClose: () => {} })
+  const merge = render({ pr: approved({ headRefName: 'feat/window' }), copy: mergeCopy(approved()), onConfirm: () => {}, onClose: () => {} })
   assert.match(merge, /Merge #\d+ into/, 'each action names itself in its own title')
+  assert.match(merge, /<p class="co-branch-flow" aria-label="Branches"><code>feat\/window<\/code>[\s\S]*?<code>main<\/code>/, 'and the merge window says which branch merges into which')
 })
 
 import { mergePull, postFindings, previewPostedFindings, pullAction } from '../collaboration.js'

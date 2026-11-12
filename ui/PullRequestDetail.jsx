@@ -7,6 +7,7 @@ import { RepoImageContext } from './MarkdownPictures.jsx'
 import { ClampedMarkdown } from './ClampedMarkdown.jsx'
 import { CopyId, commentReference } from './CopyId.jsx'
 import { Icon } from './Icons.jsx'
+import { BranchFlow } from './BranchFlow.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
 import { useTipDismiss } from './useTipDismiss.js'
 import { useKeepOnScreen } from './useKeepOnScreen.js'
@@ -440,7 +441,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
         <small>{openedLine(description.data?.user?.login || pr.author?.login, pr.createdAt)}</small>
       </summary>
       <div className="co-desc-content">
-        <p className="co-branch-flow" aria-label="Branches">{pr.headRefName ? <><code>{pr.headRefName}</code><span className="co-branch-to"><Icon name="arrow-right" size={15} /><code>{pr.baseRefName}</code></span></> : <code>{pr.baseRefName}</code>}</p>
+        <BranchFlow pr={pr} />
         {readState(description, 'description')}
         {ready(description) ? <ClampedMarkdown markdown={description.data?.body || '_No description provided._'} /> : null}
       </div>
