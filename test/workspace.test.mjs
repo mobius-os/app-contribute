@@ -152,9 +152,8 @@ test('SSR local preparation remains inventory when another task owns the outlet'
   if (!ui) return
   const props = { project, run: { privateAction: { title: 'Prepare', draft: 'Private preparation' } }, cycle: { phase: 'idle' } }
   const html = ui.render('ProjectControls', props, { activeId: 'task:review', host: null })
-  assert.match(html, /1 file<\/strong> changed on this Möbius\./)
-  assert.match(html, /Local changes and GitHub/)
-  assert.match(html, /See the files/)
+  // The local-change count, the files and the Make PRs button live in the Local changes tab, not above the tabs.
+  assert.doesNotMatch(html, /changed on this Möbius|Local changes and GitHub|See the files/)
   assert.doesNotMatch(html, /Check &amp; update safely/)
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }, { activeId: 'task:review', host: null }), '')
   assert.equal(ui.render('TaskPane', { id: 'task:prepare', children: 'Task body' }), 'Task body')
@@ -435,6 +434,26 @@ test('SSR public review inventory replaces duplicate public rows but retains pri
     appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
   }, { host: null, publicKeys: new Set(['owner/project#7', 'owner/project#8']) })
   assert.match(mine, /Accepted work/)
+})
+
+test('SSR saved open PRs wait for the PR list to be read before any of them is Shared work', async t => {
+  const ui = await rendered(t)
+  if (!ui) return
+  const current = run({ working: [
+    work('Shown in list', 'public', 'open'), work('Not in list', 'public', 'open', { number: 9 }),
+    work('Saved issue', 'public', 'open', { type: 'issue', number: 10 }),
+  ] })
+  const render = publicKeys => ui.renderPublicRun({ run: current, githubState: 'connected' }, {
+    appId: 'fixture-app', token: 'fixture-only', project, conn: { state: 'connected', login: 'owner' },
+  }, { host: null, publicKeys })
+  // null: the list is still being read, so which PRs it shows is not known yet. An issue is never in the PR list, so it is not held back.
+  const waiting = render(null)
+  assert.doesNotMatch(waiting, /Shared work|Shown in list|Not in list/)
+  assert.match(waiting, /Saved issue/)
+  const read = render(new Set(['owner/project#7']))
+  assert.match(read, /Shared work/)
+  assert.match(read, /Not in list/)
+  assert.doesNotMatch(read, /Shown in list/)
 })
 
 test('SSR unavailable GitHub cannot hide saved public contributions behind an empty review inventory', async t => {

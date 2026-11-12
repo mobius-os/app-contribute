@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ACTION_COPY, allowedMergeMethods, approvalNote, askApprovalCopy, mergeCopy, openForReviewCopy, methodToSend, postFindingsCopy } from '../action-copy.js'
+import { ACTION_COPY, APPROVAL_NOTE_LIMIT, MAX_ASKED, allowedMergeMethods, approvalNote, askApprovalCopy, askRereviewCopy, mergeCopy, openForReviewCopy, methodToSend, postFindingsCopy } from '../action-copy.js'
 import { isPersonalDraft } from '../domain.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
@@ -70,6 +70,16 @@ const landable = { squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMer
 const approved = (extra = {}) => pr({ reviewDecision: 'APPROVED', repository: { nameWithOwner: 'team/repo', ...landable }, ...extra })
 
 const approvedBy = people => ({ standing: { approvedBy: people } })
+
+test('Merge is never switched off for a change request that still stands, so its sheet says who holds one', () => {
+  const unapproved = mergeCopy(approved(), { standing: { approvedBy: [], changesFrom: ['Sam'] } })
+  assert.deepEqual(unapproved.facts.slice(0, 2).map(fact => `${fact.tone}:${fact.text}`),
+    ['bad:Nobody but the author has approved this version', 'bad:Sam asked for changes and hasn’t approved since'])
+  const approvedToo = mergeCopy(approved(), { standing: { approvedBy: ['sam'], changesFrom: ['Sam', 'Bob'] } })
+  assert.deepEqual(approvedToo.facts.slice(0, 2).map(fact => `${fact.tone}:${fact.text}`),
+    ['ok:Approved at this version by sam', 'bad:Sam, Bob asked for changes and hasn’t approved since'])
+  assert.ok(!mergeCopy(approved(), approvedBy(['sam'])).facts.some(fact => /asked for changes/.test(fact.text)))
+})
 
 test('Merge names what it lands, who approved this version, and that Contribute cannot undo it', () => {
   const copy = mergeCopy(approved(), approvedBy(['sam']))
@@ -163,7 +173,8 @@ test('the open Actions menu names its two groups only when there is something of
   assert.match(withYou, /M10\.5 8\.5 15\.5 12l-5 3\.5Z/, 'the button wears the play icon, not three dots')
   assert.match(withYou, /role="group" aria-label="Agent"/)
   assert.ok(withYou.indexOf('Open for review') < withYou.indexOf('aria-label="Agent"'), 'your own actions come first')
-  assert.match(withYou, /Open it for review first\./, 'Merge stays in place, dimmed, with its reason')
+  assert.doesNotMatch(withYou, /Open it for review first\./, 'Merge on a draft is on offer: the platform refuses a draft in its own words')
+  assert.match(withYou, /<strong>Merge<\/strong><small><\/small><\/span><\/button>/, 'and it carries no dimming or reason')
   // Close appears only where this Möbius can close for you; then it sits apart, red, after everything else of yours.
   const withClose = render({ pulls: [draft], record: { status: 'draft', submission_mode: 'github' }, capabilities: { merge_now: true, close_now: true } })
   assert.match(withClose, /co-agent-menu-apart"><button[^>]*data-danger="true"[^>]*class="[^"]*is-danger[^"]*"[^>]*><span class="co-agent-menu-tile">.*?Close pull request/, 'Close sits apart, marked destructive')
@@ -346,25 +357,92 @@ test('Merge says plainly when an approval is of an older commit whose work is th
   assert.deepEqual(mixed, ['Approved at this version by kim', 'Approved by sam on a1b2c3d. The lines you added and removed have not changed since'])
 })
 
-test('Ask for approval shows the exact note it posts, naming only the people asked, and is off when nobody commented without approving', () => {
-  const standing = { approvalFrom: ['ReviewerOne', 'Kim'], lookedAgain: ['Kim'] }
+const askable = [
+  { by: 'ReviewerOne', reason: 'commented_here', commit: 'abcdef0123456789', requestable: false },
+  { by: 'Kim', reason: 'looked_again', commit: 'a1b2c3d4e5f6a7b8', requestable: true },
+  { by: 'Bob', reason: 'approved_older', commit: 'a1b2c3d4e5f6a7b8', requestable: true },
+]
+const standing = { askable, approvalFrom: ['ReviewerOne', 'Kim'], rereviewFrom: ['Bob'] }
+
+test('Ask for approval lists everyone who can be asked, ticks the people it is meant for, and shows the exact note for whoever is ticked', () => {
   const copy = askApprovalCopy(pr(), { standing })
+  assert.deepEqual(copy.people.options.map(option => [option.key, option.ticked]), [['ReviewerOne', true], ['Kim', true], ['Bob', false]])
+  assert.equal(copy.people.options[2].detail, 'Approved a1b2c3d; this version has new commits')
   assert.equal(copy.title, 'Ask ReviewerOne, Kim to approve #9?')
-  assert.equal(copy.says.markdown, approvalNote(pr(), standing.approvalFrom, standing.lookedAgain))
-  assert.deepEqual(approvalNote(pr(), standing.approvalFrom).match(/@[A-Za-z0-9-]+/g), ['@ReviewerOne', '@Kim'])
+  assert.equal(copy.says.markdown, approvalNote(pr(), [askable[0], askable[1]]))
   assert.match(copy.says.markdown, /\(`abcdef0`\)/)
-  assert.match(copy.says.markdown, /GitHub still holds an earlier change request from Kim; it lifts only when they approve or dismiss it\./, 'only a standing change request is explained')
-  assert.doesNotMatch(approvalNote(pr(), ['ReviewerOne']), /change request/, 'a plain comment holds nothing, so the note does not say it does')
+  assert.match(copy.says.markdown, /- @ReviewerOne you left a comment on this version but have not approved it\./)
+  assert.match(copy.says.markdown, /- @Kim you left a comment on this version, but GitHub still holds your earlier change request until you approve or dismiss it\./, 'only a standing change request is explained')
+  assert.deepEqual(copy.says.markdown.match(/@[A-Za-z0-9-]+/g), ['@ReviewerOne', '@Kim', '@ReviewerOne', '@Kim'], 'it names only the people asked')
+  assert.doesNotMatch(approvalNote(pr(), [askable[0]]), /change request/, 'a plain comment holds nothing, so the note does not say it does')
   assert.equal(copy.disabled, false)
-  assert.equal(askApprovalCopy(pr(), { standing: { approvalFrom: [], lookedAgain: [] } }).disabled, true)
   assert.equal(ACTION_COPY.ask_approval, askApprovalCopy)
+})
+
+test('the Ask sheets follow the ticks: a person ticked later is worded for what is true of them, and nobody ticked turns the button off', () => {
+  const copy = askApprovalCopy(pr(), { standing })
+  const bobOnly = copy.forPicked(['Bob'])
+  assert.equal(bobOnly.title, 'Ask Bob to approve #9?')
+  assert.match(bobOnly.says.markdown, /- @Bob you approved an earlier version \(`a1b2c3d`\); this one has new commits\./)
+  assert.deepEqual(bobOnly.says.markdown.match(/@[A-Za-z0-9-]+/g), ['@Bob', '@Bob'])
+  assert.doesNotMatch(bobOnly.footnote, /dismissing their request/, 'no change request here, so the footnote does not talk about one')
+  assert.match(copy.forPicked(['Kim']).footnote, /dismissing their request/)
+  const nobody = copy.forPicked([])
+  assert.equal(nobody.disabled, true)
+  assert.equal(nobody.says, null)
+  assert.deepEqual(nobody.facts.map(fact => fact.text), ['Pick at least one person', 'The note is public on the PR, from your GitHub account'])
+  assert.equal(askApprovalCopy(pr(), { standing: { approvalFrom: [], lookedAgain: [] } }).disabled, true, 'with nobody to name it cannot be sent')
+})
+
+test('Ask for approval turns itself off before the tap when the note would be longer than the platform accepts', () => {
+  const crowd = Array.from({ length: 12 }, (_, index) => ({ by: `a-reviewer-with-a-long-login-name-${String(index).padStart(2, '0')}`, reason: 'changes_older', commit: 'a1b2c3d4e5f6a7b8' }))
+  const copy = askApprovalCopy(pr(), { standing: { askable: crowd, approvalFrom: crowd.map(item => item.by), rereviewFrom: [] } })
+  assert.ok(approvalNote(pr(), crowd).length > APPROVAL_NOTE_LIMIT)
+  assert.equal(copy.disabled, true)
+  assert.ok(copy.facts.some(fact => fact.tone === 'bad' && /too long/.test(fact.text)))
+  assert.equal(copy.forPicked([crowd[0].by]).disabled, false, 'fewer people fit')
+})
+
+test('Ask for re-review lists the people GitHub takes a request for, ticks those whose review is of an older version, and sends GitHub’s usual request', () => {
+  const copy = askRereviewCopy(pr(), { standing })
+  assert.deepEqual(copy.people.options.map(option => [option.key, option.ticked]), [['Kim', false], ['Bob', true]], 'someone who only commented may not be a collaborator, so GitHub could refuse the request')
+  assert.equal(copy.title, 'Ask Bob to review #9 again?')
+  assert.equal(copy.disabled, false)
+  assert.equal(copy.forPicked(['Kim', 'Bob', 'ReviewerOne']).title, 'Ask Kim, Bob to review #9 again?', 'a name that is not on the sheet is never asked')
+  assert.equal(copy.forPicked(['Kim', 'Bob']).title, 'Ask Kim, Bob to review #9 again?')
+  assert.equal(copy.forPicked([]).disabled, true)
+  assert.match(copy.footnote, /Nothing is posted in the conversation/)
+  assert.equal(ACTION_COPY.ask_rereview, askRereviewCopy)
+})
+
+test('the Ask sheet renders its people as real checkboxes, the ticked ones checked, with the note for them below', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR')
+  const { render } = await renderModule(`
+    import React from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { ActionConfirm } from './ui/ActionConfirm.jsx'
+    export const render = props => renderToStaticMarkup(React.createElement(ActionConfirm, props))
+  `)
+  const html = render({ pr: pr(), copy: askApprovalCopy(pr(), { standing }), onConfirm: () => {}, onClose: () => {} })
+  assert.match(html, /<h4 class="co-rw-label">Who should I ask\?<\/h4>/)
+  assert.match(html, /aria-label="Who should I ask\?"/)
+  const boxes = html.match(/<input type="checkbox"[^>]*>/g)
+  assert.equal(boxes.length, 3)
+  assert.deepEqual(boxes.map(box => /checked=""/.test(box)), [true, true, false], 'the people this ask is meant for start ticked')
+  assert.match(html, /<strong>Bob<\/strong><small>Approved a1b2c3d; this version has new commits<\/small>/)
+  assert.match(html, /The note that will be posted/)
+  assert.match(html, /there is a new version of this PR/)
+  assert.match(html, />Ask for approval<\/button>/)
+  const rereview = render({ pr: pr(), copy: askRereviewCopy(pr(), { standing }), onConfirm: () => {}, onClose: () => {} })
+  assert.doesNotMatch(rereview, /The note that will be posted/, 'a re-review request posts no note')
+  assert.match(rereview, />Ask for re-review<\/button>/)
 })
 
 test('Ask for approval goes to the platform with who and the exact note, and reads an unconfirmed post back', async () => {
   const sent = []
   const previous = globalThis.fetch
   const reply = (status, body) => async (url, options) => { sent.push({ url, body: JSON.parse(options.body) }); return { ok: status < 400, status, json: async () => body } }
-  const note = approvalNote(pr(), ['sam'])
+  const note = approvalNote(pr(), [{ by: 'sam', reason: 'commented_here', commit: 'abcdef0123456789' }])
   try {
     globalThis.fetch = reply(200, { state: 'asked', observed_head_sha: 'abcdef0123456789' })
     assert.deepEqual(await pullAction('t', 10, pr(), 'ask-approval', { people: ['sam'], note }), { ok: true, state: 'asked', observedHead: 'abcdef0123456789' })
@@ -375,4 +453,29 @@ test('Ask for approval goes to the platform with who and the exact note, and rea
     globalThis.fetch = reply(409, { detail: 'Ask only people who looked again without approving: nobody.' })
     assert.deepEqual(await pullAction('t', 10, pr(), 'ask-approval', { people: ['sam'], note }), { error: 'Ask only people who looked again without approving: nobody.' })
   } finally { globalThis.fetch = previous }
+})
+
+const person = (index, extra = {}) => ({ by: `reviewer-${String(index).padStart(2, '0')}`, reason: 'changes_older', commit: 'a1b2c3d4e5f6a7b8', requestable: true, ...extra })
+
+test('a review of a commit that is gone is worded without a hash, never with an empty one', () => {
+  const gone = [person(1, { commit: '' }), person(2, { reason: 'approved_older', commit: '' }), person(3, { reason: 'commented_older', commit: '' })]
+  const note = approvalNote(pr(), gone)
+  assert.doesNotMatch(note, /``|\(\)/, 'no empty code span in a public note')
+  assert.match(note, /- @reviewer-01 your change request is on an earlier version\. GitHub holds it/)
+  assert.match(note, /- @reviewer-02 you approved an earlier version; this one has new commits\./)
+  assert.match(note, /- @reviewer-03 you left a comment on an earlier version\./)
+  const details = askApprovalCopy(pr(), { standing: { askable: gone, approvalFrom: [], rereviewFrom: [] } }).people.options.map(option => option.detail)
+  assert.deepEqual(details, ['Asked for changes on an earlier version, has not looked since', 'Approved an earlier version; this version has new commits', 'Commented on an earlier version'])
+  assert.match(approvalNote(pr(), [person(4)]), /\(`a1b2c3d`\)/, 'a known commit is still named')
+})
+
+test('both Ask sheets turn off before the tap for more people than the platform takes in one ask', () => {
+  const crowd = Array.from({ length: MAX_ASKED + 1 }, (_, index) => person(index, { by: `r${index}` }))
+  const standingOf = { askable: crowd, approvalFrom: crowd.map(item => item.by), rereviewFrom: crowd.map(item => item.by) }
+  for (const copy of [askApprovalCopy(pr(), { standing: standingOf }), askRereviewCopy(pr(), { standing: standingOf })]) {
+    assert.equal(copy.disabled, true)
+    assert.ok(copy.facts.some(fact => fact.tone === 'bad' && fact.text === `Ask at most ${MAX_ASKED} people at once`), copy.title)
+  }
+  // Fifteen people is the limit itself and is allowed; (for Ask for approval the note is longer than the platform takes well before that).
+  assert.equal(askRereviewCopy(pr(), { standing: standingOf }).forPicked(crowd.slice(0, MAX_ASKED).map(item => item.by)).disabled, false)
 })

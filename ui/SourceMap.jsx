@@ -9,8 +9,7 @@ import {
 import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { TimeAgo } from './GithubParts.jsx'
-import { ProjectFileChanges } from './ProjectEdits.jsx'
-import { TaskContext, TaskPane } from './TaskPane.jsx'
+import { TaskContext } from './TaskPane.jsx'
 import { DESK_VIEWS, deskViewKey, splitProjects } from '../desk.js'
 import { NAMES } from '../names.js'
 import { DeskChips, DeskCounts, DeskRail } from './Desk.jsx'
@@ -34,46 +33,17 @@ function projectMatchesJourney(project, filter) {
   return true
 }
 
-function shortCommit(value) {
-  return typeof value === 'string' && value ? value.slice(0, 7) : 'Unavailable'
-}
-
-function ProjectPosition({ project }) {
-  const installedRelease = project.kind === 'app' && project.base_ref === 'upstream'
-  const comparisonRef = project.comparison_ref || project.base_ref
-  const comparisonSha = project.comparison_sha || project.base_sha
-  const comparesWithRelease = installedRelease && comparisonRef === project.base_ref
-  return (
-    <details className="co-position-details">
-      <summary><span>Branch and version</span><Icon name="chevron" size={15} /></summary>
-      <dl>
-        <div><dt>Your branch</dt><dd><code>{project.detached ? 'Detached' : project.branch || 'Unknown'}</code></dd></div>
-        <div><dt>Your commit</dt><dd><code>{shortCommit(project.head_sha)}</code></dd></div>
-        {project.state !== 'local_only' ? (
-          <>
-            <div><dt>Compared with</dt><dd><code>{comparesWithRelease ? `installed release (${comparisonRef})` : comparisonRef || 'Not configured'}</code></dd></div>
-            <div><dt>{comparesWithRelease ? 'Release commit' : 'Shared commit'}</dt><dd><code>{shortCommit(comparisonSha)}</code></dd></div>
-          </>
-        ) : null}
-        {project.canonical_repo ? <div><dt>Repository</dt><dd><code>{project.canonical_repo}</code></dd></div> : null}
-      </dl>
-    </details>
-  )
-}
-
 function ProjectGlyph({ project }) {
   return <ProjectIcon project={project} className="co-source-glyph" />
 }
 
 function ProjectDetail({
   project,
-  loadProjectDiff,
-  onRefresh,
   renderActivity,
   navigation,
-  sourceRevision,
 }) {
-  const [publicKeys, setPublicKeys] = useState(new Set())
+  // The open PRs the project's PR list shows; null until that list has been read.
+  const [publicKeys, setPublicKeys] = useState(null)
   const projectView = useRef(null)
   const pendingScroll = useRef(null)
   const activeId = navigation.selectedId || ''
@@ -109,13 +79,6 @@ function ProjectDetail({
             {renderActivity?.(project, navigation)}
           </div>
         </div>
-        <TaskPane id="task:files" dock={false}>
-          <h3>Your edited files</h3>
-          <p>The files that differ from GitHub, and the exact versions being compared.</p>
-          <ProjectFileChanges key={sourceRevision} project={project} loadProjectDiff={loadProjectDiff} onRefresh={onRefresh} />
-          <ProjectPosition project={project} />
-          {!project.available ? <p>No inspectable local source is available.</p> : null}
-        </TaskPane>
       </article>
     </TaskContext.Provider>
   )
@@ -221,8 +184,6 @@ export function SourceMap({
   conn,
   loading,
   error,
-  onRetry,
-  loadProjectDiff,
   renderActivity,
   addProject = null,
   onProjectOpenChange,
@@ -467,11 +428,8 @@ export function SourceMap({
           <ProjectDetail
             key={selectedProject.key}
             project={selectedProject}
-            loadProjectDiff={loadProjectDiff}
-            onRefresh={onRetry}
             renderActivity={renderActivity}
             navigation={activityNavigation}
-            sourceRevision={snapshot?.generated_at}
           />
         </div>
       )}

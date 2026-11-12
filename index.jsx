@@ -1872,7 +1872,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus} desk={desk}
           onProjectOpenChange={setProjectOpen}
           conn={conn} loading={sourceLoading} error={sourceError}
-          onRetry={refreshAll} checks={upstreamChecks} attention={projectAttention} loadProjectDiff={loadProjectDiff}
+          checks={upstreamChecks} attention={projectAttention}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
@@ -1887,7 +1887,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? view => renderPullRequests(project, navigation, view) : null}
               reviewRequestCount={project?.reviewRequests?.length || 0}
-              edits={project && localChangeSentence(project).edits ? <ProjectEdits project={project} run={projectRun(project)} loadProjectDiff={loadProjectDiff} onRefresh={refreshAll} /> : null}
+              edits={project && localChangeSentence(project).edits ? <ProjectEdits key={sourceSnapshot?.generated_at} project={project} run={projectRun(project)} loadProjectDiff={loadProjectDiff} onRefresh={refreshAll} /> : null}
               editsCount={project && localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
               controls={controls}
               projectProgress={progress}
