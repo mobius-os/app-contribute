@@ -553,7 +553,9 @@ window.runProjectWarningChecks = async () => {
     ensure(text(row().querySelector('p')) === 'An update from GitHub conflicts with your local changes.', 'The warning read: ' + text(row()))
     ensure(row().compareDocumentPosition(query('[role=tablist]')) & Node.DOCUMENT_POSITION_FOLLOWING, 'The warning is not above the tabs')
     const action = button('Open App Store', row()), box = row().getBoundingClientRect(), actionBox = action.getBoundingClientRect()
-    ensure(Math.round(actionBox.height) >= 44 && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px')
+    // A 44px target: drawn 44 tall on a desktop, drawn 38 on a phone with a 44px tap box, so ask where a tap 21px above and below the middle lands.
+    const middle = actionBox.top + actionBox.height / 2, centre = actionBox.left + actionBox.width / 2
+    ensure([-21, 21].every(reach => action.contains(document.elementFromPoint(centre, middle + reach))) && actionBox.left >= box.left && actionBox.right <= box.right + 1, 'The button is not a 44px target inside the row: ' + Math.round(actionBox.height) + 'px drawn')
     ensure(box.left >= 0 && Math.round(box.right) <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth, 'The row makes the page scroll sideways')
     const asked = []
     const listen = event => asked.push(event.data)
