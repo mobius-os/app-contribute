@@ -104,11 +104,13 @@ const COVERED_NOTE = {
 const runKind = (run, own) => (run.mode === 'review_fix_merge' ? (own ? NAMES.finishIt : NAMES.takeOver) : reviewRunTitle(run))
 
 // `quiet`: another box above already holds the amber "needs you" frame, so this saved review stays plain.
-function SavedReview({ quiet = false, token, appId, status: listed, response = null, standing = null, earlier: listedEarlier = null, own = null, ignored = null, canPost = false, readOnly = false, busy = false, error = '', onStart, onStop, onRetry, onVerdict, onRepair, onCheck, onFix, onIgnore, onUndoIgnore, onPost, pulls = [], listState = {} }) {
+function SavedReview({ quiet = false, token, appId, status: listed, response = null, standing = null, earlier: listedEarlier = null, own = null, ignored = null, canPost = false, readOnly = false, busy: busyElsewhere = false, error = '', onStart, onStop, onRetry, onVerdict, onRepair, onCheck, onFix, onIgnore, onUndoIgnore, onPost, pulls = [], listState = {} }) {
   // The saved review's documents come from the run itself; the list only has its short form.
   const documents = useRunDocuments({ token, appId, run: listed?.run, item: listed?.item })
   const earlierDocuments = useRunDocuments({ token, appId, run: listedEarlier?.run, item: listedEarlier?.item })
   const status = listed ? { ...listed, run: documents.run, item: documents.item } : listed
+  // A copy of the run that is older than the list says it is shown, but nothing decides on it until the run is read again.
+  const busy = busyElsewhere || !documents.current
   const earlier = listedEarlier ? { ...listedEarlier, run: earlierDocuments.run, item: earlierDocuments.item } : listedEarlier
   const tone = reviewContent(status, { own, ignored, covered: standing?.coveredBy })
   const running = tone.key === 'running'

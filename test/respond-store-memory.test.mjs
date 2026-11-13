@@ -117,3 +117,12 @@ test('each reader of the answers has its own memory', async () => {
   await first.read()
   assert.deepEqual(lists(storage), ['respond-results/', 'respond-decisions/'])
 })
+
+test('a runtime that still has the private versioned read remembers what it read, like a newer one', async () => {
+  const storage = stampedStorage({ [RESULT]: example() }, { bodiesLeftOut: [RESULT] })
+  storage._getWithVersion = storage.getWithVersion
+  delete storage.getWithVersion
+  const memory = rememberResponseFolders()
+  await loadResponses(storage, memory)
+  assert.equal(memory.results.size, 1)
+})

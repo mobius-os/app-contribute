@@ -55,7 +55,7 @@ export const SYNC_NOTE_ID = 'co-sync-note'
 export function SyncNote({ note }) {
   if (!note?.at && !note?.failed && !note?.updating) return null
   // The app opened from its last-known copy and is reading what moved: one quiet line, and how old the copy is.
-  if (note.updating) return <span id={SYNC_NOTE_ID} className="co-sync-note">Updating…{note.at ? <TimeAgo prefix=" · last synced " value={note.at} /> : null}</span>
+  if (note.updating) return <span id={SYNC_NOTE_ID} className="co-sync-note">Updating…{note.at ? <span className="co-sync-last"><TimeAgo prefix=" · last synced " value={note.at} /></span> : null}</span>
   // After a failure the last good time follows on a wide header; a phone keeps only the failure, so the note never grows past the button.
   return <span id={SYNC_NOTE_ID} className="co-sync-note">{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
 }

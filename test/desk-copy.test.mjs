@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { loadDeskCopy, normalizeDeskCopy, saveDeskCopy, settledPulls, slimReviewRow } from '../desk-copy.js'
+import { PR_FIELDS } from '../api.js'
 import { classifyReview, reviewKey } from '../review-list.js'
 import { withOwnerPulls } from '../desk.js'
 
@@ -34,12 +35,37 @@ test('only a review whose standing was read is a last-known row', () => {
   for (const bucket of ['waiting', 'running', 'stalled', 'done']) assert.equal(slimReviewRow(entry({ bucket })).bucket, bucket)
 })
 
-test('a copy is trusted only when it names its account, its last sync and both lists', () => {
-  const copy = { schema: 1, login: 'owner', synced_at: '2026-11-13T07:00:00Z', incoming: [{ number: 1 }], repositories: { repositories: [{ nameWithOwner: 'o/r' }], hasNextPage: true }, review_rows: [] }
-  assert.deepEqual(normalizeDeskCopy(copy), { login: 'owner', syncedAt: '2026-11-13T07:00:00Z', incoming: [{ number: 1 }], repositories: copy.repositories, reviewRows: [], reviewPulls: [] })
-  assert.deepEqual(normalizeDeskCopy({ ...copy, review_pulls: [{ number: 7 }] }).reviewPulls, [{ number: 7 }])
+// A copy as the app writes it (saveDeskCopy), so the test never repeats how it is stamped.
+async function written(input) {
+  let file
+  globalThis.window = { mobius: { storage: { set: async (path, value) => { file = value } } } }
+  await saveDeskCopy({ login: 'owner', syncedAt: '2026-11-13T07:00:00Z', incoming: [], repositories: { repositories: [], hasNextPage: false }, reviewRows: [], reviewPulls: [], ...input })
+  return file
+}
+const whole = (number = 1) => ({ number, url: `https://github.com/o/r/pull/${number}`, repository: { nameWithOwner: 'o/r' } })
+const row = (id = 'o/r#7') => ({ id, bucket: 'waiting', chips: [], item: { repo: 'o/r', number: 7 } })
+
+test('a copy is trusted only when it names its account, its last sync and both lists', async () => {
+  const copy = await written({ incoming: [whole()], repositories: { repositories: [{ nameWithOwner: 'o/r' }], hasNextPage: true } })
+  assert.deepEqual(normalizeDeskCopy(copy), { login: 'owner', syncedAt: '2026-11-13T07:00:00Z', incoming: [whole()], repositories: copy.repositories, reviewRows: [], reviewPulls: [] })
   for (const broken of [null, {}, { ...copy, login: '' }, { ...copy, synced_at: undefined }, { ...copy, incoming: {} }, { ...copy, review_rows: null }]) assert.equal(normalizeDeskCopy(broken), null)
   assert.deepEqual(normalizeDeskCopy({ ...copy, repositories: undefined }).repositories, { repositories: [], hasNextPage: false })
+})
+
+test('only whole items of a copy are shown, so a damaged or older file never breaks a screen', async () => {
+  const copy = await written({ incoming: [whole(1), { number: 2 }, null], reviewRows: [row(), { id: 'x' }, 'broken'], reviewPulls: [{ number: 7, state: 'MERGED', repository: { nameWithOwner: 'o/r' } }, { number: 8, state: 'MERGED' }] })
+  const read = normalizeDeskCopy(copy)
+  assert.deepEqual(read.incoming.map(pr => pr.number), [1])
+  assert.deepEqual(read.reviewRows.map(item => item.id), ['o/r#7'])
+  assert.deepEqual(read.reviewPulls.map(pr => pr.number), [7])
+})
+
+test('a copy whose PRs were read with other fields than this version asks for is not shown', async () => {
+  const copy = await written({ incoming: [whole()] })
+  assert.equal(normalizeDeskCopy({ ...copy, pr_fields: 'another version' }), null)
+  assert.equal(normalizeDeskCopy({ ...copy, pr_fields: undefined }), null, 'a copy saved before the fields were recorded')
+  assert.equal(copy.pr_fields, String(copy.pr_fields), 'the stamp is part of the file')
+  assert.ok(PR_FIELDS.length > 100)
 })
 
 test('the copy is written when it changed and not again while it has not', async () => {

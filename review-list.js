@@ -4,7 +4,7 @@
 // live read of that PR: a saved review cannot say whether its PR moved on, so
 // every PR is read, in bounded batches. A PR that could not be read is shown as
 // unknown, never classified from older saved data.
-import { PR_FIELDS, aliasedPulls, fetchChangeProbe, fetchLiveStates, validPullRef } from './api.js'
+import { PR_FIELDS, aliasedPulls, fetchChangeProbe, fetchLiveStates, pullSignature, validPullRef } from './api.js'
 import { STATES } from './pr-machine.js'
 import { standingFor } from './pr-standing.js'
 
@@ -133,14 +133,11 @@ export async function loadReviewPulls(token, refs) {
   return new Map(read.filter(([, pr]) => pr))
 }
 
-// What a PR looked like when it was read, as the change probe reports it (api.js fetchChangeProbe): the same two
-// facts, so a read PR and a probe answer can be compared.
-const pullSignature = pr => `${pr.updatedAt}|${pr.state}`
-
 // One live read of the PRs the reviews belong to: all of `refs`, or only those whose keys are in `keys`.
 // What was asked for travels with the answer, so a merge can tell a PR GitHub did not return from one nobody asked about.
-// `known` (the PRs read before, by key) lets a PR the cheap change probe says did not move keep its read instead of
-// being read again, a point per hundred PRs against a read of dozens; without it every PR is read.
+// `known` (the PRs read before, by key) lets a PR that is over (merged or closed) which the cheap change probe says did
+// not move keep its read instead of being read again, a point per hundred PRs against a read of dozens; without it every
+// PR is read. An open PR is always read: its checks and its merge state move without GitHub updating the PR.
 export async function readReviewPulls(token, refs, keys = null, known = null) {
   const asked = keys ? refs.filter(ref => keys.has(reviewKey(ref.repo, ref.number))) : refs
   const unchanged = await unchangedPulls(token, asked, known)
@@ -149,10 +146,11 @@ export async function readReviewPulls(token, refs, keys = null, known = null) {
   return { everything: !keys, asked: asked.map(ref => reviewKey(ref.repo, ref.number)), pulls: new Map([...unchanged, ...read]) }
 }
 
-// The asked PRs whose last read is still what GitHub has: the probe's signature equals the read's own. A probe GitHub
-// does not answer proves nothing, so nothing is skipped.
+// The asked PRs that are over and whose last read is still what GitHub has: the probe's signature equals the read's own.
+// A probe GitHub does not answer proves nothing, so nothing is skipped.
+const isOver = pr => pr?.state === 'MERGED' || pr?.state === 'CLOSED'
 async function unchangedPulls(token, asked, known) {
-  const remembered = asked.filter(ref => known?.has(reviewKey(ref.repo, ref.number)))
+  const remembered = asked.filter(ref => isOver(known?.get(reviewKey(ref.repo, ref.number))))
   if (!remembered.length) return new Map()
   const current = await fetchChangeProbe(token, remembered.map(ref => ({ ...ref, key: reviewKey(ref.repo, ref.number) })))
   if (!current) return new Map()

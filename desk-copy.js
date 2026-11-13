@@ -4,7 +4,12 @@
 // parts of the copy; this file has its own writer (index.jsx, once the open reads have answered), so no two
 // writers ever replace one another's file.
 
+import { PR_FIELDS } from './api.js'
+
 const DESK_COPY = 'desk-cache.json'
+// The PRs of the copy were read with these fields. A copy written with others (a later version asks for more) is not
+// shown: its rows would lack what the desk now reads, so that visit opens like a first one and saves a fresh copy.
+const FIELDS_KEY = String([...PR_FIELDS].reduce((hash, character) => ((hash << 5) + hash + character.charCodeAt(0)) | 0, 5381) >>> 0)
 // The reviews the Agent runs view lists, in the states that say where a PR stands. A row still being read, or one GitHub
 // could not read, is no last-known state.
 const KNOWN_BUCKETS = new Set(['waiting', 'running', 'stalled', 'done'])
@@ -35,13 +40,18 @@ export function settledPulls(pulls) {
   }))
 }
 
-const isList = value => Array.isArray(value)
+// A copy is read from a file the app wrote, but an older version or a damaged write must never break a screen: only whole items stay.
+const isPull = pr => !!pr && Number.isInteger(pr.number) && typeof pr.repository?.nameWithOwner === 'string' && typeof pr.url === 'string'
+const isSettledPull = pr => !!pr && Number.isInteger(pr.number) && typeof pr.repository?.nameWithOwner === 'string' && typeof pr.state === 'string'
+const isRow = row => !!row && typeof row.id === 'string' && Number.isInteger(row.item?.number) && typeof row.item?.repo === 'string' && Array.isArray(row.chips)
+const wholeItems = (list, valid) => (Array.isArray(list) ? list.filter(valid) : null)
 
 export function normalizeDeskCopy(raw) {
-  if (!raw || typeof raw !== 'object' || typeof raw.login !== 'string' || !raw.login) return null
-  if (typeof raw.synced_at !== 'string' || !isList(raw.incoming) || !isList(raw.review_rows)) return null
-  const repositories = raw.repositories && isList(raw.repositories.repositories) ? raw.repositories : { repositories: [], hasNextPage: false }
-  return { login: raw.login, syncedAt: raw.synced_at, incoming: raw.incoming, repositories, reviewRows: raw.review_rows, reviewPulls: isList(raw.review_pulls) ? raw.review_pulls : [] }
+  if (!raw || typeof raw !== 'object' || raw.pr_fields !== FIELDS_KEY || typeof raw.login !== 'string' || !raw.login) return null
+  const incoming = wholeItems(raw.incoming, isPull), reviewRows = wholeItems(raw.review_rows, isRow)
+  if (typeof raw.synced_at !== 'string' || !incoming || !reviewRows) return null
+  const repositories = raw.repositories && Array.isArray(raw.repositories.repositories) ? raw.repositories : { repositories: [], hasNextPage: false }
+  return { login: raw.login, syncedAt: raw.synced_at, incoming, repositories, reviewRows, reviewPulls: wholeItems(raw.review_pulls, isSettledPull) || [] }
 }
 
 export async function loadDeskCopy() {
@@ -56,7 +66,7 @@ export async function loadDeskCopy() {
 let lastSaved = ''
 export async function saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows, reviewPulls }) {
   const copy = {
-    schema: 1, login, synced_at: syncedAt, incoming,
+    schema: 1, pr_fields: FIELDS_KEY, login, synced_at: syncedAt, incoming,
     repositories: { repositories: repositories.repositories, hasNextPage: !!repositories.hasNextPage },
     review_rows: reviewRows, review_pulls: reviewPulls,
   }

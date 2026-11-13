@@ -41,8 +41,8 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
-import { createSyncHub, onShownAgain } from './refresh.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
+import { SYNC_POLICY, createSyncHub, onShownAgain } from './refresh.js'
 import { settledPulls, slimReviewRow } from './desk-copy.js'
 import { useDeskCopySave, useSavedDeskCopy } from './ui/useDeskCopy.js'
 import { checkUpstream } from './upstream-check.js'
@@ -309,12 +309,14 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const [followedRepos, setFollowedRepos] = useState([])
   useEffect(() => window.mobius.storage.subscribe(FOLLOWED_REPOSITORIES, value => setFollowedRepos(followedRepositories(value))), [])
   const repositoryRequest = useRef(0)
+  const repositoriesAnsweredRef = useRef(false)
   const [repositoryAccess, setRepositoryAccess] = useState({ repositories: [], error: '', hasNextPage: false })
   const loadRepositories = useCallback(async (cursor = null) => {
     const requestId = ++repositoryRequest.current
     try {
       const next = await discoverRepositories(token, cursor)
       if (requestId !== repositoryRequest.current) return
+      repositoriesAnsweredRef.current = true
       setRepositoryAccess(old => ({ ...next, error: '', repositories: cursor
         ? [...new Map([...old.repositories, ...next.repositories].map(repo => [repo.nameWithOwner, repo])).values()]
         : next.repositories }))
@@ -465,7 +467,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     historyWantedRef.current = true
     try {
       const ledger = await loadLedger({ history: true })
-      if (!ledger.wholeHistory || ledger.fromCache) { historyWantedRef.current = false; return }
+      if (!ledger.wholeHistory) { historyWantedRef.current = false; return }
       replaceFeed(reconcileLedgerSnapshot(recordsRef.current, ledger.records))
       setHistoryComplete(true)
     } catch {
@@ -618,6 +620,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // and their own PRs), which answers well before the full list: those rows are right
   // as soon as it does, and the full read replaces the list when it answers.
   const [incomingFirstReady, setIncomingFirstReady] = useState(false)
+  const incomingAnsweredRef = useRef(false)
   const ownerReadStarted = useRef(false)
   useEffect(() => {
     if (sendOnly) return undefined
@@ -637,6 +640,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         return rows
       },
       apply: (rows, { early = false } = {}) => {
+        incomingAnsweredRef.current = true
         setIncomingFirstReady(true)
         if (early) { setIncomingReviews(old => withOwnerPulls(old, rows, connRef.current.login)); return }
         incomingReadOkRef.current = true
@@ -684,8 +688,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // saved the app opens from them at once and updates quietly; without them (a first visit) it waits for its first reads.
   const { saved, savedCopy } = useSavedDeskCopy({ enabled: !sendOnly, onCopy: copy => {
     // Anything a read has already answered is newer than the copy.
-    setIncomingReviews(old => (old.length ? old : copy.incoming))
-    setRepositoryAccess(old => (old.repositories.length ? old : { ...copy.repositories, error: '' }))
+    if (!incomingAnsweredRef.current) setIncomingReviews(copy.incoming)
+    if (!repositoriesAnsweredRef.current) setRepositoryAccess({ ...copy.repositories, error: '' })
   } })
   // Who the desk's rows are for, before GitHub's account answers: the copy's own account.
   const login = conn.login || savedCopy?.login || ''
@@ -737,7 +741,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
       const ledger = await ledgerPromise
       if (cancelled) return
-      const recs = ledger.records
+      // Laid over what the saved feed showed, as every later pass does, so a status GitHub moved ahead of the file does not flip back.
+      const recs = reconcileLedgerSnapshot(recordsRef.current, ledger.records)
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
       setRecords(recs)
@@ -950,6 +955,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         return
       }
 
+      // A settled record can lie outside the desk's own set; the ledger the passes keep must hold it, or the next pass would drop it.
+      if (!isCurrentRecord(record)) await loadHistory()
+      if (cancelled) return
       const next = upsertRecord(recordsRef.current, record)
       recordsRef.current = next
       setRecords(next)
@@ -1804,14 +1812,17 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [booted, copyReady, firstOpenReady, savedCopy])
   // The open's own reads have all answered, so the header can say how it went: they are the facts the desk shows,
   // each read once by its owner, and the quiet update ends with the last of them.
-  const openReadsAnswered = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady && (responsesReady || conn.state !== 'connected') && reviewList.settled
+  // The reviewed PRs are read through the hub, which holds that read while the account is low on GitHub points: that is no reason to say
+  // Updating… until the owner syncs, so the open ends there, as an update that did not finish.
+  const pointsLow = (githubRemainingPoints() ?? Infinity) < SYNC_POLICY.lowPoints
+  const openReadsAnswered = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady && (responsesReady || conn.state !== 'connected') && (reviewList.settled || pointsLow)
   const [openSynced, setOpenSynced] = useState(false)
   useEffect(() => {
     if (!booted || !openReadsAnswered || openSynced) return
     setOpenSynced(true)
     // Without a connected GitHub account there is nothing to sync. A GitHub that could not be reached is a failed update.
     if (conn.state === 'disconnected') { setRefreshNote(null); return }
-    const synced = conn.state === 'connected' && !sourceError && syncReadsCurrent()
+    const synced = conn.state === 'connected' && !sourceError && syncReadsCurrent() && reviewList.settled && !reviewList.failed
     setRefreshNote(old => (synced ? { at: new Date().toISOString(), failed: false } : { at: old?.at || null, failed: true }))
     if (synced) markSynced()
   }, [booted, openReadsAnswered, openSynced, conn.state, sourceError])

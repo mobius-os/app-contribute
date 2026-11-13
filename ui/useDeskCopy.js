@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { loadDeskCopy, saveDeskCopy } from '../desk-copy.js'
 import { loadSavedFeedStamp } from '../storage.js'
 
+// The copy is written once things have settled, not at every change of a list that moves while reads answer.
+const SAVE_AFTER_MS = 1500
+
 // The last-known copy of the desk (desk-copy.js, with the saved feed and the project snapshot): read once when the app
 // opens. `saved` is null until it was looked for, then { copy, hasFeed }; `onCopy(copy)` lets the app lay what the copy
 // holds under anything a read has already answered.
@@ -25,7 +28,7 @@ export function useSavedDeskCopy({ enabled, onCopy }) {
 export function useDeskCopySave({ enabled, syncedAt, failed, login, incoming, repositories, reviewRows, reviewPulls }) {
   useEffect(() => {
     if (!enabled || !syncedAt || failed || !login) return undefined
-    const timer = setTimeout(() => { void saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows, reviewPulls }) }, 1500)
+    const timer = setTimeout(() => { void saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows, reviewPulls }) }, SAVE_AFTER_MS)
     return () => clearTimeout(timer)
   }, [enabled, syncedAt, failed, login, incoming, repositories, reviewRows, reviewPulls])
 }

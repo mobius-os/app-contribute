@@ -65,7 +65,7 @@ function harness() {
   const rows = () => [...view.entries].map(entry => `${entry.bucket}:${entry.chips.map(chip => chip.label).join('+')}`)
   const titles = () => [...view.entries].map(entry => entry.item.title)
   const flush = () => new Promise(resolve => setImmediate(resolve))
-  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: options => view.syncPulls(options) }
+  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), failed: () => view.failed, retry: () => view.retry(), sync: options => view.syncPulls(options) }
 }
 
 const head = letter => letter.repeat(40)
@@ -212,4 +212,17 @@ test('PRs that were over at the last visit show as they were and stay unread whi
   // A later seed never replaces what a read answered.
   h.render({ knownPulls: [{ ...settled[0], state: 'CLOSED' }] })
   assert.deepEqual(h.rows(), ['done:Merged'])
+})
+
+// The open reports a failed update in its header; the rows the last visit saved stay meanwhile instead of turning into "Couldn't read".
+test('a first read GitHub cannot answer keeps the saved rows and says it failed; the next read that answers clears it', async () => {
+  const h = harness()
+  const row = { id: 'o/r#7', at: 1, bucket: 'waiting', confirm: false, chips: [{ label: 'Draft to send', tone: 'owner' }], item: { repo: 'o/r', number: 7, title: 'A PR' }, run: { created_at: '2026-11-03T22:00:00Z' }, pull: { state: 'OPEN', author: { login: 'someone-else' } } }
+  h.render({ ...base, runs: runsOf(review('needs_you', { verdict_proposal: requested })), lastKnown: [row] })
+  assert.deepEqual(h.rows(), ['waiting:Draft to send'], 'the saved row stands while the read is out')
+  h.reads[0].reject(new Error('offline')); await h.flush()
+  assert.deepEqual([h.rows(), h.failed()], [['waiting:Draft to send'], true])
+  void h.sync()
+  h.reads[1].resolve(live()); await h.flush()
+  assert.deepEqual([h.rows(), h.failed()], [['done:Waiting on someone-else'], false])
 })

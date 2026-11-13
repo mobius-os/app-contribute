@@ -87,8 +87,9 @@ const NEEDS_CONVERSATION = new Set(['failed', 'merge_unknown', 'ready_unknown', 
 
 // The one presentation of a review run, wherever it is opened from: a PR row,
 // the project's review history, or a chat link to the run.
-export function RunDetail({ token, appId, run: listed, pulls, listState, busy = false, error = '', onStop, retryPulls = [], onRetry, onVerdict, onRepair = null, onCheck = null, updater = null }) {
-  const { run, reading, failed } = useRunDocuments({ token, appId, run: listed })
+export function RunDetail({ token, appId, run: listed, pulls, listState, busy: busyElsewhere = false, error = '', onStop, retryPulls = [], onRetry, onVerdict, onRepair = null, onCheck = null, updater = null }) {
+  const { run, reading, failed, current } = useRunDocuments({ token, appId, run: listed })
+  const busy = busyElsewhere || !current
   const halted = reviewRunHalted(run)
   // "Answer" only when the conversation really asks something or must reconcile an outcome; findings alone are not a question.
   const needsAnswer = run.items?.some(item => reviewItemProgress(run, item).waiting || NEEDS_CONVERSATION.has(item.state))

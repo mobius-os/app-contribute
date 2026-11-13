@@ -250,6 +250,10 @@ test('a review the list holds cut is read whole before Respond to feedback takes
   assert.equal((await wholeSavedFindings(full, null, readRun)).summary, whole)
   assert.equal((await wholeSavedFindings({ run: { id: 'run-3', summary_only: true }, item: item({ summary: 'Short.' }) }, null, readRun)).summary, 'Short.')
   assert.deepEqual(reads, [])
+  // A run another conversation owns is not marked as a short run: its copy is all there is, and it is never read for.
+  const elsewhere = { run: { id: 'core-1', details_in_owning_chat: true }, item: item({ summary: 'cut… open this run for the full findings', summary_truncated: true }) }
+  assert.match((await wholeSavedFindings(elsewhere, null, readRun)).summary, /^cut/)
+  assert.deepEqual(reads, [])
   // A run that cannot be read is an error the window reports; it never falls back to the cut copy.
   await assert.rejects(wholeSavedFindings(cut, null, async () => { throw new Error('offline') }), /offline/)
   // A run that no longer holds the item has no findings to carry.

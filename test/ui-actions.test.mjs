@@ -471,7 +471,7 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
   // The open's own sync is the first load's header note: a sync that came back, or one that could not (keeping the copy's age).
   assert.match(appSource, /synced \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: old\?\.at \|\| null, failed: true \}/)
-  assert.match(appSource, /const synced = conn\.state === 'connected' && !sourceError && syncReadsCurrent\(\)/)
+  assert.match(appSource, /const synced = conn\.state === 'connected' && !sourceError && syncReadsCurrent\(\) && reviewList\.settled && !reviewList\.failed/)
   const syncSource = readFileSync(new URL('../ui/useDeskSync.js', import.meta.url), 'utf8')
   assert.match(syncSource, /if \(outcome\?\.ok && outcome\?\.upstream\?\.ok !== false\) \{[\s\S]*?setRefreshNote\(\{ at: new Date\(\)\.toISOString\(\), failed: false \}\)/)
   assert.match(syncSource, /else if \(!quiet\) setRefreshNote\(old => \(\{ at: old\?\.at \|\| null, failed: true \}\)\)/)
@@ -493,7 +493,7 @@ test('the workspace opens from its last-known copy, or after the first reads of 
   assert.match(appSource, /if \(booted \|\| !\(copyReady \|\| firstOpenReady\)\) return\s*setBooted\(true\)/)
   // The quiet update: the header says so until every read of the open has answered, and the copy is saved after that.
   assert.match(appSource, /setRefreshNote\(\{ at: copyReady \? savedCopy\.syncedAt : null, updating: true \}\)/)
-  assert.match(appSource, /const openReadsAnswered = ledgerReady && !sourceLoading && conn\.state !== 'checking' && \(incomingReady \|\| conn\.state !== 'connected'\) && runsReady && \(responsesReady \|\| conn\.state !== 'connected'\) && reviewList\.settled/)
+  assert.match(appSource, /const openReadsAnswered = ledgerReady && !sourceLoading && conn\.state !== 'checking' && \(incomingReady \|\| conn\.state !== 'connected'\) && runsReady && \(responsesReady \|\| conn\.state !== 'connected'\) && \(reviewList\.settled \|\| pointsLow\)/)
   // The opening screen names the same reads a first visit waits for, so its progress cannot drift from it.
   assert.match(appSource, /<BootProgress ledgerReady=\{ledgerReady\} projectsReady=\{!sourceLoading\} accountReady=\{conn\.state !== 'checking'\}/)
   assert.match(appSource, /pullsReady=\{incomingFirstReady \|\| incomingReady\} runsReady=\{runsReady\}/)

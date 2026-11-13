@@ -2,7 +2,7 @@
 // The helper writes `respond-results/`; the app writes `respond-decisions/` and `respond-findings/`; neither writes the other's folder.
 import { DECISION_FOLDER, RESULT_FOLDER, normalizeDecision, normalizeResult, postingSoon, resultSlug } from './respond-result.js'
 import { SYNC_POLICY } from './refresh.js'
-import { listingStamp } from './storage.js'
+import { listingStamp, versionedReader } from './storage.js'
 
 const storageOf = () => window.mobius.storage
 
@@ -34,7 +34,8 @@ async function readFolder(storage, prefix, memory) {
 // One file as the server holds it now. A runtime without versioned reads, or no answer from the server (offline), reads the
 // runtime's own copy instead, which the caller must not remember.
 async function readOne(storage, path) {
-  const loaded = typeof storage.getWithVersion === 'function' ? await storage.getWithVersion(path) : null
+  const readVersioned = versionedReader(storage)
+  const loaded = readVersioned ? await readVersioned(path) : null
   if (loaded && !loaded.offline) return { content: loaded.value, fresh: true }
   return { content: await storage.get(path), fresh: false }
 }

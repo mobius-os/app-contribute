@@ -253,3 +253,20 @@ test('many busy opens at once share one read of the folder and the saved feed', 
   assert.equal(log.lists.length, 1)
   assert.equal(log.gets.length, 1)
 })
+
+test('the desk set is the whole history when nothing settled is left unread, and says so', async () => {
+  fakeStorage({ saved: savedFeed([record('recent')], { 'recent.json': { stamp: stampOfFile('recent.json'), current: false } }), listing: [file('recent')], server: {} })
+  assert.equal((await loadLedger()).wholeHistory, true, 'every settled record is in the desk set')
+  fakeStorage({
+    saved: savedFeed([record('recent')], { 'recent.json': { stamp: stampOfFile('recent.json'), current: false }, 'old.json': { stamp: stampOfFile('old.json'), current: false } }),
+    listing: [file('recent'), file('old')], server: {},
+  })
+  assert.equal((await loadLedger()).wholeHistory, false, 'older history is left for the screen that lists it')
+})
+
+test('a file that reads as gone or empty is not remembered, so a record caught between writes is read again next time', async () => {
+  const log = fakeStorage({ saved: savedFeed([], {}), listing: [file('flicker')], server: {} })
+  assert.deepEqual((await loadLedger()).records, [])
+  await cacheFeed([])
+  assert.deepEqual(log.writes.at(-1).value.index, {}, 'nothing was learned about it')
+})

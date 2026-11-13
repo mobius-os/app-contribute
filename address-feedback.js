@@ -34,7 +34,8 @@ export function savedFindings(status, ignored = null) {
 // findings cut, collaboration.js loadReviewRuns), the run itself is read first (`readRun(id)` answers the run), so a
 // long review is never sent cut; a run that cannot be read throws, and one that no longer holds the item has no findings.
 export async function wholeSavedFindings(status, ignored, readRun) {
-  if (status?.item?.summary_truncated !== true) return savedFindings(status, ignored)
+  // A run another conversation owns is the same short copy in both forms: there is no whole review to read for it.
+  if (status?.item?.summary_truncated !== true || status.run?.summary_only !== true) return savedFindings(status, ignored)
   const run = await readRun(status.run.id)
   const item = run?.items?.find(candidate => String(candidate.repo).toLowerCase() === String(status.item.repo).toLowerCase() && candidate.number === status.item.number)
   return savedFindings(item ? { run, item } : null, ignored)

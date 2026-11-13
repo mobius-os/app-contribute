@@ -2,10 +2,10 @@ import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { stackMeta } from './stack.js'
 
 // Ledger storage layer. contributions/<id>.json is written by the agent
-// (from chat turns) and by job.sh (the daily refresh); this app has TWO
-// writers of its own — the read-side feed cache (feed-cache.json, there
-// to open the next visit at once and to serve an offline open) and the
-// Dismiss button, which CAS-flips a prepared record to abandoned to avoid
+// (from chat turns) and by job.sh (the daily refresh); this app has its own
+// writers — the read-side feed cache (feed-cache.json, there to open the next
+// visit at once and to serve an offline open; the project snapshot and the desk
+// copy have files of their own) and the Dismiss button, which CAS-flips a prepared record to abandoned to avoid
 // clobbering a concurrent submit claim. Dismissal is ONLINE-ONLY (CAS needs
 // a live version read), which is why the manifest declares offline writes
 // "none". The assembled feed is also cached to feed-cache.json.
@@ -59,7 +59,7 @@ function preferCanonicalLedgerRecords(records) {
   return [...selected.values()]
 }
 
-const isCurrentRecord = record => CURRENT_STATUSES.has(record?.status) || !!record?.needs_attention
+export const isCurrentRecord = record => CURRENT_STATUSES.has(record?.status) || !!record?.needs_attention
 
 // The desk's own set: every current item, the history that is recent (a small
 // window, plus the Merged week), and every layer of a stack one of those
@@ -141,7 +141,7 @@ export async function loadContributionRecord(recordId) {
 // The runtime promoted its versioned read from the private `_getWithVersion` to
 // a supported `getWithVersion`; accept either so the app runs on a runtime from
 // before or after that rename. null on a runtime with neither.
-function versionedReader(storage) {
+export function versionedReader(storage) {
   if (typeof storage?.getWithVersion === 'function') return storage.getWithVersion.bind(storage)
   return typeof storage?._getWithVersion === 'function' ? storage._getWithVersion.bind(storage) : null
 }
@@ -314,6 +314,8 @@ async function readDeskLedger(entries, saved, readVersioned) {
     for (const entry of files) {
       const body = bodies.get(entry)
       if (body === null) { omitted.push(recordPath(entry)); continue }
+      // A file that read as gone or empty is not remembered: it may only have been caught between writes.
+      if (body === undefined) continue
       const record = ledgerRecordOf(entry, body)
       if (record) records.push(record)
       index[entry.name] = indexEntry(entry, record)
@@ -322,8 +324,10 @@ async function readDeskLedger(entries, saved, readVersioned) {
   await readInto(toRead)
   // A layer of a stack the desk shows belongs with it, however old.
   const chains = new Set(records.map(record => stackMeta(record)?.id).filter(Boolean))
-  await readInto(settledOutside.filter(entry => chains.has(index[entry.name].stack)))
-  return finishLedger({ records, omitted, index, jsonEntries, saved })
+  const layers = settledOutside.filter(entry => chains.has(index[entry.name].stack))
+  await readInto(layers)
+  // With nothing left unread the desk set is the whole history, and no screen needs to ask for more.
+  return finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistory: layers.length === settledOutside.length })
 }
 
 async function readLedger({ history }) {

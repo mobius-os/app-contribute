@@ -399,7 +399,7 @@ function fakeGithub(pulls) {
   }
   return { heavy, probes, mostAtOnce: () => mostAtOnce }
 }
-const pullAt = (number, updatedAt = '2026-11-13T08:00:00Z') => live({ number, updatedAt })
+const pullAt = (number, updatedAt = '2026-11-13T08:00:00Z', state = 'MERGED') => live({ number, updatedAt, state })
 
 test('the batches of a long history are read together, a few at a time', async () => {
   const previous = globalThis.fetch
@@ -413,19 +413,20 @@ test('the batches of a long history are read together, a few at a time', async (
   } finally { globalThis.fetch = previous }
 })
 
-test('a PR the change probe says did not move keeps its last read, and only the others are read again', async () => {
+test('a PR that is over, which the change probe says did not move, keeps its last read; every other PR is read again', async () => {
   const previous = globalThis.fetch
   try {
-    const github = fakeGithub({ 1: pullAt(1), 2: pullAt(2, '2026-11-13T10:00:00Z'), 3: pullAt(3), 4: pullAt(4) })
+    const github = fakeGithub({ 1: pullAt(1), 2: pullAt(2, '2026-11-13T10:00:00Z'), 3: pullAt(3), 4: pullAt(4, undefined, 'OPEN') })
     const refs = [1, 2, 3, 4].map(number => ({ repo: 'o/r', number }))
-    // PR 1 and 2 were read before; GitHub's PR 2 has moved since. PR 3 was never read, PR 4 is not a review of the owner's.
-    const known = new Map([['o/r#1', pullAt(1)], ['o/r#2', pullAt(2, '2026-11-13T08:00:00Z')]])
-    const { pulls, everything, asked } = await readReviewPulls('token', refs.slice(0, 3), null, known)
-    assert.deepEqual(github.probes, [[1, 2]], 'only the PRs with a last read are probed')
-    assert.deepEqual(github.heavy, [[2, 3]], 'the moved PR and the new one are read; the unchanged one is not')
+    // PR 1 and 2 (merged) were read before; GitHub's PR 2 has moved since. PR 3 was never read. PR 4 was read open and has not
+    // moved either, yet is read again: its checks and merge state change without GitHub updating the PR.
+    const known = new Map([['o/r#1', pullAt(1)], ['o/r#2', pullAt(2, '2026-11-13T08:00:00Z')], ['o/r#4', pullAt(4, undefined, 'OPEN')]])
+    const { pulls, everything, asked } = await readReviewPulls('token', refs, null, known)
+    assert.deepEqual(github.probes, [[1, 2]], 'only the PRs that are over and have a last read are probed')
+    assert.deepEqual(github.heavy, [[2, 3, 4]], 'the moved PR, the new one and the open one are read; the unchanged one is not')
     assert.equal(pulls.get('o/r#1'), known.get('o/r#1'), 'the unchanged PR is the very read it had')
     assert.equal(pulls.get('o/r#2').updatedAt, '2026-11-13T10:00:00Z')
-    assert.deepEqual([everything, asked], [true, ['o/r#1', 'o/r#2', 'o/r#3']])
+    assert.deepEqual([everything, asked], [true, ['o/r#1', 'o/r#2', 'o/r#3', 'o/r#4']])
   } finally { globalThis.fetch = previous }
 })
 
