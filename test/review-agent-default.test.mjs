@@ -107,7 +107,7 @@ test('Who sees the result sits on one row: the question on the left, the three c
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {} })
   assert.match(html, /<div class="co-rw-who-row"><h4 class="co-rw-label">Who sees the result\?<\/h4><div class="co-seg" role="radiogroup"/)
-  assert.match(html, /<\/div><\/div><p class="co-rw-note">It posts its verdict/, 'the explanation is below the row, not beside it')
+  assert.match(html, /<\/div><\/div><p class="co-rw-note">Posts approve, request changes or comment/, 'the explanation is below the row, not beside it')
 })
 
 test('the dialog styles give the row, the steps and the hover card their room', () => {

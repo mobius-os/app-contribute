@@ -23,6 +23,7 @@ import { NextStep } from './NextStep.jsx'
 import { nextStepModel, stageWord } from '../next-step.js'
 import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
+import { PullChecks } from './PullChecks.jsx'
 import { PullEscalation } from './PullEscalation.jsx'
 export { PullFiles }
 
@@ -58,10 +59,6 @@ function openedLine(login, value) {
   return `${login || 'Someone'} opened ${day} · ${time}`
 }
 
-function DetailLink({ href, children }) {
-  const safe = safeDetailLink(href)
-  return safe ? <a className="co-btn co-btn-quiet" href={safe} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>
-}
 function threadLocation(thread) {
   const side = thread.diffSide === 'LEFT' ? 'old' : thread.diffSide === 'RIGHT' ? 'new' : 'unknown-side'
   if (thread.subjectType === 'FILE') return 'file discussion'
@@ -196,31 +193,6 @@ function PullProvenance({ record, onRecord, conversations }) {
 
 function ReadErrors({ errors, onRetry }) {
   return errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={onRetry}>Retry</button></p>)
-}
-// Why a failed check failed: its failed step names and first annotations, as plain text (an annotation is
-// whatever the check's own tool wrote). The log itself is on GitHub, behind the row's link.
-function CheckWhy({ why }) {
-  return <div className="co-check-why">
-    {why.steps.length ? <p>{why.steps.length === 1 ? 'Failed step' : 'Failed steps'}: {why.steps.map(name => <code key={name}>{name}</code>)}</p> : null}
-    {why.annotations.length ? <ul>{why.annotations.map((note, index) => <li key={index}>{note.where ? <code>{note.where}</code> : null} {note.text}</li>)}</ul> : null}
-  </div>
-}
-export function PullChecks({ data }) {
-  return <>
-    <p className="co-pr-note">Reported by GitHub for this version{data?.page > 1 ? ` · page ${data.page}` : ''}. Checks are not an all-clear review.</p>
-    {data?.groups?.map(group => <section key={group.name} aria-label={group.name}>
-      <h4>{group.name}{group.total !== null ? ` · ${group.total}` : ''}</h4>
-      {group.hasMore ? <p className="co-pr-note">More results remain on GitHub.</p> : null}
-      {group.items.map(item => <article className="co-activity-item" key={item.id}>
-        <header style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', overflowWrap: 'anywhere' }}><strong>{item.name || item.context || 'Unnamed check'}</strong><span>{(item.conclusion || item.status || item.state || 'unknown').replaceAll('_', ' ')}</span><DateLabel value={item.completed_at || item.updated_at || item.started_at || item.created_at} /></header>
-        {item.output?.title || item.description ? <p>{item.output?.title || item.description}</p> : null}
-        {item.why ? <CheckWhy why={item.why} /> : null}
-        {item.details_url || item.target_url || item.html_url ? <DetailLink href={item.details_url || item.target_url || item.html_url}>{NAMES.viewOnGitHub}</DetailLink> : null}
-      </article>)}
-      {!group.items.length ? <p>No {group.name.toLowerCase()} returned on this page.</p> : null}
-    </section>)}
-    {data?.capped ? <p>Only the first 100 result pages are available here. More results remain on GitHub.</p> : null}
-  </>
 }
 // One boxed row per related item, a pull-request or issue icon telling them
 // apart at a glance; the whole box opens the item on GitHub.
@@ -372,6 +344,9 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     const mine = new Set(Object.values(keys))
     writeCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
   }
+  const checkAgain = () => {
+    writeCache(old => { const next = { ...old }; delete next[keys.view]; return next })
+  }
   const retryRelated = () => {
     writeCache(old => { const next = { ...old }; delete next[keys.related]; return next })
   }
@@ -482,9 +457,8 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       </div> : null}
     </> : null}
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
-    {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
+    {tab === 'checks' && ready(view) ? <PullChecks data={view.data} onCheckAgain={checkAgain} /> : null}
     {(tab === 'files' || tab === 'checks') && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
-    {tab === 'checks' && !view.loading ? <button className="co-btn co-btn-quiet" onClick={() => { writeCache(old => { const next = { ...old }; delete next[keys.view]; return next }) }}>{NAMES.checkAgain}</button> : null}
     </div>
     {review?.standing ? <NextStep bar decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
   </div>

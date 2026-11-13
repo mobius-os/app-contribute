@@ -384,13 +384,13 @@ test('list labels are filled pills like the PR page, two at most, and a bot says
   assert.match(bot, /co-gh-label is-plain">bot</)
   assert.doesNotMatch(bot, /dependencies/)
   const chips = html.chips({ isDraft: true, reviewDecision: 'APPROVED' })
-  assert.match(chips, /co-desk-chip">Draft</)
+  assert.doesNotMatch(chips, /Draft/, 'a draft is told by its icon alone')
   assert.match(chips, /co-desk-chip is-ready">Approved</)
   // One verdict per row: once the PR machine has its own chip, GitHub's raw decision is not shown beside it.
   const contradicting = html.chips({ reviewDecision: 'CHANGES_REQUESTED' }, { label: 'Fixes pushed', tone: 'waiting' })
   assert.doesNotMatch(contradicting, /Changes requested/)
   assert.match(html.chips({ reviewDecision: 'CHANGES_REQUESTED' }, null), /co-desk-chip is-blocker">Changes requested</)
-  assert.match(html.chips({ isDraft: true, reviewDecision: 'APPROVED' }, { label: 'Ready to merge', tone: 'owner' }), /co-desk-chip">Draft</)
+  assert.doesNotMatch(html.chips({ isDraft: true, reviewDecision: 'APPROVED' }, { label: 'Ready to merge', tone: 'owner' }), /Draft/)
 })
 
 test('rows keep their checkbox and Assign out of sight until wanted, and the header checkbox stays', () => {

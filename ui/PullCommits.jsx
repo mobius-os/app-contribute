@@ -1,21 +1,20 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { authorLine, authorNames, checkWords, commitGroups, commitStats, copyText, madeWithAgent, reviewMarker } from '../pull-commits.js'
 import { NAMES } from '../names.js'
 import { safeDetailLink } from '../pull-details.js'
 import { Icon } from './Icons.jsx'
 
-// Copy a commit's full hash. The button says what it does; the icon only helps the eye. It says
-// "Copied" only after the write succeeded; otherwise it says so, and the short hash beside it is
-// on screen to copy by hand.
-function CopyHash({ oid }) {
+// The short hash is the Copy control: pressing it copies the full hash. The icon swaps to a check only after the
+// write succeeded; otherwise it says so, and the short hash is on screen to copy by hand. The tooltip and the
+// accessible name say what it does, as for every icon-led button.
+function CommitHash({ oid, short }) {
   const [result, setResult] = useState('')
-  const copied = result === 'copied'
-  const label = copied ? 'Copied' : result === 'failed' ? 'Couldn\u2019t copy' : NAMES.copyHash
-  return <button type="button" className="co-btn co-btn-quiet" aria-label={`${NAMES.copyHash} ${oid.slice(0, 7)}`}
+  const said = result === 'copied' ? 'Copied' : result === 'failed' ? 'Couldn\u2019t copy' : ''
+  return <button type="button" className="co-commit-hash co-tip" data-tip={said || NAMES.copyHash} aria-label={`${NAMES.copyHash} ${short}`}
     onClick={async () => {
       setResult((await copyText(oid)) ? 'copied' : 'failed')
       window.setTimeout(() => setResult(''), 1500)
-    }}><Icon name={copied ? 'check' : 'copy'} size={16} /><span>{label}</span></button>
+    }}><code>{short}</code><Icon name={result === 'copied' ? 'check' : 'copy'} size={14} /><span className="co-visually-hidden" role="status">{said}</span></button>
 }
 
 function CommitTime({ value }) {
@@ -30,21 +29,23 @@ function CommitStats({ commit }) {
   return <span className="co-commit-stats">{stats.files} {stats.files === 1 ? 'file' : 'files'} <b className="co-file-add">+{stats.additions}</b> <b className="co-file-del">−{stats.deletions}</b></span>
 }
 
+// The title opens the commit's changes, the short hash copies the full hash and one GitHub icon stays. A long message
+// opens from the chevron beside the title, at the card's full width below it.
 function CommitRow({ commit, onOpen }) {
   const names = authorNames(commit)
   const checks = checkWords(commit)
   const link = safeDetailLink(commit.url)
   const body = String(commit.messageBody || '').trim()
+  const short = commit.abbreviatedOid || commit.oid.slice(0, 7)
+  const [more, setMore] = useState(false)
+  const bodyId = useId()
   return <li className="co-commit">
     <div className="co-commit-main">
-      {body ? (
-        // The whole title row opens the rest of the message; the chevron box only says so. The message then
-        // takes the card's full width below the title, never a box squeezed beside a button.
-        <details className="co-commit-body">
-          <summary><strong className="co-commit-title">{commit.messageHeadline}<span className="co-visually-hidden"> — {NAMES.showFullMessage}</span></strong><span className="co-commit-toggle" aria-hidden="true"><Icon name="chevron" size={16} /></span></summary>
-          <div>{body}</div>
-        </details>
-      ) : <strong className="co-commit-title">{commit.messageHeadline}</strong>}
+      <div className="co-commit-head">
+        <button type="button" className="co-commit-title" data-commit={commit.oid} onClick={() => onOpen(commit)}>{commit.messageHeadline}<span className="co-visually-hidden"> — {NAMES.seeChanges}: commit {short}</span></button>
+        {body ? <button type="button" className="co-commit-toggle" aria-expanded={more} aria-controls={bodyId} aria-label={NAMES.showFullMessage} onClick={() => setMore(value => !value)}><Icon name="chevron" size={16} /></button> : null}
+      </div>
+      {body && more ? <div id={bodyId} className="co-commit-body">{body}</div> : null}
       <p className="co-commit-meta">
         {names.length ? <span>{authorLine(names)} committed </span> : null}<CommitTime value={commit.committedDate} />
         <CommitStats commit={commit} />
@@ -53,10 +54,8 @@ function CommitRow({ commit, onOpen }) {
       </p>
     </div>
     <div className="co-commit-side">
-      <code>{commit.abbreviatedOid || commit.oid.slice(0, 7)}</code>
-      <button type="button" className="co-btn" data-commit={commit.oid} onClick={() => onOpen(commit)} aria-label={`See changes: commit ${commit.oid.slice(0, 7)}`}>See changes</button>
-      <CopyHash oid={commit.oid} />
-      {link ? <a className="co-btn co-btn-quiet" href={link} target="_blank" rel="noopener noreferrer" aria-label={`${NAMES.viewOnGitHub}: commit ${commit.oid.slice(0, 7)}`}><Icon name="github" size={16} /><span>{NAMES.viewOnGitHub}</span></a> : null}
+      <CommitHash oid={commit.oid} short={short} />
+      {link ? <a className="co-btn co-btn-quiet co-btn-icon co-tip" href={link} target="_blank" rel="noopener noreferrer" aria-label={`${NAMES.viewOnGitHub}: commit ${short}`} data-tip={NAMES.viewOnGitHub}><Icon name="github" size={16} /></a> : null}
     </div>
   </li>
 }

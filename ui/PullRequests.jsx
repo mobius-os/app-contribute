@@ -23,6 +23,7 @@ import { ActionConfirm } from './ActionConfirm.jsx'
 import { IgnoreReview } from './IgnoreReview.jsx'
 import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
+import { isDraftWord } from '../review-list.js'
 import { RunOnce } from './RunOnce.jsx'
 import { MERGE_OPTIONS, YOUR_INTENTS } from '../actions-menu.js'
 import { ACTION_COPY, methodToSend } from '../action-copy.js'
@@ -690,7 +691,11 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       <SearchField className="co-pr-search" label="Find a pull request" placeholder="Search pull requests" value={query} onChange={setQuery} inputRef={searchField} />
       <button type="button" className="co-btn co-btn-quiet co-btn-icon co-pr-search-toggle" aria-label={query ? `Search PRs: ${query}` : 'Search pull requests'} aria-expanded={searchOpen} onClick={() => setSearchOpen(value => !value)}><Icon name="search" size={18} /></button>
     </div>
-    {scope === 'all' ? <div className="co-pr-filters" role="group" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}{key !== 'all' && !data.hasNextPage && !data.loading ? <span className="co-pr-filter-count">{matchingPulls(pulls.filter(isOpenPull), key, conn.login).length}</span> : null}</button>)}</div> : null}
+    {scope === 'all' ? <div className="co-pr-filters" role="group" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => {
+      const count = key !== 'all' && !data.hasNextPage && !data.loading ? matchingPulls(pulls.filter(isOpenPull), key, conn.login).length : null
+      // A filter that matches nothing stays pressable but steps back, so the ones with something in them stand out.
+      return <button key={key} type="button" className={count === 0 ? 'is-empty' : undefined} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}{count !== null ? <span className="co-pr-filter-count">{count}</span> : null}</button>
+    })}</div> : null}
     {scope === 'requests' ? <p className="co-pr-intro">PRs where someone asked for your review. Start an agent review, or open the PR yourself.</p> : null}
     {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
     {focusRead ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusRead.message}{focusRow ? ' Showing the previous snapshot.' : ''}</p> : null}
@@ -731,7 +736,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
           <div className="co-row-pills">
             <PullStateChips pr={pr} machineChip={standing.role === 'author' ? review.chip : null} />
             {requestedKeys.has(key) ? <span className="co-pr-requested">Your review requested</span> : null}
-            {review.chip ? <button className={'co-pr-agent-state' + CHIP_TONE_CLASS[review.chip.tone]} onClick={() => status && !onOpenPage ? task?.open(`task:run:${status.run.id}`) : onOpenPage ? onOpenPage(pr, 'review') : inspect(pr)}><Icon name="prepare" size={13} />{review.chip.label}</button> : null}
+            {review.chip && !isDraftWord(pr, review.chip) ? <button className={'co-pr-agent-state' + CHIP_TONE_CLASS[review.chip.tone]} onClick={() => status && !onOpenPage ? task?.open(`task:run:${status.run.id}`) : onOpenPage ? onOpenPage(pr, 'review') : inspect(pr)}><Icon name="prepare" size={13} />{review.chip.label}</button> : null}
           </div>
         </div>
         <div className="co-pr-aside">

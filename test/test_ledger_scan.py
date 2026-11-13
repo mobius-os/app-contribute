@@ -122,6 +122,42 @@ class LedgerScanTests(unittest.TestCase):
         _, work = scan(self.ledger, self.state.name)
         self.assertIn("closed.json", work)
 
+    def test_a_checkout_kept_for_an_open_contribution_is_asked_about_again(self):
+        checkout = tempfile.mkdtemp(dir=self.state.name)
+        self.ledger.put("closed.json", {
+            "id": "closed", "status": "closed", "plan": {"repo_path": checkout},
+        })
+        first, work = scan(self.ledger, self.state.name)
+        self.assertIn("closed.json", work)
+        kept = {"cleaned": False, "kept_for": "follow-up"}
+        self.assertFalse(first.note_cleanup_result("closed.json", checkout, kept))
+        first.save()
+
+        # Not a refusal: the next pass asks again, without the checkout changing.
+        again, work = scan(self.ledger, self.state.name)
+        self.assertIn("closed.json", work)
+        self.assertTrue(again.note_cleanup_result("closed.json", checkout, {"cleaned": False}))
+        self.assertFalse(again.note_cleanup_result("closed.json", checkout, {"cleaned": True}))
+
+    def test_refusals_saved_by_an_older_job_are_asked_about_again(self):
+        checkout = tempfile.mkdtemp(dir=self.state.name)
+        self.ledger.put("closed.json", {
+            "id": "closed", "status": "closed", "plan": {"repo_path": checkout},
+        })
+        first, _ = scan(self.ledger, self.state.name)
+        self.assertTrue(first.note_cleanup_refused("closed.json", checkout))
+        first.save()
+        path = os.path.join(self.state.name, "ledger-scan.json")
+        with open(path) as handle:
+            state = json.load(handle)
+        # An older job may have saved a kept checkout as a refusal.
+        state["schema"] = 1
+        with open(path, "w") as handle:
+            json.dump(state, handle)
+
+        _, work = scan(self.ledger, self.state.name)
+        self.assertIn("closed.json", work)
+
     def test_a_removed_checkout_leaves_nothing_to_clean(self):
         self.ledger.put("closed.json", {
             "id": "closed", "status": "closed",

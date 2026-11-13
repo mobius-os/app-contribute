@@ -165,6 +165,53 @@ test('an automatic GitHub read waits out the cooldown, then reads once', async (
   assert.equal(state.reads.incoming, 2, 'a read nobody asked for ran')
 })
 
+// The quiet catch-up (the app shown again) needs the review requests current before it says "synced".
+function heldRead(state, name) {
+  const gates = []
+  const read = () => { state.reads[name] = (state.reads[name] || 0) + 1; return new Promise((resolve, reject) => gates.push({ resolve, reject })) }
+  return { read, gates }
+}
+
+test('catchUp awaits the read the hub made on showing, success and failure alike, and never queues a second', async () => {
+  for (const outcome of ['answers', 'fails']) {
+    mock.timers.reset()
+    const { hub, state, fact, setVisible } = setup()
+    const held = heldRead(state, 'incoming')
+    const seen = { failed: 0, applied: 0 }
+    hub.start()
+    fact('incoming', { github: true, read: held.read, apply: () => { seen.applied += 1 }, failed: () => { seen.failed += 1 } })
+    const first = hub.refresh('incoming')
+    held.gates[0].resolve(1)
+    await first
+    await elapse(SYNC_POLICY.githubCooldownMs)
+    await setVisible(true) // shown again: the hub's own catch-up read starts and waits on its response
+    assert.equal(held.gates.length, 2, 'the hub did not start its read on showing')
+    let settled = false
+    const caught = hub.catchUp('incoming').then(() => { settled = true })
+    await settle()
+    assert.equal(settled, false, 'the catch-up said the answer was current while the read was still out')
+    assert.equal(held.gates.length, 2, 'the catch-up queued a second read behind the first')
+    if (outcome === 'answers') held.gates[1].resolve(2); else held.gates[1].reject(new Error('503'))
+    await caught
+    assert.equal(held.gates.length, 2, 'the catch-up read again after the first settled')
+    assert.deepEqual(seen, outcome === 'answers' ? { failed: 0, applied: 2 } : { failed: 1, applied: 1 }, 'the read\'s own outcome did not reach the fact')
+  }
+})
+
+test('catchUp reads a GitHub fact that is due, keeps the last answer inside the cooldown and holds nothing back', async () => {
+  const { hub, state, fact, setVisible } = setup()
+  hub.start(); fact('incoming', { github: true })
+  await setVisible(true)
+  await hub.refresh('incoming')
+  await hub.catchUp('incoming')
+  assert.equal(state.reads.incoming, 1, 'inside the cooldown the catch-up read again')
+  await elapse(SYNC_POLICY.githubCooldownMs * 3)
+  assert.equal(state.reads.incoming, 1, 'the catch-up held a read back for later')
+  await hub.catchUp('incoming')
+  assert.equal(state.reads.incoming, 2, 'a due read was not made')
+  assert.equal(state.shown.incoming, 2)
+})
+
 // The review requests' failure mode: the probe saw a change once, the full read failed, and the probe
 // never reports that signature again. The read must stay wanted, not wait for another outside change.
 test('a GitHub read that failed stays wanted: read again after the cooldown though the probe sees nothing new', async () => {
