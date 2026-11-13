@@ -31,9 +31,11 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
 })
 
 test('an open PR page lifts the lists\' column and its header, Files changed keeps the whole width and every other tab a reading width', () => {
-  assert.match(CSS, /\.co-projects-view:has\(\.co-pull-page\), \.co-root:has\(\.co-pull-page\) \.co-header \{ max-width:none; \}/)
+  assert.match(CSS, /\.co-projects-view:has\(\.co-pull-page\) \{ max-width:none; \}/)
+  assert.doesNotMatch(CSS, /\.co-root:has\(\.co-pull-page\) \.co-header/, 'the header never changes with the page: it is full width and left on every screen')
   assert.match(CSS, /\.co-pr-detail-body:not\(\[data-tab="files"\]\) > \* \{ max-width:var\(--co-read-width\); \}/)
-  assert.match(CSS, /\.co-projects-view \{ width:100%; max-width:1192px;/, 'the lists keep their own column')
+  assert.match(CSS, /\.co-projects-view \{ width:100%; max-width:1400px; margin:0;/, 'the lists keep their own column, from the same left edge as the PR page')
+  assert.match(CSS, /\.co-pr-detail \{ --co-read-width:960px; \}/, 'the reading tabs share the lists\' column width')
 })
 for (const items of [[], [{ __typename: 'Issue', number: 2, title: 'Usable issue', url: 'https://github.com/team/repo/issues/2', repository: { nameWithOwner: 'team/repo' }, relationships: ['May close'] }]]) {
   test(`partial related context warns and retries with ${items.length} usable items`, async t => {

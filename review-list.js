@@ -74,6 +74,8 @@ function bucketOf(decision) {
 }
 // The one chip a decision shows on a desk row: its label (the same words as the PR page) and whose turn it is.
 export const decisionChip = decision => chip(decision.label, GOOD.has(decision.state) ? 'good' : TONE[decision.turn])
+// A draft is said once, by its icon (owner's choice, 2026-11-12): a plain "Draft" word or pill beside it says it again.
+export const isDraftWord = (pr, chip) => !!pr?.isDraft && chip?.label === 'Draft'
 // What a row shows of a decision: its bucket and its one chip.
 const standingRow = decision => ({ bucket: bucketOf(decision), chips: [decisionChip(decision)] })
 

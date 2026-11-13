@@ -8,6 +8,8 @@
 // runDeskListChecks (the whole app: Needs you rows share one layout and their counts, Agent runs has three tabs, a merged row opens its PR page),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
+// runRepositoryLinkChecks (a repository row with a GitHub update or no comparison links to Settings or the App Store, lined up under its text),
+// runSyncLineChecks (the whole app, on a fake clock: a Sync says what it changed in a line that goes away; the app shown again after a while syncs quietly),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -41,7 +43,7 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { SourceMap } from './ui/SourceMap.jsx'
+import { ProjectRow, SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
@@ -154,6 +156,8 @@ window.fetch = async (url, options = {}) => {
       if (call.body.query.includes('ContributeRepositories')) return response({data:{viewer:{repositories:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}}})
       // The Desk scenario asks the fixture PRs for review; everything else it reads falls through to the project mocks below.
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
+        // A test can hold the answer back: holdIncoming() settles to true when GitHub then fails.
+        if (window.holdIncoming && await window.holdIncoming()) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         if (window.failIncoming || window.failIncomingFull) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:window.githubInvolved || []}}})
       }
@@ -2063,6 +2067,20 @@ window.runPopupFitChecks = async () => {
     await until(() => document.querySelectorAll('.co-pr-row').length === 2, 'Project did not settle')
     // The shared Clear button: a 44px box a thumb can hit (the 16px icon stays small), inside a field that is no taller than it is without one.
     const search = query('input[aria-label="Find a pull request"]')
+    await captureShot('pr-list-search-filters', query('.co-pr-list-controls'))
+    // One box, not two: the typing area inside every search field has no edge and no fill of its own.
+    const inner = [...document.querySelectorAll('.co-search input')]
+    ensure(inner.length > 0, 'No search field on the screen')
+    inner.forEach(input => { const style = getComputedStyle(input); ensure(style.borderTopWidth === '0px' && style.backgroundColor === 'rgba(0, 0, 0, 0)', 'The typing area of "' + input.getAttribute('aria-label') + '" draws its own box (border ' + style.borderTopWidth + ', fill ' + style.backgroundColor + ')') })
+    checks.push({ name: 'a search field is one box, not two', status: 'pass' })
+    // A filter with nothing in it stays pressable but steps back; the ones with PRs keep full strength.
+    const filters = [...document.querySelectorAll('.co-pr-filters button')].filter(node => node.querySelector('.co-pr-filter-count'))
+    ensure(filters.length > 0, 'The PR list showed no filter counts')
+    filters.forEach(node => {
+      const empty = text(node.querySelector('.co-pr-filter-count')) === '0'
+      ensure(node.classList.contains('is-empty') === empty && (getComputedStyle(node).opacity !== '1') === empty, 'The filter "' + text(node) + '" ' + (empty ? 'has nothing in it and is not dimmed' : 'has PRs and is dimmed'))
+    })
+    checks.push({ name: 'a filter with a zero count is dimmed, one with PRs is not', status: 'pass' })
     const emptyHeight = search.closest('.co-search').getBoundingClientRect().height
     await fill(search, 'Contribution')
     await until(() => query('.co-pr-list-controls .co-search-clear'), 'Typing in the PR search offered no Clear')
@@ -2294,10 +2312,17 @@ window.runPullReadingChecks = async () => {
     window.commentBody = [...Array.from({ length: 16 }, (_, index) => 'Line ' + (index + 1) + ' of a long comment.'), '![after screen](' + rawPicture('screenshots/later.png') + ')', ...forgedMarkup].join('\n\n')
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [escalation] })
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+    // Where the header and the rail start on a list: a PR page must not move them.
+    const leftOf = selector => Math.round(query(selector).getBoundingClientRect().left)
+    const listLeft = { header: leftOf('.co-header-main'), view: leftOf('.co-projects-view'), rail: window.innerWidth > 900 ? leftOf('.co-rail') : null }
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
+    ensure(leftOf('.co-header-main') === listLeft.header && leftOf('.co-projects-view') === listLeft.view && (listLeft.rail === null || leftOf('.co-rail') === listLeft.rail),
+      'Opening a PR moved the header or the rail: ' + JSON.stringify(listLeft) + ' became ' + JSON.stringify({ header: leftOf('.co-header-main'), view: leftOf('.co-projects-view'), rail: query('.co-rail') ? leftOf('.co-rail') : null }))
+    ensure(query('.co-header-main').getBoundingClientRect().left <= query('.co-projects-view').getBoundingClientRect().left + 40, 'The header is not at the left, with the view')
+    pass('a PR page opens with the header and the rail where they were')
 
-    // The page is as wide as the pane: the 1192 px column of the lists no longer holds it.
+    // The page is as wide as the pane: the column of the lists no longer holds it.
     const page = query('.co-page'), view = query('.co-projects-view')
     ensure(view.getBoundingClientRect().width >= page.clientWidth - 1, 'The PR page is only ' + Math.round(view.getBoundingClientRect().width) + 'px of a ' + page.clientWidth + 'px screen')
     ensure(query('.co-header').getBoundingClientRect().width >= page.clientWidth - 1, 'The header stayed in its narrow column over a wide PR page')
@@ -2392,10 +2417,16 @@ window.runPullReadingChecks = async () => {
     }
     await click(tab('Commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'The commits did not list')
-    ensure(text(query('.co-commit-stats')).startsWith('2 files +3') && button('See changes: commit 1111111'), 'The commit row shows no size or no See changes: ' + text(query('.co-commit')))
-    ensure([...document.querySelectorAll('.co-commit a')].some(link => text(link) === 'View on GitHub'), 'The commit row lost View on GitHub')
+    const titleOf = oid => query('.co-commit-title[data-commit="' + oid + '"]')
+    ensure(text(query('.co-commit-stats')).startsWith('2 files +3') && titleOf(SHA_ONE), 'The commit row shows no size or no title to open it by: ' + text(query('.co-commit')))
+    ensure(!button('See changes') && ![...document.querySelectorAll('.co-commit a')].some(link => text(link) === 'View on GitHub'), 'The commit row still carries a See changes or a View on GitHub button')
+    ensure([...document.querySelectorAll('.co-commit a')].some(link => link.getAttribute('aria-label') === 'View on GitHub: commit 1111111' && link.dataset.tip === 'View on GitHub' && !text(link)), 'The commit row lost its one GitHub icon')
+    // The short hash is the Copy control and says how it ended.
+    await click(query('.co-commit-hash'))
+    await until(() => ['Copied', 'Couldn\u2019t copy'].includes(text(query('.co-commit-hash [role=status]'))), 'Pressing the hash said nothing about the copy')
+    ensure(query('.co-commit-hash').getAttribute('aria-label') === 'Copy hash 1111111', 'The hash button is not named for what it does')
     await captureShot('pr-page-commits', query('.co-detail-tabs'))
-    const open = button('See changes: commit 1111111'); open.focus(); await click(open)
+    const open = titleOf(SHA_ONE); open.focus(); await click(open)
     await until(() => query('.co-commit-open') && query('.co-pr-detail-body .diff-view')?.getClientRects().length, 'The commit did not open its diff on screen: ' + text(query('.co-pr-detail-body')))
     await captureShot('pr-page-commit-diff', query('.co-detail-tabs'))
     ensure(text(query('.co-commit-open')).includes('1111111') && text(query('.co-commit-open')).includes('Add the safe change'), 'The commit head did not name the commit')
@@ -2403,8 +2434,8 @@ window.runPullReadingChecks = async () => {
     ensure(!text(query('.co-pr-detail-body')).includes('at most 300 files'), 'A small commit claimed to be cut short')
     await click(button('Back to commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'Back did not return to the commits')
-    await until(() => document.activeElement === button('See changes: commit 1111111'), 'Back did not return focus to the commit that was open')
-    await click(button('See changes: commit 2222222'))
+    await until(() => document.activeElement === titleOf(SHA_ONE), 'Back did not return focus to the commit that was open')
+    await click(titleOf(SHA_TWO))
     await until(() => text(query('.co-pr-detail-body')).includes('GitHub lists at most 300 files for one commit'), 'A commit of 300 files did not say it may be cut short')
     await click(tab('Commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'The Commits tab did not return to its list')
@@ -2554,6 +2585,42 @@ window.runDeskListChecks = async () => {
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  }
+}
+
+// A repository with a GitHub update, or not compared yet, links to the one place that deals with it: Settings for Möbius, the
+// App Store for an app. The link sits under the row's text, beside its button, and asks the host to open the place.
+window.runRepositoryLinkChecks = async () => {
+  const checks = []
+  const asked = []
+  const listen = event => { if (event.data?.type?.startsWith('moebius:open-')) asked.push(event.data) }
+  window.addEventListener('message', listen)
+  try {
+    const base = { available: true, canonical_repo: 'owner/thing', origin: { sha: HEAD }, base_sha: HEAD }
+    root.render(<div className="co-root"><style>{CSS}</style><div className="co-source-group">
+      <ProjectRow project={{ ...base, key: 'platform', name: 'Möbius', kind: 'platform', incomingFiles: 2 }} selected={false} onSelect={() => {}} />
+      <ProjectRow project={{ ...base, key: 'app:fixture', name: 'Fixture project', kind: 'app', base_sha: BASE, sourceComparisonRequired: true }} selected={false} onSelect={() => {}} />
+      <ProjectRow project={{ ...base, key: 'app:quiet', name: 'Quiet project', kind: 'app' }} selected={false} onSelect={() => {}} />
+    </div></div>)
+    await until(() => document.querySelectorAll('.co-source-row-wrap').length === 3, 'The rows did not render')
+    const links = [...document.querySelectorAll('.co-source-row-link button')]
+    ensure(links.length === 2 && links.map(link => text(link)).join('|') === 'Open Settings|Open App Store', 'The links were: ' + links.map(link => text(link)).join('|'))
+    ensure(!document.querySelector('.co-source-row-wrap:nth-child(3) .co-source-row-link'), 'A quiet repository got a link')
+    document.querySelectorAll('.co-source-row-link').forEach(link => ensure(!link.closest('.co-source-row'), 'A link sits inside the row\'s own button'))
+    const row = document.querySelector('.co-source-row-wrap'), facts = row.querySelector('.co-source-row-facts span'), label = row.querySelector('.co-source-row-link button')
+    ensure(Math.abs(label.getBoundingClientRect().left - facts.getBoundingClientRect().left) <= 2, 'The link is not lined up with the row\'s text: ' + Math.round(label.getBoundingClientRect().left) + ' against ' + Math.round(facts.getBoundingClientRect().left))
+    ensure(label.getBoundingClientRect().top >= row.querySelector('.co-source-row').getBoundingClientRect().bottom - 16, 'The link is not under the row\'s text')
+    await captureShot('repository-row-links')
+    await click(links[0]); await click(links[1])
+    ensure(asked.map(message => message.type + (message.appId || '')).join('|') === 'moebius:open-settings|moebius:open-appstore', 'The host was asked: ' + JSON.stringify(asked))
+    checks.push({ name: 'a repository with an update or no comparison links to Settings or the App Store', status: 'pass' })
+    ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways')
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main') || document.body).slice(0, 2000), forbidden: calls.forbidden }
+  } finally {
+    window.removeEventListener('message', listen)
   }
 }
 
@@ -3359,6 +3426,93 @@ window.runSyncNoteChecks = async () => {
   }
 }
 
+// The whole app, on a fake clock: the owner's Sync ends with one quiet line that says what it changed on the desk and
+// goes away by itself; the app shown again after a while catches up on its own (no line, no busy button, the header's time
+// moves) and never sooner than the GitHub cooldown.
+window.runSyncLineChecks = async () => {
+  const checks = []
+  const clock = installClock()
+  const syncButton = () => query('.co-toolbar-refresh')
+  const line = () => query('.co-sync-result')
+  const repositoryReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeRepositories')).length
+  const incomingReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeIncomingReviews')).length
+  const syncedAt = () => Date.parse(query('.co-sync-note time')?.getAttribute('datetime') || '')
+  const advance = async seconds => { for (let step = 0; step < seconds; step++) await clock.advance(1000) }
+  try {
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]
+    await mountDeskApp()
+    await until(() => query('.co-sync-note')?.textContent.startsWith('Last synced') && !syncButton().disabled, 'The first load did not settle')
+    ensure(!line(), 'The first load said what it changed')
+    // The owner's Sync: a new review request arrives with it.
+    window.githubRequests = [pulls[0], pulls[1]]
+    await click(syncButton())
+    await until(() => line(), 'Sync did not say what it changed')
+    ensure(text(line()).startsWith('Synced.') && text(line()).includes('1 new review request'), 'The line said: ' + text(line()))
+    line().style.animation = 'none' // the picture shows the line while it stays, not as it fades out
+    await captureShot('sync-result-line')
+    ensure(line().closest('[role=status]'), 'The line is not announced politely')
+    checks.push({ name: 'a Sync says what it changed on the desk, in a status line', status: 'pass' })
+    await advance(7)
+    ensure(!line(), 'The line stayed on screen')
+    checks.push({ name: 'the line goes away by itself after a few seconds', status: 'pass' })
+    await click(syncButton())
+    await until(() => line(), 'A Sync that changed nothing said nothing')
+    ensure(text(line()) === 'Synced. Nothing new for you.', 'A Sync with nothing new said: ' + text(line()))
+    await advance(7)
+    checks.push({ name: 'a Sync with nothing new says so', status: 'pass' })
+    // Shown again soon: nothing to catch up on. After a while: one quiet sync.
+    window.setFrameVisible(false)
+    await advance(60)
+    let reads = repositoryReads()
+    window.setFrameVisible(true)
+    await advance(5)
+    ensure(repositoryReads() === reads, 'The app shown again after a minute synced everything')
+    window.setFrameVisible(false)
+    await advance(10 * 60)
+    reads = repositoryReads()
+    const inboxReads = incomingReads()
+    const before = syncedAt()
+    window.setFrameVisible(true)
+    for (let step = 0; step < 30 && repositoryReads() === reads; step++) await advance(1)
+    ensure(repositoryReads() > reads, 'The app shown again after ten minutes did not catch up on its own')
+    await advance(5)
+    // The inbox read costs 55 GitHub points: the catch-up shares the hub's one read of it and never queues a second behind it.
+    ensure(incomingReads() === inboxReads + 1, 'The app shown again once read the review requests ' + (incomingReads() - inboxReads) + ' times, not once')
+    ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line: it is meant to be quiet')
+    ensure(syncedAt() > before, 'The header\'s time did not move with the catch-up')
+    checks.push({ name: 'the app shown again after a while syncs quietly and the header time follows', status: 'pass' })
+    // The review requests are read once, and the header's time follows that read's own outcome: not before it answers, and not at all when it fails.
+    for (const outcome of ['answers', 'fails']) {
+      window.setFrameVisible(false)
+      await advance(10 * 60)
+      let release
+      window.holdIncoming = () => new Promise(resolve => { release = resolve })
+      const stamped = syncedAt(), asked = incomingReads(), reposBefore = repositoryReads()
+      window.setFrameVisible(true)
+      for (let step = 0; step < 30 && !release; step++) await advance(1)
+      ensure(release && incomingReads() === asked + 1, 'The app shown again did not read the review requests on its return')
+      await advance(10)
+      ensure(repositoryReads() > reposBefore, 'The catch-up did not go on to read the rest while the review requests were out')
+      ensure(syncedAt() === stamped, 'The header\'s time moved while the review requests were still out (' + outcome + ')')
+      ensure(incomingReads() === asked + 1, 'The catch-up queued a second review-request read behind the first')
+      release(outcome === 'fails'); window.holdIncoming = undefined
+      await advance(10)
+      ensure(incomingReads() === asked + 1, 'The catch-up read the review requests again once the first settled')
+      if (outcome === 'answers') ensure(syncedAt() > stamped, 'The header\'s time did not follow the review requests that answered')
+      else ensure(syncedAt() === stamped, 'The header\'s time moved on a review-request read that failed')
+      ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line (' + outcome + ')')
+      checks.push({ name: outcome === 'answers' ? 'a catch-up waits for the review requests the hub is reading before the header\'s time moves' : 'a catch-up whose review-request read fails leaves the last good time to age', status: 'pass' })
+    }
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 3000), forbidden: calls.forbidden }
+  } finally {
+    clock.restore()
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -3622,7 +3776,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
