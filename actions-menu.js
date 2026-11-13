@@ -103,7 +103,7 @@ function withMergeOptions(items, pr, capabilities) {
 function followItems(decision, record) {
   const state = followState(record)
   if (decision.role !== 'author' || !(state || canStartFollowing(record))) return []
-  const detail = !state ? 'An agent answers reviews and failing checks for you.' : state.paused ? 'Paused' : FOLLOW_MODE_WORDS[state.mode]
+  const detail = !state ? 'An agent answers reviews and checks.' : state.paused ? 'Paused' : FOLLOW_MODE_WORDS[state.mode]
   return [{ intent: FOLLOW, icon: 'cycle', title: state ? NAMES.following : NAMES.followPr, detail, rec: false, off: false, reason: '', danger: false }]
 }
 

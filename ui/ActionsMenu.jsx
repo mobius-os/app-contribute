@@ -11,7 +11,7 @@ import { useKeepOnScreen } from './useKeepOnScreen.js'
 // up with: 'end' for a trigger at the right of its row, 'start' for one at the
 // left, so the menu opens inward. On a phone the menu is a sheet from the bottom edge instead
 // (CSS only, workspace-theme.js): it cannot run off a side, and the scrim dims the page behind it and
-// closes it when pressed. Cancel is the sheet's way out and shows on a phone only. The head stays put and the rows
+// closes it when pressed. Cancel is the sheet's way out and shows on a phone only, pinned at its foot. The head stays put and the rows
 // scroll under it without a scrollbar; a fade at the foot says there are more.
 function Choice({ item, onPick }) {
   const main = <button type="button" role="menuitem" aria-disabled={item.off || undefined} data-danger={item.danger || undefined} className={(item.rec ? 'is-rec ' : '') + (item.off ? 'is-off ' : '') + (item.danger ? 'is-danger' : '')} onClick={() => { if (!item.off) onPick(item.intent) }}>
@@ -21,7 +21,7 @@ function Choice({ item, onPick }) {
   // One row, two choices: the action, and a smaller one beside it (Merge, and how it lands).
   return <div className="co-agent-menu-pair">{main}
     <button type="button" role="menuitem" className={'co-agent-menu-side' + (item.off ? ' is-off' : '')} aria-disabled={item.off || undefined} aria-label={`${item.side.title} ${item.side.detail}`} title={item.side.detail} onClick={() => { if (!item.off) onPick(item.side.intent) }}>
-      <Icon name="chevron" size={16} />
+      <span className="co-agent-menu-side-word">{NAMES.options}</span><Icon name="chevron" size={16} />
     </button>
   </div>
 }

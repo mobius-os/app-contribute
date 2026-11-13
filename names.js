@@ -53,6 +53,8 @@ export const NAMES = Object.freeze({
   merge: 'Merge',
   // Where Möbius confirms Merge on its own sheet, the way it lands is chosen here first, only when the repository allows more than one.
   mergeOptions: 'Merge options…',
+  // The word beside the chevron of that second choice on a phone; a screen reader still hears Merge options….
+  options: 'Options',
   // The app's confirm sheet while Möbius's own sheet, over it, waits for the owner.
   waitingForMobius: 'Waiting for your confirmation in Möbius…',
   closePr: 'Close pull request',
@@ -76,13 +78,13 @@ export const NAMES = Object.freeze({
   // One word for taking a proposal or draft away, whatever it was (a verdict, a pushed fix, a prepared PR).
   discard: 'Discard',
   openChat: 'Open chat',
-  answerInChat: 'Answer in chat',
-  // A saved Respond to feedback answer on the Review tab: Post publishes it as you; Reply in chat opens its conversation to talk it
   // The words beside the icons of the PR page's secondary buttons on a touch screen, where there is no hover to show a tooltip.
   // A button of one chat says Chat; one that holds several says Chats and how many.
   github: 'GitHub',
   chat: 'Chat',
   chats: 'Chats',
+  answerInChat: 'Answer in chat',
+  // A saved Respond to feedback answer on the Review tab: Post publishes it as you; Reply in chat opens its conversation to talk it
   // over first (answerInChat is for a question the agent asked); Send again re-sends an approved Post to the chat; Try again carries
   // on a post that stopped; Respond again starts a second pass that replaces the answer.
   postAnswer: 'Post',

@@ -266,13 +266,13 @@ const outboxIs = (d, state) => (d.outbox?.state === state ? '' : 'Nothing like t
 export const ACTIONS = [
   { id: 'check_my_pr', by: 'agent', roles: ['author'], title: NAMES.review, detail: 'Private. Nothing is posted.',
     when: agentStops },
-  { id: 'respond', by: 'agent', roles: ['author'], title: NAMES.respond, detail: 'Answers every point, then one approval sheet for the pushes and replies.',
+  { id: 'respond', by: 'agent', roles: ['author'], title: NAMES.respond, detail: 'Answers every point, then asks you to approve.',
     when: agentStops },
-  { id: 'finish_it', by: 'agent', roles: ['author'], title: NAMES.finishIt, detail: 'Responds, checks and fixes. Stops for your approval before each push.',
+  { id: 'finish_it', by: 'agent', roles: ['author'], title: NAMES.finishIt, detail: 'Responds and fixes. Asks before each push.',
     when: agentStops },
-  { id: 'review', by: 'agent', roles: ['reviewer'], title: d => (d.mine || d.result || d.earlier ? NAMES.reviewAgain : NAMES.review), detail: 'Private, drafted for you, or posted by the agent if you allow it.',
+  { id: 'review', by: 'agent', roles: ['reviewer'], title: d => (d.mine || d.result || d.earlier ? NAMES.reviewAgain : NAMES.review), detail: 'Private, drafted for you, or posted if you allow it.',
     when: agentStops },
-  { id: 'take_over', by: 'agent', roles: ['reviewer'], title: NAMES.takeOver, detail: 'Maintainers only. Needs a reason, and says so on the PR. Each push needs your approval.',
+  { id: 'take_over', by: 'agent', roles: ['reviewer'], title: NAMES.takeOver, detail: 'Maintainers only. Needs a reason.',
     when: takeOverStops },
 
   { id: 'send_draft', by: 'you', roles: ['author', 'reviewer'], title: 'Send…', when: (facts, d) => outboxIs(d, 'drafted') },

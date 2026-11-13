@@ -585,6 +585,8 @@ export const WORKSPACE_CSS = `
 .co-agent-menu-pair > button:first-child { flex:1 1 auto; min-width:0; }
 .co-agent-menu-list .co-agent-menu-pair > .co-agent-menu-side { flex:none; width:44px; align-items:center; justify-content:center; padding:0; border-left:1px solid var(--border); border-radius:0 var(--co-radius-field) var(--co-radius-field) 0; }
 .co-agent-menu-list .co-agent-menu-side .co-icon { margin:0; transform:rotate(-90deg); }
+/* Merge's second choice names itself on a phone only: the word beside its chevron. A screen reader hears the button's label, Merge options…. */
+.co-agent-menu-side-word { display:none; }
 .co-rw-reason { display:grid; gap:6px; margin:0 0 14px; }
 .co-rw-reason textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:var(--co-radius-control); padding:10px 12px; resize:vertical; min-height:72px; }
 .co-rw-reason small { color:var(--muted); font-size:var(--co-text-meta); }
@@ -658,14 +660,18 @@ export const WORKSPACE_CSS = `
 .co-agent-menu-scrim,.co-agent-menu-list .co-agent-menu-cancel { display:none; }
 @media(max-width:680px) {
   .co-agent-menu-scrim { display:block; position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
-  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(86dvh,640px); overflow-y:auto; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
+  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(90dvh,720px); display:flex; flex-direction:column; overflow:hidden; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
   .co-agent-menu-list { scrollbar-width:none; }
   .co-agent-menu-list::-webkit-scrollbar { display:none; }
-  .co-agent-menu-rows { max-height:none; overflow:visible; }
-  .co-agent-menu-list::before { content:''; display:block; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
+  /* The handle and the head stay on top and Cancel stays at the foot, above the safe area; only the rows between them scroll (the fade at their foot says there are more). */
+  .co-agent-menu-rows { flex:1 1 auto; min-height:0; max-height:none; }
+  .co-agent-menu-list::before { content:''; display:block; flex:none; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
+  .co-agent-menu-head { flex:none; }
   .co-agent-menu-list button:not(.co-agent-menu-cancel) { min-height:48px; margin:5px 0; border:1px solid var(--border); }
   .co-agent-menu-list button.is-rec { border-color:var(--accent); }
-  .co-agent-menu-list .co-agent-menu-cancel { display:flex; width:100%; margin-top:8px; border:1.5px solid var(--co-edge); font-weight:700; }
+  .co-agent-menu-list .co-agent-menu-cancel { display:flex; flex:none; width:100%; margin-top:8px; border:1.5px solid var(--co-edge); font-weight:700; }
+  .co-agent-menu-list .co-agent-menu-pair > .co-agent-menu-side { width:auto; padding:0 12px; gap:6px; }
+  .co-agent-menu-side-word { display:inline; font-size:var(--co-text-meta); font-weight:600; }
   .co-agent-menu-apart { margin-top:0; padding-top:0; border-top:0; }
 }
 
