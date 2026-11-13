@@ -90,6 +90,8 @@ test('concurrent ledger refreshes share one enumeration but later refreshes stay
   const first = loadLedger()
   const duplicate = loadLedger()
   assert.equal(first, duplicate)
+  // The saved feed is read before the folder is listed, so the listing starts a moment later.
+  while (!release) await new Promise((resolve) => setImmediate(resolve))
   release()
   assert.deepEqual((await first).records.map((record) => record.id), ['one'])
   assert.equal(calls, 1)
@@ -176,7 +178,7 @@ test('ledger uses JSON content batched into the storage listing', async () => {
   const result = await loadLedger()
   assert.deepEqual(listOptions, { includeContent: true })
   assert.deepEqual(result.records.map((record) => record.id).sort(), ['a', 'b'])
-  assert.deepEqual(gets, [])
+  assert.deepEqual(gets, ['feed-cache.json'], 'only the saved feed is read; no record is fetched on its own')
   assert.deepEqual(result.omitted, [])
 })
 
@@ -271,7 +273,7 @@ test('a stray non-record file in the ledger folder does not pin the feed to its 
   assert.deepEqual(result.records.map((record) => record.id), ['live'])
   assert.equal(result.fromCache, false)
   assert.deepEqual(result.omitted, [])
-  assert.deepEqual(gets, [])
+  assert.deepEqual(gets, ['feed-cache.json'])
 })
 
 test('an offline empty mirror falls back to the assembled feed cache', async () => {

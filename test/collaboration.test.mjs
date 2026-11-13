@@ -74,10 +74,10 @@ test('a run with a saved merge or push GitHub may have settled is observed read-
   const first = await loadReviewRuns('test', 80, { now: 1_000_000, onList: list => shown.push(list.runs[0].items[0].state) })
   assert.deepEqual(shown, ['queued'], 'the saved list shows before GitHub is checked')
   assert.equal(first.runs[0].items[0].state, 'merged', 'the list is re-read after GitHub reconciliation')
-  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs', 'POST /api/github/contributions/80/review-runs/run-q/observe', 'GET /api/github/contributions/80/review-runs'])
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary', 'POST /api/github/contributions/80/review-runs/run-q/observe', 'GET /api/github/contributions/80/review-runs?view=summary'])
   observed = false; calls.length = 0
   await loadReviewRuns('test', 80, { now: 1_000_000 + OBSERVE_EVERY_MS - 1 })
-  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs'], 'no second GitHub check within the minute')
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary'], 'no second GitHub check within the minute')
 })
 test('a failed observation keeps the listed runs rather than hiding them', async t => {
   const run = { id: 'run-fail', state: 'reviewing', items: [{ number: 9, state: 'merge_unknown' }] }
@@ -275,17 +275,17 @@ test('a minimized core run is never observed; a details_in_owning_chat refusal s
     return new Response(JSON.stringify({ runs }))
   })
   const list = await loadReviewRuns('test', 80, { now: 9_000_000 })
-  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs'], 'a marked run is not observed')
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary'], 'a marked run is not observed')
   assert.deepEqual(list.runs[0].items[0].public_review, { state: 'posted', url: 'https://github.com/team/repo/pull/7#r' })
   // A run listed without the marker that the server refuses as not ours is never asked again.
   const unmarked = { id: 'core-unmarked', state: 'reviewing', items: [{ number: 3, state: 'queued' }] }
   runs = [unmarked]; calls.length = 0
   const first = await loadReviewRuns('test', 80, { now: 20_000_000 })
   assert.deepEqual(first.runs, [unmarked], 'the refusal keeps the listed run')
-  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs', 'POST /api/github/contributions/80/review-runs/core-unmarked/observe'])
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary', 'POST /api/github/contributions/80/review-runs/core-unmarked/observe'])
   calls.length = 0
   await loadReviewRuns('test', 80, { now: 20_000_000 + 10 * OBSERVE_EVERY_MS })
-  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs'], 'polling stopped after the not-ours refusal')
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary'], 'polling stopped after the not-ours refusal')
   // The structured code is surfaced on request errors.
   const error = await collaborationRequest('test', 80, 'review-runs/core-unmarked/observe', {}).catch(error => error)
   assert.equal(notOursToObserve(error), true)
@@ -483,4 +483,21 @@ test('an unconfirmed request on one PR is read back, never repeated, and the oth
   const outcome = await requestReviewMany('t', 80, [owned(1), owned(2), owned(3)], ['sam'])
   assert.deepEqual(calls, [1, 2, 3])
   assert.deepEqual(outcome, { pending: true, error: 'GitHub may have asked for the review on #2. Check it before trying again.' })
+})
+
+// A new Möbius answers the short list (documents left out, marked "view": "summary"); an older one ignores the
+// option and answers in full with no marker. Contribute reads both: a short run is marked for the screens that show documents.
+test('the runs are asked for as the short list, and a short run is marked while a full one is left as it is', async t => {
+  const calls = []
+  let answer
+  t.mock.method(globalThis, 'fetch', async (url, init) => { calls.push(`${init.method} ${url}`); return new Response(JSON.stringify(answer)) })
+  answer = { view: 'summary', runs: [{ id: 'short-run', state: 'complete', items: [{ repo: 'o/r', number: 1, state: 'all_clear' }] }], respond_chats: [] }
+  const short = await loadReviewRuns('test', 80, { now: 1 })
+  assert.deepEqual(calls, ['GET /api/github/contributions/80/review-runs?view=summary'])
+  assert.deepEqual(short.runs.map(run => run.summary_only), [true], 'a screen that shows documents knows this run has none')
+  assert.equal(short.view, 'summary')
+  answer = { runs: [{ id: 'full-run', state: 'complete', items: [{ repo: 'o/r', number: 1, state: 'all_clear', summary: 'whole findings' }] }], respond_chats: [] }
+  const full = await loadReviewRuns('test', 80, { now: 1 })
+  assert.deepEqual(full.runs.map(run => run.summary_only), [undefined], 'an older Möbius answered in full: nothing to read separately')
+  assert.deepEqual(full, answer)
 })

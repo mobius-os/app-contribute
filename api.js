@@ -329,25 +329,39 @@ export function aliasedPulls(refs, fields) {
   }).join(' ')
 }
 
-// Open pull requests that involve the viewer (the source of "On GitHub" projects),
-// each flagged when it actually asks for the viewer's review. GitHub's
-// "involves" search does not cover review requests, so both are read at once.
-// Null when either search did not answer: callers keep the list they had rather
-// than treat a failed read as "nothing asks for your review".
-export async function fetchIncomingReviews(token) {
-  const query = `query ContributeIncomingReviews {
+// One GitHub search of open PRs, with the fields every list shares.
+const pullSearch = (alias, search, first) => `${alias}: search(query: ${JSON.stringify(search)}, type: ISSUE, first: ${first}) { nodes { ... on PullRequest { ${PR_FIELDS} } } }`
+
+// The open PRs that ask for the viewer's review, each flagged, then the ones `search` finds beside them. The
+// searches are read at once and answer as one. Null when either did not answer: callers keep the list they
+// had rather than treat a failed read as "nothing asks for your review".
+async function readViewerPulls(token, name, alias, search, first) {
+  const data = await fetchLiveStates(token, `query ${name} {
     rateLimit { remaining }
-    involved: search(query: "is:pr is:open involves:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${PR_FIELDS} } } }
-    requested: search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ... on PullRequest { ${PR_FIELDS} } } }
-  }`
-  const data = await fetchLiveStates(token, query)
-  if (!data?.requested || !data?.involved) return null
+    ${pullSearch(alias, search, first)}
+    ${pullSearch('requested', 'is:pr is:open review-requested:@me', first)}
+  }`)
+  if (!data?.requested || !data?.[alias]) return null
   const valid = nodes => (Array.isArray(nodes) ? nodes : []).filter((item) => item?.repository?.nameWithOwner && item?.number && item?.url)
   const requested = valid(data.requested.nodes)
   const requestedUrls = new Set(requested.map(item => item.url))
-  const involved = valid(data.involved.nodes).filter(item => !requestedUrls.has(item.url))
-  return [...requested.map(item => ({ ...item, reviewRequested: true })), ...involved]
+  const others = valid(data[alias].nodes).filter(item => !requestedUrls.has(item.url))
+  return [...requested.map(item => ({ ...item, reviewRequested: true })), ...others]
 }
+
+// Open pull requests that involve the viewer (the source of "On GitHub" projects),
+// each flagged when it actually asks for the viewer's review. GitHub's
+// "involves" search does not cover review requests, so both are read at once.
+export const fetchIncomingReviews = token => readViewerPulls(token, 'ContributeIncomingReviews', 'involved', 'is:pr is:open involves:@me', 50)
+
+// What concerns the viewer first: the PRs that ask for their review and the ones they wrote, in the same shape
+// as fetchIncomingReviews, so a row reads the same from either. GitHub charges a read by how many PRs it asks for
+// (measured: 57 points for 50 of each, 23 for 20), so this asks for the first 20 of each, a fraction of the full read,
+// which follows with every other PR that involves them and replaces it.
+export const fetchOwnPulls = token => readViewerPulls(token, 'ContributeOwnPulls', 'authored', 'is:pr is:open author:@me', 20)
+
+// What a PR looked like at one moment, as the change probe compares it: when it was last updated, and whether it is open.
+export const pullSignature = pr => `${pr.updatedAt}|${pr.state}`
 
 const PROBE_BATCH = 100
 const PROBE_REQUESTED = 'requested: search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 100) { nodes { ... on PullRequest { id updatedAt } } }'
@@ -374,7 +388,7 @@ export async function fetchChangeProbe(token, pulls) {
   const signatures = new Map([['requests', requests]])
   answers.forEach((data, batchIndex) => batches[batchIndex].forEach((pull, index) => {
     const pr = data[`p${index}`]?.pullRequest
-    signatures.set(pull.key, pr ? `${pr.updatedAt}|${pr.state}` : 'gone')
+    signatures.set(pull.key, pr ? pullSignature(pr) : 'gone')
   }))
   return signatures
 }

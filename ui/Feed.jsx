@@ -845,6 +845,9 @@ export function ContributionRun({
   run,
   loading,
   omittedCount = 0,
+  // Whether the older settled records are loaded; the desk opens without them. The fold of finished work asks for them when opened.
+  historyComplete = true,
+  onNeedHistory,
   publicationPreference = 'mobius',
   githubState = 'unknown',
   newPrStage = DEFAULT_STAGE,
@@ -988,11 +991,12 @@ export function ContributionRun({
   // activity and finished work, out of the PR list's way.
   const myWork = <>
     {[[agentActivity, NAMES.agentRuns], [actionsInProgress, 'Actions in progress']].map(fold)}
-    {history.length > 0 ? (
-      <details className="co-run-fold is-recent">
-        <summary><span>Finished and closed work</span><b>{history.length}</b><Icon name="chevron" size={14} /></summary>
+    {history.length > 0 || !historyComplete ? (
+      <details className="co-run-fold is-recent" onToggle={event => { if (event.currentTarget.open) onNeedHistory?.() }}>
+        <summary><span>Finished and closed work</span>{historyComplete ? <b>{history.length}</b> : null}<Icon name="chevron" size={14} /></summary>
         <p className="co-inventory-note">Recorded outcomes and dismissed proposals, including closed, local-only, and superseded work. Not all were merged.</p>
         <div>{history.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
+        {historyComplete ? null : <p className="co-inventory-note" role="status">Reading earlier work…</p>}
       </details>
     ) : null}
   </>

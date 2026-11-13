@@ -143,7 +143,9 @@ const quiet = promise => promise.catch(() => {})
 
 // One refresh path for every fact the app shows, so no screen keeps a timer or
 // a focus handler of its own. A fact is registered with
-//   read()    one read of its source; apply(value) shows it
+//   read({ early })  one read of its source; apply(value) shows it. A read that has a small first answer long before
+//                    its whole one may show it at once with early(value), which calls apply(value, { early: true })
+//                    for as long as the read is running and still wanted; the read's own value follows and replaces it
 //   failed(e) optional: a failed read keeps what is shown and is reported here;
 //             without it the failure belongs to whoever called refresh()
 //   every     { live, idle } ms cadence while shown, or none (read on events only)
@@ -179,7 +181,10 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
     fact.pending = false
     fact.urgent = false
     let value
-    try { value = await fact.spec.read() } catch (error) {
+    let reading = true
+    const early = shown => { if (reading && stillWanted(fact, generation)) fact.spec.apply(shown, { early: true }) }
+    try { value = await fact.spec.read({ early }) } catch (error) {
+      reading = false
       // A GitHub read that failed is still wanted: the cooldown reads it again, nothing else will
       // (the probe reports a change once, and its answer is already taken).
       if (fact.spec.github && registered(fact)) fact.pending = true
@@ -187,6 +192,7 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
       if (stillWanted(fact, generation)) fact.spec.failed(error)
       return
     }
+    reading = false
     if (!stillWanted(fact, generation)) return
     fact.value = value
     fact.spec.apply(value)

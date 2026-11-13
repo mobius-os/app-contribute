@@ -7,6 +7,7 @@ import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { standingFor } from './pr-standing.js'
 import { projectIsQuiet } from './source-map.js'
+import { DESK_HISTORY_DAYS } from './storage.js'
 
 // The four views (finding 2). Every other place a PR can be lives inside one of them.
 // `short` is the word under the count on the phone's four-segment bar.
@@ -29,6 +30,14 @@ export const deskStanding = (pr, login, facts = {}) => standingFor({ pr, login, 
 // PRs the owner authored, out of everything GitHub says involves them.
 export function authoredPulls(incoming, login) {
   return (incoming || []).filter(pr => !pr.reviewRequested && sameLogin(pr?.author?.login, login))
+}
+
+// The first answer of the review requests (api.js fetchOwnPulls) laid over the list as it stood: the PRs that
+// concern the owner (asked for their review, or theirs) are replaced by that read, every other stays as it was
+// until the full read of the PRs that involve them answers.
+export function withOwnerPulls(incoming, owned, login) {
+  const concernsOwner = pr => pr.reviewRequested || sameLogin(pr?.author?.login, login)
+  return [...owned, ...(incoming || []).filter(pr => !concernsOwner(pr))]
 }
 
 // Submitting a review answers its request on GitHub, which then stops listing
@@ -63,7 +72,8 @@ export function chainPulls(pulls) {
   return groups
 }
 
-export const MERGED_WINDOW_DAYS = 7
+// What merged this recently is the Merged list; storage.js keeps that much history in the desk's own set.
+export const MERGED_WINDOW_DAYS = DESK_HISTORY_DAYS
 
 export function mergedRecently(records, now = Date.now()) {
   const cutoff = now - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000

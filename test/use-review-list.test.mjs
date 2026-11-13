@@ -41,9 +41,9 @@ function harness() {
     createContext: () => ({}), useContext: () => null,
     classifyReview, mergeReviewPulls, respondEntries, reviewCounts, reviewEntries, reviewKey,
     fetchChangeProbe: async () => null,
-    readReviewPulls(token, refs, keys) {
+    readReviewPulls(token, refs, keys, known) {
       const asked = (keys ? refs.filter(ref => keys.has(reviewKey(ref.repo, ref.number))) : refs).map(ref => reviewKey(ref.repo, ref.number))
-      return new Promise((resolve, reject) => reads.push({ refs, keys, resolve: pulls => resolve({ everything: !keys, asked, pulls }), reject }))
+      return new Promise((resolve, reject) => reads.push({ refs, keys, known, resolve: pulls => resolve({ everything: !keys, asked, pulls }), reject }))
     },
   })
   vm.runInContext(source.replace(/^import .*\n/gm, '').replace(/export (const|function) /g, '$1 '), context)
@@ -65,7 +65,7 @@ function harness() {
   const rows = () => [...view.entries].map(entry => `${entry.bucket}:${entry.chips.map(chip => chip.label).join('+')}`)
   const titles = () => [...view.entries].map(entry => entry.item.title)
   const flush = () => new Promise(resolve => setImmediate(resolve))
-  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: options => view.syncPulls(options) }
+  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), failed: () => view.failed, retry: () => view.retry(), sync: options => view.syncPulls(options) }
 }
 
 const head = letter => letter.repeat(40)
@@ -181,4 +181,48 @@ test('a review saved without its PR\'s title shows the title from GitHub once th
   saved.render({ ...base, runs: runsOf(review('all_clear', { title: 'Saved title' })) })
   saved.reads[0].resolve(live({ title: 'Renamed' })); await saved.flush()
   assert.deepEqual(saved.titles(), ['Saved title'])
+})
+
+test('a PR the last read shows as current is not read again when the set changes, but a Sync reads every PR', async () => {
+  const h = harness()
+  const saved = runsOf(review('needs_you', { verdict_proposal: requested }))
+  h.render({ ...base, runs: saved })
+  assert.equal(h.reads[0].known.size, 0, 'the first read has nothing to reuse')
+  const read = live()
+  h.reads[0].resolve(read); await h.flush()
+  // A second review of another PR starts: the set changes and the new PR is read; the first one may keep its read.
+  h.render({ runs: [...saved, { ...saved[0], id: 'r2', items: [review('needs_you', { number: 8 })] }] })
+  assert.equal(h.reads.length, 2)
+  assert.equal(h.reads[1].keys, null, 'the whole set is asked about')
+  assert.equal(h.reads[1].known.get('o/r#7'), read.get('o/r#7'), 'with what the last read holds, for the probe to confirm')
+  h.reads[1].resolve(read); await h.flush()
+  void h.sync()
+  assert.equal(h.reads[2].known, null, 'a Sync reads every PR, whatever the probe would say')
+})
+
+test('PRs that were over at the last visit show as they were and stay unread while the probe finds them unmoved', async () => {
+  const h = harness()
+  const saved = runsOf(review('all_clear', { verdict_proposal: approved }))
+  const settled = [{ number: 7, state: 'MERGED', updatedAt: '2026-11-10T10:00:00Z', headRefOid: head('a'), author: { login: 'someone-else' }, repository: { nameWithOwner: 'o/r' } }]
+  h.render({ ...base, runs: saved, knownPulls: settled })
+  assert.deepEqual(h.rows(), ['done:Merged'], 'no "checking" for a PR the last visit saw merged')
+  assert.equal(h.reads[0].known.get('o/r#7'), settled[0], 'the first read may reuse it, if the probe confirms it')
+  h.reads[0].resolve(live({ state: 'MERGED' })); await h.flush()
+  assert.deepEqual(h.rows(), ['done:Merged'])
+  // A later seed never replaces what a read answered.
+  h.render({ knownPulls: [{ ...settled[0], state: 'CLOSED' }] })
+  assert.deepEqual(h.rows(), ['done:Merged'])
+})
+
+// The open reports a failed update in its header; the rows the last visit saved stay meanwhile instead of turning into "Couldn't read".
+test('a first read GitHub cannot answer keeps the saved rows and says it failed; the next read that answers clears it', async () => {
+  const h = harness()
+  const row = { id: 'o/r#7', at: 1, bucket: 'waiting', confirm: false, chips: [{ label: 'Draft to send', tone: 'owner' }], item: { repo: 'o/r', number: 7, title: 'A PR' }, run: { created_at: '2026-11-03T22:00:00Z' }, pull: { state: 'OPEN', author: { login: 'someone-else' } } }
+  h.render({ ...base, runs: runsOf(review('needs_you', { verdict_proposal: requested })), lastKnown: [row] })
+  assert.deepEqual(h.rows(), ['waiting:Draft to send'], 'the saved row stands while the read is out')
+  h.reads[0].reject(new Error('offline')); await h.flush()
+  assert.deepEqual([h.rows(), h.failed()], [['waiting:Draft to send'], true])
+  void h.sync()
+  h.reads[1].resolve(live()); await h.flush()
+  assert.deepEqual([h.rows(), h.failed()], [['done:Waiting on someone-else'], false])
 })

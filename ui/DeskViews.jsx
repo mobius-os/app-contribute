@@ -51,7 +51,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
           {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
         </>}
         labels={<span className="co-pr-labels"><PullLabels pr={pr} /></span>}
-        pills={pills.map(chip => <StatusPill key={chip.label} chip={chip} />)}
+        pills={pills.map((chip, index) => <StatusPill key={index} chip={chip} />)}
         aside={comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={15} />{comments}</span> : null}
         onOpen={() => onOpenPull(project, pr, framed === 'idle' ? 'conversation' : 'review')}
       />

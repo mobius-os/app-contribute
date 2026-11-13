@@ -7,6 +7,7 @@ import { MarkdownView } from './MarkdownView.jsx'
 import { ResolvedPrompt } from './ReviewPromptSettings.jsx'
 import { NAMES, rerunName } from '../names.js'
 import { Shine } from './Shine.jsx'
+import { useRunDocuments } from './useRunDocuments.js'
 
 // Saved conversations outlive the open-PR inventory. Its current snapshot
 // provides context, never new approval or a fresh verdict for old findings.
@@ -86,7 +87,9 @@ const NEEDS_CONVERSATION = new Set(['failed', 'merge_unknown', 'ready_unknown', 
 
 // The one presentation of a review run, wherever it is opened from: a PR row,
 // the project's review history, or a chat link to the run.
-export function RunDetail({ run, pulls, listState, busy = false, error = '', onStop, retryPulls = [], onRetry, onVerdict, onRepair = null, onCheck = null, updater = null }) {
+export function RunDetail({ token, appId, run: listed, pulls, listState, busy: busyElsewhere = false, error = '', onStop, retryPulls = [], onRetry, onVerdict, onRepair = null, onCheck = null, updater = null }) {
+  const { run, reading, failed, current } = useRunDocuments({ token, appId, run: listed })
+  const busy = busyElsewhere || !current
   const halted = reviewRunHalted(run)
   // "Answer" only when the conversation really asks something or must reconcile an outcome; findings alone are not a question.
   const needsAnswer = run.items?.some(item => reviewItemProgress(run, item).waiting || NEEDS_CONVERSATION.has(item.state))
@@ -95,6 +98,9 @@ export function RunDetail({ run, pulls, listState, busy = false, error = '', onS
   const elsewhere = runDetailsElsewhere(run)
   const when = reviewDate(run.created_at, true)
   const reviewedOn = when ? `Reviewed the version of ${when}` : 'Reviewed an earlier version'
+  // The run's findings, drafted verdict and instructions come from the run itself; the list only has its short form.
+  if (reading || failed) return <><Icon name="review" size={23} /><h3>{reviewRunTitle(run)}</h3>
+    {reading ? <p role="status"><Shine>Reading the review…</Shine></p> : <p role="alert">This review could not be read just now. Close this page and open it again.</p>}</>
   return <>
     <Icon name="review" size={23} /><h3>{reviewRunTitle(run)}</h3>
     <p>Recorded status: {reviewRunStateLabel(run)}</p>{run.summary ? <p>{run.summary}</p> : null}

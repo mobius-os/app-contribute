@@ -11,23 +11,31 @@ import { changedReviewRuns, classifyReview, mergeReviewPulls, pendingRespondStar
 export const SyncHubContext = createContext(null)
 export const useSyncHub = () => useContext(SyncHubContext)
 
+// The set of reviewed PRs changed, or the app opened: read every PR the last read does not already show as current.
 const ALL_PULLS = '*'
+// The owner's Sync or Retry: read every PR again, whatever the last read said.
+const EVERYTHING = '**'
+const NONE = []
 
 // The live read of every PR a review belongs to. The whole set is read once per
 // change of the set; afterwards only the PRs that moved. A review that changed
 // state reads its PR at once (`want`); the probe seeing a PR move waits out the
 // GitHub cooldown (`wantLater`), so a busy PR costs at most one read per five
-// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget; a quiet catch-up
-// (`readAll({ quiet: true })`) asks as the probe does, so it waits out the cooldown and joins a read already due.
-function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
-  const [live, setLive] = useState({ answered: '', pulls: new Map() })
-  const latest = useRef({ refs, answered: '' })
-  latest.current = { refs, answered: `${refsKey}@${attempt}` }
+// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget, and every PR; a quiet catch-up
+// (`readAll({ quiet: true })`) asks as the probe does, so it waits out the cooldown, joins a read already due, and leaves
+// the PRs the probe finds unmoved unread.
+function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt, seed }) {
+  const [live, setLive] = useState({ answered: '', pulls: new Map(), failed: false })
+  // The PRs that were over at the last visit (desk-copy.js settledPulls) stand as they were until the first full read answers, and
+  // the change probe may find them unmoved: what the open has read is never replaced by them.
+  const shown = useMemo(() => ((live.answered && !live.failed) || !seed.length ? live : { ...live, pulls: new Map([...seed.map(pr => [reviewKey(pr.repository.nameWithOwner, pr.number), pr]), ...live.pulls]) }), [live, seed])
+  const latest = useRef({ refs, answered: '', pulls: shown.pulls })
+  latest.current = { refs, answered: `${refsKey}@${attempt}`, pulls: shown.pulls }
   const wanted = useRef(new Set())
   const mark = useCallback(keys => keys.forEach(key => wanted.current.add(key)), [])
   const want = useCallback(keys => { mark(keys); return hub.changed('reviewPulls') }, [hub, mark])
   const wantLater = useCallback(keys => { mark(keys); return hub.automatic('reviewPulls') }, [hub, mark])
-  const readAll = useCallback(({ quiet = false } = {}) => { mark([ALL_PULLS]); return quiet ? hub.automatic('reviewPulls') : hub.refresh('reviewPulls') }, [hub, mark])
+  const readAll = useCallback(({ quiet = false } = {}) => { mark([quiet ? ALL_PULLS : EVERYTHING]); return quiet ? hub.automatic('reviewPulls') : hub.refresh('reviewPulls') }, [hub, mark])
   useEffect(() => {
     if (!enabled || !token) return undefined
     return hub.fact('reviewPulls', {
@@ -36,13 +44,16 @@ function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
         const keys = wanted.current
         if (!keys.size) return null
         wanted.current = new Set()
-        const { refs: all, answered } = latest.current
-        return { ...await readReviewPulls(token, all, keys.has(ALL_PULLS) ? null : keys), answered }
+        const { refs: all, answered, pulls: known } = latest.current
+        const forced = keys.has(EVERYTHING)
+        const everything = forced || keys.has(ALL_PULLS)
+        return { ...await readReviewPulls(token, all, everything ? null : keys, everything && !forced ? known : null), answered }
       },
       apply: result => {
-        if (result) setLive(old => ({ answered: result.everything ? result.answered : old.answered, pulls: mergeReviewPulls(old.pulls, result) }))
+        if (result) setLive(old => ({ answered: result.everything ? result.answered : old.answered, pulls: mergeReviewPulls(old.pulls, result), failed: result.everything ? false : old.failed }))
       },
-      failed: () => setLive(old => (old.answered === latest.current.answered ? old : { answered: latest.current.answered, pulls: new Map() })),
+      // What the last read said stays; with none yet, the saved rows stand (the open reports the failed update itself).
+      failed: () => setLive(old => (old.answered === latest.current.answered ? old : { answered: latest.current.answered, pulls: old.pulls, failed: true })),
     })
   }, [hub, enabled, token])
   const seenAttempt = useRef(attempt)
@@ -63,28 +74,35 @@ function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
       },
     )
   }, [hub, enabled, token, wantLater])
-  return { live, want, readAll }
+  return { live: shown, want, readAll }
 }
 
-// The owner's reviews for the PR reviews page and the rail's badge. Until the
-// first live read of the set has answered they are "checking", and a PR GitHub did
-// not return is unknown, so a stale finding never shows up as waiting on you.
-export function useReviewList({ hub, enabled = true, token, runs, chats = [], responses = [], pulls = [], ignored, login }) {
+// The owner's reviews for the PR reviews page and the rail's badge. A review whose PR the live read has not
+// answered yet shows where it stood at the last full sync (`lastKnown`, the rows desk-copy.js saved), and
+// "checking" only when there is nothing known; a PR GitHub did not return is unknown, so a stale finding
+// never shows up as waiting on you once the read has answered. A read that failed keeps the saved rows (`failed`
+// says so, for the header). Until the runs themselves are read (`runsReady`), the saved rows are the list.
+export function useReviewList({ hub, enabled = true, token, runs, runsReady = true, lastKnown = NONE, knownPulls = NONE, chats = [], responses = [], pulls = [], ignored, login }) {
   const raw = useMemo(() => reviewEntries(runs), [runs])
   const refs = useMemo(() => raw.map(entry => ({ repo: entry.item.repo, number: entry.item.number })), [raw])
   const refsKey = refs.map(ref => reviewKey(ref.repo, ref.number)).sort().join('|')
   const [attempt, setAttempt] = useState(0)
-  const { live, want, readAll } = useReviewPulls({ hub, enabled, token, refs, refsKey, attempt })
+  const { live, want, readAll } = useReviewPulls({ hub, enabled, token, refs, refsKey, attempt, seed: knownPulls })
   const pullsMoved = useCallback(pulls => want(pulls.map(pull => reviewKey(pull.repo, pull.number))), [want])
   const retry = useCallback(() => setAttempt(value => value + 1), [])
   return useMemo(() => {
     const done = live.answered === `${refsKey}@${attempt}`
-    const reviews = raw.map(entry => (done
-      ? { ...entry, ...classifyReview(entry, { login, ignored, runs, chats, responses, live: live.pulls.get(entry.id) }) }
-      : { ...entry, bucket: 'checking', chips: [] }))
-    const entries = [...reviews, ...respondEntries(chats, raw, pulls)]
-    return { entries, counts: reviewCounts(entries), checking: entries.some(entry => entry.bucket === 'checking'), retry, pullsMoved, syncPulls: readAll }
-  }, [raw, live, refsKey, attempt, login, ignored, runs, chats, responses, pulls, retry, pullsMoved, readAll])
+    const known = new Map(lastKnown.map(row => [row.id, row]))
+    const classified = entry => ({ ...entry, ...classifyReview(entry, { login, ignored, runs, chats, responses, live: live.pulls.get(entry.id) }) })
+    const reviews = !runsReady ? lastKnown.map(row => ({ ...row, saved: true })) : raw.map(entry => {
+      if (live.pulls.has(entry.id) || (done && !live.failed)) return classified(entry)
+      const row = known.get(entry.id)
+      if (row) return { ...entry, bucket: row.bucket, confirm: row.confirm, chips: row.chips, decision: row.decision, pull: row.pull, item: entry.item.title ? entry.item : row.item, saved: true }
+      return done ? classified(entry) : { ...entry, bucket: 'checking', chips: [] }
+    })
+    const entries = [...reviews, ...(runsReady ? respondEntries(chats, raw, pulls) : [])]
+    return { entries, counts: reviewCounts(entries), checking: entries.some(entry => entry.bucket === 'checking'), settled: raw.length === 0 || done, failed: !!live.failed, livePulls: live.pulls, retry, pullsMoved, syncPulls: readAll }
+  }, [raw, live, refsKey, attempt, login, ignored, runs, runsReady, lastKnown, chats, responses, pulls, retry, pullsMoved, readAll])
 }
 
 // Leaving a PR page re-reads the runs: whatever happened there shows on the Desk at once.

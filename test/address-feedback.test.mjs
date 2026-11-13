@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { addressBrief, addressItems, coverageLine, respondAction, savedFindings } from '../address-feedback.js'
+import { addressBrief, addressItems, coverageLine, respondAction, savedFindings, wholeSavedFindings } from '../address-feedback.js'
 import { NAMES } from '../names.js'
 
 const pr = { number: 120, title: 'Put what needs you first', url: 'https://github.com/o/r/pull/120', headRefName: 'feature', baseRefName: 'main', headRefOid: 'abcdef1234567', author: { login: 'owner' }, repository: { nameWithOwner: 'o/r' } }
@@ -100,7 +100,9 @@ test('Respond to feedback is a job the menu can open, and it starts an agent con
   const { AGENT_INTENTS } = await import('../actions-menu.js')
   assert.ok(AGENT_INTENTS.has('respond'))
   const list = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
-  assert.match(list, /if \(job === 'respond'\) \{ setAssigning\(null\); setAddressing\(/)
+  // The window opens with the whole saved review (wholeSavedFindings reads the run when the list holds it cut).
+  assert.match(list, /if \(job === 'respond'\) \{ setAssigning\(null\); void openRespond\(pulls\[0\]\); return \}/)
+  assert.match(list, /setAddressing\(\{ pr: \{ \.\.\.source, repository: \{ \.\.\.source\.repository \} \}, findings, response: responseView\(responses, source\) \}\)/)
   const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
   assert.equal((app.match(/onStartAgent=\{startAgentTask\}/g) || []).length, 2)
 })
@@ -231,4 +233,30 @@ test('the window reads the whole conversation and every thread, never just the f
   assert.match(source, /loadAllPullActivity\(/)
   assert.match(source, /loadAllPullThreads\(/)
   assert.doesNotMatch(source, /\bloadPullActivity\(|\bloadPullThreads\(/)
+})
+
+// The short list of runs cuts the findings; the Respond window must carry the whole saved review.
+test('a review the list holds cut is read whole before Respond to feedback takes its findings', async () => {
+  const whole = 'A long saved review. '.repeat(30).trim()
+  const item = extra => ({ repo: 'O/R', number: 120, state: 'needs_you', head_sha: 'abcdef1234567', summary: whole, ...extra })
+  const cut = { run: { id: 'run-1', summary_only: true }, item: item({ summary: 'A long saved review. A long saved review. … open this run for the full findings', summary_truncated: true }) }
+  const reads = []
+  const readRun = async id => { reads.push(id); return { id, items: [item()] } }
+  assert.equal((await wholeSavedFindings(cut, null, readRun)).summary, whole)
+  assert.deepEqual(reads, ['run-1'])
+  // A full list, or a short one whose summary was not cut, is the whole review already: nothing is read.
+  reads.length = 0
+  const full = { run: { id: 'run-2' }, item: item() }
+  assert.equal((await wholeSavedFindings(full, null, readRun)).summary, whole)
+  assert.equal((await wholeSavedFindings({ run: { id: 'run-3', summary_only: true }, item: item({ summary: 'Short.' }) }, null, readRun)).summary, 'Short.')
+  assert.deepEqual(reads, [])
+  // A run another conversation owns is not marked as a short run: its copy is all there is, and it is never read for.
+  const elsewhere = { run: { id: 'core-1', details_in_owning_chat: true }, item: item({ summary: 'cut… open this run for the full findings', summary_truncated: true }) }
+  assert.match((await wholeSavedFindings(elsewhere, null, readRun)).summary, /^cut/)
+  assert.deepEqual(reads, [])
+  // A run that cannot be read is an error the window reports; it never falls back to the cut copy.
+  await assert.rejects(wholeSavedFindings(cut, null, async () => { throw new Error('offline') }), /offline/)
+  // A run that no longer holds the item has no findings to carry.
+  assert.equal(await wholeSavedFindings(cut, null, async id => ({ id, items: [] })), null)
+  assert.equal(await wholeSavedFindings(cut, null, async () => null), null)
 })
