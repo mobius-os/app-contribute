@@ -84,13 +84,12 @@ test('the same rows with their details offer their actions in the same place', a
   assert.doesNotMatch(html, /<input type="checkbox"[^>]*disabled=""[^>]*aria-label="Select/)
 })
 
-test('the always-load switch says in plain words what it does, and is on only for a repository that is pinned', async t => {
+test('the pin button says in plain words what it does, and is pressed only for a repository that is pinned', async t => {
   const { renderSwitch } = await ui(t) || {}
   if (!renderSwitch) return
   const off = renderSwitch({ repo: 'o/r', pinned: false, onChange: () => {} })
-  assert.match(off, /Always load/)
+  assert.match(off, /<span>Pin<\/span>/)
   assert.match(off, /Keeps this repository’s pull requests up to date in the background\./)
-  assert.match(off, /role="switch"[^>]*aria-checked="false"/)
-  assert.doesNotMatch(off, /\bchecked=""/)
-  assert.match(renderSwitch({ repo: 'o/r', pinned: true, onChange: () => {} }), /role="switch"[^>]*aria-checked="true"/)
+  assert.match(off, /aria-pressed="false"/)
+  assert.match(renderSwitch({ repo: 'o/r', pinned: true, onChange: () => {} }), /aria-pressed="true"/)
 })

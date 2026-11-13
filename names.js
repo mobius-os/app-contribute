@@ -105,8 +105,10 @@ export const NAMES = Object.freeze({
   moreRepositories: 'More repositories',
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
-  // The switch on a repository that has its pull requests read in the background, so they are there when it is opened.
-  alwaysLoad: 'Always load',
+  // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.
+  // One short word like Sync; the sentence says what it does. The state is the filled pin and aria-pressed, never the word alone.
+  pin: 'Pin',
+  pinHint: 'Keeps this repository’s pull requests up to date in the background.',
 })
 
 const REVIEW_JOBS = new Set(['review', 'review_merge'])

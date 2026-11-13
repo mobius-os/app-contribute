@@ -16,10 +16,14 @@ export const WORKSPACE_CSS = `
 .co-workspace-head { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:2px 0 12px; }
 .co-workspace-title { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
 .co-workspace-title > div { flex:1; min-width:0; }
-.co-workspace-name-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.co-pin { display:flex; flex-wrap:wrap; align-items:center; gap:0 14px; margin:6px 0 0; }
-.co-pin-switch { display:inline-flex; align-items:center; gap:10px; min-height:var(--co-control-height); font-size:var(--co-text-meta); font-weight:500; color:var(--text); cursor:pointer; }
-.co-pin small { flex:1 1 220px; font-size:var(--co-text-meta); color:var(--muted); line-height:1.35; }
+.co-workspace-name-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; }
+.co-workspace-name-row h2 { min-width:0; }
+.co-pin { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; color:var(--muted); font-weight:600; }
+.co-pin-btn:hover:not(:disabled) { color:var(--text); }
+.co-pin-btn[aria-pressed=true] { color:var(--accent-text, var(--accent)); border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:color-mix(in srgb, var(--accent) 12%, var(--surface-2, var(--bg))); }
+.co-pin-btn[aria-pressed=true] .co-icon { fill:currentColor; }
+.co-pin-failed { flex-basis:100%; font-size:var(--co-text-meta); color:var(--danger); }
 .co-workspace-title .co-source-glyph { display:none; }
 .co-workspace-title h2 { font-size:var(--co-text-section); font-weight:600; line-height:1.25; letter-spacing:-.025em; margin:0; overflow-wrap:anywhere; }
 .co-workspace-title p { display:flex; flex-wrap:wrap; align-items:center; gap:0 12px; font-size:var(--co-text-meta); color:var(--muted); margin:4px 0 0; overflow-wrap:anywhere; }

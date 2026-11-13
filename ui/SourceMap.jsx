@@ -72,10 +72,9 @@ function ProjectDetail({
       <article ref={projectView} className="co-workspace">
         <header className="co-workspace-head">
           <div className="co-workspace-title"><ProjectGlyph project={project} /><div>
-            <div className="co-workspace-name-row"><h2>{project.name}</h2></div>
+            <div className="co-workspace-name-row"><h2>{project.name}</h2>{renderRepositoryControls?.(project)}</div>
             <p>{project.canonical_repo ? <a href={`https://github.com/${project.canonical_repo}`} target="_blank" rel="noopener noreferrer">{project.canonical_repo}</a> : <span>Only on your Möbius</span>}
             </p>
-            {renderRepositoryControls?.(project)}
           </div></div>
         </header>
         <div className="co-workspace-body">

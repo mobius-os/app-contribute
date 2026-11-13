@@ -1,21 +1,22 @@
 import { useId, useState } from 'react'
 import { NAMES } from '../names.js'
+import { Icon } from './Icons.jsx'
 
-// The owner's switch for one repository: its pull requests are read in the background and kept up to date, so they are
+// The owner's button for one repository: its pull requests are read in the background and kept up to date, so they are
 // there when it is opened. A preference of this workspace; it changes nothing the repository allows (repositories.js).
+// A toggle button, so the name stays "Pin" and aria-pressed carries the state; the filled pin shows it to the eye.
 export function AlwaysLoad({ repo, pinned, onChange }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const hint = useId()
-  async function change(on) {
+  async function change() {
     setBusy(true); setFailed(false)
-    try { await onChange(repo, on) } catch { setFailed(true) } finally { setBusy(false) }
+    try { await onChange(repo, !pinned) } catch { setFailed(true) } finally { setBusy(false) }
   }
   return <div className="co-pin">
-    <label className="co-pin-switch">
-      <span>{NAMES.alwaysLoad}</span>
-      <input type="checkbox" role="switch" className="co-switch" checked={pinned} disabled={busy} aria-checked={pinned} aria-describedby={hint} onChange={event => change(event.target.checked)} />
-    </label>
-    <small id={hint} role={failed ? 'alert' : undefined}>{failed ? 'Could not save this. Try again.' : 'Keeps this repository’s pull requests up to date in the background.'}</small>
+    <button type="button" className="co-btn co-btn-chip co-pin-btn" aria-pressed={pinned} aria-describedby={hint} title={NAMES.pinHint} disabled={busy} onClick={change}>
+      <Icon name="pin" size={16} /><span>{NAMES.pin}</span>
+    </button>
+    <small id={hint} className={failed ? 'co-pin-failed' : 'co-visually-hidden'} role={failed ? 'alert' : undefined}>{failed ? 'Could not save this. Try again.' : NAMES.pinHint}</small>
   </div>
 }
