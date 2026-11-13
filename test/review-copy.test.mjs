@@ -6,17 +6,17 @@ test('a plain private review says nothing reaches GitHub and starts privately', 
   const copy = reviewWindowCopy({ mode: 'review', bindCurrentTarget: true })
   assert.equal(copy.title, 'Review')
   assert.equal(copy.publicEffect.tone, 'private')
-  assert.equal(copy.startLabel, 'Start private review')
+  assert.equal(copy.startLabel, 'Start review')
   assert.ok(copy.steps.every(step => !step.added))
 })
 
 test('each allowed public effect adds its own step, summary and start label', () => {
   const posting = reviewWindowCopy({ mode: 'review', posting: true })
-  assert.equal(posting.startLabel, 'Start review, allow comment')
+  assert.equal(posting.startLabel, 'Start, allow comment')
   assert.match(posting.publicEffect.text, /at most one review comment from your account, only for a verdict the agent marks as public/)
   assert.ok(posting.steps.some(step => step.added && /posts one comment/.test(step.text)))
   const merge = reviewWindowCopy({ mode: 'review_merge', bindCurrentTarget: true })
-  assert.equal(merge.startLabel, 'Start review, merge when safe')
+  assert.equal(merge.startLabel, 'Start, merge when safe')
   assert.match(merge.footnote, /merges into the newest version of the target branch/)
 })
 
@@ -32,7 +32,7 @@ test('a batch discloses one possible comment and one merge on each selected PR',
 
 test('posting with merge says the review is posted first and only then merged', () => {
   const copy = reviewWindowCopy({ mode: 'review_merge', posting: true })
-  assert.equal(copy.startLabel, 'Start review, post and merge when safe')
+  assert.equal(copy.startLabel, 'Start, post and merge when safe')
   assert.match(copy.publicEffect.text, /at most one review comment from your account.*, then the merge\./)
   assert.ok(copy.steps.some(step => step.added && /posts one comment/.test(step.text)))
   assert.ok(copy.steps.some(step => step.added && /posts it first\. Once GitHub shows that review/.test(step.text)))
@@ -40,12 +40,12 @@ test('posting with merge says the review is posted first and only then merged', 
 
 test('a proposed verdict never posts or merges before the owner submits it', () => {
   const review = reviewWindowCopy({ mode: 'review', posting: true, verdict: true })
-  assert.equal(review.startLabel, 'Start review, draft a verdict for me')
+  assert.equal(review.startLabel, 'Start & draft')
   assert.match(review.publicEffect.text, /only the verdict you send, from your account/)
-  assert.ok(review.steps.some(step => /You send it, change it to a comment, or discard it; nothing is posted before that/.test(step.text)))
+  assert.ok(review.steps.some(step => /You send or discard it/.test(step.text)))
   const merge = reviewWindowCopy({ mode: 'review_merge', posting: true, verdict: true, count: 2 })
-  assert.equal(merge.startLabel, 'Start review, merge after your approval')
-  assert.ok(merge.steps.some(step => /Only after you submit an approval/.test(step.text)))
+  assert.equal(merge.startLabel, 'Start, merge after approval')
+  assert.ok(merge.steps.some(step => /After you approve and all required checks pass/.test(step.text)))
   assert.match(merge.publicEffect.text, /per PR you send.*then the merge of each PR/)
   // The verdict needs posting; without it the window stays private.
   assert.equal(reviewWindowCopy({ mode: 'review', verdict: true }).publicEffect.tone, 'private')
@@ -82,11 +82,11 @@ test('finish it and take over stop for your approval before every push, and neve
 
 test('an agent posts its verdict only when you chose it, and never together with merging', () => {
   const agent = reviewWindowCopy({ mode: 'review', intent: 'review', posting: true, verdict: true, agentPosts: true })
-  assert.equal(agent.startLabel, 'Start review, agent posts its verdict')
+  assert.equal(agent.startLabel, 'Review & post')
   assert.match(agent.publicEffect.text, /posted by the agent from your account as you allowed/)
   const merging = reviewWindowCopy({ mode: 'review_merge', intent: 'review', posting: true, verdict: true, agentPosts: true })
-  assert.equal(merging.startLabel, 'Start review, merge after your approval', 'merging always follows your own approval')
-  assert.equal(mergeWhenSafeBlocker({ drafts: false, mayMergeAll: true, notDrafting: true }), 'Merging follows your own approval: choose “Draft for me”.')
+  assert.equal(merging.startLabel, 'Start, merge after approval', 'merging always follows your own approval')
+  assert.equal(mergeWhenSafeBlocker({ drafts: false, mayMergeAll: true, notDrafting: true }), 'Needs “Draft for me”.')
 })
 
 test('merge when safe explains why it is unavailable', () => {
@@ -98,8 +98,8 @@ test('merge when safe explains why it is unavailable', () => {
 })
 
 test('the switch hints say per PR for a batch and stay singular for one PR', () => {
-  assert.match(reviewSwitchHints(1).merge, /Once you send an approval .* merges or queues the PR\./)
-  assert.match(reviewSwitchHints(2).merge, /merges or queues each PR\./)
+  assert.match(reviewSwitchHints(1).merge, /Merges or queues the PR once you approve and checks pass\./)
+  assert.match(reviewSwitchHints(2).merge, /Merges or queues each PR once you approve/)
   assert.deepEqual(Object.keys(reviewSwitchHints(1)), ['merge'])
 })
 
@@ -113,10 +113,10 @@ test('each Agent menu job titles its own window', async () => {
   const comment = reviewWindowCopy({ mode: 'review', intent: 'review', posting: true, verdict: false })
   assert.equal(priv.steps.length, 3)
   assert.equal(github.steps.length, 4)
-  assert.match(github.steps[2].text, /drafts a verdict/)
+  assert.match(github.steps[2].text, /Drafts a verdict/)
   assert.match(comment.steps[2].text, /posts one comment/, 'an older saved comment grant still says what it does')
-  assert.equal(github.startLabel, 'Start review, draft a verdict for me')
-  assert.equal(comment.startLabel, 'Start review, allow comment')
+  assert.equal(github.startLabel, 'Start & draft')
+  assert.equal(comment.startLabel, 'Start, allow comment')
   const merge = reviewWindowCopy({ mode: 'review_merge', intent: 'review', posting: true, verdict: true })
   assert.equal(merge.title, 'Review', 'merging is a switch inside Review, not its own job')
   assert.equal(merge.steps.length, 5)
@@ -126,8 +126,8 @@ test('each Agent menu job titles its own window', async () => {
 
 test('the second step sends you to the PR’s Review tab, never to a private conversation', () => {
   const one = reviewWindowCopy({ mode: 'review' }).steps.map(step => step.text)
-  assert.equal(one[1], 'Its findings appear on this PR’s Review tab.')
-  assert.equal(reviewWindowCopy({ mode: 'review', count: 3 }).steps[1].text, 'Its findings appear on each PR’s Review tab.')
+  assert.equal(one[1], 'Findings appear on this PR’s Review tab.')
+  assert.equal(reviewWindowCopy({ mode: 'review', count: 3 }).steps[1].text, 'Findings appear on each PR’s Review tab.')
   for (const options of [{}, { posting: true, verdict: true }, { mode: 'review_merge' }]) {
     assert.ok(reviewWindowCopy({ mode: 'review', ...options }).steps.every(step => !/private conversation/.test(step.text)))
   }
