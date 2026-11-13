@@ -65,14 +65,28 @@ test('every shared case gives its state, its highlighted action and its allowed 
   }
 })
 
-for (const [name, holds] of Object.entries(INVARIANTS)) {
+// The sweep decides about 131,000 PRs, so it runs once for every invariant together: a sweep per invariant
+// takes ten times as long. Each invariant keeps its own test and reports the first facts that broke it.
+const sweepOnce = () => {
+  const broken = new Map()
+  const reached = new Set()
+  for (const facts of [...cases.map(item => item.facts), ...sweep()]) {
+    const decision = decide(facts)
+    reached.add(decision.state)
+    Object.entries(INVARIANTS).filter(([name, holds]) => !broken.has(name) && !holds(decision, facts)).forEach(([name]) => broken.set(name, facts))
+  }
+  return { broken, reached }
+}
+const SWEPT = sweepOnce()
+
+for (const name of Object.keys(INVARIANTS)) {
   test(`invariant: ${name}`, () => {
-    for (const facts of [...cases.map(item => item.facts), ...sweep()]) assert.ok(holds(decide(facts), facts), `${name}: ${JSON.stringify(facts)}`)
+    assert.ok(!SWEPT.broken.has(name), `${name}: ${JSON.stringify(SWEPT.broken.get(name))}`)
   })
 }
 
 test('every state and action named by the table exists, and every state is reachable', () => {
-  const reached = new Set([...cases.map(item => item.facts), ...sweep()].map(facts => decide(facts).state))
+  const { reached } = SWEPT
   for (const key of Object.keys(STATES)) assert.ok(reached.has(key) || ['merged', 'closed', 'needs_answer', 'sending', 'author.approved_no_rights'].includes(key), `unreached state ${key}`)
   for (const state of Object.values(STATES)) if (state.next) assert.ok(ACTIONS.some(item => item.id === state.next), state.next)
 })
