@@ -391,7 +391,7 @@ export function SourceMap({
             <DeskFind view={desk.view} projects={orderedProjects} onView={openView}>
               <SearchField label="Find a PR, person or repository" value={deskQuery} onChange={setDeskQuery} />
             </DeskFind>
-            <DeskView view={desk.view} projects={orderedProjects} records={desk.records} login={desk.login} decisionsFor={desk.decisionsFor} lastLooked={desk.lastLooked} query={deskQuery} runs={desk.runs} chats={desk.respondChats} responses={desk.responses} ignored={desk.ignored} reviews={desk.reviews} counts={desk.counts} needsFilter={needsFilter} onOpenProject={openProject} onOpenPull={desk.onOpenPull} onOpenRecord={openRecordFromDesk} />
+            <DeskView view={desk.view} projects={orderedProjects} records={desk.records} login={desk.login} decisionsFor={desk.decisionsFor} lastLooked={desk.lastLooked} query={deskQuery} runs={desk.runs} chats={desk.respondChats} responses={desk.responses} ignored={desk.ignored} reviews={desk.reviews} counts={desk.counts} needsFilter={needsFilter} capabilities={desk.capabilities} onOpenProject={openProject} onOpenPull={desk.onOpenPull} onOpenRecord={openRecordFromDesk} />
           </>
         ) : (
         <>

@@ -645,9 +645,9 @@ test('an opened panel scrolls into view after the project restores its scroll, a
   assert.doesNotMatch(helper, /block: 'start'/)
 })
 
-test('a desk row can open a PR straight into its fix window, once per visit, and only where agents can start', () => {
+test('a desk row can open a PR straight into its fix window or the window of its next step, once per visit, and only where agents can start', () => {
   const pullsSource = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
-  assert.match(pullsSource, /focusPull\?\.intent === 'fix' && onStartAgent \? <RunOnce ready=\{!!detailPr\} nonce=\{focusPull\.nonce\}/)
+  assert.match(pullsSource, /focusPull\?\.intent && onStartAgent \? <RunOnce ready=\{!!detailPr && \(!!capabilities \|\| !YOUR_INTENTS\.has\(focusPull\.intent\)\)\} nonce=\{focusPull\.nonce\}/)
   assert.match(appSource, /function openPullPage\(project, pr, tab = 'conversation', intent = ''\)/)
   assert.match(appSource, /setPullPage\(\{ key: project\?\.key \|\| '', repo, number: pr\.number, tab, intent, nonce: crypto\.randomUUID\(\) \}\)/)
   const once = readFileSync(new URL('../ui/RunOnce.jsx', import.meta.url), 'utf8')

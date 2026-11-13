@@ -1322,6 +1322,21 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-desk-item.co-desk-row-split { grid-template-columns:minmax(0,1fr); grid-template-areas:"row" "note" "action"; padding:0 14px 12px; }
  .co-desk-item.co-desk-row-split > .co-desk-note { padding:0 0 10px 26px; }
 }
+/* Swipe a row left to reach its next step (ui/SwipeReveal.jsx; only a touch screen draws it): the row and the button are one horizontal
+   scroll-snap scroller, so the browser does the swiping and vertical scrolling is never taken from the page. */
+.co-swipe { display:grid; grid-template-columns:100% max-content; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; overscroll-behavior:chain; }
+@media(prefers-reduced-motion:no-preference) { .co-swipe { scroll-behavior:smooth; } }
+.co-swipe-front { min-width:0; scroll-snap-align:start; }
+.co-swipe-panel { display:flex; align-items:center; padding:0 14px; background:var(--surface-2); scroll-snap-align:end; }
+/* The quiet block under Needs you (ui/WaitingOnOthers.jsx): the card look of the list above, with a muted head and no colour of its own. */
+.co-waiting { margin-top:16px; }
+.co-waiting h3 { margin:0; padding:6px 0; color:var(--muted); font-size:var(--co-text-meta); font-weight:600; }
+@media(max-width:680px) {
+ .co-waiting { margin-top:10px; }
+ .co-waiting .co-desk-item.co-desk-row-split { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"row action"; align-items:center; padding:0 8px 0 0; }
+ .co-waiting .co-desk-row-split > .co-desk-row { padding-left:12px; }
+ .co-waiting .co-desk-row-action { width:auto; }
+}
 /* ---- Compact on a phone (DESIGN.md, The Compact Phone Rule) ----
    The sizes are the phone set of the token sheet in theme.js. This block takes the air out of the lists
    and holds on to the two things that must not shrink with them: the tap area and the text you type. */

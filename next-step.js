@@ -3,7 +3,7 @@
 // the machine's own sentence, and the one filled button is the next step it names.
 // Pure, so every state's panel is tested without a browser.
 import { NAMES } from './names.js'
-import { mayRunYourAction, AGENT_INTENTS } from './actions-menu.js'
+import { mayRunYourAction, requestReviewButton, AGENT_INTENTS } from './actions-menu.js'
 import { frameOf, isResting } from './pr-standing.js'
 
 // How each next step runs. 'menu' goes through the same handler as the Actions menu
@@ -72,3 +72,11 @@ export function stageWord(pr, decision) {
   if (decision.approvedBy?.length) return 'Approved'
   return isResting(decision) ? decision.label : 'In review'
 }
+
+// The ask a PR that waits on its reviewers can be given again: the first of these the PR machine offers and this Möbius can run,
+// as the intent of the sheet it opens (Ask for re-review, Ask for approval, Request review); null when none, so no button shows.
+const ASK_AGAIN = ['ask_rereview', 'ask_approval', 'request_review']
+const canAsk = (decision, id, capabilities) => (id === 'request_review'
+  ? requestReviewButton(decision, { capabilities })?.off === false
+  : !!decision.actions.find(action => action.id === id)?.enabled && mayRunYourAction(id, { capabilities }))
+export const askAgainIntent = (decision, { capabilities = null } = {}) => ASK_AGAIN.find(id => canAsk(decision, id, capabilities)) || null

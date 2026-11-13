@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows } from '../desk.js'
+import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows, waitingOnOthers } from '../desk.js'
 import { conversationCount, prKey, reviewForPull } from '../collaboration.js'
 import { savedFindings } from '../address-feedback.js'
 import { frameState, reviewForRecord } from '../review-frame.js'
@@ -15,6 +15,7 @@ import { Icon } from './Icons.jsx'
 import { DeskRow, DotLine, StatusPill, whoOf } from './DeskRow.jsx'
 import { Envelope, EmptyView } from './Envelope.jsx'
 import { AgentRunsView, ReviewRow } from './ReviewsView.jsx'
+import { WaitingOnOthers } from './WaitingOnOthers.jsx'
 import { NAMES } from '../names.js'
 
 const matches = (query, ...parts) => !query.trim()
@@ -53,6 +54,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
         labels={<span className="co-pr-labels"><PullLabels pr={pr} /></span>}
         pills={pills.map((chip, index) => <StatusPill key={index} chip={chip} />)}
         aside={comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={15} />{comments}</span> : null}
+        step={swipeStep({ project, pr, decision, records, capabilities, onOpenPull })}
         onOpen={() => onOpenPull(project, pr, framed === 'idle' ? 'conversation' : 'review')}
       />
     </ReviewFrame>
@@ -180,17 +182,25 @@ function viewEnvelopes(view, projects, { records, query, lastLooked, needsFilter
   return envelopes
 }
 
+// The rows of the quiet block under Needs you (desk.js waitingOnOthers), across projects, the longest wait first. The search narrows
+// them like every row on the screen; the step chips do not, because the block is no part of that list.
+function waitingRows(projects, { login, runs, chats, responses, ignored, query }) {
+  return projects.flatMap(project => waitingOnOthers(project.incomingReviews, login, { runs, chats, responses, ignored })
+    .filter(({ pr }) => matches(query, project.name, pr.title, String(pr.number))).map(row => ({ ...row, project })))
+    .sort((a, b) => b.days - a.days)
+}
+
 // The selected side view: one card per app, in the projects list's own order.
-export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', onOpenProject, onOpenPull, onOpenRecord }) {
+export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', capabilities = null, onOpenProject, onOpenPull, onOpenRecord }) {
   const [mineFilter, setMineFilter] = useState('open')
-  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], onOpenPull, onOpenRecord }
+  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], records, capabilities, onOpenPull, onOpenRecord }
   if (view === 'runs') return <AgentRunsView reviews={reviews} projects={projects} query={query} login={login} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} />
   const shownView = view === 'mine' && mineFilter === 'merged' ? 'merged' : view
   const envelopes = viewEnvelopes(shownView, projects, { records, query, lastLooked, needsFilter: view === 'needs' ? needsFilter : '', context, onOpenProject })
   const filter = view === 'mine' ? <MineFilter value={mineFilter} counts={counts} onChange={setMineFilter} /> : null
   if (!envelopes.length) {
     const empty = view === 'needs' && needsFilter ? EMPTY.filtered : EMPTY[shownView] || EMPTY.needs
-    return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} /></>
+    return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} />{waiting}</>
   }
-  return <>{filter}<div className="co-desk-envelopes">{envelopes}</div></>
+  return <>{filter}<div className="co-desk-envelopes">{envelopes}</div>{waiting}</>
 }

@@ -64,6 +64,10 @@ export const NAMES = Object.freeze({
   askRereview: 'Ask for re-review',
   // Posts a note naming the reviewers who commented but have not approved (the PR machine's ask_approval).
   askApproval: 'Ask for approval',
+  // The quiet button on a PR that has waited on its reviewers for days. It opens the Ask or Request review sheet the PR machine offers for that PR.
+  askAgain: 'Ask again',
+  // The quiet block under Needs you: your own PRs that have waited on others for days. It is a reminder and counts in no badge.
+  waitingOnOthers: 'Waiting on others',
 
   // What reaches GitHub
   sendToGitHub: 'Send to GitHub',
@@ -110,6 +114,9 @@ export const NAMES = Object.freeze({
   pin: 'Pin',
   pinHint: 'Keeps this repository’s pull requests up to date in the background.',
 })
+
+// How long a PR has waited on others, as the block under Needs you says it: "Waiting 3 days on Sam" ("reviewers" when no one is named).
+export const waitingWords = (days, who) => `Waiting ${days} days on ${who}`
 
 const REVIEW_JOBS = new Set(['review', 'review_merge'])
 // The words for starting a stopped agent job over: a review is reviewed again.

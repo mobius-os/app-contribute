@@ -2711,7 +2711,8 @@ async function checksTabChecks() {
 // rows, a review saved without a title reads its PR's title, My PRs says Part 1 of 2, and a merged row opens its PR page.
 window.runDeskListChecks = async () => {
   const checks = []
-  const rows = () => [...document.querySelectorAll('.co-desk-item')]
+  // The rows of the list: the quiet Waiting on others block under it is no part of Needs you, so no number counts it.
+  const rows = () => [...document.querySelectorAll('.co-desk-envelopes .co-desk-item')]
   const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
   const chips = () => [...document.querySelectorAll('.co-filter-line button')].map(node => text(node.querySelector('b')) + ' ' + text(node.querySelector('span')))
   const visible = node => node.getClientRects().length > 0
