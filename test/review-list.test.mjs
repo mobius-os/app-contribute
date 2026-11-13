@@ -105,14 +105,15 @@ test('a PR GitHub did not return is unknown, never classified from the saved rev
     { waiting: 2, confirm: 1, running: 1, stalled: 0, unknown: 1, done: 1 })
 })
 
-test('every PR is read live in batches of 25, one batch after another, and only what GitHub returned is known', async () => {
+test('every PR is read live in batches of 25, together, and only what GitHub returned is known', async () => {
   const sent = []
   const previous = globalThis.fetch
   globalThis.fetch = async (url, options) => {
     const query = JSON.parse(options.body).query
     sent.push(query)
+    const first = sent.length === 1
     const count = (query.match(/p\d+:repository/g) || []).length
-    return { ok: true, json: async () => ({ data: Object.fromEntries(Array.from({ length: count }, (_, index) => [`p${index}`, { pullRequest: index === 1 && sent.length === 1 ? null : live({ number: index }) }])) }) }
+    return { ok: true, json: async () => ({ data: Object.fromEntries(Array.from({ length: count }, (_, index) => [`p${index}`, { pullRequest: index === 1 && first ? null : live({ number: index }) }])) }) }
   }
   try {
     const refs = [...Array.from({ length: 30 }, (_, index) => ({ repo: 'o/r', number: index + 1 })), { repo: 'not a repo', number: 1 }, { repo: 'o/r', number: -3 }]
@@ -377,4 +378,80 @@ test('a Respond conversation that asks you is a row of Agent runs, counted in Ne
   assert.equal(deskCounts({ reviewEntries: entries, reviews: reviewCounts(entries) }).fix, 1, 'it waits on the owner, on their own PR')
   assert.equal(deskCounts({ reviewEntries: respondEntries([respondOn('running')], [], []) }).fix, 0, 'one at work waits on nobody')
   assert.deepEqual(respondEntries([respondOn('needs_answer')], [{ id: 'mobius-os/mobius#2019' }], []), [], 'a PR with a review of its own is classified with it')
+})
+
+// GitHub as the reads see it: each heavy read and each probe is logged; `pulls` says what GitHub holds for every number.
+function fakeGithub(pulls) {
+  const heavy = [], probes = []
+  let inFlight = 0, mostAtOnce = 0
+  globalThis.fetch = async (url, options) => {
+    const query = JSON.parse(options.body).query
+    const numbers = [...query.matchAll(/pullRequest\(number:(\d+)\)/g)].map(match => Number(match[1]))
+    if (query.includes('ContributeChangeProbe')) {
+      probes.push(numbers)
+      return { ok: true, json: async () => ({ data: { requested: { nodes: [] }, ...Object.fromEntries(numbers.map((number, index) => [`p${index}`, { pullRequest: pulls[number] ? { updatedAt: pulls[number].updatedAt, state: pulls[number].state } : null }])) } }) }
+    }
+    heavy.push(numbers)
+    inFlight += 1; mostAtOnce = Math.max(mostAtOnce, inFlight)
+    await new Promise(resolve => setImmediate(resolve))
+    inFlight -= 1
+    return { ok: true, json: async () => ({ data: Object.fromEntries(numbers.map((number, index) => [`p${index}`, { pullRequest: pulls[number] ?? null }])) }) }
+  }
+  return { heavy, probes, mostAtOnce: () => mostAtOnce }
+}
+const pullAt = (number, updatedAt = '2026-11-13T08:00:00Z') => live({ number, updatedAt })
+
+test('the batches of a long history are read together, a few at a time', async () => {
+  const previous = globalThis.fetch
+  try {
+    const pulls = Object.fromEntries(Array.from({ length: 230 }, (_, index) => [index + 1, pullAt(index + 1)]))
+    const github = fakeGithub(pulls)
+    const read = await loadReviewPulls('token', Array.from({ length: 230 }, (_, index) => ({ repo: 'o/r', number: index + 1 })))
+    assert.equal(github.heavy.length, 10)
+    assert.equal(github.mostAtOnce(), 4, 'together, but never dozens at once')
+    assert.equal(read.size, 230)
+  } finally { globalThis.fetch = previous }
+})
+
+test('a PR the change probe says did not move keeps its last read, and only the others are read again', async () => {
+  const previous = globalThis.fetch
+  try {
+    const github = fakeGithub({ 1: pullAt(1), 2: pullAt(2, '2026-11-13T10:00:00Z'), 3: pullAt(3), 4: pullAt(4) })
+    const refs = [1, 2, 3, 4].map(number => ({ repo: 'o/r', number }))
+    // PR 1 and 2 were read before; GitHub's PR 2 has moved since. PR 3 was never read, PR 4 is not a review of the owner's.
+    const known = new Map([['o/r#1', pullAt(1)], ['o/r#2', pullAt(2, '2026-11-13T08:00:00Z')]])
+    const { pulls, everything, asked } = await readReviewPulls('token', refs.slice(0, 3), null, known)
+    assert.deepEqual(github.probes, [[1, 2]], 'only the PRs with a last read are probed')
+    assert.deepEqual(github.heavy, [[2, 3]], 'the moved PR and the new one are read; the unchanged one is not')
+    assert.equal(pulls.get('o/r#1'), known.get('o/r#1'), 'the unchanged PR is the very read it had')
+    assert.equal(pulls.get('o/r#2').updatedAt, '2026-11-13T10:00:00Z')
+    assert.deepEqual([everything, asked], [true, ['o/r#1', 'o/r#2', 'o/r#3']])
+  } finally { globalThis.fetch = previous }
+})
+
+test('without a last read, or with a probe GitHub does not answer, every PR is read', async () => {
+  const previous = globalThis.fetch
+  try {
+    const github = fakeGithub({ 1: pullAt(1), 2: pullAt(2) })
+    const refs = [1, 2].map(number => ({ repo: 'o/r', number }))
+    await readReviewPulls('token', refs, null, null)
+    assert.deepEqual([github.probes.length, github.heavy], [0, [[1, 2]]], 'nothing known, nothing to probe')
+    const known = new Map([['o/r#1', pullAt(1)], ['o/r#2', pullAt(2)]])
+    const base = globalThis.fetch
+    globalThis.fetch = async (url, options) => JSON.parse(options.body).query.includes('ContributeChangeProbe') ? { ok: false } : base(url, options)
+    github.heavy.length = 0
+    await readReviewPulls('token', refs, null, known)
+    assert.deepEqual(github.heavy, [[1, 2]], 'a failed probe skips nothing')
+  } finally { globalThis.fetch = previous }
+})
+
+test('a PR the probe finds gone is read again rather than kept', async () => {
+  const previous = globalThis.fetch
+  try {
+    const github = fakeGithub({ 2: pullAt(2) })
+    const known = new Map([['o/r#1', pullAt(1)]])
+    const { pulls } = await readReviewPulls('token', [{ repo: 'o/r', number: 1 }], null, known)
+    assert.deepEqual(github.heavy, [[1]])
+    assert.equal(pulls.size, 0, 'GitHub no longer returns it: unknown again')
+  } finally { globalThis.fetch = previous }
 })

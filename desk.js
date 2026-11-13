@@ -7,6 +7,7 @@ import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { standingFor } from './pr-standing.js'
 import { projectIsQuiet } from './source-map.js'
+import { DESK_HISTORY_DAYS } from './storage.js'
 
 // The four views (finding 2). Every other place a PR can be lives inside one of them.
 // `short` is the word under the count on the phone's four-segment bar.
@@ -63,7 +64,8 @@ export function chainPulls(pulls) {
   return groups
 }
 
-export const MERGED_WINDOW_DAYS = 7
+// What merged this recently is the Merged list; storage.js keeps that much history in the desk's own set.
+export const MERGED_WINDOW_DAYS = DESK_HISTORY_DAYS
 
 export function mergedRecently(records, now = Date.now()) {
   const cutoff = now - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000

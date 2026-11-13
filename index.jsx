@@ -358,6 +358,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // Whether the last ledger read was complete. The manual refresh reports
   // failure from it, so a still-partial feed never reads as "updated".
   const ledgerCurrentRef = useRef(false)
+  // The desk opens with current work and recent history. The older settled records are read once a screen that
+  // lists them asks (the fold of finished work), and every later pass of the ledger keeps them too.
+  const [historyComplete, setHistoryComplete] = useState(false)
+  const historyWantedRef = useRef(false)
   // Whether the last read of the review requests came back; the hub settles a failed read without throwing.
   const incomingReadOkRef = useRef(true)
   useEffect(() => { connRef.current = conn }, [conn])
@@ -450,6 +454,21 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     replaceFeed(mergeRecordUpdates(recordsRef.current, updates))
   ), [replaceFeed])
 
+  // The older settled records, asked for by the fold of finished work. One read brings them in; a read that
+  // could not list them all is asked again at the next opening of the fold.
+  const loadHistory = useCallback(async () => {
+    if (historyWantedRef.current) return
+    historyWantedRef.current = true
+    try {
+      const ledger = await loadLedger({ history: true })
+      if (!ledger.wholeHistory || ledger.fromCache) { historyWantedRef.current = false; return }
+      replaceFeed(reconcileLedgerSnapshot(recordsRef.current, ledger.records))
+      setHistoryComplete(true)
+    } catch {
+      historyWantedRef.current = false
+    }
+  }, [replaceFeed])
+
   // A send GitHub has not confirmed is settled by observation, not by
   // waiting: after each ledger read, ask the platform to read GitHub for it
   // (read-only, deduped with any chat card in this frame, backed off when
@@ -510,7 +529,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // Local Sources refresh: fetch-free and safe to repeat after an agent edit.
   // A 404 specifically means this app source arrived before the companion
   // backend route was restarted into the running server, so say that plainly.
-  const sourceCommitsKeyRef = useRef('')
+  const sourceCommitsKeyRef = useRef(null)
   const sourceRequestRef = useRef(0)
   const refreshSources = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setSourceLoading(true)
@@ -537,12 +556,16 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return result.ok
   }, [token])
 
+  // The saved project snapshot shows at once. One read of the repositories follows, once the records the
+  // owner has are known: it compares those proposals' sources, so asking sooner would only ask again.
+  const [feedKnown, setFeedKnown] = useState(false)
+  const [sourceCacheRead, setSourceCacheRead] = useState(false)
   useEffect(() => {
     if (sendOnly) return undefined
     let cancelled = false
-    async function loadSources() {
-      const cached = await loadCachedSourceSnapshot()
-      if (cached && !cancelled) {
+    loadCachedSourceSnapshot().then(cached => {
+      if (cancelled) return
+      if (cached) {
         sourceSnapshotRef.current = cached
         setSourceSnapshot(cached)
         setSourceLoading(false)
@@ -551,11 +574,14 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           item_count: 1 + (cached?.apps?.length || 0),
         })
       }
-      if (!cancelled) await refreshSources({ quiet: !!cached })
-    }
-    loadSources()
+      setSourceCacheRead(true)
+    })
     return () => { cancelled = true }
-  }, [refreshSources, signalReady, sendOnly])
+  }, [signalReady, sendOnly])
+  useEffect(() => {
+    if (sendOnly || !feedKnown || !sourceCacheRead) return
+    void refreshSources({ quiet: !!sourceSnapshotRef.current })
+  }, [feedKnown, sourceCacheRead, refreshSources, sendOnly])
   useEffect(() => { refreshReviewStatus() }, [refreshReviewStatus])
   // Proposal coverage depends on which recorded sources source status
   // compared. When the active set changes (feed load, staging, dismissal),
@@ -564,7 +590,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     () => proposalSourceCommits(records).join(','), [records],
   )
   useEffect(() => {
-    if (!sendOnly && sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
+    if (!sendOnly && sourceCommitsKeyRef.current !== null && sourceCommitsKey !== sourceCommitsKeyRef.current) refreshSources({ quiet: true })
   }, [sourceCommitsKey, refreshSources, sendOnly])
 
   // Account reads do not scan the feed; the foreground coordinator owns that.
@@ -654,6 +680,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         recordsRef.current = cached
         setRecords(cached)
         setLoading(false)
+        setFeedKnown(true)
         signalReady({
           item_count: cached.length,
           source: 'snapshot',
@@ -687,6 +714,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       setRecords(recs)
       setFromCache(ledger.fromCache)
       ledgerCurrentRef.current = !ledger.fromCache
+      if (ledger.wholeHistory) { historyWantedRef.current = true; setHistoryComplete(true) }
+      setFeedKnown(true)
       setLoading(false)
       ledgerReadyRef.current = true
       setLedgerReady(true)
@@ -711,6 +740,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     }
     load().catch((err) => {
       if (cancelled) return
+      setFeedKnown(true)
       setLoading(false)
       ledgerReadyRef.current = true
       setLedgerReady(true)
@@ -744,12 +774,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     // Returning from Settings is the normal way GitHub becomes connected, so
     // every return also re-reads the account before the ledger pass.
     const [ledger] = await Promise.all([
-      loadLedger(),
+      loadLedger({ history: historyWantedRef.current }),
       refreshReviewStatus(),
       refreshConnectionRef.current?.(),
     ])
     setOmittedCount(ledger.omitted.length)
     ledgerCurrentRef.current = !ledger.fromCache
+    if (ledger.wholeHistory) { historyWantedRef.current = true; setHistoryComplete(true) }
     if (!ledger.fromCache) {
       // Reconcile stored rows before querying so stale ledger lifecycle state
       // cannot erase a live overlay. At settlement keep concurrent local edits.
@@ -1878,6 +1909,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               projectName={project?.name || 'all projects'}
               selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack}
               loading={loading} omittedCount={fromCache ? 0 : omittedCount}
+              historyComplete={historyComplete} onNeedHistory={loadHistory}
               publicationPreference="github" githubState={conn.state} newPrStage={newPrStage}
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}

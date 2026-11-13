@@ -41,9 +41,9 @@ function harness() {
     createContext: () => ({}), useContext: () => null,
     classifyReview, mergeReviewPulls, respondEntries, reviewCounts, reviewEntries, reviewKey,
     fetchChangeProbe: async () => null,
-    readReviewPulls(token, refs, keys) {
+    readReviewPulls(token, refs, keys, known) {
       const asked = (keys ? refs.filter(ref => keys.has(reviewKey(ref.repo, ref.number))) : refs).map(ref => reviewKey(ref.repo, ref.number))
-      return new Promise((resolve, reject) => reads.push({ refs, keys, resolve: pulls => resolve({ everything: !keys, asked, pulls }), reject }))
+      return new Promise((resolve, reject) => reads.push({ refs, keys, known, resolve: pulls => resolve({ everything: !keys, asked, pulls }), reject }))
     },
   })
   vm.runInContext(source.replace(/^import .*\n/gm, '').replace(/export (const|function) /g, '$1 '), context)
@@ -181,4 +181,21 @@ test('a review saved without its PR\'s title shows the title from GitHub once th
   saved.render({ ...base, runs: runsOf(review('all_clear', { title: 'Saved title' })) })
   saved.reads[0].resolve(live({ title: 'Renamed' })); await saved.flush()
   assert.deepEqual(saved.titles(), ['Saved title'])
+})
+
+test('a PR the last read shows as current is not read again when the set changes, but a Sync reads every PR', async () => {
+  const h = harness()
+  const saved = runsOf(review('needs_you', { verdict_proposal: requested }))
+  h.render({ ...base, runs: saved })
+  assert.equal(h.reads[0].known.size, 0, 'the first read has nothing to reuse')
+  const read = live()
+  h.reads[0].resolve(read); await h.flush()
+  // A second review of another PR starts: the set changes and the new PR is read; the first one may keep its read.
+  h.render({ runs: [...saved, { ...saved[0], id: 'r2', items: [review('needs_you', { number: 8 })] }] })
+  assert.equal(h.reads.length, 2)
+  assert.equal(h.reads[1].keys, null, 'the whole set is asked about')
+  assert.equal(h.reads[1].known.get('o/r#7'), read.get('o/r#7'), 'with what the last read holds, for the probe to confirm')
+  h.reads[1].resolve(read); await h.flush()
+  void h.sync()
+  assert.equal(h.reads[2].known, null, 'a Sync reads every PR, whatever the probe would say')
 })

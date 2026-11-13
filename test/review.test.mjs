@@ -273,8 +273,11 @@ test('a complete active stack can open from the fast snapshot', () => {
   assert.equal(focusedContributionReady(records, 'missing'), false)
 })
 
-test('only mount and foreground freshness enumerate the complete history', () => {
-  assert.equal(appSource.match(/loadLedger\(\)/g)?.length, 2)
+test('only mount, foreground freshness and the fold of finished work enumerate the ledger', () => {
+  assert.equal(appSource.match(/loadLedger\(/g)?.length, 3)
+  assert.equal(appSource.match(/loadLedger\(\)/g)?.length, 1, 'mount reads the desk set')
+  assert.equal(appSource.match(/loadLedger\(\{ history: historyWantedRef\.current \}\)/g)?.length, 1, 'a foreground pass keeps whatever history was asked for')
+  assert.equal(appSource.match(/loadLedger\(\{ history: true \}\)/g)?.length, 1, 'older history is read only when its screen asks')
   assert.match(appSource, /if \(!ledgerReadyRef\.current\) return/)
   assert.match(appSource, /loadContributionRecord\(recordId\)/)
   assert.match(appSource, /loadFreshContributionRecord\(rec\.id\)/)

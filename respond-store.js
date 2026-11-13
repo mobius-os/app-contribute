@@ -2,26 +2,50 @@
 // The helper writes `respond-results/`; the app writes `respond-decisions/` and `respond-findings/`; neither writes the other's folder.
 import { DECISION_FOLDER, RESULT_FOLDER, normalizeDecision, normalizeResult, postingSoon, resultSlug } from './respond-result.js'
 import { SYNC_POLICY } from './refresh.js'
+import { listingStamp } from './storage.js'
 
 const storageOf = () => window.mobius.storage
 
-// Every .json file of a folder, by file name. A body the listing left out (too large for its page) is read on its own.
-async function readFolder(storage, prefix) {
-  const listing = await storage.listWithStatus(prefix, { includeContent: true })
+// Every .json file of a folder, by file name. `memory` holds what the last read of this folder found: each file with the
+// listing's stamp (storage.js listingStamp). A file whose stamp did not move is not read again, so the folder costs a
+// listing of names and stamps, plus the files that changed. The first read of a folder (nothing remembered) takes the
+// small bodies with the listing in one request; a body the listing left out (too large for its page) is read on its own.
+async function readFolder(storage, prefix, memory) {
+  const listing = await storage.listWithStatus(prefix, memory.size ? {} : { includeContent: true })
   if (listing?.complete !== true) throw new Error('Responses could not be read completely')
   const files = new Map()
   for (const entry of listing.entries || []) {
     if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue
-    const content = Object.prototype.hasOwnProperty.call(entry, 'content') ? entry.content : await storage.get(entry.path || prefix + entry.name)
-    files.set(entry.name, content)
+    const stamp = listingStamp(entry)
+    const known = memory.get(entry.name)
+    if (stamp && known?.stamp === stamp) { files.set(entry.name, known.content); continue }
+    const inline = Object.prototype.hasOwnProperty.call(entry, 'content')
+    const read = inline ? { content: entry.content, fresh: true } : await readOne(storage, entry.path || prefix + entry.name)
+    files.set(entry.name, read.content)
+    // Only a read that reached the server may be remembered under the stamp it was listed with: a stale copy kept under
+    // a newer stamp would never be read again.
+    if (stamp && read.fresh) memory.set(entry.name, { stamp, content: read.content })
+    else memory.delete(entry.name)
   }
+  for (const name of memory.keys()) if (!files.has(name)) memory.delete(name)
   return files
 }
 
+// One file as the server holds it now. A runtime without versioned reads, or no answer from the server (offline), reads the
+// runtime's own copy instead, which the caller must not remember.
+async function readOne(storage, path) {
+  const loaded = typeof storage.getWithVersion === 'function' ? await storage.getWithVersion(path) : null
+  if (loaded && !loaded.offline) return { content: loaded.value, fresh: true }
+  return { content: await storage.get(path), fresh: false }
+}
+
+// What the app remembers of the two folders between reads (see readFolder). One per reader of the responses.
+export const rememberResponseFolders = () => ({ results: new Map(), decisions: new Map() })
+
 // Every saved response with the owner's decision about it: `{ slug, result, decision }`. Throws when the folders cannot be read
 // completely, so a screen keeps what it last knew instead of showing nothing.
-export async function loadResponses(storage = storageOf()) {
-  const [results, decisions] = await Promise.all([readFolder(storage, RESULT_FOLDER), readFolder(storage, DECISION_FOLDER)])
+export async function loadResponses(storage = storageOf(), memory = rememberResponseFolders()) {
+  const [results, decisions] = await Promise.all([readFolder(storage, RESULT_FOLDER, memory.results), readFolder(storage, DECISION_FOLDER, memory.decisions)])
   const responses = []
   for (const [name, raw] of results) {
     const result = normalizeResult(raw)
@@ -64,10 +88,13 @@ export async function clearDecision(slug, storage = storageOf()) {
 
 // The saved answers as a fact of the sync hub (ui/useRespondResults.js): read now and then, and closely while an answer is being posted,
 // so the card follows the posting script step by step. A failed read keeps what is shown. These are reads of the app's own storage.
-export const respondFact = apply => ({
-  read: () => loadResponses(),
-  apply,
-  failed: () => {},
-  every: { live: SYNC_POLICY.responsesLiveMs, idle: SYNC_POLICY.runsIdleMs },
-  live: list => !!list && list.some(entry => postingSoon(entry)),
-})
+export function respondFact(apply) {
+  const memory = rememberResponseFolders()
+  return {
+    read: () => loadResponses(storageOf(), memory),
+    apply,
+    failed: () => {},
+    every: { live: SYNC_POLICY.responsesLiveMs, idle: SYNC_POLICY.runsIdleMs },
+    live: list => !!list && list.some(entry => postingSoon(entry)),
+  }
+}

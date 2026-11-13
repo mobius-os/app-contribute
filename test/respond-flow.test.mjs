@@ -47,7 +47,7 @@ test('a file whose name is not its PR’s slug is not a response, and a body lef
   const storage = fakeStorage({ ...saved(), 'respond-results/wrong-name.json': example() }, { omit: [path] })
   const responses = await loadResponses(storage)
   assert.deepEqual(responses.map(item => item.slug), [SLUG])
-  assert.ok(storage.calls.some(call => call[0] === 'get' && call[1] === path), 'the omitted body was fetched')
+  assert.ok(storage.calls.some(call => call[0] === 'read' && call[1] === path), 'the omitted body was read on its own, from the server')
 })
 
 test('a listing that is not complete is an error, so the screen keeps what it last knew', async () => {

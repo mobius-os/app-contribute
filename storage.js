@@ -1,13 +1,14 @@
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
+import { stackMeta } from './stack.js'
 
 // Ledger storage layer. contributions/<id>.json is written by the agent
 // (from chat turns) and by job.sh (the daily refresh); this app has TWO
 // writers of its own — the read-side feed cache (feed-cache.json, there
-// only to serve the next offline open) and the Dismiss button, which
-// CAS-flips a prepared record to abandoned to avoid clobbering a concurrent
-// submit claim. Dismissal is ONLINE-ONLY (CAS needs a live version read),
-// which is why the manifest declares offline writes "none". The assembled
-// feed is also cached to feed-cache.json for the next offline open.
+// to open the next visit at once and to serve an offline open) and the
+// Dismiss button, which CAS-flips a prepared record to abandoned to avoid
+// clobbering a concurrent submit claim. Dismissal is ONLINE-ONLY (CAS needs
+// a live version read), which is why the manifest declares offline writes
+// "none". The assembled feed is also cached to feed-cache.json.
 
 const FEED_CACHE = 'feed-cache.json'
 const SOURCE_CACHE = 'source-cache.json'
@@ -18,6 +19,11 @@ const CURRENT_STATUSES = new Set([
   'prepared', 'submitting', 'landing', 'draft', 'open',
 ])
 const RECENT_HISTORY_LIMIT = 24
+// History this recent stays in the desk's own set: the Merged list of My PRs
+// counts what merged in this window (desk.js MERGED_WINDOW_DAYS).
+export const DESK_HISTORY_DAYS = 7
+const DAY_MS = 24 * 60 * 60 * 1000
+const BODY_READS_AT_ONCE = 6
 
 function recordTime(record) {
   const value = record?.updated_at || record?.created_at || ''
@@ -53,28 +59,59 @@ function preferCanonicalLedgerRecords(records) {
   return [...selected.values()]
 }
 
-// The cache is the fast, bounded first screen—not a second source of truth.
-// Keep every current item plus a small recent-history window; the authoritative
-// ledger refresh follows in the background and replaces it atomically.
-export function buildFeedSnapshot(records) {
+const isCurrentRecord = record => CURRENT_STATUSES.has(record?.status) || !!record?.needs_attention
+
+// The desk's own set: every current item, the history that is recent (a small
+// window, plus the Merged week), and every layer of a stack one of those
+// belongs to, so a chain is never shown without its settled layers. Older
+// history is read when a screen that lists it asks (loadLedger({ history })).
+export function buildFeedSnapshot(records, now = Date.now()) {
   const current = []
   const history = []
   for (const record of Array.isArray(records) ? records : []) {
     if (!record || typeof record !== 'object' || !record.id) continue
-    if (CURRENT_STATUSES.has(record.status) || record.needs_attention) current.push(record)
+    if (isCurrentRecord(record)) current.push(record)
     else history.push(record)
   }
   history.sort((a, b) => recordTime(b) - recordTime(a))
-  return [...current, ...history.slice(0, RECENT_HISTORY_LIMIT)]
+  const recent = history.filter((record, index) => index < RECENT_HISTORY_LIMIT || recordTime(record) >= now - DESK_HISTORY_DAYS * DAY_MS)
+  const shown = [...current, ...recent]
+  const chains = new Set(shown.map(record => stackMeta(record)?.id).filter(Boolean))
+  const layers = history.filter(record => !recent.includes(record) && chains.has(stackMeta(record)?.id))
+  return [...shown, ...layers]
+}
+
+// What the last visit saved: the desk's own records, and an index of the whole
+// ledger folder as that visit found it (see indexLedger). Reads at the same
+// moment share one read of the file.
+let savedFeedRead = null
+let ledgerIndex = null
+function readSavedFeed() {
+  if (!savedFeedRead) {
+    savedFeedRead = (async () => {
+      try {
+        const saved = await window.mobius.storage.get(FEED_CACHE)
+        if (!saved || typeof saved !== 'object') return null
+        const index = saved.index && typeof saved.index === 'object' && !Array.isArray(saved.index) ? saved.index : null
+        if (index && !ledgerIndex) ledgerIndex = index
+        return { records: Array.isArray(saved.records) ? saved.records : [], index, savedAt: typeof saved.saved_at === 'string' ? saved.saved_at : '' }
+      } catch {
+        return null
+      }
+    })().finally(() => { savedFeedRead = null })
+  }
+  return savedFeedRead
 }
 
 export async function loadCachedFeed() {
-  try {
-    const cached = await window.mobius.storage.get(FEED_CACHE)
-    return Array.isArray(cached?.records) ? cached.records : []
-  } catch {
-    return []
-  }
+  return (await readSavedFeed())?.records ?? []
+}
+
+// Whether a visit already saved a feed, and when: a feed that is saved but empty is
+// still a saved copy, so a new account is told apart from one with nothing yet.
+export async function loadSavedFeedStamp() {
+  const saved = await readSavedFeed()
+  return saved ? { savedAt: saved.savedAt, count: saved.records.length } : null
 }
 
 // A shell review handoff names one already-validated contribution id. Resolve
@@ -101,6 +138,14 @@ export async function loadContributionRecord(recordId) {
   return null
 }
 
+// The runtime promoted its versioned read from the private `_getWithVersion` to
+// a supported `getWithVersion`; accept either so the app runs on a runtime from
+// before or after that rename. null on a runtime with neither.
+function versionedReader(storage) {
+  if (typeof storage?.getWithVersion === 'function') return storage.getWithVersion.bind(storage)
+  return typeof storage?._getWithVersion === 'function' ? storage._getWithVersion.bind(storage) : null
+}
+
 // User-visible review opening can use the runtime's instant stale-while-
 // revalidate read above. Decisions that can publish or reconcile work cannot:
 // getWithVersion reaches the server while online and explicitly reports an
@@ -109,12 +154,7 @@ export async function loadContributionRecord(recordId) {
 // without versioned reads) rejects, so null means the record is absent.
 export async function loadFreshContributionRecord(recordId, { strict = false } = {}) {
   const id = typeof recordId === 'string' ? recordId.trim() : ''
-  const storage = window.mobius?.storage
-  const readVersioned = typeof storage?.getWithVersion === 'function'
-    ? storage.getWithVersion.bind(storage)
-    : (typeof storage?._getWithVersion === 'function'
-        ? storage._getWithVersion.bind(storage)
-        : null)
+  const readVersioned = versionedReader(window.mobius?.storage)
   if (!readVersioned) {
     if (strict) throw new Error('Contribution records cannot be read here')
     return null
@@ -139,98 +179,189 @@ export async function loadFreshContributionRecords(recordIds) {
   return records.filter(Boolean)
 }
 
-async function readLedger() {
-  // Current platforms page include-content listings at a bounded byte budget.
-  // Exceptional oversized entries stay isolated and are reported to the UI;
-  // this reader never falls back to an N+1 scan.
+// The listing's own stamp of a file: it changes whenever the file is written, so
+// the same stamp is the same file. '' when the listing gave none (an older
+// platform, a test double): such a file is never taken as unchanged.
+export const listingStamp = entry => (entry?.modified_at && Number.isFinite(entry.size) ? `${entry.modified_at}|${entry.size}` : '')
+
+const hasContent = entry => Object.prototype.hasOwnProperty.call(entry, 'content')
+const recordPath = entry => entry.path || RECORD_PREFIX + entry.name
+
+async function listLedgerFolder({ includeContent }) {
   const storage = window.mobius.storage
-  const listing = typeof storage.listWithStatus === 'function'
-    ? await storage.listWithStatus(RECORD_PREFIX, { includeContent: true })
-    : await (async () => {
-        const entries = await storage.list(RECORD_PREFIX, { includeContent: true })
-        return { entries, complete: entries !== null && window.mobius.online !== false }
-      })()
-  const entries = listing?.entries || []
-  if (listing?.complete !== true) {
-    return { records: await loadCachedFeed(), fromCache: true, omitted: [] }
-  }
+  const options = includeContent ? { includeContent: true } : {}
+  if (typeof storage.listWithStatus === 'function') return storage.listWithStatus(RECORD_PREFIX, options)
+  const entries = await storage.list(RECORD_PREFIX, options)
+  return { entries, complete: entries !== null && window.mobius.online !== false }
+}
+
+// A delivered body that is not a ledger record (an agent's stray scratch
+// file, a list) is not a contribution at all. Skip it: counting it as
+// omitted would mark every load partial, pin the feed to its cache, and
+// show a permanent "Offline" note while the device is online.
+// `path` rides along so subscriptions and the Dismiss CAS write address
+// the actual file even if its name ever drifts from rec.id. It only
+// reaches this app's own feed cache — dismissal writes start from a
+// fresh server read, so the field never lands in the ledger files.
+function ledgerRecordOf(entry, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !body.id) return null
+  if (entry.name !== `${body.id}.json` && entry.name !== `${body.id}.record.json`) return null
+  return { ...body, path: recordPath(entry) }
+}
+
+// What the ledger folder looked like when it was last read: one entry per record
+// file with the listing's stamp, whether the record was current then, and its
+// stack. A later visit trusts a settled record whose stamp has not moved, so the
+// history it does not show is never read again. The record's own file status is
+// what counts here, never a display status laid over it from GitHub.
+function indexEntry(entry, record) {
+  const stack = record ? stackMeta(record)?.id : undefined
+  return { stamp: listingStamp(entry), current: isCurrentRecord(record), ...(stack ? { stack } : {}) }
+}
+
+// Every record, bodies and all: the first visit, an older saved copy without an
+// index, a runtime that cannot read one record fresh, and a screen that lists history.
+// Current platforms page include-content listings at a bounded byte budget.
+// Exceptional oversized entries stay isolated and are reported to the UI;
+// this reader never falls back to an N+1 scan.
+function readWholeLedger(entries, saved) {
   const records = []
   const omitted = []
-  const jsonEntries = entries.filter((entry) =>
-    entry.type === 'file' && entry.name.endsWith('.json'))
-
+  const index = {}
+  const jsonEntries = entries.filter(entry => entry.type === 'file' && entry.name.endsWith('.json'))
   for (const entry of jsonEntries) {
-    const path = entry.path || RECORD_PREFIX + entry.name
-    if (!Object.prototype.hasOwnProperty.call(entry, 'content')) {
-      omitted.push(path)
+    if (!hasContent(entry)) {
+      omitted.push(recordPath(entry))
       continue
     }
-    const rec = entry.content
-    // `path` rides along so subscriptions and the Dismiss CAS write address
-    // the actual file even if its name ever drifts from rec.id. It only
-    // reaches this app's own feed cache — dismissal writes start from a
-    // fresh server read, so the field never lands in the ledger files.
-    const canonicalName = rec?.id ? `${rec.id}.json` : ''
-    const legacyName = rec?.id ? `${rec.id}.record.json` : ''
-    // A delivered body that is not a ledger record (an agent's stray scratch
-    // file, a list) is not a contribution at all. Skip it: counting it as
-    // omitted would mark every load partial, pin the feed to its cache, and
-    // show a permanent "Offline" note while the device is online.
-    if (
-      rec && typeof rec === 'object' && !Array.isArray(rec) && rec.id
-      && (entry.name === canonicalName || entry.name === legacyName)
-    ) {
-      records.push({ ...rec, path })
-    }
+    const record = ledgerRecordOf(entry, entry.content)
+    if (record) records.push(record)
+    index[entry.name] = indexEntry(entry, record)
   }
-  // A complete directory snapshot proves membership, not that every body fit
-  // in the bounded include-content response. Fill omitted members from the
-  // assembled feed cache, but only when their exact filename is still present
-  // so a remote deletion cannot be resurrected.
+  return finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistory: true })
+}
+
+// A complete directory snapshot proves membership, not that every body was read.
+// Fill omitted members from the saved feed, but only when their exact filename is
+// still present so a remote deletion cannot be resurrected.
+function finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistory = false }) {
   let assembled = records
   if (omitted.length > 0) {
-    const cached = await loadCachedFeed()
-    const presentNames = new Set(jsonEntries.map((entry) => entry.name))
-    const parsedIds = new Set(records.map((record) => record.id))
+    const presentNames = new Set(jsonEntries.map(entry => entry.name))
+    const parsedIds = new Set(records.map(record => record.id))
     assembled = [
       ...records,
-      ...cached.filter((record) => record?.id && !parsedIds.has(record.id) && (
+      ...(saved?.records || []).filter(record => record?.id && !parsedIds.has(record.id) && (
         presentNames.has(`${record.id}.json`)
         || presentNames.has(`${record.id}.record.json`)
       )),
     ]
   }
-  return {
-    records: preferCanonicalLedgerRecords(assembled),
-    fromCache: omitted.length > 0,
-    omitted,
+  ledgerIndex = index
+  return { records: preferCanonicalLedgerRecords(assembled), fromCache: omitted.length > 0, omitted, wholeHistory }
+}
+
+// Reads a few record files fresh from the server, a handful at a time. A file the
+// server cannot give now (offline, a failed read) is `null`; one that is gone or
+// empty is `undefined`.
+async function readRecordBodies(readVersioned, entries) {
+  const bodies = new Map()
+  for (let from = 0; from < entries.length; from += BODY_READS_AT_ONCE) {
+    await Promise.all(entries.slice(from, from + BODY_READS_AT_ONCE).map(async entry => {
+      try {
+        const loaded = await readVersioned(recordPath(entry), 'json')
+        bodies.set(entry, loaded?.offline ? null : loaded?.value ?? undefined)
+      } catch {
+        bodies.set(entry, null)
+      }
+    }))
   }
+  return bodies
+}
+
+// What the desk shows, with the least read: the listing says which files exist and
+// which were written since the last visit. A current record, one written since, and
+// one this visit has no word on are read fresh; a settled one that did not move is
+// taken from the saved feed; older settled history is left unread (and says so, in
+// the index) until a screen that lists history asks for it. Reading is bounded by
+// what the owner has open or just changed, not by how long the ledger has grown.
+async function readDeskLedger(entries, saved, readVersioned) {
+  const jsonEntries = entries.filter(entry => entry.type === 'file' && entry.name.endsWith('.json'))
+  const savedByPath = new Map(saved.records.map(record => [record.path, record]))
+  const index = {}
+  const records = []
+  const toRead = []
+  const settledOutside = []
+  for (const entry of jsonEntries) {
+    const known = saved.index[entry.name]
+    if (hasContent(entry)) {
+      const record = ledgerRecordOf(entry, entry.content)
+      if (record) records.push(record)
+      index[entry.name] = indexEntry(entry, record)
+    } else if (known && !known.current && known.stamp && known.stamp === listingStamp(entry)) {
+      index[entry.name] = known
+      if (savedByPath.has(recordPath(entry))) records.push(savedByPath.get(recordPath(entry)))
+      else settledOutside.push(entry)
+    } else {
+      toRead.push(entry)
+    }
+  }
+  const omitted = []
+  async function readInto(entries) {
+    const bodies = await readRecordBodies(readVersioned, entries)
+    for (const entry of entries) {
+      const body = bodies.get(entry)
+      if (body === null) { omitted.push(recordPath(entry)); continue }
+      const record = ledgerRecordOf(entry, body)
+      if (record) records.push(record)
+      index[entry.name] = indexEntry(entry, record)
+    }
+  }
+  await readInto(toRead)
+  // A layer of a stack the desk shows belongs with it, however old.
+  const chains = new Set(records.map(record => stackMeta(record)?.id).filter(Boolean))
+  const layers = settledOutside.filter(entry => chains.has(index[entry.name].stack))
+  await readInto(layers)
+  for (const entry of settledOutside) if (!(entry.name in index)) index[entry.name] = saved.index[entry.name]
+  return finishLedger({ records, omitted, index, jsonEntries, saved })
+}
+
+async function readLedger({ history }) {
+  const saved = await readSavedFeed()
+  const readVersioned = versionedReader(window.mobius.storage)
+  const desk = !history && saved?.index && readVersioned
+  const listing = await listLedgerFolder({ includeContent: !desk })
+  if (listing?.complete !== true) {
+    return { records: saved?.records ?? [], fromCache: true, omitted: [] }
+  }
+  const entries = listing.entries || []
+  return desk ? readDeskLedger(entries, saved, readVersioned) : readWholeLedger(entries, saved)
 }
 
 // Visibility, focus, and mount can converge during the same app activation.
 // They all want the same authoritative snapshot, so share that expensive
 // enumeration while it is in flight rather than issuing parallel 100+ page
 // scans. A settled read is never cached here: the next real refresh still
-// reaches storage.
-let ledgerLoadPromise = null
-export function loadLedger() {
-  if (!ledgerLoadPromise) {
-    ledgerLoadPromise = readLedger().finally(() => {
-      ledgerLoadPromise = null
-    })
+// reaches storage. `history: true` also reads the settled records the desk does
+// not show (a screen that lists them asks); it is its own read.
+const ledgerLoads = new Map()
+export function loadLedger({ history = false } = {}) {
+  if (!ledgerLoads.has(history)) {
+    ledgerLoads.set(history, readLedger({ history }).finally(() => ledgerLoads.delete(history)))
   }
-  return ledgerLoadPromise
+  return ledgerLoads.get(history)
 }
 
 export async function cacheFeed(records) {
   try {
     await window.mobius.storage.set(FEED_CACHE, {
-      schema: 2,
+      schema: 3,
       saved_at: new Date().toISOString(),
       records: buildFeedSnapshot(records),
+      ...(ledgerIndex ? { index: ledgerIndex } : {}),
     })
   } catch {
-    // The cache only improves the next offline open; never let it fail a load.
+    // The cache only improves the next visit; never let it fail a load.
   }
 }
 
@@ -599,12 +730,8 @@ async function casFlipStatus({ rec, from, to }) {
   const s = window.mobius && window.mobius.storage
   // The versioned read is the other half of durableWrite({ifMatch}): without a
   // version there is nothing to match on, and there is deliberately no
-  // blind-write fallback. The runtime promoted this from the private
-  // `_getWithVersion` to a supported `getWithVersion`; accept either so the
-  // app runs on a runtime from before or after that rename.
-  const readVersioned = typeof s?.getWithVersion === 'function'
-    ? s.getWithVersion.bind(s)
-    : (typeof s?._getWithVersion === 'function' ? s._getWithVersion.bind(s) : null)
+  // blind-write fallback.
+  const readVersioned = versionedReader(s)
   if (!s || typeof s.durableWrite !== 'function' || !readVersioned) {
     return { error: 'Safe storage updates are unavailable.' }
   }

@@ -4,11 +4,13 @@
 // live read of that PR: a saved review cannot say whether its PR moved on, so
 // every PR is read, in bounded batches. A PR that could not be read is shown as
 // unknown, never classified from older saved data.
-import { PR_FIELDS, aliasedPulls, fetchLiveStates, validPullRef } from './api.js'
+import { PR_FIELDS, aliasedPulls, fetchChangeProbe, fetchLiveStates, validPullRef } from './api.js'
 import { STATES } from './pr-machine.js'
 import { standingFor } from './pr-standing.js'
 
 const BATCH = 25
+// Batches asked for together: GitHub is not asked for dozens of heavy reads at once.
+const BATCHES_AT_ONCE = 4
 
 export const reviewKey = (repo, number) => `${String(repo).toLowerCase()}#${number}`
 
@@ -118,20 +120,44 @@ async function readBatch(token, refs) {
   return refs.map((ref, index) => [reviewKey(ref.repo, ref.number), data[`p${index}`]?.pullRequest || null])
 }
 
-// Every PR a review belongs to, read live in batches one after another. The
-// result holds only the PRs GitHub returned; the rest stay unknown.
+// Every PR a review belongs to, read live in batches (a few at a time: the batches do not depend on each other).
+// The result holds only the PRs GitHub returned; the rest stay unknown.
 export async function loadReviewPulls(token, refs) {
   const wanted = refs.filter(validPullRef)
+  const batches = []
+  for (let from = 0; from < wanted.length; from += BATCH) batches.push(wanted.slice(from, from + BATCH))
   const read = []
-  for (let from = 0; from < wanted.length; from += BATCH) read.push(...await readBatch(token, wanted.slice(from, from + BATCH)))
+  for (let from = 0; from < batches.length; from += BATCHES_AT_ONCE) {
+    read.push(...(await Promise.all(batches.slice(from, from + BATCHES_AT_ONCE).map(batch => readBatch(token, batch)))).flat())
+  }
   return new Map(read.filter(([, pr]) => pr))
 }
 
+// What a PR looked like when it was read, as the change probe reports it (api.js fetchChangeProbe): the same two
+// facts, so a read PR and a probe answer can be compared.
+const pullSignature = pr => `${pr.updatedAt}|${pr.state}`
+
 // One live read of the PRs the reviews belong to: all of `refs`, or only those whose keys are in `keys`.
 // What was asked for travels with the answer, so a merge can tell a PR GitHub did not return from one nobody asked about.
-export async function readReviewPulls(token, refs, keys = null) {
+// `known` (the PRs read before, by key) lets a PR the cheap change probe says did not move keep its read instead of
+// being read again, a point per hundred PRs against a read of dozens; without it every PR is read.
+export async function readReviewPulls(token, refs, keys = null, known = null) {
   const asked = keys ? refs.filter(ref => keys.has(reviewKey(ref.repo, ref.number))) : refs
-  return { everything: !keys, asked: asked.map(ref => reviewKey(ref.repo, ref.number)), pulls: await loadReviewPulls(token, asked) }
+  const unchanged = await unchangedPulls(token, asked, known)
+  const toRead = asked.filter(ref => !unchanged.has(reviewKey(ref.repo, ref.number)))
+  const read = await loadReviewPulls(token, toRead)
+  return { everything: !keys, asked: asked.map(ref => reviewKey(ref.repo, ref.number)), pulls: new Map([...unchanged, ...read]) }
+}
+
+// The asked PRs whose last read is still what GitHub has: the probe's signature equals the read's own. A probe GitHub
+// does not answer proves nothing, so nothing is skipped.
+async function unchangedPulls(token, asked, known) {
+  const remembered = asked.filter(ref => known?.has(reviewKey(ref.repo, ref.number)))
+  if (!remembered.length) return new Map()
+  const current = await fetchChangeProbe(token, remembered.map(ref => ({ ...ref, key: reviewKey(ref.repo, ref.number) })))
+  if (!current) return new Map()
+  return new Map(remembered.map(ref => [reviewKey(ref.repo, ref.number), known.get(reviewKey(ref.repo, ref.number))])
+    .filter(([key, pr]) => current.get(key) === pullSignature(pr)))
 }
 
 // The PRs known after a read. A read of everything replaces them; a partial one replaces just the PRs it asked

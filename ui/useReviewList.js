@@ -11,23 +11,27 @@ import { changedReviewRuns, classifyReview, mergeReviewPulls, pendingRespondStar
 export const SyncHubContext = createContext(null)
 export const useSyncHub = () => useContext(SyncHubContext)
 
+// The set of reviewed PRs changed, or the app opened: read every PR the last read does not already show as current.
 const ALL_PULLS = '*'
+// The owner's Sync or Retry: read every PR again, whatever the last read said.
+const EVERYTHING = '**'
 
 // The live read of every PR a review belongs to. The whole set is read once per
 // change of the set; afterwards only the PRs that moved. A review that changed
 // state reads its PR at once (`want`); the probe seeing a PR move waits out the
 // GitHub cooldown (`wantLater`), so a busy PR costs at most one read per five
-// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget; a quiet catch-up
-// (`readAll({ quiet: true })`) asks as the probe does, so it waits out the cooldown and joins a read already due.
+// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget, and every PR; a quiet catch-up
+// (`readAll({ quiet: true })`) asks as the probe does, so it waits out the cooldown, joins a read already due, and leaves
+// the PRs the probe finds unmoved unread.
 function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
   const [live, setLive] = useState({ answered: '', pulls: new Map() })
-  const latest = useRef({ refs, answered: '' })
-  latest.current = { refs, answered: `${refsKey}@${attempt}` }
+  const latest = useRef({ refs, answered: '', pulls: live.pulls })
+  latest.current = { refs, answered: `${refsKey}@${attempt}`, pulls: live.pulls }
   const wanted = useRef(new Set())
   const mark = useCallback(keys => keys.forEach(key => wanted.current.add(key)), [])
   const want = useCallback(keys => { mark(keys); return hub.changed('reviewPulls') }, [hub, mark])
   const wantLater = useCallback(keys => { mark(keys); return hub.automatic('reviewPulls') }, [hub, mark])
-  const readAll = useCallback(({ quiet = false } = {}) => { mark([ALL_PULLS]); return quiet ? hub.automatic('reviewPulls') : hub.refresh('reviewPulls') }, [hub, mark])
+  const readAll = useCallback(({ quiet = false } = {}) => { mark([quiet ? ALL_PULLS : EVERYTHING]); return quiet ? hub.automatic('reviewPulls') : hub.refresh('reviewPulls') }, [hub, mark])
   useEffect(() => {
     if (!enabled || !token) return undefined
     return hub.fact('reviewPulls', {
@@ -36,8 +40,10 @@ function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
         const keys = wanted.current
         if (!keys.size) return null
         wanted.current = new Set()
-        const { refs: all, answered } = latest.current
-        return { ...await readReviewPulls(token, all, keys.has(ALL_PULLS) ? null : keys), answered }
+        const { refs: all, answered, pulls: known } = latest.current
+        const forced = keys.has(EVERYTHING)
+        const everything = forced || keys.has(ALL_PULLS)
+        return { ...await readReviewPulls(token, all, everything ? null : keys, everything && !forced ? known : null), answered }
       },
       apply: result => {
         if (result) setLive(old => ({ answered: result.everything ? result.answered : old.answered, pulls: mergeReviewPulls(old.pulls, result) }))
