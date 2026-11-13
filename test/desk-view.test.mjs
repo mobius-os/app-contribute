@@ -413,7 +413,7 @@ test('state chips sit beside the title, and the hover Assign is an icon so the r
 
 test('a row reads title, facts, labels, then pills, each on its own line, in list rows and desk rows', () => {
   const list = readFileSync(new URL('../ui/PullRequests.jsx', import.meta.url), 'utf8')
-  assert.match(list, /<div className="co-pr-meta">[\s\S]*?<\/div>\s*<div className="co-pr-labels"><PullLabels pr=\{pr\} \/><\/div>\s*<div className="co-row-pills">\s*<PullStateChips pr=\{pr\} machineChip=\{standing\.role === 'author' \? review\.chip : null\} \/>/)
+  assert.match(list, /<div className="co-pr-meta">[\s\S]*?<\/div>\s*<div className="co-pr-labels"><PullLabels pr=\{pr\} \/><\/div>\s*<div className="co-row-pills">\s*<PullStateChips pr=\{pr\} machineChip=\{standing\?\.role === 'author' \? review\.chip : null\} \/>/)
   // Every desk row is one DeskRow: title, facts, labels, pills, in that order, all inside the button that opens the PR.
   const row = readFileSync(new URL('../ui/DeskRow.jsx', import.meta.url), 'utf8')
   assert.match(row, /<span className="co-desk-row-title">\{title\}<\/span>\s*<span className="co-desk-row-meta">\{facts\}<\/span>\s*\{labels\}\s*\{pills\.length \? <span className="co-row-pills">/)

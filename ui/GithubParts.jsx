@@ -52,12 +52,13 @@ export function labelColors(hex) {
 // The header keeps the last successful sync visible, even after a failed retry. It sits inside
 // the Sync button, so the button names it with aria-describedby (SYNC_NOTE_ID) instead of a live region.
 export const SYNC_NOTE_ID = 'co-sync-note'
-export function SyncNote({ note }) {
+// A repository's list says the same under its filters, with no id of its own (`id={null}`): the header names the one in the button.
+export function SyncNote({ note, id = SYNC_NOTE_ID }) {
   if (!note?.at && !note?.failed && !note?.updating) return null
   // The app opened from its last-known copy and is reading what moved: one quiet line, and how old the copy is.
-  if (note.updating) return <span id={SYNC_NOTE_ID} className="co-sync-note">Updating…{note.at ? <span className="co-sync-last"><TimeAgo prefix=" · last synced " value={note.at} /></span> : null}</span>
+  if (note.updating) return <span id={id} className="co-sync-note">Updating…{note.at ? <span className="co-sync-last"><TimeAgo prefix=" · last synced " value={note.at} /></span> : null}</span>
   // After a failure the last good time follows on a wide header; a phone keeps only the failure, so the note never grows past the button.
-  return <span id={SYNC_NOTE_ID} className="co-sync-note">{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
+  return <span id={id} className="co-sync-note">{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
 }
 
 // Labels in a list are the same filled pills as on the PR page, "area: " dropped,

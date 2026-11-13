@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, requestReviewMany, mergePull, offersDraft, reviewIntent, settleDraftDefault, collaborationRequest, discoverPull, discoverPulls, liveSelection, conversationCount, matchingPulls, mayAssign, mergeSelection, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
-import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, isOwnPull, observePulls, pullsInView } from '../pull-view.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, requestReviewMany, mergePull, offersDraft, reviewIntent, settleDraftDefault, collaborationRequest, liveSelection, conversationCount, matchingPulls, mayAssign, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
+import { invalidatedSelection, isOpenPull, isOwnPull, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
 import { respondChatOf } from '../pr-facts.js'
 import { ReviewFrame } from './ReviewFrame.jsx'
 import { pullConversations, recordsForPull } from '../provenance.js'
 import { RunDetail, savedVersion } from './RunDetail.jsx'
 import { PullRequestDetail, Skeleton } from './PullRequestDetail.jsx'
-import { Avatar, ChecksBadge, PullLabels, PullStateChips, PullStateIcon, TimeAgo } from './GithubParts.jsx'
+import { Avatar, ChecksBadge, PullLabels, PullStateChips, PullStateIcon, SyncNote, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
 import { useFocusLease } from './useFocusLease.js'
+import { useRepositoryList } from './useRepositoryList.js'
 import { Icon } from './Icons.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
 import { ReviewDialog } from './ReviewDialog.jsx'
@@ -105,7 +106,7 @@ function PersonOption({ label, login, hint = login, ariaLabel, disabled, onPick 
   </button>
 }
 
-function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onClose }) {
+function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onStale, onClose }) {
   const picker = useRef(null)
   useEffect(() => {
     focusActionRegion(picker.current, picker.current?.querySelector('input[type=search]'))
@@ -129,10 +130,15 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onClose }) 
     if (busy) return
     setBusy(true); setError('')
     try {
+      // The PRs are read as GitHub has them now, not from the list's last-known copy: one that changed is not assigned.
+      await liveSelection(token, pending)
       const results = await assignPulls(token, appId, pending, login)
       setOutcomes(old => [...old.filter(item => !results.some(result => result.key === item.key)), ...results])
       onAssigned(login, results.filter(result => result.ok).map(result => result.key))
       if (results.every(result => result.ok)) onClose()
+    } catch (error) {
+      setError(error.message)
+      if (error.code === 'changed') onStale()
     } finally { setBusy(false) }
   }
 
@@ -156,20 +162,7 @@ function AssigneePicker({ pulls, token, appId, ownLogin, onAssigned, onClose }) 
   </div>
 }
 
-// One session cache per repository: the loaded PR list (view and paging
-// state), the per-PR detail snapshots and the observation
-// generation survive leaving and reopening a project or a PR page, so GitHub
-// is asked once per repository per app open. The header's Refresh (refreshKey)
-// or a change in the local contribution records invalidates the entry.
-const sessionCache = new Map()
 const NO_LIST = []
-function sessionEntry(repo, key) {
-  const id = repo.toLowerCase()
-  if (sessionCache.get(id)?.key !== key) {
-    sessionCache.set(id, { key, view: null, data: null, details: new Map(), generation: 0 })
-  }
-  return sessionCache.get(id)
-}
 
 // `focusPull` is a navigation lease from a chat link: while it is held, that
 // exact PR stays in view (even when closed or on a later page) and its detail
@@ -189,16 +182,7 @@ const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerC
 export function PullRequests({ appId, token, project, conn, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
   const repo = project?.canonical_repo || ''
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
-  const session = sessionEntry(repo, `${refreshKey}|${publicRevision}`)
-  const sessionRef = useRef(session)
-  sessionRef.current = session
   const task = useProjectTask()
-  const [data, setData] = useState(session.data || { loading: true, error: '' })
-  // True once this list has finished a read, with an answer or an error. A reload after that keeps what the page already knows.
-  const [read, setRead] = useState(() => !!session.data)
-  const [view, setView] = useState(() => session.view || emptyPullView())
-  const viewRef = useRef(view)
-  const generation = useRef(session.generation)
   const focusKey = focusPull && conn.state === 'connected' && focusPull.repo?.toLowerCase() === repo.toLowerCase()
     ? `${focusPull.repo.toLowerCase()}#${focusPull.number}` : ''
   const focusRef = useRef(null)
@@ -222,6 +206,24 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [selectionNotice, setSelectionNotice] = useState('')
   const selectedRef = useRef(selected)
   selectedRef.current = selected
+  // What this screen holds of the repository's list, so a read from anywhere (the background, Sync, another screen) keeps the PR
+  // it is on and the PRs ticked, and the selection follows: a ticked PR whose version changed or that closed is no longer ticked.
+  const held = useMemo(() => ({
+    focus: () => focusRef.current?.key || '',
+    selected: () => selectedRef.current,
+    published: ({ before, after, announce }) => {
+      const pinned = focusRef.current?.key || ''
+      const removed = invalidatedSelection(selectedRef.current, pullsInView(before, pinned), pullsInView(after, pinned))
+      if (removed.length) {
+        selectedRef.current = new Set([...selectedRef.current].filter(key => !removed.includes(key)))
+        setSelected(selectedRef.current)
+      }
+      if (removed.length || announce) setSelectionNotice(removed.length ? `Selection updated: ${removed.join(', ')} changed or is no longer open. Select its current version again if needed.` : '')
+    },
+  }), [])
+  const { view, data, read, load, readFocus, detailSnapshot, detailRevision, syncedAt, acknowledge } = useRepositoryList({
+    repo, token, connected: conn.state === 'connected', refreshKey, publicRevision, focusRef, held, onFocusError: setFocusError, presentation,
+  })
   const pulls = pullsInView(view, focusKey)
   const [assigning, setAssigning] = useState(null)
   // Address feedback has its own window: it starts an agent conversation, not a review run.
@@ -263,67 +265,8 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [busy, setBusy] = useState(false)
   const [reviewReadError, setReviewReadError] = useState('')
   const [error, setError] = useState('')
-  const request = useRef(0)
-  const [detailRevision, setDetailRevision] = useState(0)
-  function detailSnapshot(pr) {
-    const key = `${prKey(pr)}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
-    const details = sessionRef.current.details
-    if (!details.has(key)) details.set(key, { entries:{}, stale:false })
-    return details.get(key)
-  }
   const alive = useRef(true)
-  useEffect(() => { alive.current = true; return () => { alive.current = false; request.current += 1 } }, [])
-  // Both readers publish through here, so selection follows the same winner.
-  const publish = useCallback((pulls, issued, inventory, announce) => {
-    const before = viewRef.current, pinned = focusRef.current?.key || ''
-    const next = observePulls(before, pulls, issued, { inventory, pinned })
-    viewRef.current = next
-    setView(next)
-    sessionRef.current.view = next
-    sessionRef.current.generation = generation.current
-    const removed = invalidatedSelection(selectedRef.current, pullsInView(before, pinned), pullsInView(next, pinned))
-    if (removed.length) {
-      selectedRef.current = new Set([...selectedRef.current].filter(key => !removed.includes(key)))
-      setSelected(selectedRef.current)
-    }
-    if (removed.length || announce) setSelectionNotice(removed.length ? `Selection updated: ${removed.join(', ')} changed or is no longer open. Select its current version again if needed.` : '')
-  }, [])
-  const readFocus = useCallback(async focus => {
-    const issued = ++generation.current
-    const current = () => alive.current && focusRef.current?.key === focus.key && focusRef.current.nonce === focus.nonce
-    try {
-      const pr = await discoverPull(token, focus.repo, focus.number)
-      if (current()) publish([pr], issued, viewRef.current.inventory, false)
-    } catch (error) {
-      if (current()) setFocusError({ key: focus.key, nonce: focus.nonce, issued, message: error.message })
-    }
-  }, [token, publish])
-  const load = useCallback(async (cursor = null) => {
-    const id = ++request.current, issued = ++generation.current
-    setData(old => ({ ...old, loading: true, error: '' }))
-    try {
-      let next = await discoverPulls(token, repo, cursor)
-      // A first-page refresh must not discard selections from later pages.
-      while (!cursor && next.hasNextPage && [...selectedRef.current].some(key => !next.pulls.some(pr => prKey(pr) === key))) {
-        if (id !== request.current || !alive.current) return
-        const page = await discoverPulls(token, repo, next.endCursor)
-        next = { ...page, pulls: mergeSelection(next.pulls, page.pulls) }
-      }
-      if (id !== request.current || !alive.current) return
-      if (!cursor) { sessionRef.current.details.clear(); setDetailRevision(value => value + 1) }
-      const inventory = cursor ? [...new Set([...viewRef.current.inventory, ...next.pulls.map(prKey)])] : next.pulls.map(prKey)
-      publish(next.pulls, issued, inventory, !cursor)
-      const settled = { total: next.total, hasNextPage: next.hasNextPage, endCursor: next.endCursor, loading: false, error: '' }
-      sessionRef.current.data = settled
-      setData(settled)
-      setRead(true)
-      // Absence from the open list is not closure: re-read a pinned destination.
-      const focus = focusRef.current
-      if (!cursor && focus && !inventory.includes(focus.key)) void readFocus(focus)
-    } catch (error) {
-      if (id === request.current && alive.current) { setData(old => ({ ...old, loading: false, error: error.message })); setRead(true) }
-    }
-  }, [token, repo, publish, readFocus])
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   // A linked run older than the capped recent list is kept as its own exact
   // record: every refresh rereads it (observing an unsettled public outcome)
   // so a list refresh can never fall back to the navigation-time snapshot.
@@ -369,20 +312,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     setResolved(null)
     setChoice(settled)
   }, [capabilities, choice])
+  // Opening a project's list or a PR page shows the runs as they are now, not as the last cadence read had them.
   useEffect(() => {
-    if (conn.state !== 'connected') return
-    // A repository already read this session reopens from its cache with no
-    // new GitHub round-trip; Refresh or changed local records reload it.
-    const cached = sessionRef.current
-    if (cached.view && cached.data && !cached.data.loading && !cached.data.error) {
-      if (viewRef.current !== cached.view) { viewRef.current = cached.view; setView(cached.view) }
-      setData(cached.data)
-    } else {
-      void load()
-    }
-    // Opening a project's list or a PR page shows the runs as they are now, not as the last cadence read had them.
-    void runsChangedRef.current?.()
-  }, [conn.state, publicRevision, refreshKey, load])
+    if (conn.state === 'connected') void runsChangedRef.current?.()
+  }, [conn.state, publicRevision, refreshKey])
   // An answer the chat has just posted left new commits, replies and a re-review request on GitHub: read the PR again, so this page
   // does not keep saying "Feedback to answer" beside a card that says Posted. Answers already posted when the page opened are history.
   const postedKey = responses.filter(entry => entry.result.state === 'posted').map(entry => entry.result.id).sort().join('|')
@@ -411,7 +344,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // Open the destination once it is observed; hand the lease back when its
   // detail closes, another PR opens, or this project view unmounts.
   const focusOpened = useRef('')
-  const focusRow = focusKey && view.rows.has(focusKey)
+  const focusRow = focusKey && view.rows.has(focusKey) && !view.rows.get(focusKey).pr.titlesOnly
   useEffect(() => {
     if (!focusRow || focusOpened.current === focusPull.nonce) return
     focusOpened.current = focusPull.nonce
@@ -459,7 +392,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const openTotal = data.loading && !pulls.length ? null : data.hasNextPage ? data.total || pulls.length : pulls.filter(isOpenPull).length
   useEffect(() => { onTotal?.(openTotal) }, [openTotal, onTotal])
   useEffect(() => { if (focusKey && scope !== 'all') onScope?.('all') }, [focusKey, focusPull?.nonce])
-  const selectableVisible = visible.filter(isOpenPull)
+  const selectableVisible = visible.filter(pr => isOpenPull(pr) && !pr.titlesOnly)
   const selection = pulls.filter(pr => isOpenPull(pr) && selected.has(prKey(pr)))
   const detailVisible = visible.some(pr => prKey(pr) === opened)
   const focusRead = focusError && focusError.key === focusKey && focusError.nonce === focusPull?.nonce
@@ -597,7 +530,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A retry reopens the same job by its machine name, so its window reads right for whose PR it is.
   const RETRY_JOBS = { author: { review_fix_merge: 'finish_it' }, reviewer: { review_fix_merge: 'take_over' } }
   const retryJob = (run, pr) => RETRY_JOBS[standingOf(pr).role]?.[run.mode] || (standingOf(pr).role === 'author' ? 'check_my_pr' : 'review')
-  const retryPulls = run => (run.items || []).map(item => pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)).filter(pr => pr && isOpenPull(pr))
+  const retryPulls = run => (run.items || []).map(item => pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)).filter(pr => pr && isOpenPull(pr) && !pr.titlesOnly)
   // Post and Discard act on the answer on screen, one at a time. Either way the saved answers and the runs are read again: an approval
   // may be written even when the chat could not be told, and the card must say where things stand. The card stays busy until the
   // refreshed answers are on screen (for at most REFRESH_WAIT_MS), so Post cannot be pressed again while the old state still shows.
@@ -649,6 +582,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A started Respond conversation holds its PR from now on: every screen shows it at work (and the old answer's Post held back)
   // at once, instead of after the next read of the runs.
   async function startRespond(pr, action) {
+    // The agent's brief names the PR's head and branch: it starts from the PR as GitHub has it now, not from the row.
+    const stale = await staleOutcome([pr])
+    if (stale) return { ok: false, error: stale.error }
     const started = await onStartAgent(action)
     if (started?.ok && started.chatId) onRespondStarted?.({ repo: pr.repository.nameWithOwner.toLowerCase(), number: pr.number, chat_id: started.chatId })
     return started
@@ -685,22 +621,30 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       return onSetAutopilot(record, change.enabled, { pushMode: change.pushMode, repo: record.plan?.repo || record.repo, number: pr.number, ...shell })
     },
   }
+  // What the owner confirms acts on the PR as GitHub has it at that moment, never on the list's last-known copy: a PR that
+  // changed since the list showed it (a push, a draft, closed) is refused, and the list is read again.
+  async function staleOutcome(pulls) {
+    try { await liveSelection(token, pulls) } catch (error) {
+      if (error.code === 'changed') void load()
+      return { error: error.message }
+    }
+    return null
+  }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls, record: acting.record, capabilities })} onConfirm={({ choice, people, note, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== FOLLOW && (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record))) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
-  const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
-      viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
-      setView(viewRef.current)
-      sessionRef.current.view = viewRef.current
-      sessionRef.current.generation = generation.current
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls, record: acting.record, capabilities })} onConfirm={async ({ choice, people, note, onConfirmed }) => (await staleOutcome(acting.pulls || [acting.pr])) || actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== FOLLOW && (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record))) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
+  const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onStale={() => void load()} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
+      acknowledge(keys, login)
       void onChanged?.()
     }} /> : null}</TaskPane>
   const visibleKeys = new Set(visible.map(prKey))
   const openRun = run => task?.open(`task:run:${run.id}`)
   // Saved reviews compare with the loaded PRs, so a failed read shows on every tab.
-  const loadError = data.error ? <div className="co-alert" role="alert"><strong>Couldn’t load pull requests</strong><p className="co-alert-text">{data.error}</p><button className="co-btn" disabled={data.loading} onClick={() => { void load(); void onRunsChanged?.() }}>Try again</button></div> : null
+  const loadError = data.error ? <div className="co-alert" role="alert"><strong>Couldn’t load pull requests</strong><p className="co-alert-text">{data.error}</p><button className="co-btn" disabled={data.loading || data.updating} onClick={() => { void load(); void onRunsChanged?.() }}>Try again</button></div> : null
+  // How old what is shown is: the same quiet line as the desk's header, while the list updates in place and after.
+  const listNote = syncedAt || data.updating ? <p className="co-pr-sync"><SyncNote id={null} note={{ at: syncedAt, updating: data.updating }} /></p> : null
   if (scope === 'edits' || scope === 'prepared') return null
   const runNotes = <>
     {runNotice ? <p className="co-pr-note" role="status">{runNotice}</p> : null}
@@ -747,10 +691,11 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       <button type="button" className="co-btn co-btn-quiet co-btn-icon co-pr-search-toggle" aria-label={query ? `Search PRs: ${query}` : 'Search pull requests'} aria-expanded={searchOpen} onClick={() => setSearchOpen(value => !value)}><Icon name="search" size={18} /></button>
     </div>
     {scope === 'all' ? <div className="co-pr-filters" role="group" aria-label="Filter pull requests">{FILTERS.map(([key, label]) => {
-      const count = key !== 'all' && !data.hasNextPage && !data.loading ? matchingPulls(pulls.filter(isOpenPull), key, conn.login).length : null
+      const count = key !== 'all' && !data.hasNextPage && !data.loading && !data.partial ? matchingPulls(pulls.filter(isOpenPull), key, conn.login).length : null
       // A filter that matches nothing stays pressable but steps back, so the ones with something in them stand out.
       return <button key={key} type="button" className={count === 0 ? 'is-empty' : undefined} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}{count !== null ? <span className="co-pr-filter-count">{count}</span> : null}</button>
     })}</div> : null}
+    {listNote}
     {scope === 'requests' ? <p className="co-pr-intro">PRs where someone asked for your review. Start an agent review, or open the PR yourself.</p> : null}
     {selectionNotice ? <p className="co-pr-note" role="status">{selectionNotice}</p> : null}
     {focusRead ? <p className="co-pr-note" role="alert">Could not read that pull request: {focusRead.message}{focusRow ? ' Showing the previous snapshot.' : ''}</p> : null}
@@ -761,22 +706,25 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     {!assignAnchor ? assignPane : null}
     {relevantRuns.filter(run => !visibleKeys.has(runAnchor(run))).map(runPane)}
     {data.loading && !pulls.length ? <div className="co-pr-skel" role="status" aria-label="Loading pull requests">{[3, 2, 3].map((lines, index) => <Skeleton key={index} lines={lines} label="" />)}</div> : null}
-    {!data.loading && !data.error && !visible.length ? <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} /> : null}
+    {!data.loading && !data.error && !visible.length ? (data.partial && filter !== 'all' ? <p className="co-pr-note" role="status">The details of these pull requests are still arriving.</p> : <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} />) : null}
     <div className="co-pr-list">{visible.map(pr => {
       const key = prKey(pr)
-      const status = statusFor(pr)
-      const standing = standingOf(pr)
-      const review = { frame: frameOf(standing), chip: chipOf(standing) }
+      // A row that holds only its titles shows what it knows (who, when, GitHub's review decision) and offers nothing that needs
+      // more than that: its checks, labels, reviewers and actions arrive in the same row.
+      const whole = !pr.titlesOnly
+      const status = whole ? statusFor(pr) : null
+      const standing = whole ? standingOf(pr) : null
+      const review = standing ? { frame: frameOf(standing), chip: chipOf(standing) } : { frame: 'idle', chip: null }
       const assignees = pr.assignees?.nodes || []
       const comments = conversationCount(pr)
       const open = isOpenPull(pr)
-      const requestOffer = open ? requestReviewButton(standing, { capabilities }) : null
+      const requestOffer = open && whole ? requestReviewButton(standing, { capabilities }) : null
       return <ReviewFrame key={key} state={review.frame} inset={4} radius={10}><article className={'co-pr-row' + (selected.has(key) ? ' is-selected' : '') + (focusKey === key ? ' is-highlighted' : '') + (assignAnchor === key && task?.activeId === 'task:assign' ? ' is-assigning' : '')} data-pr={key}>
-        <label className="co-pr-select"><input type="checkbox" checked={open && selected.has(key)} disabled={!open} onChange={() => toggle(pr)} aria-label={`Select ${pr.repository.nameWithOwner} #${pr.number}`} /></label>
+        <label className="co-pr-select"><input type="checkbox" checked={open && selected.has(key)} disabled={!open || !whole} onChange={() => toggle(pr)} aria-label={`Select ${pr.repository.nameWithOwner} #${pr.number}`} /></label>
         <PullStateIcon pr={pr} />
         <div className="co-pr-content">
           <div className="co-pr-headline">
-            <button className="co-pr-open" aria-expanded={task?.activeId === 'task:detail' && opened === key} onClick={() => {
+            <button className="co-pr-open" aria-expanded={task?.activeId === 'task:detail' && opened === key} disabled={!whole && !onOpenPage} onClick={() => {
               if (window.getSelection?.()?.toString().trim()) return
               inspect(pr)
             }}>
@@ -790,7 +738,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
           </div>
           <div className="co-pr-labels"><PullLabels pr={pr} /></div>
           <div className="co-row-pills">
-            <PullStateChips pr={pr} machineChip={standing.role === 'author' ? review.chip : null} />
+            <PullStateChips pr={pr} machineChip={standing?.role === 'author' ? review.chip : null} />
             {requestedKeys.has(key) ? <span className="co-pr-requested">Your review requested</span> : null}
             {review.chip && !isDraftWord(pr, review.chip) ? <button className={'co-pr-agent-state' + CHIP_TONE_CLASS[review.chip.tone]} onClick={() => status && !onOpenPage ? task?.open(`task:run:${status.run.id}`) : onOpenPage ? onOpenPage(pr, 'review') : inspect(pr)}><Icon name="prepare" size={13} />{review.chip.label}</button> : null}
           </div>
@@ -802,10 +750,10 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
               {assignees.length ? <span className="co-gh-avatars" title={`Assigned to ${assignees.map(user => user.login).join(', ')}`}>{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : null}
               <button className="co-btn co-btn-quiet co-pr-assign co-pr-request is-quiet" onClick={() => requestReviewSelection([pr])} aria-label={`Request review on PR ${pr.number}`}><Icon name="plus" size={15} /><span>Request review</span></button>
             </>
-            : open && mayAssign(pr.repository.viewerPermission)
+            : open && whole && mayAssign(pr.repository.viewerPermission)
             ? <button className={'co-btn co-btn-quiet co-pr-assign' + (assignees.length ? '' : ' is-quiet')} onClick={() => assignSelection([pr], key)} aria-label={assignees.length ? `Assigned to ${assignees.map(user => user.login).join(', ')}. Change assignment for PR ${pr.number}` : `Assign PR ${pr.number}`} title={assignees.length ? assignees.map(user => user.login).join(', ') : undefined}>{assignees.length ? <span className="co-gh-avatars">{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : <><Icon name="person" size={15} /><span>Assign</span></>}</button>
             : assignees.length ? <span className="co-gh-avatars" title={assignees.map(user => user.login).join(', ')}>{assignees.slice(0, 3).map(user => <Avatar key={user.login} login={user.login} />)}</span> : null}
-          {open ? <ActionsMenu pulls={[pr]} decisions={[standing]} record={recordsForPull(records, pr)[0]} capabilities={capabilities} disabled={busy} onChoose={mode => choose([pr], mode, key)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
+          {open && whole ? <ActionsMenu pulls={[pr]} decisions={[standing]} record={recordsForPull(records, pr)[0]} capabilities={capabilities} disabled={busy} onChoose={mode => choose([pr], mode, key)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
         </div>
         {assignAnchor === key ? assignPane : null}
         {relevantRuns.filter(run => runAnchor(run) === key).map(runPane)}
@@ -813,7 +761,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       </article></ReviewFrame>
     })}</div>
     </div>
-    {data.hasNextPage ? <button className="co-btn" disabled={data.loading} onClick={() => load(data.endCursor)}>Load more PRs</button> : null}
+    {data.hasNextPage ? <button className="co-btn" disabled={data.loading || data.updating} onClick={() => load(data.endCursor)}>Load more PRs</button> : null}
     {reviewDialog}
     {addressDialog}
     {actionDialog}

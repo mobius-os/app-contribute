@@ -98,6 +98,8 @@ export const NAMES = Object.freeze({
   moreRepositories: 'More repositories',
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
+  // The switch on a repository that has its pull requests read in the background, so they are there when it is opened.
+  alwaysLoad: 'Always load',
 })
 
 const REVIEW_JOBS = new Set(['review', 'review_merge'])

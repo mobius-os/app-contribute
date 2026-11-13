@@ -81,6 +81,10 @@ import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { SyncHubContext, useDeskReviewRuns, useReviewList } from './ui/useReviewList.js'
+import { RepositoryListsContext } from './ui/useRepositoryList.js'
+import { useBackgroundLists } from './ui/useBackgroundLists.js'
+import { createRepositoryLists } from './repository-lists.js'
+import { AlwaysLoad } from './ui/AlwaysLoad.jsx'
 import { useRespondResults } from './ui/useRespondResults.js'
 import { SyncNote, SYNC_NOTE_ID } from './ui/GithubParts.jsx'
 import { syncFacts } from './sync-summary.js'
@@ -91,7 +95,7 @@ import { BootProgress } from './ui/BootProgress.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { reviewSelectionIdFromIntent } from './review-selection.js'
-import { FOLLOWED_REPOSITORIES, followedRepositories } from './repositories.js'
+import { FOLLOWED_REPOSITORIES, PINNED_REPOSITORIES, followedRepositories, pinChoices, pinnedRepositories, setRepositoryPinned } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
 import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
@@ -308,6 +312,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const [incomingReviews, setIncomingReviews] = useState([])
   const [followedRepos, setFollowedRepos] = useState([])
   useEffect(() => window.mobius.storage.subscribe(FOLLOWED_REPOSITORIES, value => setFollowedRepos(followedRepositories(value))), [])
+  // The repositories the owner chose to always load in the background (the platform's by default): a preference of this workspace.
+  const [pinChoice, setPinChoice] = useState({})
+  useEffect(() => window.mobius.storage.subscribe(PINNED_REPOSITORIES, value => setPinChoice(pinChoices(value))), [])
   const repositoryRequest = useRef(0)
   const repositoriesAnsweredRef = useRef(false)
   const [repositoryAccess, setRepositoryAccess] = useState({ repositories: [], error: '', hasNextPage: false })
@@ -357,6 +364,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // The one refresh path: every fact the app shows is read through it (refresh.js).
   const hub = useMemo(() => createSyncHub({ remainingPoints: githubRemainingPoints }), [])
   useEffect(() => hub.start(), [hub])
+  // The lists of open PRs of the repositories, which every repository screen shows and the background reads fill (repository-lists.js).
+  const repositoryLists = useMemo(() => createRepositoryLists(), [])
   const agentStartRef = useRef(false)
   const sourceSnapshotRef = useRef(sourceSnapshot)
   const readySignalRef = useRef(false)
@@ -1773,6 +1782,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     ])
     let upstream = null
     if (conn.state === 'connected') {
+      // Every list read in the background is brought up to date in place; the Sync does not wait for it.
+      if (!quiet) void syncLists()
       const incoming = quiet ? hub.catchUp('incoming') : refreshIncomingReviews()
       const [, , checked] = await Promise.all([loadRepositories(), incoming, checkUpstream(token, sourceProjects), refreshReviewRuns(), reviewList.syncPulls({ quiet })])
       upstream = checked
@@ -1833,6 +1844,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const reviewRows = useMemo(() => reviewList.entries.map(slimReviewRow).filter(Boolean), [reviewList.entries])
   const reviewPulls = useMemo(() => settledPulls(reviewList.livePulls), [reviewList.livePulls])
   useDeskCopySave({ enabled: !sendOnly && openSynced, syncedAt: refreshNote?.at, failed: refreshNote?.failed, login: conn.login, incoming: incomingReviews, repositories: repositoryAccess, reviewRows, reviewPulls })
+  // The repositories' lists of open PRs, read in the background once the desk's own reads have answered (ui/useBackgroundLists.js).
+  const pinned = useMemo(() => pinnedRepositories(pinChoice, sourceSnapshot?.platform?.canonical_repo), [pinChoice, sourceSnapshot])
+  const { syncLists } = useBackgroundLists({
+    hub, lists: repositoryLists, token, sendOnly, connected: conn.state === 'connected', started: openSynced, login: conn.login, projects: sourceProjects, pinned, runs: reviewRuns, respondChats,
+  })
+  // Always load is the owner's own switch: saved, then shown, and the pass that follows reads the repository.
+  const setPinned = useCallback(async (repo, on) => { setPinChoice(await setRepositoryPinned(repo, on)) }, [])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
@@ -1919,6 +1937,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <SyncHubContext.Provider value={hub}>
+    <RepositoryListsContext.Provider value={repositoryLists}>
     <RowArrivalContext.Provider value={deskPainted}>
     <ScreenshotLoaderContext.Provider value={loadScreenshot}>
     <div className="co-root" data-design-seed="ae1883df">
@@ -1948,6 +1967,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         {selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} onRunsChanged={refreshReviewRuns} /> : <SourceMap
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus} desk={desk}
           onProjectOpenChange={setProjectOpen}
+          renderRepositoryControls={project => (project.canonical_repo && conn.state === 'connected' ? <AlwaysLoad key={project.key} repo={project.canonical_repo} pinned={pinned.has(project.canonical_repo.toLowerCase())} onChange={setPinned} /> : null)}
           conn={conn} loading={sourceLoading} error={sourceError}
           checks={upstreamChecks} attention={projectAttention}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
@@ -1992,6 +2012,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     </div>
     </ScreenshotLoaderContext.Provider>
     </RowArrivalContext.Provider>
+    </RepositoryListsContext.Provider>
     </SyncHubContext.Provider>
   )
 }

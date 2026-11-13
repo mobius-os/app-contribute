@@ -4,7 +4,7 @@
 // live read of that PR: a saved review cannot say whether its PR moved on, so
 // every PR is read, in bounded batches. A PR that could not be read is shown as
 // unknown, never classified from older saved data.
-import { PR_FIELDS, aliasedPulls, fetchChangeProbe, fetchLiveStates, pullSignature, validPullRef } from './api.js'
+import { fetchChangeProbe, pullSignature, readExactPulls, validPullRef } from './api.js'
 import { STATES } from './pr-machine.js'
 import { standingFor } from './pr-standing.js'
 
@@ -115,9 +115,8 @@ export function reviewCounts(entries) {
 // One batch of PR reads. A batch GitHub cannot answer fails the whole read, so a long history is
 // never half-read and then treated as complete; a PR missing from an answered batch is unknown.
 async function readBatch(token, refs) {
-  const data = await fetchLiveStates(token, `query ContributeReviewPulls { rateLimit { remaining } ${aliasedPulls(refs, PR_FIELDS)} }`)
-  if (!data) throw new Error('Could not read the pull requests. Try again.')
-  return refs.map((ref, index) => [reviewKey(ref.repo, ref.number), data[`p${index}`]?.pullRequest || null])
+  const pulls = await readExactPulls(token, refs)
+  return refs.map((ref, index) => [reviewKey(ref.repo, ref.number), pulls[index]])
 }
 
 // Every PR a review belongs to, read live in batches (a few at a time: the batches do not depend on each other).

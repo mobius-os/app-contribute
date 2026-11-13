@@ -11,8 +11,9 @@ import { useRunDocuments } from './useRunDocuments.js'
 
 // Saved conversations outlive the open-PR inventory. Its current snapshot
 // provides context, never new approval or a fresh verdict for old findings.
+// A list that is being updated shows the PRs as last known, so it is not a current check either.
 export function savedVersion(item, pulls = [], listState = {}) {
-  if (listState.loading || listState.error) return 'Current version not checked'
+  if (listState.loading || listState.updating || listState.error) return 'Current version not checked'
   const pr = pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)
   if (!pr) return 'Not in the loaded open PRs'
   if (item.head_sha !== pr.headRefOid || item.base_ref !== pr.baseRefName) return 'Older PR version'

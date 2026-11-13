@@ -4,12 +4,11 @@
 // parts of the copy; this file has its own writer (index.jsx, once the open reads have answered), so no two
 // writers ever replace one another's file.
 
-import { PR_FIELDS } from './api.js'
+import { PR_FIELDS_STAMP } from './api.js'
 
 const DESK_COPY = 'desk-cache.json'
-// The PRs of the copy were read with these fields. A copy written with others (a later version asks for more) is not
-// shown: its rows would lack what the desk now reads, so that visit opens like a first one and saves a fresh copy.
-const FIELDS_KEY = String([...PR_FIELDS].reduce((hash, character) => ((hash << 5) + hash + character.charCodeAt(0)) | 0, 5381) >>> 0)
+// The PRs of the copy were read with the fields PR_FIELDS_STAMP names. A copy written with others (a later version asks for
+// more) is not shown: its rows would lack what the desk now reads, so that visit opens like a first one and saves a fresh copy.
 // The reviews the Agent runs view lists, in the states that say where a PR stands. A row still being read, or one GitHub
 // could not read, is no last-known state.
 const KNOWN_BUCKETS = new Set(['waiting', 'running', 'stalled', 'done'])
@@ -47,7 +46,7 @@ const isRow = row => !!row && typeof row.id === 'string' && Number.isInteger(row
 const wholeItems = (list, valid) => (Array.isArray(list) ? list.filter(valid) : null)
 
 export function normalizeDeskCopy(raw) {
-  if (!raw || typeof raw !== 'object' || raw.pr_fields !== FIELDS_KEY || typeof raw.login !== 'string' || !raw.login) return null
+  if (!raw || typeof raw !== 'object' || raw.pr_fields !== PR_FIELDS_STAMP || typeof raw.login !== 'string' || !raw.login) return null
   const incoming = wholeItems(raw.incoming, isPull), reviewRows = wholeItems(raw.review_rows, isRow)
   if (typeof raw.synced_at !== 'string' || !incoming || !reviewRows) return null
   const repositories = raw.repositories && Array.isArray(raw.repositories.repositories) ? raw.repositories : { repositories: [], hasNextPage: false }
@@ -66,7 +65,7 @@ export async function loadDeskCopy() {
 let lastSaved = ''
 export async function saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows, reviewPulls }) {
   const copy = {
-    schema: 1, pr_fields: FIELDS_KEY, login, synced_at: syncedAt, incoming,
+    schema: 1, pr_fields: PR_FIELDS_STAMP, login, synced_at: syncedAt, incoming,
     repositories: { repositories: repositories.repositories, hasNextPage: !!repositories.hasNextPage },
     review_rows: reviewRows, review_pulls: reviewPulls,
   }

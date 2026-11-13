@@ -287,6 +287,10 @@ export const PR_FIELDS = `id number title url state headRefOid headRefName baseR
   viewerLatestReview { state commit { oid } }
   reviewThreads(last:50) { pageInfo { hasPreviousPage } nodes { isResolved comments(last:1) { nodes { author { login __typename } } } } }`
 
+// A short stamp of these fields. Saved copies of PRs (desk-copy.js, repository-list-copy.js) carry it, and a copy
+// stamped with other fields than this version asks for is not shown: its rows would lack what the app now reads.
+export const PR_FIELDS_STAMP = String([...PR_FIELDS].reduce((hash, character) => ((hash << 5) + hash + character.charCodeAt(0)) | 0, 5381) >>> 0)
+
 // The account's GitHub points left, as the last answer that carried a rateLimit
 // said: one budget for the whole app. The sync hub reads it to stop automatic
 // GitHub reads when the account runs low (refresh.js SYNC_POLICY.lowPoints).
@@ -327,6 +331,14 @@ export function aliasedPulls(refs, fields) {
     const [owner, name] = ref.repo.split('/')
     return `p${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}) { pullRequest(number:${ref.number}) { ${fields} } }`
   }).join(' ')
+}
+
+// Exact PRs, one aliased read: each ref ({ repo, number }) answers its PR, or null when GitHub returned none. The read
+// fails as a whole (a half-read list is never taken for a whole one). `name` only labels the question in GitHub's logs.
+export async function readExactPulls(token, refs, name = 'ContributeReviewPulls') {
+  const data = await fetchLiveStates(token, `query ${name} { rateLimit { remaining } ${aliasedPulls(refs, PR_FIELDS)} }`)
+  if (!data) throw new Error('Could not read the pull requests. Try again.')
+  return refs.map((ref, index) => data[`p${index}`]?.pullRequest || null)
 }
 
 // One GitHub search of open PRs, with the fields every list shares.

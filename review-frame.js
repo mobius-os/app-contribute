@@ -44,9 +44,12 @@ export function frameState(status, ctx) {
   return WORKING_ITEMS.has(item.state) ? 'reviewing' : 'idle'
 }
 
+// The repositories (lower case) whose PRs a review is still working on.
+export const reviewRepositoriesAtWork = runs => new Set((runs || []).filter(run => !reviewRunHalted(run))
+  .flatMap(run => (run.items || []).filter(item => WORKING_ITEMS.has(item.state)).map(item => String(item.repo).toLowerCase())))
+
 // Whether any review is still being worked on, so the desk polls only then.
-export const hasActiveReview = runs => (runs || []).some(run => !reviewRunHalted(run)
-  && (run.items || []).some(item => WORKING_ITEMS.has(item.state)))
+export const hasActiveReview = runs => reviewRepositoriesAtWork(runs).size > 0
 
 // A saved record names its PR by repository and number; the newest review of
 // that PR (at any version) is what its desk row should reflect while it runs.
