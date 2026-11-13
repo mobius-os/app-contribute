@@ -67,6 +67,7 @@ import { CSS } from './theme.js'
 import { NAMES } from './names.js'
 import { COPY_REPLIES } from './respond-result.js'
 import { stageWords } from './publication-stage.js'
+import { saveDeskCopy } from './desk-copy.js'
 import { createSyncHub } from './refresh.js'
 import { SyncHubContext, useDeskReviewRuns } from './ui/useReviewList.js'
 import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
@@ -4041,10 +4042,11 @@ window.runInstantOpenChecks = async () => {
   const feedback = { reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'teammate' } }] } }] } }
   const mine = extra => pull(21, { title: 'Approved change', author: { login: owner }, headRefName: 'approved', ...extra })
   const release = name => { window['hold' + name] = false; window['release' + name]?.() }
-  const saveCopy = () => {
+  // The copy a previous visit saved, written the way the app writes it.
+  const saveCopy = async () => {
     values.set('feed-cache.json', { schema: 3, saved_at: hoursAgo(2), records: [], index: {} })
     values.set('source-cache.json', { schema: 1, saved_at: hoursAgo(2), snapshot: { apps: [], platform: null } })
-    values.set('desk-cache.json', { schema: 1, login: owner, synced_at: hoursAgo(2), incoming: [mine(approvedBy)], repositories: { repositories: [], hasNextPage: false }, review_rows: [] })
+    await saveDeskCopy({ login: owner, syncedAt: hoursAgo(2), incoming: [mine(approvedBy)], repositories: { repositories: [], hasNextPage: false }, reviewRows: [], reviewPulls: [] })
   }
   const reset = () => {
     for (const key of ['feed-cache.json', 'source-cache.json', 'desk-cache.json']) values.delete(key)
@@ -4059,7 +4061,7 @@ window.runInstantOpenChecks = async () => {
   }
   try {
     // A returning open: the saved desk is on screen before anything answers.
-    reset(); saveCopy()
+    reset(); await saveCopy()
     Object.assign(window, { holdOwnFirst: true, holdIncomingFull: true, holdRunsRead: true })
     await mountDeskApp()
     await until(() => rowOf('Approved change'), 'The desk did not open from the last-known copy')
@@ -4116,7 +4118,7 @@ window.runInstantOpenChecks = async () => {
     checks.push({ name: 'a first visit keeps its opening screen until what concerns the owner has answered, then opens and keeps updating', status: 'pass' })
 
     // An update that fails says so in plain words, keeps the copy's age, and Sync with GitHub is the way out.
-    reset(); saveCopy()
+    reset(); await saveCopy()
     window.failIncoming = true
     await mountDeskApp()
     await until(() => note().startsWith('Couldn’t sync'), 'A failed update did not say so: ' + note())
