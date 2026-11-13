@@ -126,7 +126,7 @@ test('what happens follows the Who sees the result choice, in the order the agen
   assert.match(priv[2], /Asks you first/)
   const draft = steps('draft')
   assert.equal(draft.length, 4)
-  assert.match(draft[2], /Drafts a verdict .* You send, edit or discard it/, 'drafting adds its step before the question step')
+  assert.match(draft[2], /Drafts a verdict .* You send or discard it/, 'drafting adds its step before the question step')
   assert.match(draft[3], /Asks you first/)
   const agent = steps('agent')
   assert.match(agent[2], /Posts its verdict on the PR from your account/, 'letting the agent post replaces the draft step')

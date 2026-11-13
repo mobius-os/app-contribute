@@ -62,7 +62,7 @@ function postingStep(count) {
 function verdictStep(count, agentPosts) {
   const it = count === 1 ? 'the PR' : 'each PR'
   if (agentPosts) return `Posts its verdict on ${it} from your account.`
-  return `Drafts a verdict for ${it}. You send, edit or discard it.`
+  return `Drafts a verdict for ${it}. You send or discard it.`
 }
 
 function mergeStep({ count, posting, verdict }) {
