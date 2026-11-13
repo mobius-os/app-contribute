@@ -27,7 +27,7 @@ const sweep = () => Object.entries(SPACE).reduce((combos, [key, values]) => comb
 // What changes the PR or starts an agent on it, and what a quiet readable PR always offers its author or its reviewer.
 // Take over is left out of OFFERED: it stays for maintainers.
 const CHANGES_THE_PR = ['merge', 'close', 'open_for_review', 'back_to_draft', 'check_my_pr', 'respond', 'finish_it', 'review', 'take_over']
-const OFFERED = { author: ['check_my_pr', 'respond', 'finish_it', 'open_for_review', 'back_to_draft', 'merge', 'close'], reviewer: ['review', 'merge', 'close'] }
+const OFFERED = { author: ['check_my_pr', 'respond', 'finish_it', 'open_for_review', 'back_to_draft', 'request_review', 'merge', 'close'], reviewer: ['review', 'merge', 'close'] }
 const otherApprovedThisVersion = facts => facts.reviews.some(review => review.state === 'APPROVED' && (review.commit === facts.head || review.sameWork === true) && !review.bot && review.by !== facts.author)
 const INVARIANTS = {
   'an author never gets a public review action': decision => decision.role !== 'author' || !decision.actions.some(item => ['draft_verdict', 'review', 'take_over'].includes(item.id)),
@@ -42,6 +42,8 @@ const INVARIANTS = {
   'unknown checks or conflicts are never ready to merge': (decision, facts) => !(facts.checks === 'unknown' || facts.mergeable === 'unknown' || facts.readComplete === false || facts.lifecycle === 'unknown') || notReadyToMerge(facts) !== '',
   'the Ask actions are offered whenever someone could be asked': (decision, facts) => facts.role !== 'author' || !decision.askable.length || facts.readComplete === false || !['open', 'draft'].includes(facts.lifecycle)
     || ['ask_rereview', 'ask_approval'].every(id => action(decision, id)?.enabled),
+  'request review is the author’s whenever the PR can be read and is open, even before anyone has reviewed': (decision, facts) => (action(decision, 'request_review')?.enabled === true)
+    === (facts.role === 'author' && ['open', 'draft'].includes(facts.lifecycle) && facts.readComplete !== false),
   'nobody who approved this version can be asked': (decision, facts) => decision.askable.every(person => !decision.approvedBy.some(name => name.toLowerCase() === person.by.toLowerCase())),
   'a PR that cannot be read is never acted on': (decision, facts) => !(facts.readComplete === false || facts.lifecycle === 'unknown')
     || !decision.actions.some(item => CHANGES_THE_PR.includes(item.id) && item.enabled),

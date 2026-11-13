@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadPullActivity, loadPullChecks, loadPullCommitFiles, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, safeDetailLink } from '../pull-details.js'
+import { loadPullActivity, loadPullChecks, loadPullCommitFiles, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullReviewers, loadPullThreads, safeDetailLink } from '../pull-details.js'
 import { fetchRepoFile } from '../api.js'
 import { createImageReader } from '../image-source.js'
 import { MarkdownView } from './MarkdownView.jsx'
@@ -9,9 +9,10 @@ import { CopyId, commentReference } from './CopyId.jsx'
 import { Icon } from './Icons.jsx'
 import { BranchFlow } from './BranchFlow.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
+import { requestReviewButton, reviewRequested } from '../actions-menu.js'
 import { useTipDismiss } from './useTipDismiss.js'
 import { useKeepOnScreen } from './useKeepOnScreen.js'
-import { GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
+import { DateLabel, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
 import { checkSummary, conversationCount } from '../collaboration.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { ReviewTab, reviewContent } from './ReviewTab.jsx'
@@ -25,15 +26,7 @@ import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { PullChecks } from './PullChecks.jsx'
 import { PullEscalation } from './PullEscalation.jsx'
-export { PullFiles }
-
-export function DateLabel({ value, prefix = '', time = false }) {
-  if (!value || !Number.isFinite(Date.parse(value))) return null
-  const at = new Date(value)
-  const day = at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-  const text = time ? `${day} · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : day
-  return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
-}
+export { DateLabel, PullFiles }
 
 // A quiet placeholder with the rough shape of the incoming text instead of a
 // "Loading…" sentence; the label keeps the state readable to assistive tech.
@@ -298,7 +291,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     description: 'description:1',
     ...(tab === 'conversation'
       ? { activity: `activity:${number}`, threads: `threads:${threadCursor || ''}`, related: 'related' }
-      : tab === 'review' ? {} : tab === 'commits' ? { view: openCommit ? `commit:${openCommit.oid}` : `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
+      : tab === 'review' ? { reviewers: 'reviewers' } : tab === 'commits' ? { view: openCommit ? `commit:${openCommit.oid}` : `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
   }
   const keySignature = Object.values(keys).join('|')
   useEffect(() => {
@@ -334,7 +327,9 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       read(keys.activity, signal => loadPullActivity(token, pr, number, signal))
       read(keys.threads, signal => loadPullThreads(token, pr, threadCursor, signal))
       read(keys.related, signal => loadPullRelated(token, pr, signal))
-    } else if (tab !== 'review') {
+    } else if (tab === 'review') {
+      read(keys.reviewers, signal => loadPullReviewers(token, pr, signal))
+    } else {
       read(keys.view, signal => tab === 'files' ? loadPullFiles(token, pr, number, signal) : tab === 'commits' ? (openCommit ? loadPullCommitFiles(token, pr, openCommit.oid, signal) : loadPullCommits(token, pr, commitCursor, signal)) : loadPullChecks(token, pr, number, signal))
     }
   }, [keySignature, cache, writeCache, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
@@ -349,6 +344,9 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   }
   const retryRelated = () => {
     writeCache(old => { const next = { ...old }; delete next[keys.related]; return next })
+  }
+  const retryReviewers = () => {
+    writeCache(old => { const next = { ...old }; delete next[keys.reviewers]; return next })
   }
   function readState(value, label, onRetry = tryAgain) {
     return <>{value.loading ? <Skeleton label={`Loading ${label}`} /> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : onRetry}>{value.stale ? NAMES.sync : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={onRetry} /></>
@@ -380,6 +378,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     files: Number.isInteger(pr.changedFiles) ? pr.changedFiles : null,
   }
   const githubUrl = safeDetailLink(pr.url)
+  const requestOffer = requestReviewButton(review?.standing, { capabilities })
   // The machine's own review action, offered again on the Commits tab when the PR has commits the last review did not see.
   const againAction = readOnly ? null : review?.standing?.actions?.find(action => ['review', 'check_my_pr'].includes(action.id) && action.enabled) || null
   // The conversation loads as one unit: a single skeleton stands in for the
@@ -403,6 +402,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       {labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div>
     <div className={'co-pr-detail-actions' + tips.className} onPointerOut={tips.onPointerOut} onBlur={tips.onBlur}>
       {!readOnly ? <ActionsMenu variant="button" align="start" brief pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
+      {!readOnly && requestOffer && !reviewRequested(pr) ? <button className="co-btn co-request-review" disabled={stale || requestOffer.off} title={requestOffer.off ? requestOffer.reason : undefined} onClick={() => onReview?.('request_review')}><Icon name="plus" size={16} />{NAMES.requestReview}</button> : null}
       {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /></button> : null}
       {status && onProgress ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
       {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /></a> : null}
@@ -444,7 +444,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       {ready(related) ? <PullRelated data={related.data} /> : null}
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
     </> : null}
-    {tab === 'review' ? <ReviewTab pr={pr} status={status} readOnly={readOnly} {...review} /> : null}
+    {tab === 'review' ? <ReviewTab pr={pr} status={status} readOnly={readOnly} {...review} reviewers={entry(keys.reviewers || '')} onRetryReviewers={retryReviewers} /> : null}
     {tab === 'commits' && openCommit ? <CommitChangesHead commit={openCommit} onBack={() => { returnFocus.current = openCommit.oid; setOpenCommit(null) }} /> : null}
     {tab === 'files' || tab === 'checks' || tab === 'commits' ? readState(view, tab) : null}
     {tab === 'commits' && openCommit && ready(view) ? <PullFiles data={view.data} startOpen={view.data.files.length <= COMMIT_OPEN_FILES} /> : null}
