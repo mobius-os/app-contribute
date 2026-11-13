@@ -944,18 +944,32 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-filter-line button b { color:var(--accent); font-variant-numeric:tabular-nums; }
 .co-filter-line button:hover,.co-filter-line button[aria-pressed=true] { color:var(--text); }
 .co-filter-line button[aria-pressed=true] span { text-decoration:underline 2px var(--accent); text-underline-offset:7px; }
-/* Phone only: the four views as one segmented bar, all on screen, the word first and its count after it.
-   Under it the repository list is a button of its own: project icons, the word, a count and a chevron. */
-.co-desk-chips { display:none; position:sticky; top:0; z-index:5; margin:0 0 10px; padding:6px 0; background:var(--bg); }
+/* Phone only: the four views as one segmented bar, all on screen, the word first and its count after it: one row where the bar's room holds
+   all four, two by two on the narrowest phones, never overlapping. Scrolling down slides the bar away and scrolling up brings it back
+   (content-first-noise-reduction); a browser without scroll-state queries keeps it where it is. */
+.co-desk-chips { display:none; position:sticky; top:0; z-index:5; margin:0 0 10px; padding:6px 0; background:var(--bg); container:co-views / inline-size; }
 .co-desk-seg { display:flex; flex-wrap:wrap; gap:2px; padding:3px; border:1px solid var(--co-edge); border-radius:var(--co-radius-panel); background:var(--surface); }
 .co-desk-seg button { flex:1 1 auto; min-width:0; display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:var(--co-control-height); padding:0 4px; border:0; border-radius:var(--co-radius-control); background:none; color:var(--muted); font:600 var(--co-text-meta) var(--font); white-space:nowrap; cursor:pointer; }
 .co-desk-seg button[aria-pressed=true] { background:var(--accent-dim, var(--surface-2)); color:var(--text); box-shadow:inset 0 0 0 1px var(--accent); }
 .co-desk-seg button b { color:var(--accent); font-variant-numeric:tabular-nums; }
-/* Four words and their counts do not fit one row at 14 px on the narrowest phones: two by two, never overlapping. */
-@media(max-width:400px) { .co-desk-seg button { flex:1 1 calc(50% - 2px); } }
-.co-desk-chips .co-desk-chips-projects { display:flex; align-items:center; gap:10px; width:100%; margin-top:8px; min-height:var(--co-control-height); padding:0 12px 0 10px; border:1px solid var(--co-edge); border-radius:var(--co-radius-panel); background:linear-gradient(90deg,var(--accent-dim, var(--surface-2)),var(--surface)); color:var(--text); font:600 var(--co-text-meta) var(--font); text-align:left; cursor:pointer; }
-.co-desk-chips .co-desk-chips-projects[aria-pressed=true] { border-color:var(--accent); }
-.co-desk-chips-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@container co-views (max-width:350px) { .co-desk-seg button { flex:1 1 calc(50% - 2px); } }
+@media(max-width:980px) {
+ .co-page { container:co-page / scroll-state; }
+ @container co-page scroll-state((scrolled: bottom) and (scrollable: top)) { .co-desk-chips { transform:translateY(-100%); } }
+ /* Keyboard focus keeps the bar in view; a tapped view button keeps no focus ring, so it does not pin the bar. */
+ .co-desk-chips:has(:focus-visible) { transform:none; }
+}
+@media(max-width:980px) and (prefers-reduced-motion:no-preference) { .co-desk-chips { transition:transform .2s ease-out; } }
+/* Under the bar the repository list is a button of its own beside the search: a few project icons, a count and a chevron (the word
+   only for a screen reader on a phone). Above 980px the side menu holds it and this one is not drawn. */
+.co-desk-find { display:flex; align-items:center; gap:8px; margin:0 0 16px; }
+.co-desk-find .co-search { flex:1; margin:0; }
+.co-desk-find .co-search input { text-overflow:ellipsis; }
+.co-desk-find .co-desk-chips-projects { display:none; }
+@media(max-width:980px) { .co-desk-find .co-desk-chips-projects { display:flex; align-items:center; flex:none; gap:8px; min-height:var(--co-control-height); padding:0 8px 0 10px; border:1px solid var(--co-edge); border-radius:var(--co-radius-control); background:linear-gradient(90deg,var(--accent-dim, var(--surface-2)),var(--surface)); color:var(--text); font:600 var(--co-text-meta) var(--font); text-align:left; cursor:pointer; } }
+.co-desk-find .co-desk-chips-projects[aria-pressed=true] { border-color:var(--accent); }
+.co-desk-chips-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media(max-width:680px) { .co-desk-chips-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0, 0, 0, 0); } } /* the .co-visually-hidden recipe, on a phone only */
 .co-desk-chips-projects b { color:var(--muted); font-weight:500; font-variant-numeric:tabular-nums; }
 .co-desk-chips-projects > .co-icon { color:var(--muted); }
 .co-desk-avatars { display:flex; }
@@ -1013,6 +1027,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-desk-row-labels { display:flex; flex-wrap:wrap; gap:4px; }
 .co-desk-row-main > .co-pr-labels, .co-desk-row-main > .co-row-pills { margin-top:0; }
 .co-desk-row-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; color:var(--muted); font-size:var(--co-text-meta); }
+/* A phone reads a moment short (4m), both forms are in the page (TimeAgo short). */
+.co-time-short { display:none; }
 .co-desk-order { font-variant-numeric:tabular-nums; }
 .co-desk-chip { padding:1px 8px; border-radius:var(--co-radius-pill); font-size:var(--co-text-chip); font-weight:600; background:var(--surface-2); color:var(--text); }
 .co-desk-chip.is-you { background:var(--accent-dim, var(--surface-2)); color:var(--co-you-text); }
@@ -1326,11 +1342,18 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-pr-filters { padding-block:var(--co-tap-reach); }
  .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b { line-height:20px; }
  .co-desk-chips { margin-bottom:6px; padding:4px 0; }
- .co-filter-line { margin:0 0 4px; }
- .co-search { margin-bottom:10px; }
+ .co-filter-line { margin:0 0 calc(2 * var(--co-tap-reach)); }
+ .co-search, .co-desk-find { margin-bottom:10px; }
  .co-desk-envelopes { gap:10px; }
  .co-desk-row { padding:9px 12px; }
- .co-desk-row-main { gap:3px; }
+ /* A desk row is three lines: the title on one line, one facts line with the short time, then the labels and the status side by side.
+    Each of them wraps to another line only where it truly cannot fit. */
+ .co-desk-row-main { flex-direction:row; flex-wrap:wrap; align-items:center; align-content:flex-start; gap:3px 6px; }
+ .co-desk-row-title { flex:1 0 100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; overflow-wrap:normal; }
+ .co-desk-row-meta { flex:1 0 100%; gap:2px 10px; }
+ .co-desk-row-main > .co-pr-labels, .co-desk-row-main > .co-row-pills { flex:0 1 auto; min-width:0; }
+ .co-time-short { display:inline; }
+ .co-time-long { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; } /* the .co-visually-hidden recipe: the long form stays the reader's */
  .co-pr-row { padding-top:6px; padding-bottom:6px; }
  .co-source-row { min-height:0; padding:12px 4px; }
  /* A repository's sentences are detail under its name, not a second headline. */

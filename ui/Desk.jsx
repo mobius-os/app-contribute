@@ -82,9 +82,8 @@ export function DeskRail({ view, counts, projects, attention, selectedKey, onVie
 }
 
 // The same four views as the rail, as one segmented bar for phones: every segment is on screen at
-// once (nothing scrolls out of sight), the word first and its count after it. Under it the repository
-// list is a button of its own, with a few project icons and a chevron, so it reads as a place you go to.
-export function DeskChips({ view, counts, projects = [], onView }) {
+// once (nothing scrolls out of sight), the word first and its count after it.
+export function DeskChips({ view, counts, onView }) {
   return (
     <div className="co-desk-chips">
       <div className="co-desk-seg" role="group" aria-label="Contribute views">
@@ -97,12 +96,22 @@ export function DeskChips({ view, counts, projects = [], onView }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// The repository list is a button of its own beside the search field (the children), with a few project icons, a count and a chevron,
+// so it reads as a place you go to. Below 980px only: the side menu holds it above that.
+export function DeskFind({ view, projects = [], onView, children }) {
+  return (
+    <div className="co-desk-find">
       <button type="button" className="co-desk-chips-projects" aria-pressed={view === 'projects'} onClick={() => onView('projects')}>
         <span className="co-desk-avatars">{projects.slice(0, 3).map(project => <ProjectIcon key={project.key} project={project} className="co-desk-glyph" />)}</span>
         <span className="co-desk-chips-label">{NAMES.allRepositories}</span>
         {projects.length ? <b>{projects.length}</b> : null}
         <Icon name="right" size={16} />
       </button>
+      {children}
     </div>
   )
 }

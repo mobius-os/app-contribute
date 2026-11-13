@@ -12,7 +12,7 @@ import { TimeAgo } from './GithubParts.jsx'
 import { TaskContext } from './TaskPane.jsx'
 import { DESK_VIEWS, deskViewKey, splitProjects } from '../desk.js'
 import { NAMES } from '../names.js'
-import { DeskChips, DeskCounts, DeskRail } from './Desk.jsx'
+import { DeskChips, DeskCounts, DeskFind, DeskRail } from './Desk.jsx'
 import { SearchField } from './SearchField.jsx'
 import { FilterLine } from './FilterLine.jsx'
 import { DeskView } from './DeskViews.jsx'
@@ -357,7 +357,7 @@ export function SourceMap({
       <>
       {selectedProject ? <h2 className="co-visually-hidden">Repository detail</h2> : (
         <>
-        <DeskChips view={desk.view} counts={desk.counts} projects={orderedProjects} onView={openView} />
+        <DeskChips view={desk.view} counts={desk.counts} onView={openView} />
         <header className="co-view-heading">
           <div>
             <h2>{viewLabel}</h2>
@@ -388,14 +388,18 @@ export function SourceMap({
       {!selectedProject ? (
         desk.view !== 'projects' ? (
           <>
-            <SearchField label="Find a PR, person or repository" value={deskQuery} onChange={setDeskQuery} />
+            <DeskFind view={desk.view} projects={orderedProjects} onView={openView}>
+              <SearchField label="Find a PR, person or repository" value={deskQuery} onChange={setDeskQuery} />
+            </DeskFind>
             <DeskView view={desk.view} projects={orderedProjects} records={desk.records} login={desk.login} decisionsFor={desk.decisionsFor} lastLooked={desk.lastLooked} query={deskQuery} runs={desk.runs} chats={desk.respondChats} responses={desk.responses} ignored={desk.ignored} reviews={desk.reviews} counts={desk.counts} needsFilter={needsFilter} onOpenProject={openProject} onOpenPull={desk.onOpenPull} onOpenRecord={openRecordFromDesk} />
           </>
         ) : (
         <>
           <div className="co-directory">
           <FilterLine label="Filter repositories" items={FILTERS.map(([key, label]) => ({ key, label, count: key === 'all' ? null : filterCounts[key] }))} active={filter} onPick={setFilter} />
-          <SearchField label="Find a repository" value={query} onChange={setQuery} />
+          <DeskFind view={desk.view} projects={orderedProjects} onView={openView}>
+            <SearchField label="Find a repository" value={query} onChange={setQuery} />
+          </DeskFind>
 
           {filtered.length === 0 ? (
             <div className="co-stage-empty">

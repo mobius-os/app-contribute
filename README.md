@@ -189,7 +189,9 @@ only for the core and the one mode it is working in.
   All repositories, **Add repository** last). The Needs you chips (To look at,
   Review, Merge, Fix, Review again) filter the list under them, and the badge is
   their sum. Drafts ready to open are a quiet line; local changes live in the
-  project's Local changes tab. On a phone the four views are one segmented bar.
+  project's Local changes tab. On a phone the four views are one segmented bar
+  (one row where all four fit), the repository list is a button beside the
+  search, and a row is three lines.
 - **A next step on every PR.** The state badge says where an open PR stands
   (In review, Approved, or its resting label), and one panel under the actions
   holds a pill, the PR machine's own sentence and one filled button; a PR with

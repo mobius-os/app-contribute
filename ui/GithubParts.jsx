@@ -142,8 +142,17 @@ export function DateLabel({ value, prefix = '', time = false }) {
   return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
 }
 
-/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. */
-export function TimeAgo({ value, prefix = '' }) {
+// A moment in the room a phone's facts line has: "4m", "2h", "1d", "3w". Beyond a month there is no short form and the date stands.
+const SHORT_AGO = [[3600, 'm', 60], [86400, 'h', 3600], [7 * 86400, 'd', 86400], [30 * 86400, 'w', 7 * 86400]]
+function shortAgo(seconds) {
+  if (seconds < 60) return 'now'
+  const [, unit, size] = SHORT_AGO.find(([limit]) => seconds < limit) || []
+  return unit ? Math.round(seconds / size) + unit : null
+}
+
+/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. With `short`, a phone reads "3h" in its place:
+ *  both are in the page and CSS shows one (the long one stays readable to a screen reader, as single-line-overflow's own markup does). */
+export function TimeAgo({ value, prefix = '', short = false }) {
   const time = Date.parse(value)
   if (!Number.isFinite(time)) return null
   const seconds = Math.max(0, (Date.now() - time) / 1000)
@@ -154,5 +163,8 @@ export function TimeAgo({ value, prefix = '' }) {
         : seconds < 7 * 86400 ? relative.format(-Math.round(seconds / 86400), 'day')
           : seconds < 30 * 86400 ? relative.format(-Math.round(seconds / (7 * 86400)), 'week')
             : `on ${new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(seconds > 300 * 86400 ? { year: 'numeric' } : {}) })}`
-  return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
+  const brief = short ? shortAgo(seconds) : null
+  return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>
+    {brief ? <><span className="co-time-long">{prefix}{text}</span><span className="co-time-short" aria-hidden="true">{brief}</span></> : <>{prefix}{text}</>}
+  </time>
 }

@@ -38,7 +38,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
   // 3 Nov). A request's own pill already says "your turn" while the PR rests; the decision adds its words when it has some.
   const labelled = framed !== 'reviewing' && (!request || chipOf(decision))
   const pills = [...(request ? [requestChip] : []), ...(labelled && !isDraftWord(pr, decisionChip(decision)) ? [decisionChip(decision)] : [])]
-  const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} /> : null]
+  const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} short /> : null]
   return (
     <ReviewFrame state={framed} inset={3} radius={10}>
       <DeskRow
