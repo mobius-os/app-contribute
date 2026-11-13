@@ -245,10 +245,21 @@ export const OBSERVE_EVERY_MS = 60000
 const observedAt = new Map()
 const notOurs = new Set()
 
+// The list of runs as one short read: runs and items without their documents (the findings in full, what a review ran,
+// a drafted verdict's text, each fix's files, the run's own instructions), a tenth of the full list. A Möbius that does
+// not know the option ignores it and answers in full, with no `view` marker; a short run is marked so a screen that shows
+// documents knows to read the one run first (ui/useRunDocuments.js). The runs and items carry every field the lists, rows
+// and the PR machine read.
+const runsList = async (token, appId) => {
+  const list = await collaborationRequest(token, appId, 'review-runs?view=summary')
+  // A run another conversation owns is the same short copy in both forms: it has no documents to read.
+  return list?.view === 'summary' ? { ...list, runs: (list.runs || []).map(run => (runDetailsElsewhere(run) ? run : { ...run, summary_only: true })) } : list
+}
+
 // Shows the saved list at once (onList), then re-reads it after any due
 // GitHub reconciliation so a settled merge replaces "In merge queue".
 export async function loadReviewRuns(token, appId, { onList, now = Date.now() } = {}) {
-  const list = await collaborationRequest(token, appId, 'review-runs')
+  const list = await runsList(token, appId)
   onList?.(list)
   // Only Contribute's own runs can be observed through its app route; a
   // minimized run is reconciled by its owning conversation.
@@ -258,7 +269,7 @@ export async function loadReviewRuns(token, appId, { onList, now = Date.now() } 
   const settled = await Promise.allSettled(due.map(run => collaborationRequest(token, appId, `review-runs/${encodeURIComponent(run.id)}/observe`, {})))
   // A refusal that names the run as not ours stops its polling for good.
   settled.forEach((result, index) => { if (result.status === 'rejected' && notOursToObserve(result.reason)) notOurs.add(due[index].id) })
-  return settled.some(result => result.status === 'fulfilled') ? collaborationRequest(token, appId, 'review-runs') : list
+  return settled.some(result => result.status === 'fulfilled') ? runsList(token, appId) : list
 }
 
 // What the platform accepts for each mode, and nothing else (unknown or

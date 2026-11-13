@@ -1256,6 +1256,12 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(prefers-reduced-motion:reduce) { .co-pr-sticky > button { transition:none; } }
 /* One desk row layout. The row's reason is one clamped line under its button, with Show more beside it; the hover covers the whole item. */
 .co-desk-item { display:grid; grid-template-columns:minmax(0,1fr); }
+/* The quiet update: a row that arrives fades in once; a status that changed is replaced in its pill with one soft
+   highlight. Opacity and colour only, so reduced motion changes nothing about them. */
+@keyframes co-row-arrive { from { opacity:0; } to { opacity:1; } }
+@keyframes co-chip-changed { from { box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 38%,transparent); } to { box-shadow:0 0 0 3px transparent; } }
+.co-desk-item.is-arriving { animation:co-row-arrive .32s ease-out; }
+.co-desk-chip.is-changed { animation:co-chip-changed 2.2s ease-out; }
 .co-desk-item:hover { background:var(--surface-2); }
 .co-desk-item .co-desk-row:hover { background:none; }
 .co-desk-item:has(> .co-desk-note) > .co-desk-row { padding-bottom:6px; }

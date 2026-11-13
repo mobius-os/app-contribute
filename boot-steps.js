@@ -4,7 +4,7 @@
 
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
 
-// `ready` holds the same five conditions index.jsx's bootReady joins. A step's detail shows
+// `ready` holds the conditions index.jsx's first visit waits for (firstOpenReady). A step's detail shows
 // only once its read has produced something to count.
 export function bootSteps({ ledgerReady, projectsReady, accountReady, accountConnected, pullsReady, runsReady, projectCount = 0, pullCount = 0 }) {
   const steps = [

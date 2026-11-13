@@ -11,6 +11,8 @@
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
 // runRepositoryLinkChecks (a repository row with a GitHub update or no comparison links to Settings or the App Store, lined up under its text),
 // runSyncLineChecks (the whole app, on a fake clock: a Sync says what it changed in a line that goes away; the app shown again after a while syncs quietly),
+// runInstantOpenChecks (the whole app: it opens from its last-known copy and updates quietly; a first visit and a failed update behave as said),
+// runShortRunsChecks (the whole app, on a Möbius that answers the short list of review runs: the Review tab reads the run itself before it shows a document),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -109,9 +111,14 @@ const verdictRun = verdict => ({ id: 'review-verdict', chat_id: 'review-chat-fix
 // A review at work on PR 7; execution is the platform's state of the chat that runs it.
 const reviewingRun = (execution, id = 'review-helper') => ({ id, chat_id: 'review-chat-fixture', mode: 'review', state: 'reviewing', execution_state: execution, can_stop: true,
   items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'reviewing' }] })
+// A run as the platform's short list gives it (window.summaryRuns): no documents, the findings cut, a verdict with only its ids and state.
+const WHOLE_NOTE = '… open this run for the full findings'
+const shortRun = run => ({ ...run, items: run.items.map(({ summary, tests, verdict_proposal: proposal, ...item }) => ({ ...item,
+  ...(summary ? { summary: summary.length > 240 ? summary.slice(0, 240 - WHOLE_NOTE.length) + WHOLE_NOTE : summary, ...(summary.length > 240 ? { summary_truncated: true } : {}) } : {}),
+  ...(proposal ? { verdict_proposal: { id: proposal.id, state: proposal.state, event: proposal.event, head_sha: proposal.head_sha } } : {}) })) })
 // What GitHub charges, as measured on a real account: the full requests read 55 points, the reviewed PRs 14 per 25, the change probe 1.
 // Each answer carries the account's rateLimit, as the real API does.
-const GITHUB_COST = { ContributeIncomingReviews: 55, ContributeChangeProbe: 1 }
+const GITHUB_COST = { ContributeIncomingReviews: 55, ContributeOwnPulls: 29, ContributeChangeProbe: 1 }
 function charged(query, aliases = 0) {
   const name = /query (\w+)/.exec(query)?.[1]
   const cost = name === 'ContributeReviewPulls' ? Math.ceil(aliases * 14 / 25) : GITHUB_COST[name] || 0
@@ -121,6 +128,8 @@ function charged(query, aliases = 0) {
 window.githubPoints = 0; window.githubRemaining = 5000
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
 // A prompt preview resolves settings; it is a read, not a public action.
+// A read of the list of review runs, whichever form it asks for (the app asks for the short list).
+const isRunsRead = call => call.method === 'GET' && call.url.split('?')[0] === '/api/github/contributions/fixture-app/review-runs'
 const mutationRequests = () => calls.requests.filter(call => call.method !== 'GET' && call.url !== '/api/github/graphql' && !call.url.endsWith('/review-preview'))
 function forbidden(kind) {
   return (...args) => { calls.forbidden.push({ kind, args: args.map(String) }); throw new Error('Forbidden fixture transport: ' + kind) }
@@ -156,7 +165,7 @@ window.fetch = async (url, options = {}) => {
       ...(window.fullAppBinding ? { frozen_publication_binding: { record_fields: ['plan'] } } : {}) })
     if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
     // The whole app also reads the saved review runs (a plain read) whenever it syncs; this page has none. The Desk scenarios keep their own runs.
-    if (!window.fullAppDesk && call.url === '/api/github/contributions/fixture-app/review-runs' && call.method === 'GET') return response({ runs: [] })
+    if (!window.fullAppDesk && call.url.split('?')[0] === '/api/github/contributions/fixture-app/review-runs' && call.method === 'GET') return response({ runs: [] })
     if (call.url.includes('/review-status')) {
       const ids = new URL(call.url, location.origin).searchParams.getAll('record_id')
       return response({ records: ids.map(id => ({ id, state: 'ready' })), ...(ids.length ? { addressed_record_ids: ids } : {}) })
@@ -170,8 +179,16 @@ window.fetch = async (url, options = {}) => {
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
         // A test can hold the answer back: holdIncoming() settles to true when GitHub then fails.
         if (window.holdIncoming && await window.holdIncoming()) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
+        if (window.holdIncomingFull) await new Promise(resolve => { window.releaseIncomingFull = resolve })
         if (window.failIncoming || window.failIncomingFull) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:window.githubInvolved || []}}})
+      }
+      // The first read of the app: only what concerns the owner (their review requests and own PRs), a part of the full read.
+      if (window.fullAppDesk && call.body.query.includes('ContributeOwnPulls')) {
+        if (window.failIncoming || window.failIncomingFull || window.failOwnFirst) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
+        if (window.holdOwnFirst) await new Promise(resolve => { window.releaseOwnFirst = resolve })
+        const owner = (window.fullAppLogin || 'reconnected-owner').toLowerCase()
+        return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},authored:{nodes:(window.githubInvolved || []).filter(pr => String(pr.author?.login).toLowerCase() === owner)}}})
       }
       // The change probe: only the review requests and the PRs the owner reviewed, one point.
       if (window.fullAppDesk && call.body.query.includes('ContributeChangeProbe')) {
@@ -228,6 +245,14 @@ window.fetch = async (url, options = {}) => {
     return response({ data: { search: { nodes: found, issueCount: pulls.length,
       pageInfo: { hasNextPage: Boolean(window.fixturePaging && !laterPage), endCursor: window.fixturePaging && !laterPage ? 'fixture-page-2' : null } } } })
   }
+  // A Möbius that answers the short list (window.summaryRuns): the run itself, with its documents, is read by id.
+  const wholeRun = /^\/api\/github\/contributions\/fixture-app\/review-runs\/([\w-]+)$/.exec(call.url)
+  if (window.summaryRuns && wholeRun && call.method === 'GET') {
+    calls.exactRuns.push(wholeRun[1])
+    const snapshot = structuredClone(reviewRuns.find(run => run.id === wholeRun[1]))
+    if (window.holdSingleRun) await new Promise(resolve => { window.releaseSingleRun = resolve })
+    return snapshot ? response({ run: snapshot, brief: null }) : new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 })
+  }
   // Runs older than the capped recent list are reachable only by exact id.
   const oldRun = /^\/api\/github\/contributions\/fixture-app\/review-runs\/([\w-]+)(\/stop)?$/.exec(call.url)
   if (oldRun && window.oldRuns?.has(oldRun[1])) {
@@ -247,11 +272,14 @@ window.fetch = async (url, options = {}) => {
     reviewRuns[0] = verdictRun(verdict)
     return response({ run: reviewRuns[0], ...(call.body.decision === 'submit' ? { verdict: { state: verdict, event: 'APPROVE' } } : {}), merge_resumed: window.mergeResumed ?? null })
   }
-  if (call.url === '/api/github/contributions/fixture-app/review-runs') {
+  if (call.url.split('?')[0] === '/api/github/contributions/fixture-app/review-runs') {
     if (call.method === 'GET') {
       // Snapshot at request time; a held answer lands later, as a slow network may deliver it.
       const snapshot = structuredClone(reviewRuns)
       if (window.holdRunsRead) { window.holdRunsRead = false; await new Promise(resolve => { window.releaseRunsRead = resolve }) }
+      // A newer Möbius answers the short list when asked: runs and items without their documents, the findings cut at 240 characters.
+      // An older one ignores the option and answers in full.
+      if (window.summaryRuns && call.url.includes('view=summary')) return response({ view: 'summary', runs: snapshot.map(shortRun), respond_chats: structuredClone(respondChats) })
       return response({ runs: snapshot, respond_chats: structuredClone(respondChats) })
     }
     if (call.method !== 'POST') return forbidden('unexpected review method')(call.method)
@@ -2151,7 +2179,7 @@ window.runDeskFrameChecks = async () => {
     await until(() => query('.co-frame[data-frame="reviewing"]'), 'The PR page did not frame the review it started')
     // The Desk is told at once, before the owner leaves the page: here only onRunsChanged reads the run list again.
     const started = calls.requests.findIndex(call => call.method === 'POST' && call.url.endsWith('/review-runs'))
-    await until(() => calls.requests.slice(started + 1).some(call => call.method === 'GET' && call.url.endsWith('/review-runs')), 'Starting the review did not make the Desk re-read its review runs')
+    await until(() => calls.requests.slice(started + 1).some(isRunsRead), 'Starting the review did not make the Desk re-read its review runs')
     await click(query('.co-desk-back'))
     await until(() => query('.co-desk-envelopes'), 'Back did not return to the Desk')
     await until(() => deskFrame('Contribution 7') === 'reviewing', 'The Desk row has no review frame after Back: ' + deskFrame('Contribution 7'))
@@ -3430,7 +3458,7 @@ window.runRespondAgainChecks = async () => {
     ensure(calls.requests.some(call => call.url === '/api/app-chats?scope=' + encodeURIComponent('contribute-address:owner/project#7')), 'The agent was not read from the PR’s own conversation')
     checks.push({ name: 'Respond again names the agent the PR’s conversation keeps, with its effort, and offers no picker', status: 'pass' })
     await captureShot('respond-again-window')
-    const runsReads = () => calls.requests.filter(call => call.method === 'GET' && call.url === '/api/github/contributions/fixture-app/review-runs').length
+    const runsReads = () => calls.requests.filter(isRunsRead).length
     const readsBefore = runsReads()
     await until(() => button(NAMES.respondAgain) && !button(NAMES.respondAgain).disabled, 'Respond again is not ready: ' + window_)
     await click(button(NAMES.respondAgain))
@@ -3996,6 +4024,167 @@ window.runSyncLineChecks = async () => {
   }
 }
 
+// The whole app, opened the way an owner opens it every day: from the last-known copy, with the update reading quietly.
+// Each GitHub read is held (window.holdOwnFirst, holdIncomingFull, holdRunsRead) so the scenario sees the desk before it
+// answers: the desk is there at once, a row that changed is replaced where it stands, nothing is empty or spinning,
+// and the header says what is happening. A first visit, with nothing saved, keeps its opening screen until the first
+// answer. A failed update says so in plain words and Sync with GitHub is the way out.
+window.runInstantOpenChecks = async () => {
+  const checks = []
+  const owner = 'reconnected-owner'
+  const hoursAgo = hours => new Date(Date.now() - hours * 3600e3).toISOString()
+  const note = () => text(query('.co-sync-note'))
+  const rows = () => [...document.querySelectorAll('.co-desk-item')]
+  const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')) === title)
+  const statusOf = title => text(rowOf(title)?.querySelector('.co-row-pills'))
+  const approvedBy = { latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'teammate' }, commit: { oid: HEAD } }] } }
+  const feedback = { reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'teammate' } }] } }] } }
+  const mine = extra => pull(21, { title: 'Approved change', author: { login: owner }, headRefName: 'approved', ...extra })
+  const release = name => { window['hold' + name] = false; window['release' + name]?.() }
+  const saveCopy = () => {
+    values.set('feed-cache.json', { schema: 3, saved_at: hoursAgo(2), records: [], index: {} })
+    values.set('source-cache.json', { schema: 1, saved_at: hoursAgo(2), snapshot: { apps: [], platform: null } })
+    values.set('desk-cache.json', { schema: 1, login: owner, synced_at: hoursAgo(2), incoming: [mine(approvedBy)], repositories: { repositories: [], hasNextPage: false }, review_rows: [] })
+  }
+  const reset = () => {
+    for (const key of ['feed-cache.json', 'source-cache.json', 'desk-cache.json']) values.delete(key)
+    Object.assign(window, { holdOwnFirst: false, holdIncomingFull: false, failIncoming: false })
+    reviewRuns.length = 0
+    window.githubRequests = []
+    window.githubInvolved = [mine(feedback)]
+  }
+  const noSpinnerOrRetry = where => {
+    ensure(!query('.co-desk-envelopes .ma-spinner, .co-run .ma-spinner'), where + ' showed a spinner inside a list')
+    ensure(![...document.querySelectorAll('button')].some(node => /retry|try again/i.test(text(node))), where + ' offered a Retry')
+  }
+  try {
+    // A returning open: the saved desk is on screen before anything answers.
+    reset(); saveCopy()
+    Object.assign(window, { holdOwnFirst: true, holdIncomingFull: true, holdRunsRead: true })
+    await mountDeskApp()
+    await until(() => rowOf('Approved change'), 'The desk did not open from the last-known copy')
+    ensure(!query('.co-boot'), 'The opening screen showed although a saved copy exists')
+    ensure(statusOf('Approved change').includes('Ready to merge'), 'The saved row said: ' + statusOf('Approved change'))
+    ensure(note().startsWith('Updating…') && note().includes('last synced') && /2 hours ago/.test(note()), 'The header said: ' + note())
+    noSpinnerOrRetry('The saved desk')
+    await captureShot('instant-open-saved-desk')
+    checks.push({ name: 'a returning open shows the saved desk at once, with one quiet line saying it is updating and how old the copy is', status: 'pass' })
+
+    // The first answer is the owner's own PRs: the row changes where it stands, with one soft highlight, and nothing moves.
+    const row = rowOf('Approved change')
+    release('OwnFirst')
+    await until(() => statusOf('Approved change').includes('Feedback to answer'), 'The owner-first answer did not change the row: ' + statusOf('Approved change'))
+    ensure(rowOf('Approved change') === row, 'The changed row was replaced by another element instead of changing where it stands')
+    ensure(row.querySelector('.co-desk-chip.is-changed'), 'The changed status had no soft highlight')
+    ensure(note().startsWith('Updating…'), 'The header stopped updating before the full read answered: ' + note())
+    checks.push({ name: 'a status that changed is replaced in its own row with one soft highlight', status: 'pass' })
+
+    // The update ends when the last read answers.
+    release('IncomingFull'); release('RunsRead')
+    await until(() => note().startsWith('Last synced just now'), 'The header never said Last synced just now: ' + note())
+    noSpinnerOrRetry('The updated desk')
+    await until(() => values.get('desk-cache.json')?.synced_at > hoursAgo(1), 'The updated copy was not saved')
+    ensure(JSON.stringify(values.get('desk-cache.json').incoming).includes('"isResolved":false'), 'The saved copy still held the old PR')
+    checks.push({ name: 'the update ends with Last synced just now, and the copy for the next open is saved', status: 'pass' })
+
+    // A row that arrives later fades in once while the rows already there stay still; one that leaves is gone with the next read.
+    ensure(!rows().some(node => node.classList.contains('is-arriving')), 'A row of the first screen faded in')
+    window.githubRequests = [pulls[0]]
+    await click(query('.co-toolbar-refresh'))
+    await until(() => rowOf('Contribution 7'), 'A new review request did not arrive in the list')
+    ensure(rowOf('Contribution 7').classList.contains('is-arriving'), 'The arriving row did not fade in')
+    ensure(!rowOf('Approved change').classList.contains('is-arriving') && rowOf('Approved change') === row, 'A row that was already there moved or faded')
+    window.githubRequests = []
+    await click(query('.co-toolbar-refresh'))
+    await until(() => !rowOf('Contribution 7'), 'A request that is gone stayed in the list')
+    checks.push({ name: 'a row that arrives fades in once and the rows already there do not move', status: 'pass' })
+
+    // A first visit has nothing saved: the opening screen stays until the first answer, then the desk opens and keeps updating.
+    reset()
+    Object.assign(window, { holdOwnFirst: true, holdIncomingFull: true })
+    await mountDeskApp()
+    await until(() => query('.co-boot'), 'A first visit showed no opening screen')
+    await frame(); await frame()
+    ensure(query('.co-boot') && !rowOf('Approved change'), 'A first visit opened before its first answer')
+    release('OwnFirst')
+    await until(() => !query('.co-boot') && rowOf('Approved change'), 'The first answer did not open the desk')
+    ensure(note() === 'Updating…', 'A first visit has no copy to age, so the header said: ' + note())
+    ensure(statusOf('Approved change').includes('Feedback to answer'), 'The first answer was not complete for the owner\'s row: ' + statusOf('Approved change'))
+    release('IncomingFull')
+    await until(() => note().startsWith('Last synced just now'), 'The first visit never finished updating: ' + note())
+    checks.push({ name: 'a first visit keeps its opening screen until what concerns the owner has answered, then opens and keeps updating', status: 'pass' })
+
+    // An update that fails says so in plain words, keeps the copy's age, and Sync with GitHub is the way out.
+    reset(); saveCopy()
+    window.failIncoming = true
+    await mountDeskApp()
+    await until(() => note().startsWith('Couldn’t sync'), 'A failed update did not say so: ' + note())
+    ensure(rowOf('Approved change') && statusOf('Approved change').includes('Ready to merge'), 'A failed update dropped the last-known rows')
+    ensure(note().includes('Last synced') || window.innerWidth <= 480, 'A failed update lost the copy\'s age: ' + note())
+    ensure(![...document.querySelectorAll('button')].some(node => /retry|try again/i.test(text(node))), 'A failed update offered a Retry')
+    window.failIncoming = false
+    await click(query('.co-toolbar-refresh'))
+    await until(() => note().startsWith('Last synced just now'), 'Sync with GitHub did not recover the update: ' + note())
+    await until(() => statusOf('Approved change').includes('Feedback to answer'), 'Sync did not read the owner\'s PR again')
+    checks.push({ name: 'a failed update says so in plain words, keeps the last-known rows, and Sync with GitHub recovers it', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    Object.assign(window, { holdOwnFirst: false, holdIncomingFull: false, holdRunsRead: false, failIncoming: false })
+    window.releaseOwnFirst?.(); window.releaseIncomingFull?.(); window.releaseRunsRead?.()
+  }
+}
+
+// The whole app, on a Möbius that answers the short list of review runs: the PR page's Review tab and the run's own page read the run
+// itself before they show a document, so a long review is never shown cut and a drafted verdict never shows without its words.
+window.runShortRunsChecks = async () => {
+  const checks = []
+  const FINDINGS = 'The saved review found one problem, and this sentence is part of the whole findings. '.repeat(6).trim()
+  const reviewTab = () => [...document.querySelectorAll('.co-detail-tabs button')].find(node => text(node).startsWith('Review'))
+  const approve = () => [...document.querySelectorAll('.co-verdict button')].find(node => text(node) === 'Approve on GitHub')
+  try {
+    window.summaryRuns = true
+    reviewRuns.length = 0
+    reviewRuns.push(verdictRun('proposed'))
+    reviewRuns[0].items[0].summary = FINDINGS
+    await mountDeskApp()
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the review request')
+    ensure(calls.requests.some(call => call.url.endsWith('/review-runs?view=summary')), 'The runs were not asked for as the short list')
+    ensure(!calls.requests.some(call => call.url.endsWith('/review-runs') && call.method === 'GET'), 'The runs were also read in full')
+    checks.push({ name: 'the review runs are asked for as the short list', status: 'pass' })
+
+    // Open the PR on its Review tab with the run's own read held: the box waits, and shows nothing cut.
+    window.holdSingleRun = true
+    await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+    await until(() => query('.co-desk-back') && reviewTab(), 'The PR page did not open')
+    await click(reviewTab())
+    await until(() => text(query('.co-review-box')).includes('Reading the review…'), 'The Review tab did not wait for the run: ' + text(query('.co-pull-page')).slice(0, 300))
+    ensure(!approve() && !text(query('.co-pull-page')).includes('open this run for the full findings'), 'The Review tab showed the cut review, or a verdict, before the run was read')
+    checks.push({ name: 'the Review tab waits for the run itself instead of showing a cut review', status: 'pass' })
+
+    window.holdSingleRun = false; window.releaseSingleRun?.()
+    await until(() => approve(), 'The drafted verdict did not show after the run was read')
+    ensure(text(query('.co-pull-page')).includes(FINDINGS), 'The whole findings were not shown: ' + text(query('.co-review-box')).slice(0, 400))
+    ensure(text(query('.co-verdict')).includes('Looks right.'), 'The drafted verdict showed without its words: ' + text(query('.co-verdict')).slice(0, 300))
+    ensure(calls.exactRuns.includes('review-verdict'), 'The run was never read by its id')
+    checks.push({ name: 'the Review tab shows the whole findings and the drafted verdict from the run itself', status: 'pass' })
+
+    // The list is read again every few seconds: the page keeps the whole review on screen meanwhile.
+    shownAgain()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    ensure(approve() && !text(query('.co-review-box')).includes('Reading the review…'), 'A new read of the list put the page back to waiting')
+    checks.push({ name: 'a later read of the list does not take the whole review off the page', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    window.summaryRuns = false; window.holdSingleRun = false; window.releaseSingleRun?.()
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -4032,7 +4221,7 @@ window.runSyncChecks = async () => {
   const timeline = [], reads = {}
   const clock = installClock()
   const graphqlReads = name => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes(name)).length
-  const runReads = () => calls.requests.filter(call => call.method === 'GET' && call.url.endsWith('/review-runs')).length
+  const runReads = () => calls.requests.filter(isRunsRead).length
   const rowOf = title => [...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes(title))
   const asks = title => !!rowOf(title) && text(rowOf(title)).includes('Asks for your review')
   const deskFrame = title => [...document.querySelectorAll('.co-frame')].find(node => text(node).includes(title))?.dataset.frame
@@ -4259,7 +4448,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

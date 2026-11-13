@@ -26,7 +26,7 @@ export function ReviewRow({ entry, project, login = '', onOpenPull }) {
   const open = () => onOpenPull(project, { number: item.number, repository: { nameWithOwner: item.repo } }, 'review')
   const facts = [`#${item.number}`, whoOf(pull?.author?.login, login), run ? <TimeAgo prefix="you reviewed " value={run.created_at} /> : 'responding to feedback']
   return <DeskRow icon={<PullStateIcon pr={pull} />} title={item.title || `Pull request #${item.number}`} facts={<span><DotLine parts={facts} /></span>}
-    pills={chips.map(chip => <StatusPill key={chip.label} chip={chip} />)} onOpen={open} />
+    pills={chips.map((chip, index) => <StatusPill key={index} chip={chip} />)} onOpen={open} />
 }
 
 // One project's rows; a long history folds behind "Show earlier".

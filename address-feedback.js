@@ -30,6 +30,16 @@ export function savedFindings(status, ignored = null) {
   return { summary: String(item.summary), url: item.public_review?.url || '', head: item.head_sha || '' }
 }
 
+// The findings the Respond window carries are the whole saved review. When the list only holds its short form (the
+// findings cut, collaboration.js loadReviewRuns), the run itself is read first (`readRun(id)` answers the run), so a
+// long review is never sent cut; a run that cannot be read throws, and one that no longer holds the item has no findings.
+export async function wholeSavedFindings(status, ignored, readRun) {
+  if (status?.item?.summary_truncated !== true) return savedFindings(status, ignored)
+  const run = await readRun(status.run.id)
+  const item = run?.items?.find(candidate => String(candidate.repo).toLowerCase() === String(status.item.repo).toLowerCase() && candidate.number === status.item.number)
+  return savedFindings(item ? { run, item } : null, ignored)
+}
+
 // What the brief carries, in words, so the owner sees that a long review is not cut: every ticked point, every open thread, the whole saved review,
 // and how many links of the other points are not listed.
 export function coverageLine(items) {

@@ -27,6 +27,7 @@ const runRenderer = () => renderModule(`
       cycle: options.cycle || { phase: 'idle' },
       publicationPreference: options.publicationPreference || 'github',
       githubState: options.githubState || 'connected',
+      ...(options.historyComplete === undefined ? {} : { historyComplete: options.historyComplete }),
       onStartCycle: noop,
       onStopCycle: noop,
       onOpenCycle: noop,
@@ -464,6 +465,21 @@ test('prepared PRs have a counted tab while public follow-ups keep their own wor
   assert.match(prepared, /<strong>Private revision<\/strong>/)
   assert.match(prepared, /<strong>New private proposal<\/strong>/)
   assert.equal((html.match(/<strong>Public PR follow-up<\/strong>/g) || []).length, 1)
+})
+
+test('the fold of finished work shows no count until the older history is loaded, and shows itself when only older history exists', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { renderRun } = await runRenderer()
+  const outcome = status => ({ id: status, kind: 'recent', record: record(status, { status }), label: status, detail: status })
+  const partial = renderRun({ recent: [outcome('merged')], archive: [] }, { tab: 'mine', historyComplete: false })
+  assert.match(partial, /Finished and closed work<\/span><svg/, 'a count of part of the history would be wrong')
+  assert.doesNotMatch(partial, /Finished and closed work<\/span><b>/)
+  assert.match(partial, /Reading earlier work…/, 'opening the fold says the rest is being read')
+  // Nothing is loaded yet but the history may hold older records: the fold is there to ask for them.
+  assert.match(renderRun({ recent: [], archive: [] }, { tab: 'mine', historyComplete: false }), /Finished and closed work/)
+  // Once everything is loaded the fold shows the count again, and is gone when there is nothing.
+  assert.match(renderRun({ recent: [outcome('merged')], archive: [] }, { tab: 'mine' }), /Finished and closed work<\/span><b>1<\/b>/)
+  assert.doesNotMatch(renderRun({ recent: [], archive: [] }, { tab: 'mine' }), /Finished and closed work/)
 })
 
 test('history names outcomes honestly without an archive or success-only implication', async t => {

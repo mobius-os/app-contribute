@@ -72,10 +72,12 @@ function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
   return { live, want, readAll }
 }
 
-// The owner's reviews for the PR reviews page and the rail's badge. Until the
-// first live read of the set has answered they are "checking", and a PR GitHub did
-// not return is unknown, so a stale finding never shows up as waiting on you.
-export function useReviewList({ hub, enabled = true, token, runs, chats = [], responses = [], pulls = [], ignored, login }) {
+// The owner's reviews for the PR reviews page and the rail's badge. A review whose PR the live read has not
+// answered yet shows where it stood at the last full sync (`lastKnown`, the rows desk-copy.js saved), and
+// "checking" only when there is nothing known; a PR GitHub did not return is unknown, so a stale finding
+// never shows up as waiting on you once the read has answered. Until the runs themselves are read
+// (`runsReady`), the saved rows are the list.
+export function useReviewList({ hub, enabled = true, token, runs, runsReady = true, lastKnown = [], chats = [], responses = [], pulls = [], ignored, login }) {
   const raw = useMemo(() => reviewEntries(runs), [runs])
   const refs = useMemo(() => raw.map(entry => ({ repo: entry.item.repo, number: entry.item.number })), [raw])
   const refsKey = refs.map(ref => reviewKey(ref.repo, ref.number)).sort().join('|')
@@ -85,12 +87,16 @@ export function useReviewList({ hub, enabled = true, token, runs, chats = [], re
   const retry = useCallback(() => setAttempt(value => value + 1), [])
   return useMemo(() => {
     const done = live.answered === `${refsKey}@${attempt}`
-    const reviews = raw.map(entry => (done
-      ? { ...entry, ...classifyReview(entry, { login, ignored, runs, chats, responses, live: live.pulls.get(entry.id) }) }
-      : { ...entry, bucket: 'checking', chips: [] }))
-    const entries = [...reviews, ...respondEntries(chats, raw, pulls)]
-    return { entries, counts: reviewCounts(entries), checking: entries.some(entry => entry.bucket === 'checking'), retry, pullsMoved, syncPulls: readAll }
-  }, [raw, live, refsKey, attempt, login, ignored, runs, chats, responses, pulls, retry, pullsMoved, readAll])
+    const known = new Map(lastKnown.map(row => [row.id, row]))
+    const reviews = !runsReady ? lastKnown.map(row => ({ ...row, saved: true })) : raw.map(entry => {
+      if (done || live.pulls.has(entry.id)) return { ...entry, ...classifyReview(entry, { login, ignored, runs, chats, responses, live: live.pulls.get(entry.id) }) }
+      const row = known.get(entry.id)
+      if (!row) return { ...entry, bucket: 'checking', chips: [] }
+      return { ...entry, bucket: row.bucket, confirm: row.confirm, chips: row.chips, decision: row.decision, pull: row.pull, item: entry.item.title ? entry.item : row.item, saved: true }
+    })
+    const entries = [...reviews, ...(runsReady ? respondEntries(chats, raw, pulls) : [])]
+    return { entries, counts: reviewCounts(entries), checking: entries.some(entry => entry.bucket === 'checking'), settled: raw.length === 0 || done, retry, pullsMoved, syncPulls: readAll }
+  }, [raw, live, refsKey, attempt, login, ignored, runs, runsReady, lastKnown, chats, responses, pulls, retry, pullsMoved, readAll])
 }
 
 // Leaving a PR page re-reads the runs: whatever happened there shows on the Desk at once.

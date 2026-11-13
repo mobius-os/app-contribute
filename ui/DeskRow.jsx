@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useContext, useEffect, useRef, useState } from 'react'
 import { sameLogin } from '../domain.js'
 import { watchOverflow } from './watchOverflow.js'
 
@@ -8,7 +8,27 @@ import { watchOverflow } from './watchOverflow.js'
 // A status pill's colour by the tone review-list.js decisionChip gives it: yours to do is amber, a PR that
 // is good to go green, an agent at work or a request to you purple.
 const PILL_CLASS = { owner: 'is-waiting', running: 'is-you', you: 'is-you', good: 'is-ready', blocker: 'is-blocker', quiet: '' }
-export const StatusPill = ({ chip }) => <span className={'co-desk-chip ' + PILL_CLASS[chip.tone]}>{chip.label}</span>
+// A status that changes while it is on screen (the quiet update read something new) is replaced where it stands
+// with one soft highlight: the new pill is a new element, so its highlight plays once. The first label never does.
+export function StatusPill({ chip }) {
+  const label = useRef(chip.label)
+  const [changes, setChanges] = useState(0)
+  if (label.current !== chip.label) { label.current = chip.label; setChanges(count => count + 1) }
+  return <span key={changes} className={'co-desk-chip ' + PILL_CLASS[chip.tone] + (changes ? ' is-changed' : '')}>{chip.label}</span>
+}
+
+// Whether the desk has already been on screen. A row that appears after that (the quiet update brought it in)
+// fades in once, and the list moves once; the rows of the first screen simply are there.
+export const RowArrivalContext = createContext(false)
+export function useDeskPainted(shown) {
+  const [painted, setPainted] = useState(false)
+  useEffect(() => {
+    if (!shown) return undefined
+    const frame = requestAnimationFrame(() => setPainted(true))
+    return () => cancelAnimationFrame(frame)
+  }, [shown])
+  return painted
+}
 
 // Whose PR it is, as the owner reads it.
 export const whoOf = (author, login) => (sameLogin(author, login) ? 'yours' : author || '')
@@ -32,6 +52,7 @@ function RowReason({ text }) {
 // `tone` colours a saved decision's row (its icon and pill). `action` is the row's own answer, a button beside it. A row
 // with no `onOpen` has nowhere to go and is not a button.
 export function DeskRow({ icon, title, facts, labels = null, pills = [], reason = '', aside = null, action = null, tone = '', onOpen = null }) {
+  const [arrived] = useState(useContext(RowArrivalContext))
   const body = <>
     {icon}
     <span className="co-desk-row-main">
@@ -43,7 +64,7 @@ export function DeskRow({ icon, title, facts, labels = null, pills = [], reason 
     {aside}
   </>
   const className = 'co-desk-row' + (tone ? ' is-' + tone : '')
-  return <div className={'co-desk-item' + (action ? ' co-desk-row-split' : '')}>
+  return <div className={'co-desk-item' + (action ? ' co-desk-row-split' : '') + (arrived ? ' is-arriving' : '')}>
     {onOpen ? <button type="button" className={className} onClick={onOpen}>{body}</button> : <div className={className + ' is-static'}>{body}</div>}
     {reason ? <RowReason text={reason} /> : null}
     {action}

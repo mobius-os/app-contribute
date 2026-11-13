@@ -41,10 +41,11 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createSyncHub, onShownAgain } from './refresh.js'
+import { loadDeskCopy, saveDeskCopy, slimReviewRow } from './desk-copy.js'
 import { checkUpstream } from './upstream-check.js'
-import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, projectNeedsCount, settleReviewRequest } from './desk.js'
+import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, projectNeedsCount, settleReviewRequest, withOwnerPulls } from './desk.js'
 import { withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
 import { sharedPublicationObserver } from './publication-observer.js'
 import {
@@ -53,6 +54,7 @@ import {
 } from './contribution-policy.js'
 import {
   fetchIncomingReviews,
+  fetchOwnPulls,
   fetchGithubStatus,
   githubRemainingPoints,
   fetchLiveStates,
@@ -96,6 +98,7 @@ import { chatBlockTarget, validRecordId } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
 import { Shine, Words } from './ui/Shine.jsx'
+import { RowArrivalContext, useDeskPainted } from './ui/DeskRow.jsx'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -609,21 +612,36 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
   // The review requests are a GitHub fact: the hub reads them on open, on Sync, when
   // a review changed state and when its probe saw a change, and on its own at most
-  // every five minutes (each read is 55 points and seconds of GitHub work).
+  // every five minutes (each read is 55 points and seconds of GitHub work). The first
+  // read of the app also asks for what concerns the owner alone (their review requests
+  // and their own PRs), which answers well before the full list: those rows are right
+  // as soon as it does, and the full read replaces the list when it answers.
+  const [incomingFirstReady, setIncomingFirstReady] = useState(false)
+  const ownerReadStarted = useRef(false)
   useEffect(() => {
     if (sendOnly) return undefined
     return hub.fact('incoming', {
       github: true,
-      read: async () => {
+      read: async ({ early } = {}) => {
         if (connRef.current.state !== 'connected') return []
+        if (!ownerReadStarted.current) {
+          ownerReadStarted.current = true
+          // Its failure is the full read's business: that one is read next, and reported.
+          void fetchOwnPulls(token).then(owned => { if (owned) early?.(owned) }, () => {})
+        }
         const rows = await fetchIncomingReviews(token)
         // Not an empty list: that would clear every request. A failed read is reported to the hub
         // instead, which keeps it wanted and reads again after the cooldown.
         if (!rows) throw new Error('The review requests could not be read')
         return rows
       },
-      apply: rows => { incomingReadOkRef.current = true; setIncomingReviews(connRef.current.state === 'connected' ? rows : []) },
-      failed: () => { incomingReadOkRef.current = false }, // the list stays as it was
+      apply: (rows, { early = false } = {}) => {
+        setIncomingFirstReady(true)
+        if (early) { setIncomingReviews(old => withOwnerPulls(old, rows, connRef.current.login)); return }
+        incomingReadOkRef.current = true
+        setIncomingReviews(connRef.current.state === 'connected' ? rows : [])
+      },
+      failed: () => { incomingReadOkRef.current = false; setIncomingFirstReady(true) }, // the list stays as it was
     })
   }, [hub, token, sendOnly])
   const refreshIncomingReviews = useCallback(() => hub.refresh('incoming'), [hub])
@@ -652,7 +670,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     hub, token, appId, connState: conn.state, sendOnly, pullPageOpen: !!pullPage, onReviewsMoved,
   })
   // The answers Respond to feedback saved: the Review tab shows them and the PR logic knows a draft is waiting.
-  const { responses, refresh: refreshResponses } = useRespondResults({ hub, enabled: !sendOnly && conn.state === 'connected' })
+  const { responses, ready: responsesReady, refresh: refreshResponses } = useRespondResults({ hub, enabled: !sendOnly && conn.state === 'connected' })
   // Review requests count toward the first full sync, so the workspace never
   // opens with an empty inbox that fills in a beat later.
   const [incomingReady, setIncomingReady] = useState(false)
@@ -660,6 +678,27 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     if (sendOnly || conn.state === 'checking') return
     Promise.resolve(refreshIncomingReviews()).finally(() => setIncomingReady(true))
   }, [conn.state, refreshIncomingReviews, sendOnly])
+
+  // The last-known copy of the desk (desk-copy.js, with the saved feed and the project snapshot): when all three are
+  // saved the app opens from them at once and updates quietly; without them (a first visit) it waits for its first reads.
+  const [saved, setSaved] = useState(null)
+  useEffect(() => {
+    if (sendOnly) return undefined
+    let cancelled = false
+    Promise.all([loadDeskCopy(), loadSavedFeedStamp()]).then(([copy, feed]) => {
+      if (cancelled) return
+      if (copy) {
+        // Anything a read has already answered is newer than the copy.
+        setIncomingReviews(old => (old.length ? old : copy.incoming))
+        setRepositoryAccess(old => (old.repositories.length ? old : { ...copy.repositories, error: '' }))
+      }
+      setSaved({ copy, hasFeed: !!feed })
+    })
+    return () => { cancelled = true }
+  }, [sendOnly])
+  const savedCopy = saved?.copy || null
+  // Who the desk's rows are for, before GitHub's account answers: the copy's own account.
+  const login = conn.login || savedCopy?.login || ''
 
   // Mount: the cached first screen, GitHub status, and app preferences are all
   // small independent reads. Publish them without holding those controls
@@ -1610,7 +1649,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   // Reviews you started: one row per PR for the Agent runs page, counted in the rail.
-  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, chats: respondChats, responses, pulls: incomingReviews, ignored: ignoredReviews, login: conn.login || '' })
+  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, runsReady, lastKnown: savedCopy?.reviewRows, chats: respondChats, responses, pulls: incomingReviews, ignored: ignoredReviews, login })
   reviewListRef.current = reviewList
 
   // A linked repository outside the owner's lists still opens as a project.
@@ -1646,23 +1685,23 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // What waits on the owner in each project: the same count its Needs you
   // card lists, so the rail and the card never disagree.
   const projectAttention = useMemo(() => Object.fromEntries(sourceProjects
-    .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, conn.login || '', reviewList.entries, standingFacts)])), [sourceProjects, records, reviewStatus, conn.login, reviewList.entries, standingFacts])
+    .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, login, reviewList.entries, standingFacts)])), [sourceProjects, records, reviewStatus, login, reviewList.entries, standingFacts])
   // The home's clickable counts: every number names a next step and its view.
   const deskCountsValue = useMemo(() => deskCounts({
     projects: sourceProjects,
     decisions: contributionRun.decisions,
     incoming: incomingReviews,
     records,
-    login: conn.login || '',
+    login,
     reviews: reviewList.counts,
     reviewEntries: reviewList.entries,
     ...standingFacts,
-  }), [sourceProjects, contributionRun, incomingReviews, records, conn.login, reviewList.counts, reviewList.entries, standingFacts])
+  }), [sourceProjects, contributionRun, incomingReviews, records, login, reviewList.counts, reviewList.entries, standingFacts])
   const desk = {
     view: deskView,
     onView: setDeskView,
     counts: deskCountsValue,
-    login: conn.login || '',
+    login,
     records,
     runs: reviewRuns,
     respondChats,
@@ -1753,24 +1792,48 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     document.addEventListener('pointerdown', pointer, true)
     return () => { document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', pointer, true) }
   }, [])
-  // The workspace opens only once its first sync is complete — the saved
-  // ledger, the project snapshot, the GitHub account and the review-request
-  // inbox — so nothing visibly reloads right after it appears. Latched: a
+  // The workspace opens at once from the last-known copy (savedCopy, the saved feed and the project snapshot) and
+  // updates quietly under a header line that says so. Only a first visit, or an account with nothing saved, waits
+  // behind the opening screen, and only for what it cannot do without: the saved ledger, the project snapshot, the
+  // GitHub account and the first answer of what concerns the owner (their review requests and own PRs). Latched: a
   // later manual refresh never drops the app back to the opening screen.
   const [booted, setBooted] = useState(false)
+  const deskPainted = useDeskPainted(booted)
   // The first successful load and later explicit refreshes share one header history (ui/useDeskSync.js).
   const { refreshingAll, refreshNote, setRefreshNote, syncResult, syncAll, markSynced } = useDeskSync({
     refreshEverything, booted, connected: conn.state === 'connected', enabled: !sendOnly,
     facts: syncFacts({ incoming: incomingReviews, counts: deskCountsValue, projects: sourceProjects, checks: upstreamChecks }),
   })
   const refreshAll = () => syncAll()
-  const bootReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady
+  const copyReady = !!savedCopy && saved.hasFeed && !!sourceSnapshot && feedKnown
+  const firstOpenReady = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingFirstReady || incomingReady || conn.state !== 'connected') && runsReady
   useEffect(() => {
-    if (!bootReady || booted) return
+    if (booted || !(copyReady || firstOpenReady)) return
     setBooted(true)
-    if (conn.state === 'connected') setRefreshNote(old => old || (!sourceError && syncReadsCurrent() ? { at: new Date().toISOString(), failed: false } : { at: null, failed: true }))
-    if (!sourceError && syncReadsCurrent()) markSynced()
-  }, [bootReady, booted, conn.state, sourceError])
+    setRefreshNote({ at: copyReady ? savedCopy.syncedAt : null, updating: true })
+  }, [booted, copyReady, firstOpenReady, savedCopy])
+  // The open's own reads have all answered, so the header can say how it went: they are the facts the desk shows,
+  // each read once by its owner, and the quiet update ends with the last of them.
+  const openReadsAnswered = ledgerReady && !sourceLoading && conn.state !== 'checking' && (incomingReady || conn.state !== 'connected') && runsReady && (responsesReady || conn.state !== 'connected') && reviewList.settled
+  const [openSynced, setOpenSynced] = useState(false)
+  useEffect(() => {
+    if (!booted || !openReadsAnswered || openSynced) return
+    setOpenSynced(true)
+    // Without a connected GitHub account there is nothing to sync. A GitHub that could not be reached is a failed update.
+    if (conn.state === 'disconnected') { setRefreshNote(null); return }
+    const synced = conn.state === 'connected' && !sourceError && syncReadsCurrent()
+    setRefreshNote(old => (synced ? { at: new Date().toISOString(), failed: false } : { at: old?.at || null, failed: true }))
+    if (synced) markSynced()
+  }, [booted, openReadsAnswered, openSynced, conn.state, sourceError])
+
+  // What the next visit opens from: saved once the open has been synced, and again when a later read moved something.
+  const reviewRows = useMemo(() => reviewList.entries.map(slimReviewRow).filter(Boolean), [reviewList.entries])
+  const reviewPulls = useMemo(() => settledPulls(reviewList.livePulls), [reviewList.livePulls])
+  useEffect(() => {
+    if (sendOnly || !openSynced || !refreshNote?.at || refreshNote.failed || !conn.login) return undefined
+    const timer = setTimeout(() => { void saveDeskCopy({ login: conn.login, syncedAt: refreshNote.at, incoming: incomingReviews, repositories: repositoryAccess, reviewRows, reviewPulls }) }, 1500)
+    return () => clearTimeout(timer)
+  }, [sendOnly, openSynced, refreshNote, conn.login, incomingReviews, repositoryAccess, reviewRows, reviewPulls])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
@@ -1850,19 +1913,20 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       <div className="co-root" data-design-seed="ae1883df">
         <style>{CSS}</style>
         <BootProgress ledgerReady={ledgerReady} projectsReady={!sourceLoading} accountReady={conn.state !== 'checking'} accountConnected={conn.state === 'connected'}
-          pullsReady={incomingReady} runsReady={runsReady} projectCount={sourceProjects.length} pullCount={incomingReviews.length} />
+          pullsReady={incomingFirstReady || incomingReady} runsReady={runsReady} projectCount={sourceProjects.length} pullCount={incomingReviews.length} />
       </div>
     )
   }
   // One workspace owns project context and the exact contribution beneath it.
   return (
     <SyncHubContext.Provider value={hub}>
+    <RowArrivalContext.Provider value={deskPainted}>
     <ScreenshotLoaderContext.Provider value={loadScreenshot}>
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
-          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed ? SYNC_NOTE_ID : undefined}>
+          <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed || refreshNote?.updating ? SYNC_NOTE_ID : undefined}>
             <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
             <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.sync}</span>
               <span className="co-label-short">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
@@ -1928,6 +1992,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       </main>
     </div>
     </ScreenshotLoaderContext.Provider>
+    </RowArrivalContext.Provider>
     </SyncHubContext.Provider>
   )
 }

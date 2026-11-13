@@ -32,6 +32,14 @@ export function authoredPulls(incoming, login) {
   return (incoming || []).filter(pr => !pr.reviewRequested && sameLogin(pr?.author?.login, login))
 }
 
+// The first answer of the review requests (api.js fetchOwnPulls) laid over the list as it stood: the PRs that
+// concern the owner (asked for their review, or theirs) are replaced by that read, every other stays as it was
+// until the full read of the PRs that involve them answers.
+export function withOwnerPulls(incoming, owned, login) {
+  const concernsOwner = pr => pr.reviewRequested || sameLogin(pr?.author?.login, login)
+  return [...owned, ...(incoming || []).filter(pr => !concernsOwner(pr))]
+}
+
 // Submitting a review answers its request on GitHub, which then stops listing
 // the PR as waiting on the owner. Say so at once instead of at the next read.
 export function settleReviewRequest(incoming, repo, number) {

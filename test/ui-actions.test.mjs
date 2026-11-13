@@ -467,9 +467,11 @@ test('every refresh control renews the contribution feed and reports a partial o
   assert.match(appSource, /<button[^>]*co-toolbar-refresh[^>]*aria-label=\{NAMES\.sync\}[\s\S]*?<SyncNote note=\{refreshNote\} \/>/)
   assert.equal(NAMES.sync, 'Sync with GitHub')
   // A failed review-request read is a failed sync, on a manual Sync and on the first load alike (the hub settles it without throwing).
-  assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false \}/)
+  assert.match(appSource, /failed: \(\) => \{ incomingReadOkRef\.current = false; setIncomingFirstReady\(true\) \}/)
   assert.match(appSource, /syncReadsCurrent = \(\) => ledgerCurrentRef\.current && \(connRef\.current\.state !== 'connected' \|\| incomingReadOkRef\.current\)/)
-  assert.match(appSource, /!sourceError && syncReadsCurrent\(\) \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: null, failed: true \}/)
+  // The open's own sync is the first load's header note: a sync that came back, or one that could not (keeping the copy's age).
+  assert.match(appSource, /synced \? \{ at: new Date\(\)\.toISOString\(\), failed: false \} : \{ at: old\?\.at \|\| null, failed: true \}/)
+  assert.match(appSource, /const synced = conn\.state === 'connected' && !sourceError && syncReadsCurrent\(\)/)
   const syncSource = readFileSync(new URL('../ui/useDeskSync.js', import.meta.url), 'utf8')
   assert.match(syncSource, /if \(outcome\?\.ok && outcome\?\.upstream\?\.ok !== false\) \{[\s\S]*?setRefreshNote\(\{ at: new Date\(\)\.toISOString\(\), failed: false \}\)/)
   assert.match(syncSource, /else if \(!quiet\) setRefreshNote\(old => \(\{ at: old\?\.at \|\| null, failed: true \}\)\)/)
@@ -484,12 +486,17 @@ test('GitHub is synced once per open: no hidden foreground re-sync, one explicit
   assert.match(appSource, /className="co-btn co-toolbar-refresh"/)
 })
 
-test('the workspace opens only after its first sync and never falls back to the boot screen', () => {
-  assert.match(appSource, /const bootReady = ledgerReady && !sourceLoading && conn\.state !== 'checking'/)
-  assert.match(appSource, /if \(!bootReady \|\| booted\) return\s*setBooted\(true\)/)
-  // The opening screen names the same five reads bootReady waits for, so its progress cannot drift from it.
+test('the workspace opens from its last-known copy, or after the first reads of a first visit, and never falls back to the boot screen', () => {
+  // A saved copy (desk copy, saved feed, project snapshot) opens the desk at once; without one the app waits for what it cannot do without.
+  assert.match(appSource, /const copyReady = !!savedCopy && saved\.hasFeed && !!sourceSnapshot && feedKnown/)
+  assert.match(appSource, /const firstOpenReady = ledgerReady && !sourceLoading && conn\.state !== 'checking' && \(incomingFirstReady \|\| incomingReady \|\| conn\.state !== 'connected'\) && runsReady/)
+  assert.match(appSource, /if \(booted \|\| !\(copyReady \|\| firstOpenReady\)\) return\s*setBooted\(true\)/)
+  // The quiet update: the header says so until every read of the open has answered, and the copy is saved after that.
+  assert.match(appSource, /setRefreshNote\(\{ at: copyReady \? savedCopy\.syncedAt : null, updating: true \}\)/)
+  assert.match(appSource, /const openReadsAnswered = ledgerReady && !sourceLoading && conn\.state !== 'checking' && \(incomingReady \|\| conn\.state !== 'connected'\) && runsReady && \(responsesReady \|\| conn\.state !== 'connected'\) && reviewList\.settled/)
+  // The opening screen names the same reads a first visit waits for, so its progress cannot drift from it.
   assert.match(appSource, /<BootProgress ledgerReady=\{ledgerReady\} projectsReady=\{!sourceLoading\} accountReady=\{conn\.state !== 'checking'\}/)
-  assert.match(appSource, /pullsReady=\{incomingReady\} runsReady=\{runsReady\}/)
+  assert.match(appSource, /pullsReady=\{incomingFirstReady \|\| incomingReady\} runsReady=\{runsReady\}/)
   assert.match(readFileSync(new URL('../ui/BootProgress.jsx', import.meta.url), 'utf8'), /className="co-boot" role="status"/)
 })
 

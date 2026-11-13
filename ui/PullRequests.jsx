@@ -14,7 +14,7 @@ import { Icon } from './Icons.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
 import { ReviewDialog } from './ReviewDialog.jsx'
 import { AddressFeedbackWindow } from './AddressFeedback.jsx'
-import { savedFindings } from '../address-feedback.js'
+import { wholeSavedFindings } from '../address-feedback.js'
 import { responseView } from '../respond-result.js'
 import { askOwner, ownerConfirmOffered } from '../owner-grant.js'
 import { approveResponse, discardResponse } from '../respond-flow.js'
@@ -261,6 +261,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // Where Möbius confirms the owner's sensitive taps on its own sheet (owner-grant.js), the writes below ask it first; elsewhere null.
   const shellConfirm = ownerConfirmOffered(capabilities) ? askOwner : null
   const [busy, setBusy] = useState(false)
+  const [reviewReadError, setReviewReadError] = useState('')
   const [error, setError] = useState('')
   const request = useRef(0)
   const [detailRevision, setDetailRevision] = useState(0)
@@ -487,10 +488,19 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     setOpened(prKey(pr))
     task?.open('task:detail')
   }
+  // The Respond window opens with the whole saved review (address-feedback.js wholeSavedFindings).
+  async function openRespond(source) {
+    setReviewReadError('')
+    let findings
+    try {
+      findings = await wholeSavedFindings(statusFor(source), ignoredReviews, async id => (await collaborationRequest(token, appId, `review-runs/${encodeURIComponent(id)}`)).run)
+    } catch { if (alive.current) setReviewReadError('The saved review could not be read just now, so Respond to feedback did not open. Try again.'); return }
+    if (alive.current) setAddressing({ pr: { ...source, repository: { ...source.repository } }, findings, response: responseView(responses, source) })
+  }
   // A launch or assignment opened from one PR stays beside that PR; a batch
   // opens under the list header. `anchor` is only placement, never scope.
   function choose(pulls, job, anchor = '') {
-    if (job === 'respond') { setAssigning(null); setAddressing({ pr: { ...pulls[0], repository: { ...pulls[0].repository } }, findings: savedFindings(statusFor(pulls[0]), ignoredReviews), response: responseView(responses, pulls[0]) }); return }
+    if (job === 'respond') { setAssigning(null); void openRespond(pulls[0]); return }
     if (YOUR_INTENTS.has(job) || job === MERGE_OPTIONS || job === FOLLOW) {
       setAssigning(null)
       const record = recordsForPull(records, pulls[0])[0]
@@ -607,7 +617,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     const run = statusFor(pr)?.run
     const answer = responseView(responses, pr)
     return {
-      own: isOwnPull(pr, conn.login), standing: standingOf(pr), respondChat: respondChatOf(respondChats, pr), earlier: run ? null : earlierReviewForPull(relevantRuns, pr), busy, error: runError, pulls, listState: data,
+      token, appId, own: isOwnPull(pr, conn.login), standing: standingOf(pr), respondChat: respondChatOf(respondChats, pr), earlier: run ? null : earlierReviewForPull(relevantRuns, pr), busy, error: runError, pulls, listState: data,
       ignored: ignoredReviews,
       canPost: capabilities?.post_findings_now === true,
       onPost: ({ run: postRun, item }) => setPosting({ pr, run: postRun, item, own: isOwnPull(pr, conn.login) }),
@@ -630,7 +640,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     }
   }
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>
-      <RunDetail run={run} pulls={pulls} listState={data} busy={busy} error={runError}
+      <RunDetail token={token} appId={appId} run={run} pulls={pulls} listState={data} busy={busy} error={runError}
         onStop={() => stopRun(run)} onVerdict={(item, proposal, decision, extra) => decideVerdict(run, item, proposal, decision, extra)} onRepair={capabilities?.push_approval === true ? (item, attempt, decision) => decideRepair(run, item, attempt, decision) : null} onCheck={() => checkRun(run)} retryPulls={retryPulls(run)} onRetry={retry => choose(retry, retry[0] ? retryJob(run, retry[0]) : 'review', runAnchor(run))}
         updater={projectUpdater(project)} />
     </TaskPane>
@@ -695,6 +705,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const runNotes = <>
     {runNotice ? <p className="co-pr-note" role="status">{runNotice}</p> : null}
     {runError ? <p className="co-pr-note" role="status">Agent progress unavailable: {runError}</p> : null}
+    {reviewReadError ? <p className="co-pr-note" role="alert">{reviewReadError}</p> : null}
   </>
   if (scope === 'mine') return <section className="co-public-work is-mine" aria-label={NAMES.agentRuns}>
     {runNotes}

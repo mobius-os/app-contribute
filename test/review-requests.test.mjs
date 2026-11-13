@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { fetchIncomingReviews } from '../api.js'
+import { fetchIncomingReviews, fetchOwnPulls } from '../api.js'
 
 const pr = (number, repo = 'mobius-os/mobius') => ({
   number, url: `https://github.com/${repo}/pull/${number}`, repository: { nameWithOwner: repo },
@@ -42,6 +42,30 @@ test('a read GitHub did not fully answer is null, never an empty list of request
       rows.push(await fetchIncomingReviews('token'))
     }
     assert.deepEqual(rows, [null, null, null, []])
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('the first read asks only for what concerns the owner, in the shape of the full read', async () => {
+  const original = globalThis.fetch
+  let query = ''
+  globalThis.fetch = async (url, options) => {
+    query = JSON.parse(options.body).query
+    return { ok: true, json: async () => ({ data: {
+      authored: { nodes: [pr(1925), pr(1912), pr(1926)] },
+      requested: { nodes: [pr(1912)] },
+    } }) }
+  }
+  try {
+    const rows = await fetchOwnPulls('token')
+    assert.match(query, /query ContributeOwnPulls/)
+    assert.match(query, /author:@me/)
+    assert.match(query, /review-requested:@me/)
+    assert.doesNotMatch(query, /involves:@me/, 'the PRs that merely involve the owner follow in the full read')
+    assert.deepEqual(rows.map(row => [row.number, row.reviewRequested === true]), [[1912, true], [1925, false], [1926, false]], 'a request first, and never listed twice')
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: { authored: { nodes: [pr(1)] }, requested: null } }) })
+    assert.equal(await fetchOwnPulls('token'), null, 'a read GitHub did not fully answer is never an empty list')
   } finally {
     globalThis.fetch = original
   }

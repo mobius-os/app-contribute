@@ -510,3 +510,59 @@ test('the saved answers are read closely while one is being posted, and on the i
   await elapse(SYNC_POLICY.runsIdleMs)
   assert.equal(state.reads.responses - later, 1, 'five minutes on, a chat that never started is back on the idle cadence')
 })
+
+// A read with a small first answer long before its whole one (the owner's own PRs before every PR that involves them).
+test('a read may show an early answer at once, and its own answer replaces it', async () => {
+  const { hub, state, fact, setVisible } = setup()
+  const shown = []
+  let finish
+  fact('incoming', {
+    apply: (value, options = {}) => shown.push([value, options.early === true]),
+    read: ({ early }) => { early('first'); return new Promise(resolve => { finish = () => resolve('whole') }) },
+  })
+  hub.start(); await setVisible(true)
+  const reading = hub.refresh('incoming')
+  await settle()
+  assert.deepEqual(shown, [['first', true]], 'the early answer shows while the read is still running')
+  finish(); await reading
+  assert.deepEqual(shown, [['first', true], ['whole', false]])
+  assert.equal(state.reads.incoming, undefined)
+})
+
+test('an early answer never lands over an action that superseded the read, or after the read ended', async () => {
+  const { hub, fact, setVisible } = setup()
+  const shown = []
+  let early, finish
+  fact('incoming', {
+    apply: (value, options = {}) => shown.push(options.early ? `early ${value}` : value),
+    read: args => { early = args.early; return new Promise(resolve => { finish = resolve }) },
+  })
+  hub.start(); await setVisible(true)
+  const reading = hub.refresh('incoming')
+  await settle()
+  hub.supersede('incoming')
+  early('late first answer')
+  assert.deepEqual(shown, [], 'the action replaced what this read would show')
+  finish('whole'); await reading
+  early('after the end')
+  assert.deepEqual(shown, [], 'neither the whole answer nor a straggler lands')
+
+  const again = hub.refresh('incoming')
+  await settle()
+  finish('second whole'); await again
+  early('straggler of an earlier read')
+  assert.deepEqual(shown, ['second whole'])
+})
+
+test('a read that fails after an early answer is reported once and the early answer stays shown', async () => {
+  const { hub, fact, setVisible } = setup()
+  const events = []
+  fact('incoming', {
+    apply: (value, options = {}) => events.push(options.early ? `early ${value}` : value),
+    failed: error => events.push(`failed ${error.message}`),
+    read: async ({ early }) => { early('first'); throw new Error('GitHub did not answer') },
+  })
+  hub.start(); await setVisible(true)
+  await hub.refresh('incoming')
+  assert.deepEqual(events, ['early first', 'failed GitHub did not answer'])
+})
