@@ -83,11 +83,12 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub sees is one labelled icon at the top of the window, and the words stay in the page for a screen reader', async t => {
+test('what GitHub sees is one labelled icon at the foot of the window, above its buttons, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
-  assert.match(html, /class="co-rw-tools"><span class="co-rw-seen is-public">/)
+  assert.match(html, /<footer class="co-rw-foot"><span class="co-rw-seen is-public">/, 'it is the first line of the foot, the last thing read before the start button')
+  assert.doesNotMatch(html, /co-rw-tools/, 'and no longer in the head')
   assert.match(html, /<button type="button" class="co-btn co-btn-quiet is-toned co-rw-seen-btn" aria-describedby="[^"]*" aria-pressed="false"><span>What GitHub sees<\/span><svg/, 'the icon is named in words, and the words come before it so the card’s arrow stays under the icon')
   assert.doesNotMatch(html, /Seen on GitHub/)
   assert.match(html, /role="tooltip"[^>]*><strong>What GitHub sees:<\/strong> one approve, request changes or comment, posted by the agent from your account as you allowed/)
@@ -97,7 +98,7 @@ test('what GitHub sees is one labelled icon at the top of the window, and the wo
   assert.match(quiet, /<strong>What GitHub sees:<\/strong> nothing\. Only you see the review\./)
   // The fix window says the same thing the same way.
   const fix = api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} })
-  assert.match(fix, /co-rw-seen is-private/)
+  assert.match(fix, /<footer class="co-rw-foot"><span class="co-rw-seen is-private">/)
   assert.equal((fix.match(/>Cancel<\/button>/g) || []).length, 1, 'and the fix window has one way out, Cancel')
 })
 
@@ -120,22 +121,30 @@ test('the dialog styles give the row, the steps and the hover card their room', 
   assert.match(css, /@media \(hover:hover\) and \(pointer:fine\) \{ \.co-rw-seen-btn:hover \+ \.co-rw-seen-card/, 'hover only where there is a hover')
 })
 
-test('the hover card is anchored to the header and sized from the dialog, never the viewport', () => {
+test('the hover card opens above the label and is sized from the foot, never the viewport', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
   const card = css.match(/\.co-rw-seen-card \{([^}]*)\}/)[1]
-  assert.match(css, /\.co-rw-head \{[^}]*--rw-edge:28px; position:relative;/, 'the header is what the card is positioned against')
-  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1; margin-bottom:6px; \}/, 'the icon wrapper is not a positioned ancestor')
-  assert.match(card, /left:var\(--rw-edge\); right:var\(--rw-edge\); margin-inline:auto; width:min\(300px,calc\(100% - 2 \* var\(--rw-edge\)\)\)/, 'the card keeps one header edge of room on each side and sits in the middle')
-  assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and header insets and clips the card on a narrow phone')
-  assert.match(css, /@media\(max-width:680px\) \{[^@]*\.co-rw-head \{ --rw-edge:20px;/, 'the phone card has the smaller edge')
+  assert.match(css, /\.co-rw-seen \{ position:relative; display:grid; justify-items:center; \}/, 'the label’s own line is what the card is positioned against')
+  assert.match(card, /bottom:calc\(100% \+ 10px\); left:50%; width:min\(320px,100%\)/, 'the card sits above the label, in the middle, no wider than the foot')
+  assert.doesNotMatch(card, /100vw/, 'a viewport width ignores the sheet and foot insets and clips the card on a narrow phone')
+  assert.match(css, /\.co-rw-seen-card::before \{[^}]*bottom:-6px; left:50%;/, 'the arrow points down at the middle of the label')
 })
 
-test('the lock’s label sits beside its icon as the first line of the head, centred, with the card’s arrow pointing at it', () => {
+test('the label pulses gently so it reads as something to open, and stays still for reduced motion', () => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 12px; cursor:help; \}/)
-  assert.match(css, /\.co-rw-seen \{ display:grid; order:-1;/, 'it comes before the purple line, so it never sits over a long title')
-  assert.match(css, /\.co-rw-seen-card::before \{[^}]*left:50%;/, 'the arrow is under the middle of the centred lock')
-  assert.doesNotMatch(css, /@media\(max-width:450px\) \{\n \.co-rw-tools \{ display:contents; \}/, 'there is no second narrow layout for it any more')
+  assert.match(css, /\.co-btn\.co-rw-seen-btn \{ display:flex; gap:8px; padding:0 12px; cursor:help; animation:co-seen-pulse 2\.8s ease-in-out infinite; \}/)
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\) \{[^@]*\.co-btn\.co-rw-seen-btn \{ animation:none; \}/)
+})
+
+test('an agent window keeps one size: the head and foot stay put and the middle scrolls without a scrollbar', async t => {
+  const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  assert.match(css, /\.co-dialog:has\(> \.co-review-window\.is-sized\) \{ display:flex; height:min\(780px,calc\(100% - 40px\)\); overflow:hidden; \}/)
+  assert.match(css, /\.co-review-window\.is-sized > \.co-rw-body \{[^}]*overflow-y:auto;[^}]*scrollbar-width:none;/)
+  assert.match(css, /\.co-review-window\.is-sized > \.co-rw-body > \* \{ flex-shrink:0; \}/, 'what opens inside (the agent list, the commit) scrolls instead of squeezing the rest')
+  const api = await windows(t)
+  if (!api) return
+  assert.match(api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review' }, onModeChange() {}, onCancel() {} }), /class="co-review-window is-sized"/)
+  assert.match(api.render('AddressFeedbackWindow', { pr, token: 't', appId: 1, onStart() {}, onClose() {} }), /class="co-review-window is-sized"/)
 })
 
 test('a new Review or Fix window is started from the saved agent, and only when there is one', () => {

@@ -19,8 +19,8 @@ import { frameOf } from '../pr-standing.js'
 import { ROLE_TITLES } from '../provenance.js'
 import { NAMES } from '../names.js'
 import { showOpenTab } from './stripScroll.js'
-import { NextStep, StateLine } from './NextStep.jsx'
-import { nextStepModel } from '../next-step.js'
+import { NextStep } from './NextStep.jsx'
+import { nextStepModel, stageWord } from '../next-step.js'
 import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { PullChecks } from './PullChecks.jsx'
@@ -395,19 +395,19 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   return <div className="co-pr-detail" aria-label={`Details for PR ${pr.number}`}>
     <PullStickyTitle pr={pr} targetRef={titleRef} tone={FEEDBACK_FLAGS[record?.attention?.type]?.tone} />
     <header className="co-gh-pr-head">
-      <h3 className="co-gh-pr-title" ref={titleRef}>{pr.title} <span className="co-pr-title-num">#{pr.number}</span></h3>
-      {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
+      <h3 className="co-gh-pr-title" ref={titleRef}><span className="co-pr-title-num">#{pr.number}</span> {pr.title}</h3>
     </header>
+    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} note={stageWord(pr, review?.standing)} /><span className="co-pr-sub-num">#{pr.number}</span>
+      <span>by <b>{pr.author?.login || 'Someone'}</b></span>
+      <BranchFlow pr={pr} />
+      {labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div>
     <div className={'co-pr-detail-actions' + tips.className} onPointerOut={tips.onPointerOut} onBlur={tips.onBlur}>
-      {!readOnly ? <ActionsMenu variant="button" align="start" pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
+      {!readOnly ? <ActionsMenu variant="button" align="start" brief pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
       {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /></button> : null}
       {status && onProgress ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
       {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /></a> : null}
       <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
     </div>
-    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} /><span className="co-pr-sub-num">#{pr.number}</span>
-      <span>by <b>{pr.author?.login || 'Someone'}</b></span></div>
-    <StateLine pr={pr} decision={review?.standing} />
     {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
     {conversationLoading ? null : <>
     <details className="co-gh-description">
@@ -416,7 +416,6 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
         <small>{openedLine(description.data?.user?.login || pr.author?.login, pr.createdAt)}</small>
       </summary>
       <div className="co-desc-content">
-        <BranchFlow pr={pr} />
         {readState(description, 'description')}
         {ready(description) ? <ClampedMarkdown markdown={description.data?.body || '_No description provided._'} /> : null}
       </div>

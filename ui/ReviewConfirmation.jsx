@@ -179,8 +179,8 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
   const copy = reviewWindowCopy({ mode: ownOnly ? 'review' : choice.mode, intent: ownOnly ? 'check_my_pr' : choice.intent, title: choice.title, posting, verdict, agentPosts, count: choice.pulls.length, bindCurrentTarget })
   const postingUnavailable = choice.mode === 'review_merge' && !!capabilities && !(capabilities.post_review === true && capabilities.propose_verdict === true)
   const startBlocked = takeover && !!blocker
-  return <section ref={confirmation} tabIndex={-1} className="co-review-window" aria-labelledby={titleId}>
-    <WindowHead title={copy.title} titleId={titleId} pulls={choice.pulls} tools={<SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />} />
+  return <section ref={confirmation} tabIndex={-1} className="co-review-window is-sized" aria-labelledby={titleId}>
+    <WindowHead title={copy.title} titleId={titleId} pulls={choice.pulls} />
     <div className="co-rw-body">
       {choice.since && token ? <SinceReview token={token} pr={choice.pulls[0]} since={choice.since} /> : null}
       {takeover && choice.intent === 'take_over' && onReasonChange ? <TakeoverReason value={choice.takeover_reason || ''} disabled={busy} onChange={onReasonChange} /> : null}
@@ -196,6 +196,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
       <VersionDetails pulls={choice.pulls} live={bindCurrentTarget} />
     </div>
     <footer className="co-rw-foot">
+      <SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />
       <p>{copy.footnote}</p>
       <div className="co-rw-actions">
         {onCancel ? <button type="button" className="co-btn" disabled={busy} onClick={onCancel}>{NAMES.cancel}</button> : null}

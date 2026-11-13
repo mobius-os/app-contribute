@@ -1672,10 +1672,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
         runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
         presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore}
-        records={recordsForProject(records, project)} onRecord={record => {
-          setPullPage(null)
-          if (project?.key) setProjectFocus({ key: project.key, nonce: crypto.randomUUID() })
-        }} />
+        records={recordsForProject(records, project)} />
     }
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}

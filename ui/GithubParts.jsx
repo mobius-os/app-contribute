@@ -107,9 +107,10 @@ export function PullStateIcon({ pr, size = 16 }) {
 // GitHub's own state colours: open green, draft grey, merged purple, closed red.
 const STATE_COLOR = { open: '238636', draft: '6e7781', merged: '8957e5', closed: 'da3633' }
 
-export function PullStateBadge({ pr }) {
+// `note` is what an open PR's badge adds after the state ("Open · In review").
+export function PullStateBadge({ pr, note = '' }) {
   const state = pullState(pr)
-  return <span className={`co-gh-badge is-${state}`} style={labelColors(STATE_COLOR[state])}><Icon name={state === 'draft' ? 'draft' : state === 'merged' ? 'merge' : 'pull'} size={14} />{STATE_TEXT[state]}</span>
+  return <span className={`co-gh-badge is-${state}`} style={labelColors(STATE_COLOR[state])}><Icon name={state === 'draft' ? 'draft' : state === 'merged' ? 'merge' : 'pull'} size={14} />{STATE_TEXT[state]}{note ? ` · ${note}` : ''}</span>
 }
 
 /** "✓ 18/18" as on GitHub's PR list. Counts are GitHub's rollup, not a review. */

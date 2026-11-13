@@ -1,7 +1,8 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Eighteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Twenty-one scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
+// runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runPullReadingChecks (the whole app: reading a PR page: pictures, the Checks tab, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
@@ -47,6 +48,8 @@ import { ProjectRow, SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ReviewDialog } from './ui/ReviewDialog.jsx'
+import { ReviewConfirmation } from './ui/ReviewConfirmation.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { localChangeSentence, localChangeSummary } from './source-map.js'
 import { PullRequests } from './ui/PullRequests.jsx'
@@ -2170,6 +2173,38 @@ window.runDeskFrameChecks = async () => {
 // What a thumb lands on is the browser's answer, so this asks it (elementFromPoint) at the edges of what is drawn and at the edges of the 44px box
 // that has to be around it: a neighbour's tap area must not cover a control's face, a border or a box that clips must not cut the area short,
 // and a control narrower than 44px needs its width too. Desktop draws 44px, so there the same probes show nothing covers a face.
+// The review window over a bulk selection: thirty selected PRs list in the head, and the window keeps its one size,
+// so the list scrolls inside the head and Start and Cancel stay on screen and reachable.
+window.runBulkReviewWindowChecks = async () => {
+  const checks = []
+  try {
+    const pulls = Array.from({ length: 30 }, (_, index) => ({ number: index + 1, title: 'Neutral change number ' + (index + 1), url: 'https://github.com/team/repo/pull/' + (index + 1),
+      headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: 'b'.repeat(40) } }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' },
+      author: { login: 'owner' }, assignees: { nodes: [] } }))
+    const choice = { mode: 'review', intent: 'review', pulls, options: { post_review: true, propose_verdict: true } }
+    const capabilities = { review_fix_merge: true, pr_machine: true, post_review: true, propose_verdict: true }
+    createRoot(document.getElementById('root')).render(<div className="co-root"><style>{CSS}</style><ReviewDialog onClose={() => {}}>
+      <ReviewConfirmation choice={choice} capabilities={capabilities} onConfirm={() => {}} onCancel={() => {}} onModeChange={() => {}} onOptionsChange={() => {}} />
+    </ReviewDialog></div>)
+    await until(() => review(), 'The review window did not open')
+    await captureShot('bulk-review-window')
+    const dialog = query('.co-dialog').getBoundingClientRect(), list = query('.co-rw-head .co-rw-list')
+    const inside = node => { const box = node.getBoundingClientRect(); return box.top >= dialog.top - 1 && box.bottom <= dialog.bottom + 1 }
+    const start = [...review().querySelectorAll('.co-rw-actions .co-btn-primary')][0], cancel = cancelButton(review())
+    ensure(start && cancel && inside(start) && inside(cancel), 'Start or Cancel is clipped by the window: dialog ' + Math.round(dialog.top) + ' to ' + Math.round(dialog.bottom) + ', Start ' + Math.round(start?.getBoundingClientRect().bottom))
+    const head = query('.co-rw-head').getBoundingClientRect()
+    ensure(head.height < dialog.height / 2, 'The head of ' + pulls.length + ' PRs takes ' + Math.round(head.height) + ' of the window\'s ' + Math.round(dialog.height) + 'px')
+    ensure(list && list.scrollHeight > list.clientHeight && getComputedStyle(list).overflowY === 'auto', 'The PR list does not scroll inside the head')
+    ensure(inside(query('.co-rw-body')) && query('.co-rw-body').getBoundingClientRect().height > 80, 'The settings area is squeezed out of the window')
+    list.scrollTop = list.scrollHeight
+    ensure(list.scrollTop > 0 && inside(start), 'Scrolling the PR list moved the window\'s buttons off screen')
+    checks.push({ name: 'a bulk review window keeps Start and Cancel on screen and scrolls its PR list', status: 'pass' })
+    return { status: 'pass', checks }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('#root')).slice(0, 1000) }
+  }
+}
+
 window.runTapBoxChecks = async () => {
   const checks = []
   const TAP = 44
@@ -2690,8 +2725,8 @@ window.runDeskListChecks = async () => {
     await captureShot('desk-my-prs-merged')
     await click(rowOf('Merged contribution').querySelector('button'))
     await until(() => query('.co-desk-back') && text(query('.co-pull-page')).includes('Merged contribution'), 'A merged row did not open its PR page')
-    await until(() => query('.co-next-hint'), 'The merged PR page shows no next-step line')
-    ensure(text(query('.co-next-hint')) === 'Merged' && !query('.co-next-step button:not(:disabled)'), 'The merged PR page said ' + text(query('.co-next-hint')) + ' and offered a next step')
+    await until(() => query('.co-pull-page .co-gh-badge.is-merged'), 'The merged PR page does not say Merged in its state badge')
+    ensure(text(query('.co-pull-page .co-gh-badge')) === 'Merged' && !query('.co-next-step'), 'The merged PR page said ' + text(query('.co-pull-page .co-gh-badge')) + ' and drew a next-step panel: ' + text(query('.co-next-step')))
     await captureShot('merged-pr-page')
     checks.push({ name: 'a merged row opens its PR page, with nothing left to do on it', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
@@ -3338,23 +3373,25 @@ window.runAskApprovalChecks = async () => {
     // 5. Where Möbius confirms the owner's taps on its own sheet (it advertises owner_confirm), that sheet is the one confirm: Merge is one tap on
     // the action, the app draws no confirm of its own (its sheet only waits, and says Merging… once Möbius has confirmed), Möbius is asked for exactly
     // the request that is then sent, and a cancel sends nothing.
-    // "Merge options…" is the way to choose how it lands first, and only where the repository allows more than one way. Without owner_confirm the
+    // "Merge options…" is the way to choose how it lands first: a second, smaller choice on the Merge row, and only where the repository allows more than one way. Without owner_confirm the
     // blocks above are the proof that nothing changed: the app's own sheet, and no request to the shell.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
     const landable = { nameWithOwner: 'owner/project', viewerPermission: 'WRITE', squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: false }
     const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
+    const mergeOptions = () => menuItem('Merge')?.parentElement.querySelector('.co-agent-menu-side')
     const openMenu = async () => { await click(query('[aria-label="Choose an action for PR 7"]')); await until(() => menuItems().length, 'The Actions menu did not open') }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    ensure(menuItem('Merge') && !menuItem('Merge options…'), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
+    ensure(menuItem('Merge') && !mergeOptions(), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
     await captureShot('merge-menu-app-sheet')
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true, owner_confirm: true }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    const offered = menuItems().map(node => text(node.querySelector('strong')))
-    ensure(offered.indexOf('Merge options…') === offered.indexOf('Merge') + 1, 'Merge options… did not follow Merge: ' + offered.join(', '))
+    ensure(mergeOptions()?.getAttribute('aria-label') === 'Merge options… Choose how it lands.' && !menuItem('Merge options…'), 'Merge options… is not a second choice on the Merge row: ' + menuItems().map(node => text(node.querySelector('strong')) || node.getAttribute('aria-label')).join(', '))
+    const rows = query('.co-agent-menu-rows'), fits = rows.scrollHeight <= rows.clientHeight
+    ensure(getComputedStyle(rows).scrollbarWidth === 'none' && (fits || getComputedStyle(rows).overflowY === 'auto' || window.innerWidth <= 680), 'The menu rows show a scrollbar or cannot scroll: ' + getComputedStyle(rows).scrollbarWidth + ' ' + getComputedStyle(rows).overflowY)
     await captureShot('merge-menu-shell-sheet')
     window.holdOwnerGrant = new Promise(resolve => { window.releaseOwnerGrant = resolve })
     await click(menuItem('Merge'))
@@ -3386,7 +3423,7 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'a cancel sends nothing and closes; a refusal sends nothing and shows the platform’s sentence', status: 'pass' })
     window.ownerGrantAnswer = undefined
     await openMenu()
-    await click(menuItem('Merge options…'))
+    await click(mergeOptions())
     await until(() => query('.co-rw-rungs'), 'Merge options… did not show how it lands')
     await click([...document.querySelectorAll('[role=radio]')].find(node => text(node).includes('Create a merge commit')))
     ensure(text(query('.co-review-window .co-btn-primary')) === 'Merge', 'The sheet’s button did not name the chosen way: ' + text(query('.co-review-window .co-btn-primary')))
@@ -3889,7 +3926,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

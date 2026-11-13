@@ -23,9 +23,10 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
   assert.match(html, /aria-pressed="true">Comments/)
   assert.match(html, />Files<span class="co-tab-more"> changed<\/span></)
   assert.match(html, />Checks<\/button>/)
-  // The header keeps the state and the author; branch names live in the Description fold.
-  assert.doesNotMatch(html, /co-branch-flow/)
-  assert.match(html, /by <b>/)
+  // The number leads the title, and one facts line carries the state, the author and the branch it merges into.
+  assert.match(html, /<h3 class="co-gh-pr-title"><span class="co-pr-title-num">#7<\/span> /)
+  assert.match(html, /by <b>[^<]*<\/b><\/span><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.doesNotMatch(html, /co-state-line/, 'the four-step line is gone: the state badge says where the PR stands')
   assert.match(html, /Loading the conversation/)
   assert.match(html, /aria-label="Choose an action for PR \d+"/)
   assert.match(html, /class="co-pr-detail-body"[^>]*data-tab="conversation"/, 'the page tells its CSS which tab is open')
@@ -199,7 +200,7 @@ test('the description starts folded and unanswered feedback stays visible under 
     record: { attention: { type: 'changes_requested', url: 'https://github.com/team/repo/pull/9#pullrequestreview-777' } } })
   if (!html) return
   assert.doesNotMatch(html, /<details class="co-gh-description" open/)
-  assert.match(html, /class="co-desc-content"><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.doesNotMatch(html, /class="co-desc-content"><p class="co-branch-flow"/, 'the branch is on the facts line, not folded into the description')
   assert.match(html, /class="co-pr-feedback-flag is-blocker"/)
   assert.match(html, /Changes requested/)
   assert.match(html, /Not addressed yet\. Read the review under Comments/)
