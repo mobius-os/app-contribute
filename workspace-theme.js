@@ -662,8 +662,9 @@ export const WORKSPACE_CSS = `
 
 /* The agent review window: protected focus for a consent with public effects. */
 /* The Window Rule (DESIGN.md): every pop-up over the page is one blurred, darkened backdrop and one round card with a faint accent edge. */
-.co-dialog-backdrop { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
-.co-dialog { width:min(520px,100%); max-height:calc(100% - 40px); overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); box-shadow:0 28px 90px rgba(0,0,0,.42); animation:co-dialog-in .16s ease-out; }
+/* A window is the browser's modal <dialog> (ui/ReviewDialog.jsx): the card is the dialog and the backdrop is its ::backdrop. The user-agent's own padding, colour and size caps are set back, and scrolling over the backdrop or inside the card never reaches the page. */
+.co-dialog::backdrop { background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); overflow:hidden; overscroll-behavior:contain; }
+.co-dialog { width:min(520px,calc(100% - 40px)); max-width:none; max-height:calc(100% - 80px); margin:auto; padding:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); color:var(--text); box-shadow:0 28px 90px rgba(0,0,0,.42); animation:co-dialog-in .16s ease-out; }
 .co-dialog::-webkit-scrollbar { display:none; }
 /* A project action (Send to GitHub, Mark ready) is a window like the rest: it sits in a .co-dialog and its own card chrome is gone. */
 .co-dialog > .co-task-dock { position:relative; margin:0; padding:32px 28px 28px; border:0; background:none; }
@@ -813,7 +814,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-versions p { margin:6px 0 0; }
 /* An agent window keeps one size, whatever is open inside it: the head and the foot stay put and the middle scrolls
    without a scrollbar (its foot fades while more is below: the scroll fade at the end of this sheet). */
-.co-dialog:has(> .co-review-window.is-sized) { display:flex; height:min(780px,calc(100% - 40px)); overflow:hidden; }
+.co-dialog[open]:has(> .co-review-window.is-sized) { display:flex; height:min(780px,calc(100% - 80px)); overflow:hidden; }
 .co-dialog > .co-review-window.is-sized { flex:1 1 auto; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .co-dialog > .co-review-window.is-sized > .co-rw-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; padding-bottom:20px; }
 .co-dialog > .co-review-window.is-sized > .co-rw-body::-webkit-scrollbar { display:none; }
@@ -823,9 +824,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-dialog > .co-review-window.is-sized > .co-rw-head .co-rw-list { max-height:min(168px,24vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 .co-selection-page .co-review-window { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 @media(max-width:680px) {
- .co-dialog-backdrop { align-items:flex-end; padding:12px 12px max(22px,env(safe-area-inset-bottom)); }
- .co-dialog { width:100%; max-height:100%; }
- .co-dialog:has(> .co-review-window.is-sized) { height:min(780px,100%); }
+ .co-dialog { width:calc(100% - 24px); max-height:calc(100% - 12px - max(22px,env(safe-area-inset-bottom))); margin:auto auto max(22px,env(safe-area-inset-bottom)); }
+ .co-dialog[open]:has(> .co-review-window.is-sized) { height:min(780px,calc(100% - 12px - max(22px,env(safe-area-inset-bottom)))); }
  .co-rw-head { --rw-edge:20px; }
   .co-rw-icon { width:40px; height:40px; }
  .co-rw-foot { margin-top:0; padding-top:14px; }

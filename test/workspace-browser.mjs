@@ -905,7 +905,7 @@ window.runWorkspaceChecks = async () => {
       await click(query('[aria-label="Select all visible pull requests"]'))
       await openSecond(); await chooseAgent(query('.co-pr-detail'))
       // The review window is modal: filters behind it cannot change its scope.
-      ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Review window is not a modal dialog')
+      ensure(review().closest('dialog:modal'),'Review window is not a modal dialog')
       ensure(text(review()).includes('Contribution 8') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope')
       await closeReview(); await setFilter('all')
       ensure(mutationRequests().length===before,'Filtering an existing confirmation approved work')
@@ -996,7 +996,7 @@ window.runWorkspaceChecks = async () => {
       try {
       await warmCapabilities(query('.co-pr-box-head'))
       await chooseAgent(query('.co-pr-box-head'))
-      ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Batch review did not use the modal review window')
+      ensure(review().closest('dialog:modal'),'Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
       ensure(button('Start & draft') && reviewRuns.length === 0,'Draft for me was not the default, or something started')

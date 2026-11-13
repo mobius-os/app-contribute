@@ -138,7 +138,7 @@ test('the label pulses gently so it reads as something to open, and stays still 
 
 test('an agent window keeps one size: the head and foot stay put and the middle scrolls without a scrollbar', async t => {
   const css = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
-  assert.match(css, /\.co-dialog:has\(> \.co-review-window\.is-sized\) \{ display:flex; height:min\(780px,calc\(100% - 40px\)\); overflow:hidden; \}/)
+  assert.match(css, /\.co-dialog\[open\]:has\(> \.co-review-window\.is-sized\) \{ display:flex; height:min\(780px,calc\(100% - 80px\)\); overflow:hidden; \}/)
   assert.match(css, /\.co-review-window\.is-sized > \.co-rw-body \{[^}]*overflow-y:auto;[^}]*scrollbar-width:none;/)
   assert.match(css, /\.co-review-window\.is-sized > \.co-rw-body > \* \{ flex-shrink:0; \}/, 'what opens inside (the agent list, the commit) scrolls instead of squeezing the rest')
   const api = await windows(t)
