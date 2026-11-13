@@ -33,7 +33,8 @@ async function pass({ lists, token, tiers, paused, counted, moved, probed, synci
   let failed = false
   const attempt = async (repo, how) => {
     if (paused()) throw new Error(PAUSED)
-    try { await lists.read(repo, { token, how }) } catch { failed = true }
+    // `fresh`: the owner's Sync is theirs, so it reads even a list they paged past; an automatic pass leaves such a list alone.
+    try { await lists.read(repo, { token, how, fresh: syncing }) } catch { failed = true }
   }
   for (const repo of moved) await attempt(repo, 'reconcile')
   if (probed && !syncing) return failIf(failed)

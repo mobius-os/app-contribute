@@ -132,12 +132,16 @@ export function createRepositoryLists({ now = () => Date.now() } = {}) {
     return { inventory, moved, current: !moved.length && sameMembers }
   }
 
-  // What a probe says of a list read in full this visit that is a whole page: `current` (its time moves, and nothing needs
-  // saving), `behind` GitHub, or `unchecked` (a list read some other way, or of more than a page, is the read's to settle).
+  // What a probe says of a list read in full this visit and not paged past its first page: `current` (its time moves, and
+  // nothing needs saving), `behind` GitHub (a row of the first page moved, a PR came or went, or the total changed, so a
+  // repository above a page is found too), or `unchecked` (a list read some other way, or one the owner paged past, is not the
+  // probe's to settle: another read would collapse the pages they opened). The probe holds up to a hundred PRs; the first page
+  // is the part of it a list shows.
   function checkAgainst(repo, probe) {
     const list = entry(repo)
-    if (!canReconcile(list) || probe.total > PAGE_SIZE) return 'unchecked'
-    if (!compare(list, probe).current) return 'behind'
+    if (!list.listed || !list.sessionRead || list.data.partial || pagedPast(list)) return 'unchecked'
+    const page = { ...probe, pulls: probe.pulls.slice(0, PAGE_SIZE) }
+    if (probe.total !== list.first.total || !compare(list, page).current) return 'behind'
     list.syncedAt = stamp()
     notify(list, { confirmed: true })
     return 'current'

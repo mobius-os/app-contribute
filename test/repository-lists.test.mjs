@@ -361,7 +361,7 @@ test('a probe confirms a list that shows what GitHub holds, finds one that is be
   lists.entry('o/r').data = { ...lists.entry('o/r').data, partial: true }
   assert.equal(lists.checkAgainst('o/r', probe), 'unchecked', 'rows that hold only their titles are not what GitHub holds')
   lists.entry('o/r').data = { ...lists.entry('o/r').data, partial: false }
-  assert.equal(lists.checkAgainst('o/r', { ...probe, total: 120 }), 'unchecked', 'a probe of more than a page does not speak for the page')
+  assert.equal(lists.checkAgainst('o/r', { ...probe, total: 120 }), 'behind', 'a repository that grew past a page is found, its first page is read again')
   assert.equal(lists.entry('o/r').syncedAt, before)
   assert.equal(lists.checkAgainst('o/r', { ...probe, pulls: [{ number: 1, signature: 'moved' }, ...probe.pulls.slice(1)] }), 'behind')
   assert.equal(lists.checkAgainst('o/r', { total: 4, pulls: [...probe.pulls, { number: 9, signature: 'new' }] }), 'behind', 'a PR that came')

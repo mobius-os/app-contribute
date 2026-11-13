@@ -128,3 +128,44 @@ test('what a pass was asked to bring up to date is asked again when it fails or 
   await readListPass({ lists, token: 't', tiers: tiers(['o/a']), paused: () => false, wanted })
   assert.deepEqual([wanted.moved.size, wanted.syncing, wanted.probed], [0, false, false], 'a pass that went through asks for nothing more')
 })
+
+test('a list above a page is found behind by the probe when a row of its first page moves or the repository grows past a page, and the pass reads it again', async () => {
+  for (const count of [51, 101]) {
+    const world = { 'o/a': many('o/a', count) }
+    github = installGithub(world)
+    const lists = createRepositoryLists()
+    await run(lists, { tiers: tiers(['o/a']) })
+    assert.deepEqual(await probePinned('t', ['o/a'], lists), [], `${count} PRs: nothing moved`)
+    world['o/a'][0] = fullPull('o/a', 1, { title: 'Moved', updatedAt: '2026-11-14T00:00:00Z' })
+    assert.deepEqual(await probePinned('t', ['o/a'], lists), ['o/a'], `${count} PRs: a PR of the first page moved`)
+    await run(lists, { tiers: tiers(['o/a']), moved: ['o/a'], probed: true })
+    assert.equal(pullsInView(lists.entry('o/a').view)[0].title, 'Moved', `${count} PRs: the first page was read again`)
+    world['o/a'].push(fullPull('o/a', count + 1))
+    assert.deepEqual(await probePinned('t', ['o/a'], lists), ['o/a'], `${count} PRs: one more PR`)
+    github.restore()
+  }
+})
+
+test('a list grown from one page to a page and one more PR is found behind and refreshed', async () => {
+  const world = { 'o/a': many('o/a', 50) }
+  github = installGithub(world)
+  const lists = createRepositoryLists()
+  await run(lists, { tiers: tiers(['o/a']) })
+  world['o/a'].push(fullPull('o/a', 51))
+  assert.deepEqual(await probePinned('t', ['o/a'], lists), ['o/a'])
+  await run(lists, { tiers: tiers(['o/a']), moved: ['o/a'], probed: true })
+  assert.deepEqual([lists.entry('o/a').data.total, lists.entry('o/a').data.hasNextPage], [51, true])
+})
+
+test('a list the owner paged past its first page is left to them by the probe, and their Sync reads it again', async () => {
+  const world = { 'o/a': many('o/a', 120) }
+  github = installGithub(world)
+  const lists = createRepositoryLists()
+  await run(lists, { tiers: tiers(['o/a']) })
+  await lists.loadMore('o/a', 't')
+  world['o/a'][0] = fullPull('o/a', 1, { title: 'Moved', updatedAt: '2026-11-14T00:00:00Z' })
+  assert.deepEqual(await probePinned('t', ['o/a'], lists), [], 'the pages they opened are not collapsed by a probe')
+  await run(lists, { tiers: tiers(['o/a']), syncing: true })
+  assert.equal(pullsInView(lists.entry('o/a').view)[0].title, 'Moved', 'Sync brought the list up to date though they had paged')
+  assert.equal(pullsInView(lists.entry('o/a').view).length, 50, 'and read the first page again, as Sync always did')
+})
