@@ -362,21 +362,33 @@ export const pullAction = (token, appId, pr, action, extra = {}, shell = {}) => 
 }
 
 // Request review for several PRs at once: one request per PR, naming the ticked people who may be asked there (not its
-// author, not who approved this version). A PR asked on an earlier try (`done`, which this fills) is skipped, so a retry
-// after a partial failure asks nobody twice. { ok } when every PR is asked or has nobody left to ask, { pending } when GitHub
+// author, not who approved this version). `done` (which this fills) holds each PR/person pair already asked, or that GitHub may
+// have taken, on an earlier try: a retry sends only the pairs still missing, so a changed selection reaches every PR it was
+// never asked on and nobody is asked twice. { ok } when every PR is asked or has nobody left to ask, { pending } when GitHub
 // may have taken a request (read it back, never repeat), otherwise { error } naming the PRs that were refused. `shell` is
 // { shellConfirm, onConfirmed } of publicWrite: each request is then confirmed on Möbius's own sheet first, and closing that sheet
-// stops here, { cancelled } when nothing was asked yet.
+// stops here: { cancelled } when nothing was asked yet, else the outcome so far (a request GitHub may have taken is still
+// answered { pending }, so it is read back and never sent again).
 export async function requestReviewMany(token, appId, pulls, people, { approvedBy = () => [], done = new Set(), shell = {} } = {}) {
   const asked = [], skipped = [], refused = [], unsure = []
-  for (const pr of pulls.filter(item => !done.has(prKey(item)))) {
-    const askable = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
-    if (!askable.length) { skipped.push(pr.number); done.add(prKey(pr)); continue }
+  const pairOf = (pr, login) => `${prKey(pr)}|${login.toLowerCase()}`
+  const pendingWords = () => `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.`
+  for (const pr of pulls) {
+    const eligible = people.filter(login => !sameLogin(login, pr.author?.login) && !approvedBy(pr).some(name => sameLogin(name, login)))
+    if (!eligible.length) { skipped.push(pr.number); continue }
+    const askable = eligible.filter(login => !done.has(pairOf(pr, login)))
+    if (!askable.length) continue
     const outcome = await pullAction(token, appId, pr, 'request-review', { reviewers: askable }, shell)
-    if (outcome.cancelled) return asked.length ? { error: `Asked on ${asked.map(number => '#' + number).join(', ')}. You closed Möbius’s sheet before the rest, so nothing more was sent.` } : { cancelled: true }
-    if (outcome.ok) { asked.push(pr.number); done.add(prKey(pr)) } else if (outcome.pending) unsure.push(pr.number); else refused.push(`#${pr.number}: ${outcome.error}`)
+    if (outcome.cancelled) {
+      const stopped = 'You closed Möbius’s sheet before the rest, so nothing more was sent.'
+      if (unsure.length) return { pending: true, error: `${pendingWords()} ${stopped}` }
+      return asked.length ? { error: `Asked on ${asked.map(number => '#' + number).join(', ')}. ${stopped}` } : { cancelled: true }
+    }
+    if (outcome.ok) { asked.push(pr.number); askable.forEach(login => done.add(pairOf(pr, login))) }
+    else if (outcome.pending) { unsure.push(pr.number); askable.forEach(login => done.add(pairOf(pr, login))) }
+    else refused.push(`#${pr.number}: ${outcome.error}`)
   }
-  if (unsure.length) return { pending: true, error: `GitHub may have asked for the review on ${unsure.map(number => '#' + number).join(', ')}. Check ${unsure.length === 1 ? 'it' : 'them'} before trying again.` }
+  if (unsure.length) return { pending: true, error: pendingWords() }
   if (refused.length) return { error: `Not asked: ${refused.join(' · ')}.${asked.length ? ` Asked on ${asked.map(number => '#' + number).join(', ')}.` : ''}` }
   return { ok: true, state: 'requested', asked, skipped }
 }

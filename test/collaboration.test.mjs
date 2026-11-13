@@ -434,6 +434,48 @@ test('a refused PR names its reason, the others are still asked, and a retry ask
   assert.deepEqual(retry, { ok: true, state: 'requested', asked: [2], skipped: [] })
 })
 
+test('a retry with a changed selection asks each PR only the people it was not asked, and nobody twice', async t => {
+  const sent = []
+  const answers = { 8: { status: 409, json: { detail: 'GitHub refused.' } } }
+  t.mock.method(globalThis, 'fetch', async (url, options) => { const body = JSON.parse(options.body); sent.push([body.number, body.reviewers]); return replyPerPr(answers)(url, options) })
+  const done = new Set()
+  const first = await requestReviewMany('t', 80, [owned(7), owned(8)], ['new-colleague'], { done })
+  assert.match(first.error, /#8: GitHub refused\..* Asked on #7/)
+  delete answers[8]
+  sent.length = 0
+  const retry = await requestReviewMany('t', 80, [owned(7), owned(8)], ['second-reviewer'], { done })
+  assert.deepEqual(sent, [[7, ['second-reviewer']], [8, ['second-reviewer']]], 'the new person is asked on both PRs')
+  assert.deepEqual(retry, { ok: true, state: 'requested', asked: [7, 8], skipped: [] })
+  sent.length = 0
+  await requestReviewMany('t', 80, [owned(7), owned(8)], ['new-colleague', 'second-reviewer'], { done })
+  assert.deepEqual(sent, [[8, ['new-colleague']]], 'only the pair never asked is sent')
+})
+
+test('closing Möbius’s sheet after an unconfirmed request still reads it back and never sends it again', async t => {
+  const sent = []
+  const answers = { 1: { status: 502, json: { detail: { code: 'reviewers_unconfirmed', message: 'GitHub may have asked.' } } } }
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sent.push(JSON.parse(options.body).number); return replyPerPr(answers)(url, options) })
+  const done = new Set()
+  let confirmed = 0
+  const shell = { shellConfirm: async () => (++confirmed === 2 ? { cancelled: true } : null) }
+  const cancelledSecond = await requestReviewMany('t', 80, [owned(1), owned(2)], ['sam'], { done, shell })
+  assert.equal(cancelledSecond.pending, true)
+  assert.match(cancelledSecond.error, /on #1\. Check it before trying again\. You closed Möbius’s sheet/)
+  assert.deepEqual(sent, [1])
+  // Another PR was asked before the cancel: the uncertainty still wins over the plain error.
+  const sentAfter = []
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sentAfter.push(JSON.parse(options.body).number); return replyPerPr(answers)(url, options) })
+  confirmed = 0
+  const three = { shellConfirm: async () => (++confirmed === 3 ? { cancelled: true } : null) }
+  const mixed = await requestReviewMany('t', 80, [owned(4), owned(1), owned(3)], ['sam'], { shell: three })
+  assert.equal(mixed.pending, true)
+  assert.match(mixed.error, /on #1\./)
+  // The pair is held, so a retry in the same sheet does not send #1 again.
+  const retry = await requestReviewMany('t', 80, [owned(1)], ['sam'], { done })
+  assert.deepEqual(retry, { ok: true, state: 'requested', asked: [], skipped: [] })
+  assert.deepEqual(sent, [1], '#1 was never sent a second time')
+})
+
 test('an unconfirmed request on one PR is read back, never repeated, and the others are still asked', async t => {
   const calls = []
   const answers = { 2: { status: 502, json: { detail: { code: 'reviewers_unconfirmed', message: 'GitHub may have asked.' } } } }

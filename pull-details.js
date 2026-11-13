@@ -189,14 +189,37 @@ export async function loadPullThreads(token, pr, after = null, signal) {
     nextCursor: connection?.pageInfo?.endCursor || null, errors }
 }
 // Who was asked to review this PR and where each review stands (reviewers.js words the rows). Review requests and
-// their "requested" events are GitHub's own record of asking; an assignee is not among them.
+// their "requested" events are GitHub's own record of asking; an assignee is not among them. A person's standing verdict
+// can come from far back in the history (an old change request stays through later comments), so each connection is read
+// to its end, oldest first. When the walk cannot reach the end (a page fails, or the history is past the page limit) the read
+// fails: a list built from part of the history would show a wrong standing as if it were complete.
+const REVIEWER_PAGE_LIMIT = 20
 export async function loadPullReviewers(token, pr, signal) {
   const person = '__typename ... on User { login }'
-  const { data, errors } = await pullGraphRead(token, pr, `
-    reviewRequests(first:30) { nodes { requestedReviewer { ${person} } } }
-    reviews(last:100) { nodes { state submittedAt author { login } } }
-    timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ${person} } } } }`, {}, signal)
-  if (!data.reviewRequests || !data.timelineItems || !data.reviews) errors.push('Who was asked to review is unavailable.')
+  const connections = {
+    reviewRequests: { args: 'first:100', nodes: `requestedReviewer { ${person} }` },
+    reviews: { args: 'first:100', nodes: 'state submittedAt author { login }' },
+    timelineItems: { args: 'first:100, itemTypes:[REVIEW_REQUESTED_EVENT]', nodes: `... on ReviewRequestedEvent { createdAt requestedReviewer { ${person} } }` },
+  }
+  const field = (name, after) => `${name}(${connections[name].args}${after ? ', after:$after' : ''}) { pageInfo { hasNextPage endCursor } nodes { ${connections[name].nodes} } }`
+  const first = await pullGraphRead(token, pr, Object.keys(connections).map(name => field(name, false)).join('\n'), {}, signal)
+  const errors = [...first.errors]
+  if (!first.data.reviewRequests || !first.data.timelineItems || !first.data.reviews) errors.push('Who was asked to review is unavailable.')
+  const data = {}
+  for (const name of Object.keys(connections)) {
+    const connection = first.data[name]
+    if (!connection) continue
+    const nodes = [...(connection.nodes || [])]
+    let more = connection.pageInfo
+    for (let pages = 1; more?.hasNextPage; pages += 1) {
+      if (pages >= REVIEWER_PAGE_LIMIT || !more.endCursor) throw new Error('Too much review history to read in full.')
+      const next = (await pullGraphRead(token, pr, field(name, true), { after: more.endCursor }, signal)).data[name]
+      if (!next) throw new Error('Could not read all of the review history.')
+      nodes.push(...(next.nodes || []))
+      more = next.pageInfo
+    }
+    data[name] = { nodes }
+  }
   return { reviewers: reviewersOf(data), errors }
 }
 

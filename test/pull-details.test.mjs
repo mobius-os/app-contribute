@@ -129,13 +129,43 @@ test('who was asked to review is read from GitHub’s review requests and their 
   const { reviewers, errors } = await loadPullReviewers('fixture', pr)
   assert.deepEqual(reviewers.map(row => [row.name, row.status, row.requestedAt]), [['sam', 'waiting', '2026-11-09T11:20:00Z']])
   assert.deepEqual(errors, [])
-  assert.match(calls[0].query, /reviewRequests\(first:30\)/)
+  assert.match(calls[0].query, /reviewRequests\(first:100\)/)
   assert.match(calls[0].query, /REVIEW_REQUESTED_EVENT/)
-  assert.match(calls[0].query, /reviews\(last:100\)/)
+  assert.match(calls[0].query, /reviews\(first:100\)/, 'the whole history, oldest first')
   assert.doesNotMatch(calls[0].query, /latestReviews/, 'GitHub’s latest reviews leave out anyone asked again')
   assert.doesNotMatch(calls[0].query, /assignees/)
   assert.doesNotMatch(calls[0].query, /Team/, 'a team’s name needs a permission this app’s token lacks, and one refused field fails the whole read')
   assert.deepEqual(calls[0].variables, { owner: 'team', name: 'repo', number: 7 })
+})
+
+test('a change request older than 100 reviews still stands, and a history that cannot be read in full is an error, not a shorter list', async t => {
+  const person = { __typename: 'User', login: 'sam' }
+  const review = (state, at) => ({ state, submittedAt: new Date(Date.UTC(2026, 10, 1, 0, at)).toISOString(), author: { login: 'sam' } })
+  const history = [review('CHANGES_REQUESTED', 0), ...Array.from({ length: 100 }, (_, index) => review('COMMENTED', index + 1))]
+  const serve = pages => async (url, options) => {
+    const body = JSON.parse(options.body)
+    const after = body.variables.after
+    const page = after ? Number(after) : 0
+    const slice = history.slice(page * 100, page * 100 + 100)
+    const more = page * 100 + 100 < history.length
+    const reviews = { pageInfo: { hasNextPage: more, endCursor: String(page + 1) }, nodes: slice }
+    return response({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName,
+      ...(after ? { reviews } : { reviews,
+        reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [] },
+        timelineItems: { pageInfo: { hasNextPage: false }, nodes: [{ createdAt: '2026-10-31T00:00:00Z', requestedReviewer: person }] } }) } } } })
+  }
+  const queries = []
+  t.mock.method(globalThis, 'fetch', async (url, options) => { queries.push(JSON.parse(options.body)); return serve()(url, options) })
+  const read = await loadPullReviewers('fixture', pr)
+  assert.deepEqual(read.reviewers.map(row => [row.name, row.status]), [['sam', 'changes']])
+  assert.equal(queries.length, 2, 'one read for everything, one more page of reviews')
+  assert.deepEqual(queries[1].variables.after, '1')
+  assert.doesNotMatch(queries[1].query, /reviewRequests|timelineItems/, 'only the connection with more is read again')
+  t.mock.method(globalThis, 'fetch', async (url, options) => JSON.parse(options.body).variables.after ? new Response('{}', { status: 502 }) : serve()(url, options))
+  await assert.rejects(loadPullReviewers('fixture', pr))
+  t.mock.method(globalThis, 'fetch', async () => response({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName,
+    reviews: { pageInfo: { hasNextPage: true, endCursor: 'next' }, nodes: [] }, reviewRequests: { nodes: [] }, timelineItems: { nodes: [] } } } } }))
+  await assert.rejects(loadPullReviewers('fixture', pr), /Too much review history/)
 })
 
 test('who was asked is reported unavailable, not empty, when GitHub leaves out the requests, and a moved branch is stale', async t => {
