@@ -78,7 +78,7 @@ function DeskAttentionRow({ item, pr, decision, login, onSelect, action = null }
   const reason = lookAtReason(item)
   const detectedAt = item.record?.attention?.detected_at
   const number = item.record?.number
-  const facts = [number ? `#${number}` : null, pr ? whoOf(pr.author?.login, login) : null, detectedAt ? <TimeAgo prefix="detected " value={detectedAt} /> : null, groupNote(item)]
+  const facts = [number ? `#${number}` : null, pr ? whoOf(pr.author?.login, login) : null, detectedAt ? <>detected <TimeAgo value={detectedAt} short /></> : null, groupNote(item)]
   return (
     <DeskRow
       tone={reason.key}
@@ -158,7 +158,7 @@ function MergedRows({ project, records, query, lastLooked, onOpenPull }) {
       return <DeskRow key={record.id}
         icon={<Icon name="merge" size={16} className="co-desk-merged-icon" />}
         title={<><NewDot value={record.updated_at} lastLooked={lastLooked} />{record.title || 'Untitled contribution'}</>}
-        facts={<span><DotLine parts={[record.number ? `#${record.number}` : null, 'yours', <TimeAgo value={record.updated_at || record.created_at} />]} /></span>}
+        facts={<span><DotLine parts={[record.number ? `#${record.number}` : null, 'yours', <TimeAgo value={record.updated_at || record.created_at} short />]} /></span>}
         pills={[<StatusPill key="status" chip={{ label: STATUS_LABELS[record.status] || record.status, tone: 'quiet' }} />]}
         onOpen={record.number && repo ? () => onOpenPull(project, { number: record.number, repository: { nameWithOwner: repo } }) : null} />
     })
@@ -195,8 +195,8 @@ function viewEnvelopes(view, projects, { records, query, lastLooked, needsFilter
 
 // The rows of the quiet block under Needs you (desk.js waitingOnOthers), across projects, the longest wait first. The search narrows
 // them like every row on the screen; the step chips do not, because the block is no part of that list.
-function waitingRows(projects, { login, runs, chats, responses, ignored, query }) {
-  return projects.flatMap(project => waitingOnOthers(project.incomingReviews, login, { runs, chats, responses, ignored })
+function waitingRows(projects, { login, runs, chats, responses, ignored, query, decisionsFor, reviewEntries }) {
+  return projects.flatMap(project => waitingOnOthers(project, decisionsFor(project), login, reviewEntries, { runs, chats, responses, ignored })
     .filter(({ pr }) => matches(query, project.name, pr.title, String(pr.number))).map(row => ({ ...row, project })))
     .sort((a, b) => b.days - a.days)
 }
@@ -210,8 +210,11 @@ export function DeskView({ view, projects, records, login, decisionsFor, lastLoo
   const envelopes = viewEnvelopes(shownView, projects, { records, query, lastLooked, needsFilter: view === 'needs' ? needsFilter : '', context, onOpenProject })
   const filter = view === 'mine' ? <MineFilter value={mineFilter} counts={counts} onChange={setMineFilter} /> : null
   // Under the empty message and under the list alike; it is no row of Needs you, so no count or chip includes it.
-  const waiting = view === 'needs' ? <WaitingOnOthers rows={waitingRows(projects, context)} capabilities={capabilities} onOpenPull={onOpenPull} /> : null
+  const waitingRowsNow = view === 'needs' ? waitingRows(projects, context) : []
+  const waiting = <WaitingOnOthers rows={waitingRowsNow} capabilities={capabilities} onOpenPull={onOpenPull} />
   if (!envelopes.length) {
+    // A search that only the quiet block answers is no empty screen.
+    if (query.trim() && waitingRowsNow.length) return <>{filter}{waiting}</>
     const empty = view === 'needs' && needsFilter ? EMPTY.filtered : EMPTY[shownView] || EMPTY.needs
     return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} />{waiting}</>
   }

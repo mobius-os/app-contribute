@@ -162,7 +162,7 @@ const FIX_WAITING = { label: 'Fix to push', headline: 'A fix is ready. Read it, 
 // An approval that only carries over says so: "at this version" would be untrue of it.
 const CARRIED_APPROVAL = { headline: 'Your PR · approved by {who}, {green}. The lines you added and removed are the same as when they approved. Merge it' }
 // Nobody has reviewed it and no review was requested: waiting would be untrue. Assigning someone asks nobody.
-export const NOBODY_ASKED = { label: 'Nobody asked yet', headline: 'Your PR · nobody has been asked to review it on GitHub yet. Use Request review' }
+const NOBODY_ASKED = { label: 'Nobody asked yet', headline: 'Your PR · nobody has been asked to review it on GitHub yet. Use Request review' }
 function wordsOf(key, d) {
   if (key === 'author.waiting_review' && d.nobodyAsked) return { ...STATES[key], ...NOBODY_ASKED }
   if (key === 'to_confirm' && d.outbox?.kind === 'repair') return { ...STATES[key], ...FIX_WAITING }
@@ -324,7 +324,7 @@ export function decide(facts) {
   })
   const waitingOn = state.turn !== 'other' ? '' : facts.role === 'reviewer' ? facts.author || 'the author' : headlineWho(key, d).join(', ') || 'reviewers'
   const label = state.label.replace('{author}', facts.author || 'the author')
-  return { role: facts.role, state: key, turn: state.turn, label, headline: headlineFor(key, facts, d), next: state.next || '', jobKind: facts.job?.kind || '', coveredBy: d.coveredBy, waitingOn, actions,
+  return { role: facts.role, state: key, turn: state.turn, label, headline: headlineFor(key, facts, d), next: state.next || '', jobKind: facts.job?.kind || '', coveredBy: d.coveredBy, nobodyAsked: !!d.nobodyAsked, waitingOn, actions,
     approvedBy: d.approvedAtHead, carriedFrom: d.carried, changesFrom: [...d.changesAtHead, ...d.changesOlder], lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview, askable: d.askable }
 }
 

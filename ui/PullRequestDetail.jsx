@@ -162,7 +162,7 @@ function ProvenanceGroup({ role, links, lone }) {
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
   const kind = PROVENANCE_KINDS[role] || 'agent'
-  const many = `${NAMES.openChat} · ${links.length} ${kind}`
+  const many = `${NAMES.chats} ${links.length} · ${kind}`
   if (links.length === 1) {
     const name = lone ? NAMES.openChat : `${NAMES.openChat} · ${kind}`
     // The chat's own title rides in the tooltip; a role's stand-in title ("Source conversation") would only repeat the name.
@@ -368,7 +368,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   </div> : null
   const labels = pr.labels?.nodes || []
   // Where the PR goes and what it is tagged: beside the facts on a wide screen, in the folded Description's head on a phone (CSS shows one of the two).
-  const marks = <><BranchFlow pr={pr} />{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</>
+  const marks = <><BranchFlow pr={pr} inline />{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</>
   const tabs = [['conversation', 'Comments'], ['commits', 'Commits'], ['files', <>Files<span className="co-tab-more"> changed</span></>], ['checks', 'Checks'], ['review', 'Review']]
   // GitHub-style tab badges: one neutral count pill per tab. Comments counts
   // the loaded conversation (comments and reviews); until it loads, GitHub's

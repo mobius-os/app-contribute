@@ -26,7 +26,7 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
   assert.match(html, />Checks<\/button>/)
   // The number leads the title, and one facts line carries the state, the author and the branch it merges into.
   assert.match(html, /<h3 class="co-gh-pr-title"><span class="co-pr-title-num">#7<\/span> /)
-  assert.match(html, /by <b>[^<]*<\/b><\/span><span class="co-pr-marks"><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.match(html, /by <b>[^<]*<\/b><\/span><span class="co-pr-marks"><span class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
   assert.doesNotMatch(html, /co-state-line/, 'the four-step line is gone: the state badge says where the PR stands')
   assert.match(html, /Loading the conversation/)
   assert.match(html, /aria-label="Choose an action for PR \d+"/)
@@ -323,7 +323,7 @@ test('several chats of one kind fold into one Open chat dropdown, one stays a pl
     { chat_id: 'c3', role: 'review', title: 'Review it' },
   ] })
   if (!two) return
-  assert.match(two, /aria-label="Open chat · 2 where it started" data-tip="Open chat · 2 where it started"/)
+  assert.match(two, /aria-label="Chats 2 · where it started" data-tip="Chats 2 · where it started"/)
   assert.match(two, /co-chat-group/)
   assert.doesNotMatch(two, /Where it started #1/) // the list opens on demand, closed by default
   assert.match(two, /aria-label="Open chat · review" data-tip="Open chat · review · Review it"/) // a single review chat stays a plain icon button, its own title in the tooltip

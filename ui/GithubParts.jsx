@@ -3,6 +3,7 @@
  *  so a PR is recognisable here and on github.com in both shell themes. */
 import { Icon } from './Icons.jsx'
 import { checkSummary, isBotAuthor } from '../collaboration.js'
+import { timeAgo } from '../domain.js'
 
 // Labels and state pills are filled with their GitHub colour, 30% less intense:
 // 70% of the colour mixed into the page surface, then black or white text,
@@ -142,12 +143,11 @@ export function DateLabel({ value, prefix = '', time = false }) {
   return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
 }
 
-// A moment in the room a phone's facts line has: "4m", "2h", "1d", "3w". Beyond a month there is no short form and the date stands.
-const SHORT_AGO = [[3600, 'm', 60], [86400, 'h', 3600], [7 * 86400, 'd', 86400], [30 * 86400, 'w', 7 * 86400]]
-function shortAgo(seconds) {
-  if (seconds < 60) return 'now'
-  const [, unit, size] = SHORT_AGO.find(([limit]) => seconds < limit) || []
-  return unit ? Math.round(seconds / size) + unit : null
+// A moment in the room a phone's facts line has: domain.js timeAgo without its "ago" ("4m", "2h", "5d"). Beyond a month there is no short form and the date stands.
+function shortAgo(value) {
+  const ago = timeAgo(value)
+  if (ago === 'just now') return 'now'
+  return ago.endsWith(' ago') ? ago.slice(0, -4) : null
 }
 
 /** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. With `short`, a phone reads "3h" in its place:
@@ -163,7 +163,7 @@ export function TimeAgo({ value, prefix = '', short = false }) {
         : seconds < 7 * 86400 ? relative.format(-Math.round(seconds / 86400), 'day')
           : seconds < 30 * 86400 ? relative.format(-Math.round(seconds / (7 * 86400)), 'week')
             : `on ${new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(seconds > 300 * 86400 ? { year: 'numeric' } : {}) })}`
-  const brief = short ? shortAgo(seconds) : null
+  const brief = short ? shortAgo(value) : null
   return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>
     {brief ? <><span className="co-time-long">{prefix}{text}</span><span className="co-time-short" aria-hidden="true">{brief}</span></> : <>{prefix}{text}</>}
   </time>

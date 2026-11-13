@@ -180,7 +180,7 @@ const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerC
 // `onRunsChanged` asks the hub to read it again, so every screen shows the change.
 // `onReviewPosted(repo, number)` tells it the owner's review of a PR reached GitHub,
 // so the row leaves Review requests without waiting for the next read.
-export function PullRequests({ appId, token, project, conn, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
+export function PullRequests({ appId, token, project, conn, capabilities: knownCapabilities = null, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
   const repo = project?.canonical_repo || ''
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   const task = useProjectTask()
@@ -260,7 +260,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [choice, setChoice] = useState(null)
   const [resolved, setResolved] = useState(null)
   // The platform's advertised workflows, remembered across launches.
-  const [capabilities, setCapabilities] = useCapabilities(token, appId, conn.state === 'connected')
+  const [capabilities, setCapabilities] = useCapabilities(token, appId, conn.state === 'connected', knownCapabilities)
   // Where Möbius confirms the owner's sensitive taps on its own sheet (owner-grant.js), the writes below ask it first; elsewhere null.
   const shellConfirm = ownerConfirmOffered(capabilities) ? askOwner : null
   const [busy, setBusy] = useState(false)

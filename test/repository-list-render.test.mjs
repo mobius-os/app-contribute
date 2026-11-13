@@ -16,7 +16,7 @@ async function ui(t) {
     import { RepositoryListsContext } from './ui/useRepositoryList.js'
     import { createRepositoryLists } from './repository-lists.js'
     import { AlwaysLoad } from './ui/AlwaysLoad.jsx'
-    export const renderSwitch = props => renderToStaticMarkup(React.createElement(AlwaysLoad, props))
+    export const renderPin = props => renderToStaticMarkup(React.createElement(AlwaysLoad, props))
     export const makeLists = () => createRepositoryLists()
     export const render = (lists, props) => renderToStaticMarkup(React.createElement(RepositoryListsContext.Provider, { value: lists }, React.createElement(PullRequests, props)))
   `)
@@ -85,11 +85,11 @@ test('the same rows with their details offer their actions in the same place', a
 })
 
 test('the pin button says in plain words what it does, and is pressed only for a repository that is pinned', async t => {
-  const { renderSwitch } = await ui(t) || {}
-  if (!renderSwitch) return
-  const off = renderSwitch({ repo: 'o/r', pinned: false, onChange: () => {} })
+  const { renderPin } = await ui(t) || {}
+  if (!renderPin) return
+  const off = renderPin({ repo: 'o/r', pinned: false, onChange: () => {} })
   assert.match(off, /<span>Pin<\/span>/)
   assert.match(off, /Keeps this repository’s pull requests up to date in the background\./)
   assert.match(off, /aria-pressed="false"/)
-  assert.match(renderSwitch({ repo: 'o/r', pinned: true, onChange: () => {} }), /aria-pressed="true"/)
+  assert.match(renderPin({ repo: 'o/r', pinned: true, onChange: () => {} }), /aria-pressed="true"/)
 })

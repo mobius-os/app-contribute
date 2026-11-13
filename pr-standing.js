@@ -1,7 +1,7 @@
 // How a PR's machine decision (pr-machine.js) shows on a row: the comet frame
 // and the chip. Pure, so rows, the desk and the PR page cannot disagree.
 import { prFacts } from './pr-facts.js'
-import { NOBODY_ASKED, decide } from './pr-machine.js'
+import { decide } from './pr-machine.js'
 import { responseView } from './respond-result.js'
 import { NAMES } from './names.js'
 
@@ -32,6 +32,6 @@ export const isResting = decision => QUIET.has(decision.state) && (decision.turn
 // Your own PR that has gone to its reviewers (a first review, a look at fixes, a look at an approval that is old): what the
 // Waiting on others block under Needs you lists. A PR nobody was asked to review is the owner's own step, not a wait on others.
 const WAITS_ON_REVIEWERS = new Set(['author.waiting_review', 'author.waiting_rereview', 'author.approval_stale'])
-export const waitsOnReviewers = decision => WAITS_ON_REVIEWERS.has(decision.state) && decision.label !== NOBODY_ASKED.label
+export const waitsOnReviewers = decision => WAITS_ON_REVIEWERS.has(decision.state) && !decision.nobodyAsked
 
 export const chipOf = decision => (QUIET.has(decision.state) ? null : { label: decision.label, tone: TONE[decision.turn] })

@@ -255,7 +255,7 @@ test('a feedback card is shaped like a PR row: title, then #number, then its sta
   const html = api.view({ view: 'needs', projects: [project], records: [], login: 'owner', decisionsFor: () => [item], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
   assert.match(html, /class="co-desk-row is-changes"/)
   assert.match(html, /co-desk-row-title">Feedback title</, 'the number moves to the facts line, so the title is the title alone')
-  assert.match(html, /co-desk-row-meta"><span>#9 · <time[^>]*>detected /)
+  assert.match(html, /co-desk-row-meta"><span>#9 · detected <time/)
   assert.match(html, /co-desk-chip is-tone">Changes requested/)
   assert.match(html, /co-desk-row-why">A GitHub review requested changes\./)
   assert.doesNotMatch(html, /View PR/)
@@ -337,7 +337,7 @@ test('every Needs you row has one layout: title, #number · who · when, status,
   assert.ok(withNote[0].indexOf('co-row-pills') < withNote[0].indexOf('co-desk-note') && withNote[0].indexOf('</button><div class="co-desk-note"') > -1)
   assert.ok(withNote[0].includes(`>${note}<`), 'the whole note is in the page; one line shows and Show more reveals the rest')
   assert.match(items.at(-1), /Reviewed title/)
-  assert.match(items.at(-1), /#4 · teammate · <time[^>]*>you reviewed /)
+  assert.match(items.at(-1), /#4 · teammate · you reviewed <time/)
   assert.doesNotMatch(html, /Pull request #4/)
 })
 

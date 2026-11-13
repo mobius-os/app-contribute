@@ -19,9 +19,7 @@ export const WORKSPACE_CSS = `
 .co-workspace-name-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; }
 .co-workspace-name-row h2 { min-width:0; }
 .co-pin { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:4px 10px; }
-.co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; color:var(--muted); font-weight:600; }
-.co-pin-btn:hover:not(:disabled) { color:var(--text); }
-.co-pin-btn[aria-pressed=true] { color:var(--accent-text, var(--accent)); border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:color-mix(in srgb, var(--accent) 12%, var(--surface-2, var(--bg))); }
+.co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; }
 .co-pin-btn[aria-pressed=true] .co-icon { fill:currentColor; }
 .co-pin-failed { flex-basis:100%; font-size:var(--co-text-meta); color:var(--danger); }
 .co-workspace-title .co-source-glyph { display:none; }

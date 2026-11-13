@@ -37,14 +37,19 @@ export function authoredPulls(incoming, login) {
 export const WAITING_ON_OTHERS_DAYS = 2
 const DAY_MS = 24 * 60 * 60 * 1000
 
-// Those PRs, longest wait first, as { pr, decision, days }. Which ones wait on reviewers is the PR machine's word (waitsOnReviewers).
-// "Since" is GitHub's updatedAt, the one date the desk already holds that every way a PR goes back to its reviewers moves (opened for
-// review, a push, a review request or an ask), so the days can fall short of the true wait but never run over it. No date, no row.
-export function waitingOnOthers(pulls, login, facts = {}, now = Date.now()) {
-  return authoredPulls(pulls, login)
+// The PRs a row of Needs you already stands for (a PR, a feedback card or a review run): the quiet block never repeats one of them.
+const needsRowKey = row => row.pr ? pullKey(row.pr) : row.item ? [...feedbackPullKeys([row.item])][0] : `${String(row.entry.item.repo).toLowerCase()}#${row.entry.item.number}`
+
+// Those PRs of one repository, longest wait first, as { pr, decision, days }. Which ones wait on reviewers is the PR machine's word
+// (waitsOnReviewers). "Since" is GitHub's updatedAt, the one date the desk already holds that every way a PR goes back to its reviewers
+// moves (opened for review, a push, a review request or an ask), so on fresh data the days fall short of the true wait and never run over
+// it. No date, no row.
+export function waitingOnOthers(project, decisions, login, reviewEntries = [], facts = {}, now = Date.now()) {
+  const listed = new Set(projectNeedsRows(project, decisions, login, reviewEntries, facts).map(needsRowKey))
+  return authoredPulls(project.incomingReviews, login)
+    .filter(pr => !listed.has(pullKey(pr)))
     .map(pr => ({ pr, decision: deskStanding(pr, login, facts), days: Math.floor((now - (Date.parse(pr.updatedAt || '') || now)) / DAY_MS) }))
     .filter(({ decision, days }) => waitsOnReviewers(decision) && days >= WAITING_ON_OTHERS_DAYS)
-    .sort((a, b) => b.days - a.days)
 }
 
 // The first answer of the review requests (api.js fetchOwnPulls) laid over the list as it stood: the PRs that

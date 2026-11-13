@@ -1750,13 +1750,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // and where to report the open PR count. Without it the list shows all PRs.
   function renderPullRequests(project, navigation, view = null, page = null) {
     if (page) {
-      return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token}
+      return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token} capabilities={capabilities}
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
         runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
         presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
         records={recordsForProject(records, project)} />
     }
-    return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
+    return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token} capabilities={capabilities}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
       runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
       scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
@@ -1853,7 +1853,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const { syncLists } = useBackgroundLists({
     hub, lists: repositoryLists, token, sendOnly, connected: conn.state === 'connected', started: openSynced, login: conn.login, projects: sourceProjects, pinned, runs: reviewRuns, respondChats,
   })
-  // Always load is the owner's own switch: saved, then shown, and the pass that follows reads the repository.
+  // Pin is the owner's own button: saved, then shown, and the pass that follows reads the repository.
   const setPinned = useCallback(async (repo, on) => { setPinChoice(await setRepositoryPinned(repo, on)) }, [])
 
   // The toolbar reflects only the app's first connection/feed read. Once that

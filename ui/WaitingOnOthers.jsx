@@ -19,7 +19,7 @@ export function WaitingOnOthers({ rows, capabilities, onOpenPull }) {
           icon={<PullStateIcon pr={pr} />}
           title={pr.title}
           facts={<span><DotLine parts={[`#${pr.number}`, several ? project.name : null, waitingWords(days, decision.waitingOn)]} /></span>}
-          action={ask ? <button type="button" className="co-btn co-btn-quiet co-desk-row-action" onClick={() => onOpenPull(project, pr, 'conversation', ask)}>{NAMES.askAgain}</button> : null}
+          action={ask ? <button type="button" className="co-btn co-btn-quiet co-desk-row-action" aria-label={`${NAMES.askAgain}: ${pr.title}`} onClick={() => onOpenPull(project, pr, 'conversation', ask)}>{NAMES.askAgain}</button> : null}
           onOpen={() => onOpenPull(project, pr)} />
       })}
     </div>
