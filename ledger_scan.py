@@ -31,7 +31,9 @@ from typing import Any
 
 PREFIX = "contributions/"
 STATE_FILE = "ledger-scan.json"
-SCHEMA = 1
+# 2: a refusal saved before kept_for was understood may be a kept checkout;
+# starting from a fresh read drops those once instead of keeping them forever.
+SCHEMA = 2
 
 # Records the job polls, reconciles, or settles on every pass. A record still
 # `submitting` may hold a send GitHub has not confirmed (publication_observe.py).
