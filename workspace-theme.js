@@ -421,9 +421,12 @@ export const WORKSPACE_CSS = `
 .co-follow-line b { color:var(--text); font-weight:600; }
 .co-follow-line svg { flex:none; }
 .co-follow-error { flex-basis:100%; color:var(--danger-text,var(--danger)); }
-.co-gh-pr-sub code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
+.co-gh-pr-sub code,.co-desc-marks code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
 .co-branch-flow { display:inline-flex; align-items:center; gap:7px; min-width:0; }
 .co-gh-pr-sub .co-branch-flow { flex-direction:row; flex-wrap:wrap; margin:0; }
+/* The branches and labels are drawn twice: on the facts line (a wide screen) and in the Description row's head (a phone); one of the two shows. */
+.co-pr-marks { display:contents; }
+.co-desc-marks { display:none; }
 .co-branch-flow code { overflow-wrap:anywhere; }
 .co-branch-flow .co-icon { flex:0 0 auto; color:var(--muted); }
 .co-tab-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
@@ -447,6 +450,12 @@ export const WORKSPACE_CSS = `
 @media (prefers-reduced-motion:reduce) { .co-tip::after { transition-duration:0s; } }
 /* On a phone a tooltip hangs from its button's right edge. Centred, the last button's long label ran past the screen's edge, and although nothing showed, the page scrolled sideways to reach it. */
 @media (max-width:680px) { .co-tip::after { left:auto; right:0; transform:none; } }
+/* On a touch screen there is no hover to show a tooltip, so the PR page's icon buttons say their word beside the icon (a mouse keeps the icon and its tooltip). */
+.co-btn-word { display:none; }
+@media (hover:none) {
+ .co-pr-detail-actions .co-tip { min-width:0; min-height:var(--co-control-height); padding-inline:10px; }
+ .co-pr-detail-actions .co-btn-word { display:inline; }
+}
 .co-gh-provenance { display:contents; }
 .co-chat-group { position:relative; display:inline-flex; }
 .co-chat-group-list { position:absolute; z-index:30; top:calc(100% + 6px); left:0; width:min(320px,calc(100vw - 32px)); padding:6px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); box-shadow:0 12px 32px rgba(0,0,0,.28); }
@@ -1221,10 +1230,16 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @keyframes co-fade-end { 0%,96% { --co-fade-end:28px; } 100% { --co-fade-end:0px; } }
 @media(max-width:680px) {
  .co-pr-detail { display:flex; flex-direction:column; }
- .co-pr-detail .co-gh-pr-sub { order:-2; margin:2px 0 0; }
- /* The facts sit above the title on a phone, and the Following line stays right under them. */
- .co-pr-detail .co-follow-line { order:-2; margin:0; }
- .co-pr-detail .co-gh-pr-head { order:-1; padding-right:0; }
+ /* The title leads on a phone, then one facts line (state, number, author) and the Following line right under it. The branches and labels sit in the Description row's head. */
+ .co-pr-detail .co-gh-pr-head { order:-2; padding-right:0; }
+ .co-pr-detail .co-gh-pr-sub { order:-2; margin:6px 0 0; }
+ .co-pr-detail .co-follow-line { order:-2; margin:6px 0 0; }
+ .co-pr-marks { display:none; }
+ .co-desc-marks { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; padding-left:22px; }
+ .co-desc-marks .co-branch-flow { flex-direction:row; flex-wrap:nowrap; min-width:0; max-width:100%; margin:0; gap:6px; }
+ .co-desc-marks .co-branch-to { flex:none; gap:6px; }
+ /* Folded, a long branch name keeps the row to one line and ends in an ellipsis; opened, the Description shows it whole. */
+ .co-gh-description:not([open]) .co-desc-marks code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
  .co-pr-detail .co-pr-title-num { display:none; }
  .co-pr-detail .co-pr-sub-num { display:inline; }
  .co-pull-page .co-gh-pr-title { margin-top:8px; font-size:var(--co-text-body); font-weight:600; line-height:1.32; letter-spacing:-.01em; }

@@ -78,6 +78,11 @@ export const NAMES = Object.freeze({
   openChat: 'Open chat',
   answerInChat: 'Answer in chat',
   // A saved Respond to feedback answer on the Review tab: Post publishes it as you; Reply in chat opens its conversation to talk it
+  // The words beside the icons of the PR page's secondary buttons on a touch screen, where there is no hover to show a tooltip.
+  // A button of one chat says Chat; one that holds several says Chats and how many.
+  github: 'GitHub',
+  chat: 'Chat',
+  chats: 'Chats',
   // over first (answerInChat is for a question the agent asked); Send again re-sends an approved Post to the chat; Try again carries
   // on a post that stopped; Respond again starts a second pass that replaces the answer.
   postAnswer: 'Post',

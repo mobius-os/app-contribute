@@ -1508,11 +1508,15 @@ window.runWorkspaceChecks = async () => {
       const links = [...provenance.querySelectorAll('.co-gh-chat-link')]
       const names = links.map(link => link.getAttribute('aria-label'))
       // The prepared PR, then one Open chat button per kind of conversation (where it started, the review).
-      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, NAMES.openChat + ' · where it started', NAMES.openChat + ' · review'].join('|') && links.every(link => !text(link)), 'Provenance is not one combined section of icon buttons: ' + names)
+      // Icon buttons with a mouse; on a touch screen (no hover to show the tooltip) each also says its own word.
+      const words = matchMedia('(hover: none)').matches ? [NAMES.preparedPr, NAMES.chat, NAMES.chat] : ['', '', '']
+      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, NAMES.openChat + ' · where it started', NAMES.openChat + ' · review'].join('|') && links.map(link => link.innerText.trim()).join('|') === words.join('|'), 'Provenance is not one combined section of icon buttons: ' + names + ' / ' + links.map(link => link.innerText.trim()))
       ensure(document.querySelectorAll('.co-gh-provenance').length === 1, 'Provenance repeated')
       for (const link of links) {
+        // A control drawn short on a phone is still tapped 44px tall (The Compact Phone Rule), so the tap is probed, not the drawn box.
+        link.scrollIntoView({ block: 'center' })
         const box = link.getBoundingClientRect()
-        ensure(box.height >= 44 && box.width >= 44, 'Provenance hit area below 44px: ' + text(link) + ' ' + box.width + 'x' + box.height)
+        ensure(box.width >= 44 && tapsFortyFour(link), 'Provenance hit area below 44px: ' + text(link) + ' ' + box.width + 'x' + box.height)
       }
       const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent')
       Object.defineProperty(window, 'parent', { configurable: true, value: { postMessage(message, target) {
@@ -2858,7 +2862,8 @@ window.runRequestReviewChecks = async () => {
     const labels = [...toolbar.querySelectorAll('button, a')].map(node => text(node) || node.getAttribute('aria-label') || '')
     ensure(labels.indexOf('Request review') === labels.indexOf('Actions') + 1 && labels.indexOf('Actions') >= 0, 'Request review was not right after Actions: ' + labels.join(' | '))
     ensure(toolbar.querySelector('[aria-label="Assign"]'), 'The Assign icon went missing: ' + labels.join(' | '))
-    ensure(!toolbar.querySelector('[aria-label="Assign"]').textContent.trim(), 'Assign must stay a bare icon, apart from Request review')
+    // A bare icon with a mouse; on a touch screen (no hover to show the tooltip) it says its own word and nothing else.
+    ensure(toolbar.querySelector('[aria-label="Assign"]').innerText.trim() === (matchMedia('(hover: none)').matches ? 'Assign' : ''), 'Assign must stay a bare icon, apart from Request review, and say only Assign on a touch screen')
     ensure(!button('Request review').classList.contains('co-btn-primary'), 'Request review took the filled colour, which is the next step’s alone')
     ensure(sideways(), 'The PR page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
     const bar = toolbar.getBoundingClientRect()

@@ -26,7 +26,7 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
   assert.match(html, />Checks<\/button>/)
   // The number leads the title, and one facts line carries the state, the author and the branch it merges into.
   assert.match(html, /<h3 class="co-gh-pr-title"><span class="co-pr-title-num">#7<\/span> /)
-  assert.match(html, /by <b>[^<]*<\/b><\/span><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.match(html, /by <b>[^<]*<\/b><\/span><span class="co-pr-marks"><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
   assert.doesNotMatch(html, /co-state-line/, 'the four-step line is gone: the state badge says where the PR stands')
   assert.match(html, /Loading the conversation/)
   assert.match(html, /aria-label="Choose an action for PR \d+"/)
