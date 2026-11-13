@@ -23,13 +23,25 @@ export function slimReviewRow(entry) {
   }
 }
 
+// A PR that is over (merged or closed) stands as its state says whatever else GitHub holds about it, so the next
+// visit keeps only what a desk row reads of it and the change probe compares (review-list.js pullSignature). That
+// is enough to show it, and a probe that finds it unmoved leaves it unread: a long review history is mostly PRs
+// that are over, and they are most of what a full read costs.
+export function settledPulls(pulls) {
+  return [...pulls.values()].filter(pr => pr.state === 'MERGED' || pr.state === 'CLOSED').map(pr => ({
+    number: pr.number, title: pr.title, url: pr.url, state: pr.state, isDraft: pr.isDraft, updatedAt: pr.updatedAt,
+    headRefOid: pr.headRefOid, headRefName: pr.headRefName, baseRefName: pr.baseRefName,
+    author: { login: pr.author?.login }, repository: { nameWithOwner: pr.repository?.nameWithOwner },
+  }))
+}
+
 const isList = value => Array.isArray(value)
 
 export function normalizeDeskCopy(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.login !== 'string' || !raw.login) return null
   if (typeof raw.synced_at !== 'string' || !isList(raw.incoming) || !isList(raw.review_rows)) return null
   const repositories = raw.repositories && isList(raw.repositories.repositories) ? raw.repositories : { repositories: [], hasNextPage: false }
-  return { login: raw.login, syncedAt: raw.synced_at, incoming: raw.incoming, repositories, reviewRows: raw.review_rows }
+  return { login: raw.login, syncedAt: raw.synced_at, incoming: raw.incoming, repositories, reviewRows: raw.review_rows, reviewPulls: isList(raw.review_pulls) ? raw.review_pulls : [] }
 }
 
 export async function loadDeskCopy() {
@@ -42,11 +54,11 @@ export async function loadDeskCopy() {
 
 // Writes only what changed: the open writes it once its reads answered and again when a later read moved something.
 let lastSaved = ''
-export async function saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows }) {
+export async function saveDeskCopy({ login, syncedAt, incoming, repositories, reviewRows, reviewPulls }) {
   const copy = {
     schema: 1, login, synced_at: syncedAt, incoming,
     repositories: { repositories: repositories.repositories, hasNextPage: !!repositories.hasNextPage },
-    review_rows: reviewRows,
+    review_rows: reviewRows, review_pulls: reviewPulls,
   }
   const text = JSON.stringify(copy)
   if (text === lastSaved) return false

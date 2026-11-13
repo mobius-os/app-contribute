@@ -199,3 +199,17 @@ test('a PR the last read shows as current is not read again when the set changes
   void h.sync()
   assert.equal(h.reads[2].known, null, 'a Sync reads every PR, whatever the probe would say')
 })
+
+test('PRs that were over at the last visit show as they were and stay unread while the probe finds them unmoved', async () => {
+  const h = harness()
+  const saved = runsOf(review('all_clear', { verdict_proposal: approved }))
+  const settled = [{ number: 7, state: 'MERGED', updatedAt: '2026-11-10T10:00:00Z', headRefOid: head('a'), author: { login: 'someone-else' }, repository: { nameWithOwner: 'o/r' } }]
+  h.render({ ...base, runs: saved, knownPulls: settled })
+  assert.deepEqual(h.rows(), ['done:Merged'], 'no "checking" for a PR the last visit saw merged')
+  assert.equal(h.reads[0].known.get('o/r#7'), settled[0], 'the first read may reuse it, if the probe confirms it')
+  h.reads[0].resolve(live({ state: 'MERGED' })); await h.flush()
+  assert.deepEqual(h.rows(), ['done:Merged'])
+  // A later seed never replaces what a read answered.
+  h.render({ knownPulls: [{ ...settled[0], state: 'CLOSED' }] })
+  assert.deepEqual(h.rows(), ['done:Merged'])
+})

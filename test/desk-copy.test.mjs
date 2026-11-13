@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { loadDeskCopy, normalizeDeskCopy, saveDeskCopy, slimReviewRow } from '../desk-copy.js'
+import { loadDeskCopy, normalizeDeskCopy, saveDeskCopy, settledPulls, slimReviewRow } from '../desk-copy.js'
+import { classifyReview, reviewKey } from '../review-list.js'
 import { withOwnerPulls } from '../desk.js'
 
 const chip = { label: 'Draft to send', tone: 'owner' }
@@ -35,7 +36,8 @@ test('only a review whose standing was read is a last-known row', () => {
 
 test('a copy is trusted only when it names its account, its last sync and both lists', () => {
   const copy = { schema: 1, login: 'owner', synced_at: '2026-11-13T07:00:00Z', incoming: [{ number: 1 }], repositories: { repositories: [{ nameWithOwner: 'o/r' }], hasNextPage: true }, review_rows: [] }
-  assert.deepEqual(normalizeDeskCopy(copy), { login: 'owner', syncedAt: '2026-11-13T07:00:00Z', incoming: [{ number: 1 }], repositories: copy.repositories, reviewRows: [] })
+  assert.deepEqual(normalizeDeskCopy(copy), { login: 'owner', syncedAt: '2026-11-13T07:00:00Z', incoming: [{ number: 1 }], repositories: copy.repositories, reviewRows: [], reviewPulls: [] })
+  assert.deepEqual(normalizeDeskCopy({ ...copy, review_pulls: [{ number: 7 }] }).reviewPulls, [{ number: 7 }])
   for (const broken of [null, {}, { ...copy, login: '' }, { ...copy, synced_at: undefined }, { ...copy, incoming: {} }, { ...copy, review_rows: null }]) assert.equal(normalizeDeskCopy(broken), null)
   assert.deepEqual(normalizeDeskCopy({ ...copy, repositories: undefined }).repositories, { repositories: [], hasNextPage: false })
 })
@@ -65,4 +67,33 @@ test('the first answer replaces the PRs that concern the owner and leaves every 
   assert.deepEqual(merged.map(item => item.number), [1, 2, 3], 'PR 4 was the owner\'s and is not in the fresh answer: it is gone')
   assert.deepEqual(merged.filter(item => item.title === 'fresh').map(item => item.number), [1, 2])
   assert.deepEqual(withOwnerPulls(undefined, owned, 'owner').map(item => item.number), [1, 2])
+})
+
+// A merged or closed PR is read as its state says: the copy keeps what a row and the change probe read, and the row is the same.
+const pullRead = (extra = {}) => ({
+  id: 'PR_1', number: 7, title: 'A PR', url: 'https://github.com/o/r/pull/7', state: 'MERGED', isDraft: false, updatedAt: '2026-11-10T10:00:00Z',
+  headRefOid: 'a'.repeat(40), headRefName: 'feature', baseRefName: 'main', baseRefOid: 'b'.repeat(40), mergeable: 'UNKNOWN', reviewDecision: 'APPROVED',
+  author: { login: 'someone', __typename: 'User' }, repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE', squashMergeAllowed: true },
+  latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'owner' }, commit: { oid: 'a'.repeat(40) } }] }, viewerLatestReview: { state: 'APPROVED', commit: { oid: 'a'.repeat(40) } },
+  reviewThreads: { nodes: [] }, comments: { nodes: [], totalCount: 40 }, labels: { nodes: [] }, ...extra,
+})
+
+test('only PRs that are over are kept, with what a row reads and the change probe compares, and nothing else', () => {
+  const pulls = new Map([['o/r#7', pullRead()], ['o/r#8', pullRead({ number: 8, state: 'CLOSED' })], ['o/r#9', pullRead({ number: 9, state: 'OPEN' })]])
+  const kept = settledPulls(pulls)
+  assert.deepEqual(kept.map(pr => [pr.number, pr.state]), [[7, 'MERGED'], [8, 'CLOSED']], 'an open PR is read again at every visit')
+  assert.deepEqual(Object.keys(kept[0]).sort(), ['author', 'baseRefName', 'headRefName', 'headRefOid', 'isDraft', 'number', 'repository', 'state', 'title', 'updatedAt', 'url'])
+  assert.deepEqual([kept[0].author, kept[0].repository], [{ login: 'someone' }, { nameWithOwner: 'o/r' }])
+  assert.ok(JSON.stringify(kept[0]).length < 400)
+})
+
+test('a row reads the same from the kept copy of a PR that is over as from the whole read', () => {
+  const full = pullRead()
+  const [kept] = settledPulls(new Map([[reviewKey('o/r', 7), full]]))
+  for (const state of ['all_clear', 'needs_you', 'verdict_pending', 'reviewing']) for (const login of ['owner', 'someone']) {
+    const item = { repo: 'o/r', number: 7, head_sha: full.headRefOid, title: 'A PR', state, ...(state === 'verdict_pending' ? { verdict_proposal: { state: 'proposed', event: 'APPROVE', head_sha: full.headRefOid } } : {}) }
+    const run = { id: 'r', state: state === 'reviewing' ? 'reviewing' : 'complete', execution_state: 'completed', chat_id: 'c', created_at: '2026-11-03T22:00:00Z', items: [item] }
+    const read = live => { const row = classifyReview({ run, item, id: 'o/r#7' }, { login, live, runs: [run] }); return [row.bucket, row.confirm, row.chips, row.decision.state, row.decision.turn, row.decision.next, row.pull.state, row.pull.author.login] }
+    assert.deepEqual(read(kept), read(full), `${state} as ${login}`)
+  }
 })

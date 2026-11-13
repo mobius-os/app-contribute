@@ -43,7 +43,7 @@ import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createSyncHub, onShownAgain } from './refresh.js'
-import { loadDeskCopy, saveDeskCopy, slimReviewRow } from './desk-copy.js'
+import { loadDeskCopy, saveDeskCopy, settledPulls, slimReviewRow } from './desk-copy.js'
 import { checkUpstream } from './upstream-check.js'
 import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, projectNeedsCount, settleReviewRequest, withOwnerPulls } from './desk.js'
 import { withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
@@ -1649,7 +1649,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   // Reviews you started: one row per PR for the Agent runs page, counted in the rail.
-  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, runsReady, lastKnown: savedCopy?.reviewRows, chats: respondChats, responses, pulls: incomingReviews, ignored: ignoredReviews, login })
+  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, runsReady, lastKnown: savedCopy?.reviewRows, knownPulls: savedCopy?.reviewPulls, chats: respondChats, responses, pulls: incomingReviews, ignored: ignoredReviews, login })
   reviewListRef.current = reviewList
 
   // A linked repository outside the owner's lists still opens as a project.
