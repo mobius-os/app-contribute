@@ -4,7 +4,7 @@
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
-// runPullReadingChecks (the whole app: reading a PR page: pictures, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
+// runPullReadingChecks (the whole app: reading a PR page: pictures, the Checks tab, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
 // runDeskListChecks (the whole app: Needs you rows share one layout and their counts, Agent runs has three tabs, a merged row opens its PR page),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
@@ -280,6 +280,9 @@ window.fetch = async (url, options = {}) => {
     if(call.url.includes('/commits/')) {
       const head=call.url.match(/commits\/([a-f0-9]+)\//)?.[1]
       ensure([HEAD,SECOND_HEAD].includes(head),'Checks lost their exact head')
+      // A scenario that wants a long list of checks fills window.checkRuns (the head to its check runs) and window.checkStatuses.
+      if(window.checkRuns && call.url.includes('/check-runs?')) return response({total_count:window.checkRuns(head).length,check_runs:window.checkRuns(head)})
+      if(window.checkStatuses && call.url.includes('/status?')) return response({sha:head,total_count:window.checkStatuses.length,statuses:window.checkStatuses})
       if(call.url.includes('/check-runs?')) return window.failChecks
         ? new Response(JSON.stringify({detail:'Fixture check runs unavailable'}),{status:503})
         : response({total_count:1,check_runs:[window.failedCheck
@@ -2401,7 +2404,7 @@ window.runPullReadingChecks = async () => {
     await until(() => query('.co-check-why'), 'The failed check did not say why: ' + text(query('.co-pr-detail-body')))
     const why = query('.co-check-why')
     ensure(text(why).includes('Failed step: Run unit tests') && text(why).includes('test/desk.test.mjs:41') && text(why).includes('not ok 412'), 'The reason read: ' + text(why))
-    ensure([...query('.co-pr-detail-body').querySelectorAll('a')].some(link => text(link) === 'View on GitHub'), 'The check lost View on GitHub')
+    ensure([...query('.co-pr-detail-body').querySelectorAll('a')].some(link => link.getAttribute('aria-label') === 'View on GitHub: Unit tests' && link.dataset.tip === 'View on GitHub'), 'The check lost View on GitHub')
     ensure(readsOf('/actions/jobs/77').length === 1 && readsOf('/check-runs/77/annotations').length === 1 || readsOf('/annotations').length === 0, 'The failure was not read through the route')
     await captureShot('pr-page-check-why', query('.co-detail-tabs'))
     pass('a failing check shows its failed step and annotation, with View on GitHub')
@@ -2462,10 +2465,120 @@ window.runPullReadingChecks = async () => {
     ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     await captureShot('pr-page-reading', query('.co-detail-tabs'))
+    checks.push(...await checksTabChecks())
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
   }
+}
+
+// A PR with twenty checks as GitHub reports them: one still running, twelve check runs and one commit status passed, six skipped
+// (one of them neutral); with failing, one of the twelve fails. Nothing real: the names are the kind a project's tests have.
+const minutesAgo = minutes => new Date(Date.now() - minutes * 60000).toISOString()
+function twentyChecks({ failing = false } = {}) {
+  const done = (id, name, seconds, extra = {}) => ({ id, name, head_sha: HEAD, status: 'completed', conclusion: 'success', started_at: minutesAgo(12), completed_at: new Date(Date.now() - 12 * 60000 + seconds * 1000).toISOString(),
+    app: { slug: 'github-actions' }, output: { annotations_count: 0 }, details_url: 'https://github.com/owner/project/actions/runs/9/job/' + id, ...extra })
+  const names = ['privacy', 'lint', 'build', 'frontend-tests'].concat([1, 2, 3, 4, 5, 6, 7, 8].map(shard => 'backend-tests (' + shard + ')'))
+  // With failing, frontend-tests fails: its Actions job and one annotation are what window.checkJob and window.checkAnnotations answer.
+  const broke = { conclusion: 'failure', output: { title: 'Process completed with exit code 1.', annotations_count: 1 } }
+  const passed = names.map((name, index) => done(10 + index, name, 90 + index * 37, failing && name === 'frontend-tests' ? broke : {}))
+  const skipped = ['e2e', 'e2e-boot', 'release-replay', 'docs-preview', 'deploy-preview'].map((name, index) => done(30 + index, name, 0, { conclusion: 'skipped' })).concat([done(40, 'coverage', 0, { conclusion: 'neutral' })])
+  const running = [{ id: 50, name: 'upgrade-path', head_sha: HEAD, status: 'in_progress', conclusion: null, started_at: minutesAgo(4), completed_at: null, app: { slug: 'github-actions' }, details_url: 'https://github.com/owner/project/actions/runs/9/job/50' }]
+  return { runs: passed.concat(skipped, running), statuses: [{ id: 60, context: 'ci/package', state: 'success', description: 'Package built', created_at: minutesAgo(10), updated_at: minutesAgo(9), target_url: 'https://ci.example/package/60' }] }
+}
+
+// The Checks tab of a PR page with twenty checks: one line says where they stand (the commit, when it was read, Check again), the chips of the PR
+// list pick a state, the checks sit by what needs the owner with passed and skipped folded, and a failing check comes first with its reason.
+async function checksTabChecks() {
+  const checks = []
+  const pass = name => checks.push({ name, status: 'pass' })
+  const body = () => query('.co-pr-detail-body')
+  const groupStates = () => [...body().querySelectorAll('.co-check-group')].map(node => node.className.replace(/.*is-/, ''))
+  const rowsIn = state => [...body().querySelectorAll('.co-check-group.is-' + state + ' .co-check')]
+  const chips = () => [...body().querySelectorAll('.co-pr-filters button')]
+  const chip = name => chips().find(node => text(node).replace(/\d+$/, '') === name)
+  const nothingSideways = message => ensure(document.documentElement.scrollWidth <= window.innerWidth && [...body().querySelectorAll('.co-check')].every(row => row.getBoundingClientRect().right <= window.innerWidth + 1), message + ': ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
+  let fixture = twentyChecks()
+  window.checkRuns = () => fixture.runs; window.checkStatuses = fixture.statuses
+  window.checkJob = { id: 13, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run unit tests', conclusion: 'failure' }] }
+  window.checkAnnotations = [{ path: 'src/ui/Drawer.test.jsx', start_line: 88, annotation_level: 'failure', message: 'expected the ring to be hidden' }]
+  window.failedCheck = false
+  await mountDeskApp()
+  await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+  await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+  await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
+  await click(detailTab('Checks'))
+  await until(() => query('.co-checks-summary'), 'The checks did not load: ' + text(body()).slice(0, 300))
+
+  // One line says where they stand, with the commit, when it was read and Check again at its top.
+  const summary = query('.co-checks-summary')
+  ensure(text(summary).includes('1 running · 13 passed · 6 skipped'), 'The summary read: ' + text(summary))
+  ensure(text(summary).includes('For commit ' + HEAD.slice(0, 7)) && /read (just now|1 minute ago)/.test(text(summary)), 'The summary did not name the commit and when it was read: ' + text(summary))
+  ensure(button('Check again', summary) && [...body().querySelectorAll('button')].filter(node => text(node) === 'Check again').length === 1, 'Check again is not alone, in the summary')
+  ensure(summary.compareDocumentPosition(query('.co-checks .co-pr-note')) & Node.DOCUMENT_POSITION_FOLLOWING && text(query('.co-checks .co-pr-note')).includes('Checks are not an all-clear review'), 'The note is not under the summary')
+  ensure(query('.co-check-ring').getAttribute('aria-label') === '19 of 20 checks passed or skipped', 'The ring named: ' + query('.co-check-ring').getAttribute('aria-label'))
+  await captureShot('checks-tab', query('.co-detail-tabs'))
+  nothingSideways('The Checks tab runs past the screen edge')
+  pass('the Checks tab leads with where the checks stand, the commit, when it was read and Check again')
+
+  // The PR list's own chips, with a state that has no checks stepped back.
+  ensure(chips().map(text).join('|') === 'All20|Failing0|Running1|Passed13|Skipped6', 'The chips read: ' + chips().map(text).join('|'))
+  ensure(chip('Failing').classList.contains('is-empty') && !chip('Running').classList.contains('is-empty') && chip('All').getAttribute('aria-pressed') === 'true', 'The chips did not step back or show which is pressed')
+  ensure(chips().every(node => node.getBoundingClientRect().right <= window.innerWidth), 'A chip is cut off by the screen edge')
+  pass('the chips are the PR list\'s, All 20, Failing 0, Running 1, Passed 13, Skipped 6, and the empty one steps back')
+
+  // Grouped by what needs the owner; passed and skipped fold; one line per check with icon, word, name and time, and a GitHub icon that names itself.
+  ensure(groupStates().join() === 'running,passed,skipped', 'The groups ran: ' + groupStates())
+  ensure(rowsIn('running').length === 1 && rowsIn('passed').length === 3 && rowsIn('skipped').length === 3, 'The groups showed ' + ['running', 'passed', 'skipped'].map(state => rowsIn(state).length))
+  ensure(button('Show 10 more', body()) && button('Show 3 more', body()), 'The folds did not say how many are hidden')
+  const running = rowsIn('running')[0]
+  ensure(text(running).includes('upgrade-path') && text(running).includes('Running') && /started 4 minutes ago/.test(text(running)), 'The running check read: ' + text(running))
+  ensure(rowsIn('passed').every(row => row.querySelector('.co-check-icon svg') && text(row.querySelector('.co-check-meta b')) === 'Passed' && /^\d+m \d\ds$|^\d+s$/.test(text(row.querySelector('.co-check-time')))), 'A passed check lacked its icon, its word or how long it took')
+  ensure(rowsIn('skipped').every(row => text(row.querySelector('.co-check-meta')) === 'Skipped' || text(row.querySelector('.co-check-meta')) === 'Neutral'), 'A skipped check carried a time: ' + rowsIn('skipped').map(row => text(row.querySelector('.co-check-meta'))))
+  const github = running.querySelector('a[aria-label="View on GitHub: upgrade-path"]')
+  ensure(github && github.getAttribute('data-tip') === 'View on GitHub' && github.href.startsWith('https://github.com/') && github.target === '_blank', 'The GitHub icon is not a named link out')
+  ensure(![...body().querySelectorAll('a')].some(link => text(link) === 'View on GitHub'), 'A row spends words on View on GitHub')
+  ensure(rowsIn('passed').every(row => row.getBoundingClientRect().height <= 90), 'A check takes more than a line or two')
+  pass('checks sit by what needs the owner, passed and skipped fold, and each line has its icon, word, name, time and a GitHub icon')
+
+  // Show N more opens a fold, and Show fewer closes it.
+  await click(button('Show 10 more', body()))
+  await until(() => rowsIn('passed').length === 13 && button('Show fewer', body()), 'Show 10 more did not open the passed checks')
+  ensure(button('Show fewer', body()).getAttribute('aria-expanded') === 'true' && rowsIn('passed').some(row => text(row).includes('ci/package')), 'The commit status is not among the passed checks')
+  await click(button('Show fewer', body()))
+  await until(() => rowsIn('passed').length === 3, 'Show fewer did not fold them again')
+  pass('Show more and Show fewer fold the passed checks')
+
+  // A chip shows only its own group, whole; a state with none says so.
+  await click(chip('Passed'))
+  await until(() => groupStates().join() === 'passed' && rowsIn('passed').length === 13, 'The Passed chip showed ' + groupStates() + ' ' + rowsIn('passed').length)
+  ensure(!body().querySelector('.co-check-fold') && chip('Passed').getAttribute('aria-pressed') === 'true', 'A chosen state still folded')
+  await click(chip('Failing'))
+  await until(() => groupStates().length === 0 && text(body()).includes('No failing checks.'), 'An empty state said nothing: ' + text(body()).slice(0, 300))
+  await click(chip('All'))
+  await until(() => groupStates().join() === 'running,passed,skipped', 'All did not bring the groups back')
+  pass('a chip shows its own checks whole, and a state with none says so')
+
+  // Check again reads again; a failing check comes first and opens with its reason.
+  const reads = () => calls.requests.filter(call => call.url.includes('/check-runs?')).length
+  const before = reads()
+  fixture = twentyChecks({ failing: true })
+  await click(button('Check again', query('.co-checks-summary')))
+  await until(() => text(query('.co-checks-summary')).includes('1 failing') && query('.co-check-group.is-failing .co-check-why'), 'The failure did not show: ' + text(body()).slice(0, 400))
+  ensure(reads() === before + 1, 'Check again did not read the checks once more: ' + before + ' then ' + reads())
+  ensure(text(query('.co-checks-summary')).includes('1 failing · 1 running · 12 passed · 6 skipped'), 'The summary read: ' + text(query('.co-checks-summary')))
+  ensure(groupStates().join() === 'failing,running,passed,skipped', 'The groups ran: ' + groupStates())
+  const failing = rowsIn('failing')[0]
+  ensure(text(failing).includes('frontend-tests') && text(failing.querySelector('.co-check-meta')) === 'Failed3m 21s', 'The failing check read: ' + text(failing))
+  ensure(text(failing).includes('Failed step: Run unit tests') && text(failing).includes('src/ui/Drawer.test.jsx:88') && text(failing).includes('expected the ring to be hidden'), 'The failing check did not say why: ' + text(failing))
+  ensure(!chip('Failing').classList.contains('is-empty') && text(chip('Failing')) === 'Failing1', 'The Failing chip did not light')
+  await captureShot('checks-tab-failing', query('.co-detail-tabs'))
+  nothingSideways('The failing Checks tab runs past the screen edge')
+  pass('Check again reads the checks once more, and a failing check comes first, open with its reason')
+
+  ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+  window.checkRuns = null; window.checkStatuses = null
+  return checks
 }
 
 // The whole app on a fresh page: every Needs you row has one layout, a long saved note is one line with Show more, the chips count each PR
@@ -3765,7 +3878,7 @@ async function main() {
     const page = join(temporary, 'fixture.html')
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; connect-src \'none\'">' +
-      '<style>:root{--bg:#fff;--surface:#f5f5f5;--surface-2:#eee;--text:#222;--muted:#666;--border:#ddd;--accent:#2454cc;--accent-dim:#eef;--font:Arial}html,body,#root{height:100%;margin:0}</style>' +
+      '<style>:root{--bg:#fff;--surface:#f5f5f5;--surface-2:#eee;--text:#222;--muted:#666;--border:#ddd;--accent:#2454cc;--accent-dim:#eef;--font:Arial;--green:#059669;--green-text:#046c4e;--danger:#ef4444;--danger-text:#c42341;--warning:#8f5a00;--warning-text:#8f5a00}html,body,#root{height:100%;margin:0}</style>' +
       '</head><body><div id="root"></div><script>' + output[0].code.replace(/<\/script/gi, '<\\/script') + '</script></body></html>')
     browser = spawn(await chromiumPath(), ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions',
