@@ -168,6 +168,27 @@ test('a change request older than 100 reviews still stands, and a history that c
   await assert.rejects(loadPullReviewers('fixture', pr), /Too much review history/)
 })
 
+test('a page GitHub answers with partial-context errors fails the reviewer read, on the first page and on any later page of any connection', async t => {
+  const base = { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName }
+  const review = (state, at) => ({ state, submittedAt: `2026-11-0${at}T00:00:00Z`, author: { login: 'sam' } })
+  const empty = { pageInfo: { hasNextPage: false }, nodes: [] }
+  const serve = (name, partial) => async (url, options) => {
+    const after = JSON.parse(options.body).variables.after
+    const rows = { reviewRequests: empty, reviews: empty, timelineItems: empty }
+    if (!after) rows[name] = { pageInfo: { hasNextPage: true, endCursor: 'p2' }, nodes: name === 'reviews' ? [review('CHANGES_REQUESTED', 1)] : [] }
+    const page = after ? { [name]: { pageInfo: { hasNextPage: false }, nodes: partial ? [null] : [review('APPROVED', 2)] } } : rows
+    return response({ data: { repository: { pullRequest: { ...base, ...page } } }, ...(partial ? { errors: [{ message: 'Resource not accessible' }] } : {}) })
+  }
+  t.mock.method(globalThis, 'fetch', serve('reviews', false))
+  assert.deepEqual((await loadPullReviewers('fixture', pr)).reviewers.map(row => row.status), [], 'control: a complete later page is read')
+  for (const name of ['reviewRequests', 'reviews', 'timelineItems']) {
+    t.mock.method(globalThis, 'fetch', serve(name, true))
+    await assert.rejects(loadPullReviewers('fixture', pr), /only part of the review history/, name)
+  }
+  t.mock.method(globalThis, 'fetch', async () => response({ data: { repository: { pullRequest: { ...base, reviews: { nodes: [null] }, reviewRequests: empty, timelineItems: empty } } }, errors: [{ message: 'partial' }] }))
+  await assert.rejects(loadPullReviewers('fixture', pr), /only part of the review history/)
+})
+
 test('who was asked is reported unavailable, not empty, when GitHub leaves out the requests, and a moved branch is stale', async t => {
   const answer = fields => response({ data: { repository: { pullRequest: { headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, baseRefName: pr.baseRefName, ...fields } } } })
   t.mock.method(globalThis, 'fetch', async () => answer({ reviews: { nodes: [] } }))
