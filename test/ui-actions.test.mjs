@@ -458,8 +458,8 @@ test('every refresh control renews the contribution feed and reports a partial o
   const refresh = appSource.match(/async function refreshEverything\(\{ quiet = false \} = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || ''
   assert.match(refresh, /hub\.refresh\('ledger'\)/)
   assert.match(refresh, /reviewList\.syncPulls\(\{ quiet \}\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
-  // The quiet catch-up asks the hub for the review requests as its own cadence does; only the owner's Sync forces the read.
-  assert.match(refresh, /quiet \? hub\.automatic\('incoming'\) : refreshIncomingReviews\(\)/)
+  // The quiet catch-up awaits the hub's own read of the review requests; only the owner's Sync forces the read.
+  assert.match(refresh, /quiet \? hub\.catchUp\('incoming'\) : refreshIncomingReviews\(\)/)
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
   assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
   assert.match(appSource, /checks=\{upstreamChecks\}/)

@@ -2,7 +2,7 @@ export function createRefreshCoordinator(refresh) {
   let active = null
   let rerun = false
 
-  return function requestRefresh() {
+  function requestRefresh() {
     if (active) {
       rerun = true
       return active
@@ -15,6 +15,9 @@ export function createRefreshCoordinator(refresh) {
     })().finally(() => { active = null })
     return active
   }
+  // The read now in flight (with any queued behind it), or null: for a caller that wants its outcome without asking for another.
+  requestRefresh.inFlight = () => active
+  return requestRefresh
 }
 
 // Whether the shell shows this frame. A pane tiled beside a chat is shown without
@@ -151,7 +154,8 @@ const quiet = promise => promise.catch(() => {})
 // superseded it is dropped, so the newest state is the one shown. Hidden, the
 // hub reads nothing; shown again, it catches up at once. `refresh(name)` is the
 // owner's own action and always reads (and rejects when the read fails);
-// `changed(name)` is a change known to matter and `automatic(name)` a cadence.
+// `changed(name)` is a change known to matter, `automatic(name)` a cadence and `catchUp(name)`
+// a caller that needs the answer to be current before it goes on.
 export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => null, now = () => Date.now(), host = globalThis.window } = {}) {
   const facts = new Map()
   let visible = false
@@ -282,6 +286,18 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
     // A read a probe or a cadence asks for: held back while the GitHub fact's
     // cooldown runs or the account is low, and read once that allows it.
     automatic: name => (facts.has(name) ? automatic(facts.get(name)) : Promise.resolve()),
+    // Catch up with a fact once its answer is current, and say when that is: a read in flight is
+    // awaited (its outcome is the fact's own, a failure reaching `failed`), a read that is due is
+    // made, and a GitHub fact inside its cooldown or with the account low keeps its last answer
+    // (nothing is held back to read later). Never forces a second read behind one in flight.
+    catchUp(name) {
+      const fact = facts.get(name)
+      if (!fact) return Promise.resolve()
+      const inFlight = fact.coordinator.inFlight()
+      if (inFlight) return quiet(inFlight)
+      if (!visible || (fact.spec.github && (lowOnPoints() || !githubDue(fact)))) return Promise.resolve()
+      return quiet(run(fact))
+    },
     every: (read, ms) => tickers.add(read, ms),
     watch: (probe, changed) => probes.watch(probe, changed),
   }

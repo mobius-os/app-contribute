@@ -156,6 +156,8 @@ window.fetch = async (url, options = {}) => {
       if (call.body.query.includes('ContributeRepositories')) return response({data:{viewer:{repositories:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}}})
       // The Desk scenario asks the fixture PRs for review; everything else it reads falls through to the project mocks below.
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
+        // A test can hold the answer back: holdIncoming() settles to true when GitHub then fails.
+        if (window.holdIncoming && await window.holdIncoming()) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         if (window.failIncoming || window.failIncomingFull) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:window.githubInvolved || []}}})
       }
@@ -3480,6 +3482,28 @@ window.runSyncLineChecks = async () => {
     ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line: it is meant to be quiet')
     ensure(syncedAt() > before, 'The header\'s time did not move with the catch-up')
     checks.push({ name: 'the app shown again after a while syncs quietly and the header time follows', status: 'pass' })
+    // The review requests are read once, and the header's time follows that read's own outcome: not before it answers, and not at all when it fails.
+    for (const outcome of ['answers', 'fails']) {
+      window.setFrameVisible(false)
+      await advance(10 * 60)
+      let release
+      window.holdIncoming = () => new Promise(resolve => { release = resolve })
+      const stamped = syncedAt(), asked = incomingReads(), reposBefore = repositoryReads()
+      window.setFrameVisible(true)
+      for (let step = 0; step < 30 && !release; step++) await advance(1)
+      ensure(release && incomingReads() === asked + 1, 'The app shown again did not read the review requests on its return')
+      await advance(10)
+      ensure(repositoryReads() > reposBefore, 'The catch-up did not go on to read the rest while the review requests were out')
+      ensure(syncedAt() === stamped, 'The header\'s time moved while the review requests were still out (' + outcome + ')')
+      ensure(incomingReads() === asked + 1, 'The catch-up queued a second review-request read behind the first')
+      release(outcome === 'fails'); window.holdIncoming = undefined
+      await advance(10)
+      ensure(incomingReads() === asked + 1, 'The catch-up read the review requests again once the first settled')
+      if (outcome === 'answers') ensure(syncedAt() > stamped, 'The header\'s time did not follow the review requests that answered')
+      else ensure(syncedAt() === stamped, 'The header\'s time moved on a review-request read that failed')
+      ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line (' + outcome + ')')
+      checks.push({ name: outcome === 'answers' ? 'a catch-up waits for the review requests the hub is reading before the header\'s time moves' : 'a catch-up whose review-request read fails leaves the last good time to age', status: 'pass' })
+    }
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
