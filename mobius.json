@@ -228,6 +228,8 @@
     "ui/useRespondResults.js",
     "ui/useDeskSync.js",
     "ui/useCapabilities.js",
+    "ui/useTouchScreen.js",
+    "ui/SwipeReveal.jsx",
     "ui/WaitingOnOthers.jsx",
     "send-readiness.js",
     "inline-session.js",

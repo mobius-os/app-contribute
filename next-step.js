@@ -1,4 +1,4 @@
-// The PR page's next-step panel and the word beside its state badge (findings 1, 10 and 13). Both only read
+// The PR page's next-step panel and the word beside its state badge (findings 1, 10 and 13), and the same step for a desk row. They only read
 // the PR machine's decision (pr-machine.js): the pill says what is true, the hint is
 // the machine's own sentence, and the one filled button is the next step it names.
 // Pure, so every state's panel is tested without a browser.
@@ -71,6 +71,13 @@ export function stageWord(pr, decision) {
   if (!decision || pr?.isDraft || pr?.mergedAt || (pr?.state && pr.state !== 'OPEN')) return ''
   if (decision.approvedBy?.length) return 'Approved'
   return isResting(decision) ? decision.label : 'In review'
+}
+
+// What a desk row can be swiped to: the PR page's own next-step button (its intent and route), where it opens a window,
+// a sheet or a tab. A step that only reads GitHub again (Sync) is not worth a swipe.
+export function rowStep(decision, { record = null, capabilities = null } = {}) {
+  const primary = nextStepModel(decision, { record, capabilities })?.primary
+  return primary && primary.route !== 'sync' ? primary : null
 }
 
 // The ask a PR that waits on its reviewers can be given again: the first of these the PR machine offers and this Möbius can run,

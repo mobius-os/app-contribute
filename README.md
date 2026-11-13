@@ -191,7 +191,8 @@ only for the core and the one mode it is working in.
   their sum. Drafts ready to open are a quiet line; local changes live in the
   project's Local changes tab. On a phone the four views are one segmented bar
   (one row where all four fit), the repository list is a button beside the
-  search, and a row is three lines. Under Needs you, a quiet **Waiting on others**
+  search, a row is three lines, and a row whose PR has a next step swipes left
+  to reach it on a touch screen. Under Needs you, a quiet **Waiting on others**
   block lists your own PRs that have waited on reviewers for two days or more,
   with **Ask again**; it counts in no badge.
 - **A next step on every PR.** The state badge says where an open PR stands
