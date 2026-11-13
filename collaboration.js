@@ -25,8 +25,8 @@ export function takeoverBlocker(pulls) {
 // own "18/18", skipped and neutral runs count as passing; anything failed or
 // cancelled is a failure; the rest is still pending. A green rollup is not a
 // review verdict or proof that branch-required checks passed.
-const PASSING_CHECKS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL'])
-const FAILING_CHECKS = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'STALE'])
+export const PASSING_CHECKS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL'])
+export const FAILING_CHECKS = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'STALE'])
 export function checkSummary(pr) {
   const counts = pr?.commits?.nodes?.at(-1)?.commit?.statusCheckRollup?.contexts
   if (!Number.isInteger(counts?.totalCount) || counts.totalCount < 0) return null

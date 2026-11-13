@@ -72,7 +72,7 @@ export function PullLabels({ pr }) {
   </>
 }
 
-// Where the PR stands, at the right of its row: draft, and GitHub's review decision. On your own PR a row says one
+// Where the PR stands, at the right of its row: GitHub's review decision (a draft is told by its icon alone). On your own PR a row says one
 // thing about where it stands: when the PR machine has a chip for it (pr-standing.js chipOf), that chip is the verdict
 // and GitHub's raw decision (which cannot know a reviewer only commented, or that an approval carries over) stays out.
 // The caller passes the chip only for your own PRs: on someone else's, GitHub's decision is information the machine's
@@ -80,7 +80,6 @@ export function PullLabels({ pr }) {
 export function PullStateChips({ pr, machineChip = null }) {
   const decision = machineChip ? null : { CHANGES_REQUESTED: ['is-blocker', 'Changes requested'], APPROVED: ['is-ready', 'Approved'] }[pr?.reviewDecision]
   return <>
-    {pr?.isDraft ? <span className="co-desk-chip">Draft</span> : null}
     {decision ? <span className={'co-desk-chip ' + decision[0]}>{decision[1]}</span> : null}
   </>
 }
@@ -108,9 +107,10 @@ export function PullStateIcon({ pr, size = 16 }) {
 // GitHub's own state colours: open green, draft grey, merged purple, closed red.
 const STATE_COLOR = { open: '238636', draft: '6e7781', merged: '8957e5', closed: 'da3633' }
 
-export function PullStateBadge({ pr }) {
+// `note` is what an open PR's badge adds after the state ("Open · In review").
+export function PullStateBadge({ pr, note = '' }) {
   const state = pullState(pr)
-  return <span className={`co-gh-badge is-${state}`} style={labelColors(STATE_COLOR[state])}><Icon name={state === 'draft' ? 'draft' : state === 'merged' ? 'merge' : 'pull'} size={14} />{STATE_TEXT[state]}</span>
+  return <span className={`co-gh-badge is-${state}`} style={labelColors(STATE_COLOR[state])}><Icon name={state === 'draft' ? 'draft' : state === 'merged' ? 'merge' : 'pull'} size={14} />{STATE_TEXT[state]}{note ? ` · ${note}` : ''}</span>
 }
 
 /** "✓ 18/18" as on GitHub's PR list. Counts are GitHub's rollup, not a review. */

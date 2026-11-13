@@ -17,7 +17,8 @@ const ALL_PULLS = '*'
 // change of the set; afterwards only the PRs that moved. A review that changed
 // state reads its PR at once (`want`); the probe seeing a PR move waits out the
 // GitHub cooldown (`wantLater`), so a busy PR costs at most one read per five
-// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget.
+// minutes. The owner's Sync and Retry (`readAll`) always read, whatever the budget; a quiet catch-up
+// (`readAll({ quiet: true })`) asks as the probe does, so it waits out the cooldown and joins a read already due.
 function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
   const [live, setLive] = useState({ answered: '', pulls: new Map() })
   const latest = useRef({ refs, answered: '' })
@@ -26,7 +27,7 @@ function useReviewPulls({ hub, enabled, token, refs, refsKey, attempt }) {
   const mark = useCallback(keys => keys.forEach(key => wanted.current.add(key)), [])
   const want = useCallback(keys => { mark(keys); return hub.changed('reviewPulls') }, [hub, mark])
   const wantLater = useCallback(keys => { mark(keys); return hub.automatic('reviewPulls') }, [hub, mark])
-  const readAll = useCallback(() => { mark([ALL_PULLS]); return hub.refresh('reviewPulls') }, [hub, mark])
+  const readAll = useCallback(({ quiet = false } = {}) => { mark([ALL_PULLS]); return quiet ? hub.automatic('reviewPulls') : hub.refresh('reviewPulls') }, [hub, mark])
   useEffect(() => {
     if (!enabled || !token) return undefined
     return hub.fact('reviewPulls', {

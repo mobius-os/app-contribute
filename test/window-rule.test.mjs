@@ -32,3 +32,7 @@ test('a window keeps its foot on screen and stacks its buttons, the main one on 
   assert.match(css, /\.co-rw-actions \{ flex-direction:column-reverse; align-items:stretch; \}/)
   assert.match(css, /\.co-task-dock > \.co-run-approval \.co-run-approval-actions \{ display:flex; flex-direction:column-reverse; align-items:stretch; \}/)
 })
+
+test('a sized window keeps its foot reachable over a bulk selection: the PR list in the head scrolls in its own box', () => {
+  assert.match(css, /\.co-dialog > \.co-review-window\.is-sized > \.co-rw-head \.co-rw-list \{ max-height:min\(168px,24vh\); overflow-y:auto;/)
+})

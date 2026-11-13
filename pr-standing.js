@@ -26,4 +26,7 @@ export function frameOf(decision) {
   return REVIEW_MOVES.has(decision.state) ? 'verdict' : 'idle'
 }
 
+// A resting state has no step for anyone here and no agent at work: the PR page says it in the state badge and draws no panel.
+export const isResting = decision => QUIET.has(decision.state) && (decision.turn === 'other' || decision.turn === 'none')
+
 export const chipOf = decision => (QUIET.has(decision.state) ? null : { label: decision.label, tone: TONE[decision.turn] })

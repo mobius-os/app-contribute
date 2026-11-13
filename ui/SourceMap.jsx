@@ -18,6 +18,7 @@ import { FilterLine } from './FilterLine.jsx'
 import { DeskView } from './DeskViews.jsx'
 import { openGithubSettings } from '../github-connection.js'
 import { Shine } from './Shine.jsx'
+import { projectUpdater } from '../updates.js'
 
 const FILTERS = [
   ['all', 'All'],
@@ -94,7 +95,7 @@ function attentionLine(reviewRequests, needs) {
   return parts.join(' ')
 }
 
-function ProjectRow({ project, selected, onSelect, check = null, needs = 0, quiet = false }) {
+export function ProjectRow({ project, selected, onSelect, check = null, needs = 0, quiet = false }) {
   const facts = projectBoardFacts(project)
   const reviewRequests = project.reviewRequests?.length || 0
   const attention = attentionLine(reviewRequests, needs)
@@ -112,6 +113,9 @@ function ProjectRow({ project, selected, onSelect, check = null, needs = 0, quie
     || !project.available
     || (!project.builtHere && project.kind !== 'external' && project.canonical_repo && !project.origin?.sha && !project.base_sha)
   )
+  // A line about an update, a conflict or a missing comparison points at the one place that deals with it
+  // (Settings for Möbius, the App Store for an app). It sits beside the row's button, never inside it.
+  const updater = showShared ? projectUpdater(project) : null
   return (
     <div className={'co-source-row-wrap' + (selected ? ' is-selected' : '') + (quiet ? ' is-quiet' : '')}>
       <button
@@ -138,6 +142,7 @@ function ProjectRow({ project, selected, onSelect, check = null, needs = 0, quie
           <Icon name="right" size={15} />
         </span>
       </button>
+      {updater ? <div className="co-source-row-link"><button type="button" className="co-btn co-btn-quiet" onClick={updater.open}>{updater.label}<Icon name="right" size={14} /></button></div> : null}
     </div>
   )
 }

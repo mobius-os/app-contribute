@@ -5,8 +5,8 @@ import { BranchFlow } from './BranchFlow.jsx'
 // The top of every agent and confirm window, always the same centred lines: the repository and number in
 // purple capitals, the job, then the PR's name and the branches it merges from and into. A window over several PRs says "N PRs" and lists each one.
 // A question about a saved record, not a PR on GitHub (Withdraw, Discard), gives its own `eyebrow` and no
-// `pulls`. `tools` (the "What GitHub sees" label, or the close X of a window with no Cancel) sit in the
-// head; `done` swaps in a green check above the lines.
+// `pulls`. `tools` (the close X of a window with no Cancel) sit in the head; `done` swaps in a green check
+// above the lines.
 export function WindowHead({ title, titleId, pulls = [], eyebrow = null, tools = null, done = false }) {
   const [only] = pulls
   const line = eyebrow ?? (pulls.length === 1 ? `${only.repository.nameWithOwner} · #${only.number}` : `${pulls.length} PRs`)

@@ -1,13 +1,16 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Twenty scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Twenty-three scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
+// runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
-// runPullReadingChecks (the whole app: reading a PR page: pictures, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
+// runPullReadingChecks (the whole app: reading a PR page: pictures, the Checks tab, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
 // runDeskListChecks (the whole app: Needs you rows share one layout and their counts, Agent runs has three tabs, a merged row opens its PR page),
 // runReviewRequestChecks (the whole app: a review you submit takes its row out of Review requests),
 // runSyncNoteChecks (the whole app: the header's Last synced stands only on reads that came back, a failed review-request read included),
+// runRepositoryLinkChecks (a repository row with a GitHub update or no comparison links to Settings or the App Store, lined up under its text),
+// runSyncLineChecks (the whole app, on a fake clock: a Sync says what it changed in a line that goes away; the app shown again after a while syncs quietly),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -15,7 +18,7 @@
 // runRespondAgainChecks (the whole app: Respond again is delivered into the PR's existing conversation as a message),
 // runAskApprovalChecks (the whole app: a reviewer who looked again without approving is asked to approve with a note, an approval of the same work carries over, and where Möbius confirms the owner's taps on its own sheet Merge is one tap),
 // runRequestReviewChecks (the whole app: your own PR gets a Request review button beside Actions, a sheet that asks anyone, and a Review tab that lists who was asked),
-// runRequestReviewListChecks (the whole app: your own PRs offer Request review in the PR list, on one row or over the ticked ones) and
+// runRequestReviewListChecks (the whole app: your own PRs offer Request review in the PR list, on one row or over the ticked ones),
 // runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent),
 // runTapBoxChecks (the whole app: every compact control takes a full 44px tap, and no tap box covers another control's face).
 // Run one with WORKSPACE_BROWSER_ONLY=runDeskFrameChecks (and one viewport with WORKSPACE_BROWSER_VIEWPORT=desktop), for example while
@@ -43,10 +46,12 @@ const ENTRY = '\0workspace-browser-fixture'
 const fixture = String.raw`
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { SourceMap } from './ui/SourceMap.jsx'
+import { ProjectRow, SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ReviewDialog } from './ui/ReviewDialog.jsx'
+import { ReviewConfirmation } from './ui/ReviewConfirmation.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { localChangeSentence, localChangeSummary } from './source-map.js'
 import { PullRequests } from './ui/PullRequests.jsx'
@@ -163,6 +168,8 @@ window.fetch = async (url, options = {}) => {
       if (call.body.query.includes('ContributeRepositories')) return response({data:{viewer:{repositories:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}}}}})
       // The Desk scenario asks the fixture PRs for review; everything else it reads falls through to the project mocks below.
       if (window.fullAppDesk && call.body.query.includes('ContributeIncomingReviews')) {
+        // A test can hold the answer back: holdIncoming() settles to true when GitHub then fails.
+        if (window.holdIncoming && await window.holdIncoming()) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         if (window.failIncoming || window.failIncomingFull) return new Response(JSON.stringify({detail:'Fixture GitHub error'}), {status:503})
         return response({data:{rateLimit:charged(call.body.query),requested:{nodes:window.githubRequests || [pulls[0]]},involved:{nodes:window.githubInvolved || []}}})
       }
@@ -285,6 +292,9 @@ window.fetch = async (url, options = {}) => {
     if(call.url.includes('/commits/')) {
       const head=call.url.match(/commits\/([a-f0-9]+)\//)?.[1]
       ensure([HEAD,SECOND_HEAD].includes(head),'Checks lost their exact head')
+      // A scenario that wants a long list of checks fills window.checkRuns (the head to its check runs) and window.checkStatuses.
+      if(window.checkRuns && call.url.includes('/check-runs?')) return response({total_count:window.checkRuns(head).length,check_runs:window.checkRuns(head)})
+      if(window.checkStatuses && call.url.includes('/status?')) return response({sha:head,total_count:window.checkStatuses.length,statuses:window.checkStatuses})
       if(call.url.includes('/check-runs?')) return window.failChecks
         ? new Response(JSON.stringify({detail:'Fixture check runs unavailable'}),{status:503})
         : response({total_count:1,check_runs:[window.failedCheck
@@ -544,7 +554,7 @@ async function chooseDraftThenMergeSwitch() {
   ensure(!review().querySelector('[role=switch]').checked && !review().querySelector('[role=switch]').disabled,'Drafting a verdict did not offer an unchecked merge switch')
   await click(button('Only me',review()))
   const dimmed=review().querySelector('[role=switch]')
-  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Merging follows your own approval'),'Only me did not leave the merge switch off and dimmed with its reason')
+  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Needs “Draft for me”'),'Only me did not leave the merge switch off and dimmed with its reason')
   await captureShot('review-only-me-merge-off')
   await click(button('Draft for me',review()))
   const mergeSwitch=review().querySelector('[role=switch]')
@@ -888,11 +898,11 @@ window.runWorkspaceChecks = async () => {
       title.focus(); await click(title); await until(()=>query('.co-task-content'),'The PR detail did not reopen')
       await chooseAgent(query('.co-task-content'), NAMES.review)
       ensure(text(review()).includes('Contribution 8') && text(review()).includes('ccccccc') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope or version')
-      ensure(button('Start review, draft a verdict for me'),'Individual review did not open on Draft for me, or granted merge by default')
+      ensure(button('Start & draft'),'Individual review did not open on Draft for me, or granted merge by default')
       const mergeSwitch=await chooseDraftThenMergeSwitch()
-      ensure(button('Start review, draft a verdict for me'),'Drafting a verdict granted merge or lost its start label')
+      ensure(button('Start & draft'),'Drafting a verdict granted merge or lost its start label')
       await click(mergeSwitch)
-      ensure(button('Start review, merge after your approval'),'Individual merge choice did not require guarded approval')
+      ensure(button('Start, merge after approval'),'Individual merge choice did not require guarded approval')
       ensure(mutationRequests().length===0,'Changing individual review mode mutated GitHub')
       await closeReview()
       } finally { await asOwner() }
@@ -927,7 +937,7 @@ window.runWorkspaceChecks = async () => {
       ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
-      ensure(button('Start review, draft a verdict for me') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
+      ensure(button('Start & draft') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
       const mergeToggle=await chooseDraftThenMergeSwitch()
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
       const region=review(), rect=region.getBoundingClientRect()
@@ -937,7 +947,7 @@ window.runWorkspaceChecks = async () => {
       ensure(text(review()).includes('merges into the newest version of the target branch'),'Approval falsely pins the displayed base')
       ensure(text(review()).includes('all required checks pass'),'Review and required checks missing from approval')
       window.liveBase='d'.repeat(40)
-      await enabled('Start review, merge after your approval')
+      await enabled('Start, merge after approval')
       // Starting closes the review window and clears the selection; the run itself lives in its own conversation.
       await until(() => reviewRuns.length === 1 && !review(),'Review did not start')
       await until(() => ['7','8'].every(n => query('[data-pr="owner/project#'+n+'"]')?.closest('.co-frame')?.dataset.frame === 'reviewing'),'A started review did not show on its rows')
@@ -958,7 +968,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => { const frame = query('[data-pr="owner/project#7"]')?.closest('.co-frame')?.dataset.frame; return frame && frame !== 'reviewing' },'Finished review did not reload')
       await inventory(); await click(firstCheckbox); await chooseAgent(query('.co-pr-box-head'))
       window.failReview = true
-      await enabled('Start private review')
+      await enabled('Start review')
       await until(() => text(review()).includes('Fixture review error'),'No workflow error')
       ensure(firstCheckbox.checked && reviewRuns.length===1,'Failed review lost selection or started work')
       window.failReview=false; await closeReview(); await click(query('[aria-label="Clear selection"]'))
@@ -967,7 +977,7 @@ window.runWorkspaceChecks = async () => {
       const before=mutationRequests().length
       await click(firstCheckbox); await chooseAgent(query('.co-pr-box-head'))
       window.exactHeadChanged=true
-      await enabled('Start private review')
+      await enabled('Start review')
       await until(()=>text(review()).includes('changed since this list loaded'),'Changed code did not stop exact launch')
       ensure(mutationRequests().length===before && reviewRuns.length===1,'Changed code was approved')
       window.exactHeadChanged=false
@@ -985,7 +995,7 @@ window.runWorkspaceChecks = async () => {
         await chooseAgent(query('[data-pr="owner/project#8"]'), NAMES.reviewAgain)
         ensure(text(review().querySelector('h3')) === NAMES.reviewAgain, 'The window is not titled Review again: ' + text(review().querySelector('h3')))
         await until(() => /2 new commits since your review of [^.]*3/.test(text(review())), 'The window did not say how many commits are new: ' + text(review()))
-        ensure(whoIs('Draft for me') && button('Start review, draft a verdict for me'), 'A re-review did not open on Draft for me')
+        ensure(whoIs('Draft for me') && button('Start & draft'), 'A re-review did not open on Draft for me')
         await captureShot('review-again-window')
         await closeReview()
         // The PR page keeps that earlier review as a card with the date it covers and no button of its own: Review again is in Actions.
@@ -1038,10 +1048,10 @@ window.runWorkspaceChecks = async () => {
         await click(query('input[aria-label="Select owner/project #7"]')); await click(query('input[aria-label="Select owner/project #8"]'))
         // The page learns what this Möbius can do when a window resolves; the second window is the one that could have defaulted to drafting.
         await chooseAgent(query('.co-pr-box-head'))
-        await until(() => button('Start private review') && !button('Start private review').disabled, 'The review window did not resolve')
+        await until(() => button('Start review') && !button('Start review').disabled, 'The review window did not resolve')
         await closeReview()
         await chooseAgent(query('.co-pr-box-head'))
-        await enabled('Start private review')
+        await enabled('Start review')
         await until(() => text(review()).includes('Fixture review error'), 'The refused review did not show its error')
         ensure(!button('Draft for me', review()) && text(review()).includes('your own PRs'), 'Your own PRs offered a verdict to draft')
         const options = sent().body.options || {}
@@ -1592,15 +1602,15 @@ window.runWorkspaceChecks = async () => {
     const beforeLink = mutationRequests().length
     await check('direct link opens exact approval without granting consent on navigation', async () => {
       await showSelection('selection-link-one')
-      await until(() => button('Start review, merge when safe'), 'Review link did not reach exact approval')
+      await until(() => button('Start, merge when safe'), 'Review link did not reach exact approval')
       ensure(text(query('.co-selection-page')).includes('aaaaaaa → main (bbbbbbb)'), 'Link omitted selected version')
       ensure(!text(query('.co-selection-page')).includes('newest version of the target branch'),'Pinned link incorrectly allows base rebinding')
       ensure(mutationRequests().length === beforeLink, 'Opening an approval link mutated work')
     })
     await check('direct link confirmation posts exact scope once even after double click', async () => {
       // The approval resolves its frozen preview before it can be pressed.
-      await until(() => button('Start review, merge when safe') && !button('Start review, merge when safe').disabled, 'Approval did not become available')
-      const confirm = button('Start review, merge when safe')
+      await until(() => button('Start, merge when safe') && !button('Start, merge when safe').disabled, 'Approval did not become available')
+      const confirm = button('Start, merge when safe')
       confirm.click(); confirm.click()
       await until(() => button('Open chat'), 'Approval did not open its owning conversation')
       ensure(mutationRequests().length === beforeLink + 1, 'Approval did not produce exactly one request')
@@ -1611,29 +1621,29 @@ window.runWorkspaceChecks = async () => {
       await click(button('Back to repositories'))
       await showSelection('selection-link-one')
       await until(() => button('Open chat'), 'Existing selection did not resolve its owner')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Existing selection asked for duplicate approval')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Existing selection asked for duplicate approval')
     })
     await check('changed public version invalidates a link without silently advancing it', async () => {
       await click(button('Back to repositories'))
       const stale = savedSelection('selection-stale'); stale.items[0].head_sha = SECOND_HEAD
       await showSelection('selection-stale', stale)
       await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed version did not stop approval')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale link mutated work')
     })
     await check('changed base version also invalidates a link without silently advancing it', async () => {
       await click(button('Back to repositories'))
       const stale = savedSelection('selection-stale-base'); stale.items[0].base_sha = 'd'.repeat(40)
       await showSelection('selection-stale-base', stale)
       await until(() => text(query('.co-selection-page')).includes('changed or closed'), 'Changed base did not stop approval')
-      ensure(!button('Start review, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale-base link mutated work')
+      ensure(!button('Start, merge when safe') && mutationRequests().length === beforeLink + 1, 'Stale-base link mutated work')
     })
     await check('editing saved selection during confirmation never approves replacement work', async () => {
       await click(button('Back to repositories'))
       await showSelection('selection-replaced')
-      await until(() => button('Start review, merge when safe'), 'Proposal not ready')
+      await until(() => button('Start, merge when safe'), 'Proposal not ready')
       const changed = savedSelection('selection-replaced'); changed.items[0].number = 8
       values.set('review-selections/selection-replaced.json', changed)
-      await enabled('Start review, merge when safe')
+      await enabled('Start, merge when safe')
       await until(() => text(query('.co-selection-page')).includes('changed while you were reading'), 'Proposal replacement was not detected')
       ensure(mutationRequests().length === beforeLink + 1, 'Replaced proposal was approved')
     })
@@ -1641,9 +1651,9 @@ window.runWorkspaceChecks = async () => {
       await click(button('Back to repositories')); window.fixturePermission = 'READ'
       await showSelection('selection-reader')
       await until(() => button('Review privately instead'), 'Permission failure not explained')
-      ensure(button('Start review, merge when safe')?.disabled, 'Read permission exposed active merge approval')
+      ensure(button('Start, merge when safe')?.disabled, 'Read permission exposed active merge approval')
       await click(button('Review privately instead'))
-      ensure(button('Start private review') && !button('Start private review').disabled, 'Private review became unavailable')
+      ensure(button('Start review') && !button('Start review').disabled, 'Private review became unavailable')
       ensure(mutationRequests().length === beforeLink + 1, 'Changing mode counted as approval')
       window.fixturePermission = 'WRITE'
     })
@@ -2072,6 +2082,20 @@ window.runPopupFitChecks = async () => {
     await until(() => document.querySelectorAll('.co-pr-row').length === 2, 'Project did not settle')
     // The shared Clear button: a 44px box a thumb can hit (the 16px icon stays small), inside a field that is no taller than it is without one.
     const search = query('input[aria-label="Find a pull request"]')
+    await captureShot('pr-list-search-filters', query('.co-pr-list-controls'))
+    // One box, not two: the typing area inside every search field has no edge and no fill of its own.
+    const inner = [...document.querySelectorAll('.co-search input')]
+    ensure(inner.length > 0, 'No search field on the screen')
+    inner.forEach(input => { const style = getComputedStyle(input); ensure(style.borderTopWidth === '0px' && style.backgroundColor === 'rgba(0, 0, 0, 0)', 'The typing area of "' + input.getAttribute('aria-label') + '" draws its own box (border ' + style.borderTopWidth + ', fill ' + style.backgroundColor + ')') })
+    checks.push({ name: 'a search field is one box, not two', status: 'pass' })
+    // A filter with nothing in it stays pressable but steps back; the ones with PRs keep full strength.
+    const filters = [...document.querySelectorAll('.co-pr-filters button')].filter(node => node.querySelector('.co-pr-filter-count'))
+    ensure(filters.length > 0, 'The PR list showed no filter counts')
+    filters.forEach(node => {
+      const empty = text(node.querySelector('.co-pr-filter-count')) === '0'
+      ensure(node.classList.contains('is-empty') === empty && (getComputedStyle(node).opacity !== '1') === empty, 'The filter "' + text(node) + '" ' + (empty ? 'has nothing in it and is not dimmed' : 'has PRs and is dimmed'))
+    })
+    checks.push({ name: 'a filter with a zero count is dimmed, one with PRs is not', status: 'pass' })
     const emptyHeight = search.closest('.co-search').getBoundingClientRect().height
     await fill(search, 'Contribution')
     await until(() => query('.co-pr-list-controls .co-search-clear'), 'Typing in the PR search offered no Clear')
@@ -2158,6 +2182,38 @@ window.runDeskFrameChecks = async () => {
 // What a thumb lands on is the browser's answer, so this asks it (elementFromPoint) at the edges of what is drawn and at the edges of the 44px box
 // that has to be around it: a neighbour's tap area must not cover a control's face, a border or a box that clips must not cut the area short,
 // and a control narrower than 44px needs its width too. Desktop draws 44px, so there the same probes show nothing covers a face.
+// The review window over a bulk selection: thirty selected PRs list in the head, and the window keeps its one size,
+// so the list scrolls inside the head and Start and Cancel stay on screen and reachable.
+window.runBulkReviewWindowChecks = async () => {
+  const checks = []
+  try {
+    const pulls = Array.from({ length: 30 }, (_, index) => ({ number: index + 1, title: 'Neutral change number ' + (index + 1), url: 'https://github.com/team/repo/pull/' + (index + 1),
+      headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: 'b'.repeat(40) } }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' },
+      author: { login: 'owner' }, assignees: { nodes: [] } }))
+    const choice = { mode: 'review', intent: 'review', pulls, options: { post_review: true, propose_verdict: true } }
+    const capabilities = { review_fix_merge: true, pr_machine: true, post_review: true, propose_verdict: true }
+    createRoot(document.getElementById('root')).render(<div className="co-root"><style>{CSS}</style><ReviewDialog onClose={() => {}}>
+      <ReviewConfirmation choice={choice} capabilities={capabilities} onConfirm={() => {}} onCancel={() => {}} onModeChange={() => {}} onOptionsChange={() => {}} />
+    </ReviewDialog></div>)
+    await until(() => review(), 'The review window did not open')
+    await captureShot('bulk-review-window')
+    const dialog = query('.co-dialog').getBoundingClientRect(), list = query('.co-rw-head .co-rw-list')
+    const inside = node => { const box = node.getBoundingClientRect(); return box.top >= dialog.top - 1 && box.bottom <= dialog.bottom + 1 }
+    const start = [...review().querySelectorAll('.co-rw-actions .co-btn-primary')][0], cancel = cancelButton(review())
+    ensure(start && cancel && inside(start) && inside(cancel), 'Start or Cancel is clipped by the window: dialog ' + Math.round(dialog.top) + ' to ' + Math.round(dialog.bottom) + ', Start ' + Math.round(start?.getBoundingClientRect().bottom))
+    const head = query('.co-rw-head').getBoundingClientRect()
+    ensure(head.height < dialog.height / 2, 'The head of ' + pulls.length + ' PRs takes ' + Math.round(head.height) + ' of the window\'s ' + Math.round(dialog.height) + 'px')
+    ensure(list && list.scrollHeight > list.clientHeight && getComputedStyle(list).overflowY === 'auto', 'The PR list does not scroll inside the head')
+    ensure(inside(query('.co-rw-body')) && query('.co-rw-body').getBoundingClientRect().height > 80, 'The settings area is squeezed out of the window')
+    list.scrollTop = list.scrollHeight
+    ensure(list.scrollTop > 0 && inside(start), 'Scrolling the PR list moved the window\'s buttons off screen')
+    checks.push({ name: 'a bulk review window keeps Start and Cancel on screen and scrolls its PR list', status: 'pass' })
+    return { status: 'pass', checks }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('#root')).slice(0, 1000) }
+  }
+}
+
 window.runTapBoxChecks = async () => {
   const checks = []
   const TAP = 44
@@ -2303,10 +2359,17 @@ window.runPullReadingChecks = async () => {
     window.commentBody = [...Array.from({ length: 16 }, (_, index) => 'Line ' + (index + 1) + ' of a long comment.'), '![after screen](' + rawPicture('screenshots/later.png') + ')', ...forgedMarkup].join('\n\n')
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [escalation] })
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+    // Where the header and the rail start on a list: a PR page must not move them.
+    const leftOf = selector => Math.round(query(selector).getBoundingClientRect().left)
+    const listLeft = { header: leftOf('.co-header-main'), view: leftOf('.co-projects-view'), rail: window.innerWidth > 900 ? leftOf('.co-rail') : null }
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
+    ensure(leftOf('.co-header-main') === listLeft.header && leftOf('.co-projects-view') === listLeft.view && (listLeft.rail === null || leftOf('.co-rail') === listLeft.rail),
+      'Opening a PR moved the header or the rail: ' + JSON.stringify(listLeft) + ' became ' + JSON.stringify({ header: leftOf('.co-header-main'), view: leftOf('.co-projects-view'), rail: query('.co-rail') ? leftOf('.co-rail') : null }))
+    ensure(query('.co-header-main').getBoundingClientRect().left <= query('.co-projects-view').getBoundingClientRect().left + 40, 'The header is not at the left, with the view')
+    pass('a PR page opens with the header and the rail where they were')
 
-    // The page is as wide as the pane: the 1192 px column of the lists no longer holds it.
+    // The page is as wide as the pane: the column of the lists no longer holds it.
     const page = query('.co-page'), view = query('.co-projects-view')
     ensure(view.getBoundingClientRect().width >= page.clientWidth - 1, 'The PR page is only ' + Math.round(view.getBoundingClientRect().width) + 'px of a ' + page.clientWidth + 'px screen')
     ensure(query('.co-header').getBoundingClientRect().width >= page.clientWidth - 1, 'The header stayed in its narrow column over a wide PR page')
@@ -2385,7 +2448,7 @@ window.runPullReadingChecks = async () => {
     await until(() => query('.co-check-why'), 'The failed check did not say why: ' + text(query('.co-pr-detail-body')))
     const why = query('.co-check-why')
     ensure(text(why).includes('Failed step: Run unit tests') && text(why).includes('test/desk.test.mjs:41') && text(why).includes('not ok 412'), 'The reason read: ' + text(why))
-    ensure([...query('.co-pr-detail-body').querySelectorAll('a')].some(link => text(link) === 'View on GitHub'), 'The check lost View on GitHub')
+    ensure([...query('.co-pr-detail-body').querySelectorAll('a')].some(link => link.getAttribute('aria-label') === 'View on GitHub: Unit tests' && link.dataset.tip === 'View on GitHub'), 'The check lost View on GitHub')
     ensure(readsOf('/actions/jobs/77').length === 1 && readsOf('/check-runs/77/annotations').length === 1 || readsOf('/annotations').length === 0, 'The failure was not read through the route')
     await captureShot('pr-page-check-why', query('.co-detail-tabs'))
     pass('a failing check shows its failed step and annotation, with View on GitHub')
@@ -2401,10 +2464,16 @@ window.runPullReadingChecks = async () => {
     }
     await click(tab('Commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'The commits did not list')
-    ensure(text(query('.co-commit-stats')).startsWith('2 files +3') && button('See changes: commit 1111111'), 'The commit row shows no size or no See changes: ' + text(query('.co-commit')))
-    ensure([...document.querySelectorAll('.co-commit a')].some(link => text(link) === 'View on GitHub'), 'The commit row lost View on GitHub')
+    const titleOf = oid => query('.co-commit-title[data-commit="' + oid + '"]')
+    ensure(text(query('.co-commit-stats')).startsWith('2 files +3') && titleOf(SHA_ONE), 'The commit row shows no size or no title to open it by: ' + text(query('.co-commit')))
+    ensure(!button('See changes') && ![...document.querySelectorAll('.co-commit a')].some(link => text(link) === 'View on GitHub'), 'The commit row still carries a See changes or a View on GitHub button')
+    ensure([...document.querySelectorAll('.co-commit a')].some(link => link.getAttribute('aria-label') === 'View on GitHub: commit 1111111' && link.dataset.tip === 'View on GitHub' && !text(link)), 'The commit row lost its one GitHub icon')
+    // The short hash is the Copy control and says how it ended.
+    await click(query('.co-commit-hash'))
+    await until(() => ['Copied', 'Couldn\u2019t copy'].includes(text(query('.co-commit-hash [role=status]'))), 'Pressing the hash said nothing about the copy')
+    ensure(query('.co-commit-hash').getAttribute('aria-label') === 'Copy hash 1111111', 'The hash button is not named for what it does')
     await captureShot('pr-page-commits', query('.co-detail-tabs'))
-    const open = button('See changes: commit 1111111'); open.focus(); await click(open)
+    const open = titleOf(SHA_ONE); open.focus(); await click(open)
     await until(() => query('.co-commit-open') && query('.co-pr-detail-body .diff-view')?.getClientRects().length, 'The commit did not open its diff on screen: ' + text(query('.co-pr-detail-body')))
     await captureShot('pr-page-commit-diff', query('.co-detail-tabs'))
     ensure(text(query('.co-commit-open')).includes('1111111') && text(query('.co-commit-open')).includes('Add the safe change'), 'The commit head did not name the commit')
@@ -2412,8 +2481,8 @@ window.runPullReadingChecks = async () => {
     ensure(!text(query('.co-pr-detail-body')).includes('at most 300 files'), 'A small commit claimed to be cut short')
     await click(button('Back to commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'Back did not return to the commits')
-    await until(() => document.activeElement === button('See changes: commit 1111111'), 'Back did not return focus to the commit that was open')
-    await click(button('See changes: commit 2222222'))
+    await until(() => document.activeElement === titleOf(SHA_ONE), 'Back did not return focus to the commit that was open')
+    await click(titleOf(SHA_TWO))
     await until(() => text(query('.co-pr-detail-body')).includes('GitHub lists at most 300 files for one commit'), 'A commit of 300 files did not say it may be cut short')
     await click(tab('Commits'))
     await until(() => document.querySelectorAll('.co-commit').length === 2, 'The Commits tab did not return to its list')
@@ -2440,10 +2509,120 @@ window.runPullReadingChecks = async () => {
     ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     await captureShot('pr-page-reading', query('.co-detail-tabs'))
+    checks.push(...await checksTabChecks())
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
   }
+}
+
+// A PR with twenty checks as GitHub reports them: one still running, twelve check runs and one commit status passed, six skipped
+// (one of them neutral); with failing, one of the twelve fails. Nothing real: the names are the kind a project's tests have.
+const minutesAgo = minutes => new Date(Date.now() - minutes * 60000).toISOString()
+function twentyChecks({ failing = false } = {}) {
+  const done = (id, name, seconds, extra = {}) => ({ id, name, head_sha: HEAD, status: 'completed', conclusion: 'success', started_at: minutesAgo(12), completed_at: new Date(Date.now() - 12 * 60000 + seconds * 1000).toISOString(),
+    app: { slug: 'github-actions' }, output: { annotations_count: 0 }, details_url: 'https://github.com/owner/project/actions/runs/9/job/' + id, ...extra })
+  const names = ['privacy', 'lint', 'build', 'frontend-tests'].concat([1, 2, 3, 4, 5, 6, 7, 8].map(shard => 'backend-tests (' + shard + ')'))
+  // With failing, frontend-tests fails: its Actions job and one annotation are what window.checkJob and window.checkAnnotations answer.
+  const broke = { conclusion: 'failure', output: { title: 'Process completed with exit code 1.', annotations_count: 1 } }
+  const passed = names.map((name, index) => done(10 + index, name, 90 + index * 37, failing && name === 'frontend-tests' ? broke : {}))
+  const skipped = ['e2e', 'e2e-boot', 'release-replay', 'docs-preview', 'deploy-preview'].map((name, index) => done(30 + index, name, 0, { conclusion: 'skipped' })).concat([done(40, 'coverage', 0, { conclusion: 'neutral' })])
+  const running = [{ id: 50, name: 'upgrade-path', head_sha: HEAD, status: 'in_progress', conclusion: null, started_at: minutesAgo(4), completed_at: null, app: { slug: 'github-actions' }, details_url: 'https://github.com/owner/project/actions/runs/9/job/50' }]
+  return { runs: passed.concat(skipped, running), statuses: [{ id: 60, context: 'ci/package', state: 'success', description: 'Package built', created_at: minutesAgo(10), updated_at: minutesAgo(9), target_url: 'https://ci.example/package/60' }] }
+}
+
+// The Checks tab of a PR page with twenty checks: one line says where they stand (the commit, when it was read, Check again), the chips of the PR
+// list pick a state, the checks sit by what needs the owner with passed and skipped folded, and a failing check comes first with its reason.
+async function checksTabChecks() {
+  const checks = []
+  const pass = name => checks.push({ name, status: 'pass' })
+  const body = () => query('.co-pr-detail-body')
+  const groupStates = () => [...body().querySelectorAll('.co-check-group')].map(node => node.className.replace(/.*is-/, ''))
+  const rowsIn = state => [...body().querySelectorAll('.co-check-group.is-' + state + ' .co-check')]
+  const chips = () => [...body().querySelectorAll('.co-pr-filters button')]
+  const chip = name => chips().find(node => text(node).replace(/\d+$/, '') === name)
+  const nothingSideways = message => ensure(document.documentElement.scrollWidth <= window.innerWidth && [...body().querySelectorAll('.co-check')].every(row => row.getBoundingClientRect().right <= window.innerWidth + 1), message + ': ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
+  let fixture = twentyChecks()
+  window.checkRuns = () => fixture.runs; window.checkStatuses = fixture.statuses
+  window.checkJob = { id: 13, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run unit tests', conclusion: 'failure' }] }
+  window.checkAnnotations = [{ path: 'src/ui/Drawer.test.jsx', start_line: 88, annotation_level: 'failure', message: 'expected the ring to be hidden' }]
+  window.failedCheck = false
+  await mountDeskApp()
+  await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+  await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+  await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
+  await click(detailTab('Checks'))
+  await until(() => query('.co-checks-summary'), 'The checks did not load: ' + text(body()).slice(0, 300))
+
+  // One line says where they stand, with the commit, when it was read and Check again at its top.
+  const summary = query('.co-checks-summary')
+  ensure(text(summary).includes('1 running · 13 passed · 6 skipped'), 'The summary read: ' + text(summary))
+  ensure(text(summary).includes('For commit ' + HEAD.slice(0, 7)) && /read (just now|1 minute ago)/.test(text(summary)), 'The summary did not name the commit and when it was read: ' + text(summary))
+  ensure(button('Check again', summary) && [...body().querySelectorAll('button')].filter(node => text(node) === 'Check again').length === 1, 'Check again is not alone, in the summary')
+  ensure(summary.compareDocumentPosition(query('.co-checks .co-pr-note')) & Node.DOCUMENT_POSITION_FOLLOWING && text(query('.co-checks .co-pr-note')).includes('Checks are not an all-clear review'), 'The note is not under the summary')
+  ensure(query('.co-check-ring').getAttribute('aria-label') === '19 of 20 checks passed or skipped', 'The ring named: ' + query('.co-check-ring').getAttribute('aria-label'))
+  await captureShot('checks-tab', query('.co-detail-tabs'))
+  nothingSideways('The Checks tab runs past the screen edge')
+  pass('the Checks tab leads with where the checks stand, the commit, when it was read and Check again')
+
+  // The PR list's own chips, with a state that has no checks stepped back.
+  ensure(chips().map(text).join('|') === 'All20|Failing0|Running1|Passed13|Skipped6', 'The chips read: ' + chips().map(text).join('|'))
+  ensure(chip('Failing').classList.contains('is-empty') && !chip('Running').classList.contains('is-empty') && chip('All').getAttribute('aria-pressed') === 'true', 'The chips did not step back or show which is pressed')
+  ensure(chips().every(node => node.getBoundingClientRect().right <= window.innerWidth), 'A chip is cut off by the screen edge')
+  pass('the chips are the PR list\'s, All 20, Failing 0, Running 1, Passed 13, Skipped 6, and the empty one steps back')
+
+  // Grouped by what needs the owner; passed and skipped fold; one line per check with icon, word, name and time, and a GitHub icon that names itself.
+  ensure(groupStates().join() === 'running,passed,skipped', 'The groups ran: ' + groupStates())
+  ensure(rowsIn('running').length === 1 && rowsIn('passed').length === 3 && rowsIn('skipped').length === 3, 'The groups showed ' + ['running', 'passed', 'skipped'].map(state => rowsIn(state).length))
+  ensure(button('Show 10 more', body()) && button('Show 3 more', body()), 'The folds did not say how many are hidden')
+  const running = rowsIn('running')[0]
+  ensure(text(running).includes('upgrade-path') && text(running).includes('Running') && /started 4 minutes ago/.test(text(running)), 'The running check read: ' + text(running))
+  ensure(rowsIn('passed').every(row => row.querySelector('.co-check-icon svg') && text(row.querySelector('.co-check-meta b')) === 'Passed' && /^\d+m \d\ds$|^\d+s$/.test(text(row.querySelector('.co-check-time')))), 'A passed check lacked its icon, its word or how long it took')
+  ensure(rowsIn('skipped').every(row => text(row.querySelector('.co-check-meta')) === 'Skipped' || text(row.querySelector('.co-check-meta')) === 'Neutral'), 'A skipped check carried a time: ' + rowsIn('skipped').map(row => text(row.querySelector('.co-check-meta'))))
+  const github = running.querySelector('a[aria-label="View on GitHub: upgrade-path"]')
+  ensure(github && github.getAttribute('data-tip') === 'View on GitHub' && github.href.startsWith('https://github.com/') && github.target === '_blank', 'The GitHub icon is not a named link out')
+  ensure(![...body().querySelectorAll('a')].some(link => text(link) === 'View on GitHub'), 'A row spends words on View on GitHub')
+  ensure(rowsIn('passed').every(row => row.getBoundingClientRect().height <= 90), 'A check takes more than a line or two')
+  pass('checks sit by what needs the owner, passed and skipped fold, and each line has its icon, word, name, time and a GitHub icon')
+
+  // Show N more opens a fold, and Show fewer closes it.
+  await click(button('Show 10 more', body()))
+  await until(() => rowsIn('passed').length === 13 && button('Show fewer', body()), 'Show 10 more did not open the passed checks')
+  ensure(button('Show fewer', body()).getAttribute('aria-expanded') === 'true' && rowsIn('passed').some(row => text(row).includes('ci/package')), 'The commit status is not among the passed checks')
+  await click(button('Show fewer', body()))
+  await until(() => rowsIn('passed').length === 3, 'Show fewer did not fold them again')
+  pass('Show more and Show fewer fold the passed checks')
+
+  // A chip shows only its own group, whole; a state with none says so.
+  await click(chip('Passed'))
+  await until(() => groupStates().join() === 'passed' && rowsIn('passed').length === 13, 'The Passed chip showed ' + groupStates() + ' ' + rowsIn('passed').length)
+  ensure(!body().querySelector('.co-check-fold') && chip('Passed').getAttribute('aria-pressed') === 'true', 'A chosen state still folded')
+  await click(chip('Failing'))
+  await until(() => groupStates().length === 0 && text(body()).includes('No failing checks.'), 'An empty state said nothing: ' + text(body()).slice(0, 300))
+  await click(chip('All'))
+  await until(() => groupStates().join() === 'running,passed,skipped', 'All did not bring the groups back')
+  pass('a chip shows its own checks whole, and a state with none says so')
+
+  // Check again reads again; a failing check comes first and opens with its reason.
+  const reads = () => calls.requests.filter(call => call.url.includes('/check-runs?')).length
+  const before = reads()
+  fixture = twentyChecks({ failing: true })
+  await click(button('Check again', query('.co-checks-summary')))
+  await until(() => text(query('.co-checks-summary')).includes('1 failing') && query('.co-check-group.is-failing .co-check-why'), 'The failure did not show: ' + text(body()).slice(0, 400))
+  ensure(reads() === before + 1, 'Check again did not read the checks once more: ' + before + ' then ' + reads())
+  ensure(text(query('.co-checks-summary')).includes('1 failing · 1 running · 12 passed · 6 skipped'), 'The summary read: ' + text(query('.co-checks-summary')))
+  ensure(groupStates().join() === 'failing,running,passed,skipped', 'The groups ran: ' + groupStates())
+  const failing = rowsIn('failing')[0]
+  ensure(text(failing).includes('frontend-tests') && text(failing.querySelector('.co-check-meta')) === 'Failed3m 21s', 'The failing check read: ' + text(failing))
+  ensure(text(failing).includes('Failed step: Run unit tests') && text(failing).includes('src/ui/Drawer.test.jsx:88') && text(failing).includes('expected the ring to be hidden'), 'The failing check did not say why: ' + text(failing))
+  ensure(!chip('Failing').classList.contains('is-empty') && text(chip('Failing')) === 'Failing1', 'The Failing chip did not light')
+  await captureShot('checks-tab-failing', query('.co-detail-tabs'))
+  nothingSideways('The failing Checks tab runs past the screen edge')
+  pass('Check again reads the checks once more, and a failing check comes first, open with its reason')
+
+  ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+  window.checkRuns = null; window.checkStatuses = null
+  return checks
 }
 
 // The whole app on a fresh page: every Needs you row has one layout, a long saved note is one line with Show more, the chips count each PR
@@ -2555,8 +2734,8 @@ window.runDeskListChecks = async () => {
     await captureShot('desk-my-prs-merged')
     await click(rowOf('Merged contribution').querySelector('button'))
     await until(() => query('.co-desk-back') && text(query('.co-pull-page')).includes('Merged contribution'), 'A merged row did not open its PR page')
-    await until(() => query('.co-next-hint'), 'The merged PR page shows no next-step line')
-    ensure(text(query('.co-next-hint')) === 'Merged' && !query('.co-next-step button:not(:disabled)'), 'The merged PR page said ' + text(query('.co-next-hint')) + ' and offered a next step')
+    await until(() => query('.co-pull-page .co-gh-badge.is-merged'), 'The merged PR page does not say Merged in its state badge')
+    ensure(text(query('.co-pull-page .co-gh-badge')) === 'Merged' && !query('.co-next-step'), 'The merged PR page said ' + text(query('.co-pull-page .co-gh-badge')) + ' and drew a next-step panel: ' + text(query('.co-next-step')))
     await captureShot('merged-pr-page')
     checks.push({ name: 'a merged row opens its PR page, with nothing left to do on it', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
@@ -2588,7 +2767,8 @@ window.runRequestReviewChecks = async () => {
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
     await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
-    ensure(text(query('.co-next-step')).includes('Nobody asked yet') && text(query('.co-next-step')).includes('Use Request review'), 'The page still said it waits on reviewers: ' + text(query('.co-next-step')))
+    // A resting state draws no next-step panel: the state badge beside the title carries the machine's label.
+    ensure(text(query('.co-gh-pr-sub .co-gh-badge')).includes('Nobody asked yet'), 'The page still said it waits on reviewers: ' + text(query('.co-gh-pr-sub')))
     ensure(![...query('.co-pr-detail-actions').querySelectorAll('button')].some(node => text(node) === 'Request review'), 'A Möbius that cannot ask for the review offered the button')
     ensure(query('.co-pr-detail-actions [aria-label="Assign"]'), 'Assign went missing on a Möbius without Request review')
     checks.push({ name: 'with nobody asked the PR says so instead of waiting on reviewers, and a Möbius whose platform cannot ask for the review yet shows no Request review button, and Assign stays', status: 'pass' })
@@ -2767,6 +2947,42 @@ window.runRequestReviewListChecks = async () => {
     pulls.length = 2
     Object.assign(pulls[1], { author: { login: 'owner' } })
     window.fixtureCapabilities = undefined
+  }
+}
+
+// A repository with a GitHub update, or not compared yet, links to the one place that deals with it: Settings for Möbius, the
+// App Store for an app. The link sits under the row's text, beside its button, and asks the host to open the place.
+window.runRepositoryLinkChecks = async () => {
+  const checks = []
+  const asked = []
+  const listen = event => { if (event.data?.type?.startsWith('moebius:open-')) asked.push(event.data) }
+  window.addEventListener('message', listen)
+  try {
+    const base = { available: true, canonical_repo: 'owner/thing', origin: { sha: HEAD }, base_sha: HEAD }
+    root.render(<div className="co-root"><style>{CSS}</style><div className="co-source-group">
+      <ProjectRow project={{ ...base, key: 'platform', name: 'Möbius', kind: 'platform', incomingFiles: 2 }} selected={false} onSelect={() => {}} />
+      <ProjectRow project={{ ...base, key: 'app:fixture', name: 'Fixture project', kind: 'app', base_sha: BASE, sourceComparisonRequired: true }} selected={false} onSelect={() => {}} />
+      <ProjectRow project={{ ...base, key: 'app:quiet', name: 'Quiet project', kind: 'app' }} selected={false} onSelect={() => {}} />
+    </div></div>)
+    await until(() => document.querySelectorAll('.co-source-row-wrap').length === 3, 'The rows did not render')
+    const links = [...document.querySelectorAll('.co-source-row-link button')]
+    ensure(links.length === 2 && links.map(link => text(link)).join('|') === 'Open Settings|Open App Store', 'The links were: ' + links.map(link => text(link)).join('|'))
+    ensure(!document.querySelector('.co-source-row-wrap:nth-child(3) .co-source-row-link'), 'A quiet repository got a link')
+    document.querySelectorAll('.co-source-row-link').forEach(link => ensure(!link.closest('.co-source-row'), 'A link sits inside the row\'s own button'))
+    const row = document.querySelector('.co-source-row-wrap'), facts = row.querySelector('.co-source-row-facts span'), label = row.querySelector('.co-source-row-link button')
+    ensure(Math.abs(label.getBoundingClientRect().left - facts.getBoundingClientRect().left) <= 2, 'The link is not lined up with the row\'s text: ' + Math.round(label.getBoundingClientRect().left) + ' against ' + Math.round(facts.getBoundingClientRect().left))
+    ensure(label.getBoundingClientRect().top >= row.querySelector('.co-source-row').getBoundingClientRect().bottom - 16, 'The link is not under the row\'s text')
+    await captureShot('repository-row-links')
+    await click(links[0]); await click(links[1])
+    ensure(asked.map(message => message.type + (message.appId || '')).join('|') === 'moebius:open-settings|moebius:open-appstore', 'The host was asked: ' + JSON.stringify(asked))
+    checks.push({ name: 'a repository with an update or no comparison links to Settings or the App Store', status: 'pass' })
+    ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways')
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main') || document.body).slice(0, 2000), forbidden: calls.forbidden }
+  } finally {
+    window.removeEventListener('message', listen)
   }
 }
 
@@ -3371,23 +3587,25 @@ window.runAskApprovalChecks = async () => {
     // 5. Where Möbius confirms the owner's taps on its own sheet (it advertises owner_confirm), that sheet is the one confirm: Merge is one tap on
     // the action, the app draws no confirm of its own (its sheet only waits, and says Merging… once Möbius has confirmed), Möbius is asked for exactly
     // the request that is then sent, and a cancel sends nothing.
-    // "Merge options…" is the way to choose how it lands first, and only where the repository allows more than one way. Without owner_confirm the
+    // "Merge options…" is the way to choose how it lands first: a second, smaller choice on the Merge row, and only where the repository allows more than one way. Without owner_confirm the
     // blocks above are the proof that nothing changed: the app's own sheet, and no request to the shell.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
     const landable = { nameWithOwner: 'owner/project', viewerPermission: 'WRITE', squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: false }
     const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
+    const mergeOptions = () => menuItem('Merge')?.parentElement.querySelector('.co-agent-menu-side')
     const openMenu = async () => { await click(query('[aria-label="Choose an action for PR 7"]')); await until(() => menuItems().length, 'The Actions menu did not open') }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    ensure(menuItem('Merge') && !menuItem('Merge options…'), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
+    ensure(menuItem('Merge') && !mergeOptions(), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
     await captureShot('merge-menu-app-sheet')
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true, owner_confirm: true }
     await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
-    const offered = menuItems().map(node => text(node.querySelector('strong')))
-    ensure(offered.indexOf('Merge options…') === offered.indexOf('Merge') + 1, 'Merge options… did not follow Merge: ' + offered.join(', '))
+    ensure(mergeOptions()?.getAttribute('aria-label') === 'Merge options… Choose how it lands.' && !menuItem('Merge options…'), 'Merge options… is not a second choice on the Merge row: ' + menuItems().map(node => text(node.querySelector('strong')) || node.getAttribute('aria-label')).join(', '))
+    const rows = query('.co-agent-menu-rows'), fits = rows.scrollHeight <= rows.clientHeight
+    ensure(getComputedStyle(rows).scrollbarWidth === 'none' && (fits || getComputedStyle(rows).overflowY === 'auto' || window.innerWidth <= 680), 'The menu rows show a scrollbar or cannot scroll: ' + getComputedStyle(rows).scrollbarWidth + ' ' + getComputedStyle(rows).overflowY)
     await captureShot('merge-menu-shell-sheet')
     window.holdOwnerGrant = new Promise(resolve => { window.releaseOwnerGrant = resolve })
     await click(menuItem('Merge'))
@@ -3419,7 +3637,7 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'a cancel sends nothing and closes; a refusal sends nothing and shows the platform’s sentence', status: 'pass' })
     window.ownerGrantAnswer = undefined
     await openMenu()
-    await click(menuItem('Merge options…'))
+    await click(mergeOptions())
     await until(() => query('.co-rw-rungs'), 'Merge options… did not show how it lands')
     await click([...document.querySelectorAll('[role=radio]')].find(node => text(node).includes('Create a merge commit')))
     ensure(text(query('.co-review-window .co-btn-primary')) === 'Merge', 'The sheet’s button did not name the chosen way: ' + text(query('.co-review-window .co-btn-primary')))
@@ -3569,6 +3787,93 @@ window.runSyncNoteChecks = async () => {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
   } finally {
     window.failIncoming = false
+  }
+}
+
+// The whole app, on a fake clock: the owner's Sync ends with one quiet line that says what it changed on the desk and
+// goes away by itself; the app shown again after a while catches up on its own (no line, no busy button, the header's time
+// moves) and never sooner than the GitHub cooldown.
+window.runSyncLineChecks = async () => {
+  const checks = []
+  const clock = installClock()
+  const syncButton = () => query('.co-toolbar-refresh')
+  const line = () => query('.co-sync-result')
+  const repositoryReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeRepositories')).length
+  const incomingReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeIncomingReviews')).length
+  const syncedAt = () => Date.parse(query('.co-sync-note time')?.getAttribute('datetime') || '')
+  const advance = async seconds => { for (let step = 0; step < seconds; step++) await clock.advance(1000) }
+  try {
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]
+    await mountDeskApp()
+    await until(() => query('.co-sync-note')?.textContent.startsWith('Last synced') && !syncButton().disabled, 'The first load did not settle')
+    ensure(!line(), 'The first load said what it changed')
+    // The owner's Sync: a new review request arrives with it.
+    window.githubRequests = [pulls[0], pulls[1]]
+    await click(syncButton())
+    await until(() => line(), 'Sync did not say what it changed')
+    ensure(text(line()).startsWith('Synced.') && text(line()).includes('1 new review request'), 'The line said: ' + text(line()))
+    line().style.animation = 'none' // the picture shows the line while it stays, not as it fades out
+    await captureShot('sync-result-line')
+    ensure(line().closest('[role=status]'), 'The line is not announced politely')
+    checks.push({ name: 'a Sync says what it changed on the desk, in a status line', status: 'pass' })
+    await advance(7)
+    ensure(!line(), 'The line stayed on screen')
+    checks.push({ name: 'the line goes away by itself after a few seconds', status: 'pass' })
+    await click(syncButton())
+    await until(() => line(), 'A Sync that changed nothing said nothing')
+    ensure(text(line()) === 'Synced. Nothing new for you.', 'A Sync with nothing new said: ' + text(line()))
+    await advance(7)
+    checks.push({ name: 'a Sync with nothing new says so', status: 'pass' })
+    // Shown again soon: nothing to catch up on. After a while: one quiet sync.
+    window.setFrameVisible(false)
+    await advance(60)
+    let reads = repositoryReads()
+    window.setFrameVisible(true)
+    await advance(5)
+    ensure(repositoryReads() === reads, 'The app shown again after a minute synced everything')
+    window.setFrameVisible(false)
+    await advance(10 * 60)
+    reads = repositoryReads()
+    const inboxReads = incomingReads()
+    const before = syncedAt()
+    window.setFrameVisible(true)
+    for (let step = 0; step < 30 && repositoryReads() === reads; step++) await advance(1)
+    ensure(repositoryReads() > reads, 'The app shown again after ten minutes did not catch up on its own')
+    await advance(5)
+    // The inbox read costs 55 GitHub points: the catch-up shares the hub's one read of it and never queues a second behind it.
+    ensure(incomingReads() === inboxReads + 1, 'The app shown again once read the review requests ' + (incomingReads() - inboxReads) + ' times, not once')
+    ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line: it is meant to be quiet')
+    ensure(syncedAt() > before, 'The header\'s time did not move with the catch-up')
+    checks.push({ name: 'the app shown again after a while syncs quietly and the header time follows', status: 'pass' })
+    // The review requests are read once, and the header's time follows that read's own outcome: not before it answers, and not at all when it fails.
+    for (const outcome of ['answers', 'fails']) {
+      window.setFrameVisible(false)
+      await advance(10 * 60)
+      let release
+      window.holdIncoming = () => new Promise(resolve => { release = resolve })
+      const stamped = syncedAt(), asked = incomingReads(), reposBefore = repositoryReads()
+      window.setFrameVisible(true)
+      for (let step = 0; step < 30 && !release; step++) await advance(1)
+      ensure(release && incomingReads() === asked + 1, 'The app shown again did not read the review requests on its return')
+      await advance(10)
+      ensure(repositoryReads() > reposBefore, 'The catch-up did not go on to read the rest while the review requests were out')
+      ensure(syncedAt() === stamped, 'The header\'s time moved while the review requests were still out (' + outcome + ')')
+      ensure(incomingReads() === asked + 1, 'The catch-up queued a second review-request read behind the first')
+      release(outcome === 'fails'); window.holdIncoming = undefined
+      await advance(10)
+      ensure(incomingReads() === asked + 1, 'The catch-up read the review requests again once the first settled')
+      if (outcome === 'answers') ensure(syncedAt() > stamped, 'The header\'s time did not follow the review requests that answered')
+      else ensure(syncedAt() === stamped, 'The header\'s time moved on a review-request read that failed')
+      ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line (' + outcome + ')')
+      checks.push({ name: outcome === 'answers' ? 'a catch-up waits for the review requests the hub is reading before the header\'s time moves' : 'a catch-up whose review-request read fails leaves the last good time to age', status: 'pass' })
+    }
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 3000), forbidden: calls.forbidden }
+  } finally {
+    clock.restore()
   }
 }
 
@@ -3824,7 +4129,7 @@ async function main() {
     const page = join(temporary, 'fixture.html')
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; connect-src \'none\'">' +
-      '<style>:root{--bg:#fff;--surface:#f5f5f5;--surface-2:#eee;--text:#222;--muted:#666;--border:#ddd;--accent:#2454cc;--accent-dim:#eef;--font:Arial}html,body,#root{height:100%;margin:0}</style>' +
+      '<style>:root{--bg:#fff;--surface:#f5f5f5;--surface-2:#eee;--text:#222;--muted:#666;--border:#ddd;--accent:#2454cc;--accent-dim:#eef;--font:Arial;--green:#059669;--green-text:#046c4e;--danger:#ef4444;--danger-text:#c42341;--warning:#8f5a00;--warning-text:#8f5a00}html,body,#root{height:100%;margin:0}</style>' +
       '</head><body><div id="root"></div><script>' + output[0].code.replace(/<\/script/gi, '<\\/script') + '</script></body></html>')
     browser = spawn(await chromiumPath(), ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions',
@@ -3835,7 +4140,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

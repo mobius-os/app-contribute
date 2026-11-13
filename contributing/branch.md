@@ -23,7 +23,11 @@ Resource cleanup is part of the work, not an unrelated maintenance favor.
   checkout while a contribution is prepared, open, or awaiting reconciliation.
   Once the record is terminal, call its `cleanup-staging` endpoint and verify
   the checkout is gone. A pushed or merged change is not a complete handoff if
-  its disposable local copy remains behind.
+  its disposable local copy remains behind. An answer with `kept_for` means
+  another unfinished contribution still uses that checkout (a follow-up
+  prepared in the same clone, for example): leave it in place. Contribute asks
+  again later and removes it once nothing needs it. Give each new contribution
+  its own checkout folder so one never depends on another's.
 - A nonterminal record may need its source checkout for safe review or repair,
   but it does not need copied `node_modules`, virtual environments, caches, or
   build output while idle. Remove those after verification when no process is
