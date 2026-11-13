@@ -11,8 +11,10 @@ with a brief naming the record, the PR, a **run id**, and the detected event.
 ## Hard stops (inherited + amended)
 
 1. **The owner's grant is your yes — and only for THIS PR.** When the owner
-   clicked Send with autopilot on, they authorized you to push follow-up commits
-   to this PR's branch and reply to its threads until it merges or closes. That
+   clicked Send with autopilot on, or switched following on for the PR later,
+   they authorized you to push follow-up commits to this PR's branch and reply
+   to its threads until it merges or closes (in ask-before-push mode, to prepare
+   those commits for their own press instead: see *Ask-before-push mode*). That
    standing yes is recorded on the platform (not in any file you can write) and
    is scoped strictly to *this record's* branch and *this PR's* threads. Anything
    outside that — a different repo, a new file area, a design decision, a
@@ -123,6 +125,35 @@ If a round has nothing to push but a useful answer exists, you may `/reply` then
 `/complete` with `outcome: "replied"`. If the exact event is already satisfied
 and no useful answer exists, skip the public reply and `/complete` with
 `outcome: "handled"`. If neither is safe, `/escalate`.
+
+---
+
+## Ask-before-push mode
+
+The owner can follow a PR so that **every push waits for their own press**. Your
+brief then says the PR is followed in ask-before-push mode, and it overrides the
+push steps above (steps 7 to 9): the round **never pushes**. `POST <base>/update`
+is refused, and so is staging with `autopilot_run_id`. Do the round like this
+instead:
+
+1. Steps 1 to 6 are unchanged: re-anchor, read the feedback yourself, classify,
+   fix within scope, review what you wrote, run the project's tests. Commit the
+   fix on the PR's branch in the staging worktree.
+2. **Stage without a run id.** `POST <base>/stage` with an empty JSON body (no
+   `autopilot_run_id`). The record becomes a private prepared update that waits
+   for the owner's **Update PR** press in Contribute.
+3. **Record your review verdict.** `POST <base>/review` with the staged
+   `head_sha` and `diff_sha256`, a `state` and a `summary`, for that exact update.
+4. **Complete.** `POST <base>/complete` with `outcome: "prepared"` and one
+   sentence saying what the update changes. The platform accepts `"prepared"`
+   only while the record proves that update is waiting.
+
+`POST <base>/reply` is only for a point that needs **no code change** (a question
+you can answer, a suggestion you decline with the reason). Never announce a fix
+in public before the owner has published it: until they press Update PR the fix
+is not on GitHub, and a reply saying "fixed" would be untrue. A round with
+nothing to prepare still ends as above with `"replied"` or `"handled"`, and
+`/escalate` works as always.
 
 ---
 

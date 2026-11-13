@@ -25,7 +25,8 @@ import { PostFindings } from './PostFindings.jsx'
 import { isPersonalDraft } from '../domain.js'
 import { isDraftWord } from '../review-list.js'
 import { RunOnce } from './RunOnce.jsx'
-import { MERGE_OPTIONS, YOUR_INTENTS, requestReviewButton, requestReviewForMany } from '../actions-menu.js'
+import { FOLLOW, MERGE_OPTIONS, YOUR_INTENTS, requestReviewButton, requestReviewForMany } from '../actions-menu.js'
+import { followChange } from '../autopilot.js'
 import { loadPullReviewers } from '../pull-details.js'
 import { pendingReviewers } from '../reviewers.js'
 import { ACTION_COPY, methodToSend } from '../action-copy.js'
@@ -39,7 +40,7 @@ const scopeFor = mode => mode === 'review_fix_merge' ? { confirmation_scope: TAK
 
 // The sheets that make the owner choose first (how a merge lands, whom to ask), so a tap on their menu row cannot also be the press that
 // Möbius's own sheet confirms: this app's sheet comes first, and Möbius's confirms what was chosen.
-const CHOOSES_FIRST = new Set([MERGE_OPTIONS, 'request_review'])
+const CHOOSES_FIRST = new Set([MERGE_OPTIONS, 'request_review', FOLLOW])
 
 // How long a card waits for the refreshed saved answers after Post or Discard before it is pressable again.
 const REFRESH_WAIT_MS = 4000
@@ -185,7 +186,7 @@ const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerC
 // `onRunsChanged` asks the hub to read it again, so every screen shows the change.
 // `onReviewPosted(repo, number)` tells it the owner's review of a PR reached GitHub,
 // so the row leaves Review requests without waiting for the next read.
-export function PullRequests({ appId, token, project, conn, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null }) {
+export function PullRequests({ appId, token, project, conn, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
   const repo = project?.canonical_repo || ''
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   const session = sessionEntry(repo, `${refreshKey}|${publicRevision}`)
@@ -490,11 +491,11 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // opens under the list header. `anchor` is only placement, never scope.
   function choose(pulls, job, anchor = '') {
     if (job === 'respond') { setAssigning(null); setAddressing({ pr: { ...pulls[0], repository: { ...pulls[0].repository } }, findings: savedFindings(statusFor(pulls[0]), ignoredReviews), response: responseView(responses, pulls[0]) }); return }
-    if (YOUR_INTENTS.has(job) || job === MERGE_OPTIONS) {
+    if (YOUR_INTENTS.has(job) || job === MERGE_OPTIONS || job === FOLLOW) {
       setAssigning(null)
       const record = recordsForPull(records, pulls[0])[0]
       // Möbius's own sheet is the one confirm; a personal draft opens through the app's own record, which it does not cover. The tap on the
-      // action is the whole press (oneTap) unless the owner is to choose first (how it lands, or who to ask), which only this app's sheet offers.
+      // action is the whole press (oneTap) unless the owner is to choose first (how it lands, or who to ask, or how a PR is followed), which only this app's sheet offers.
       const viaShell = !!shellConfirm && !(job === 'open_for_review' && isPersonalDraft(record))
       setActing({ intent: job === MERGE_OPTIONS ? 'merge' : job, pr: { ...pulls[0], repository: { ...pulls[0].repository } }, record, viaShell, oneTap: viaShell && !CHOOSES_FIRST.has(job) })
       return
@@ -667,12 +668,18 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     ask_rereview: ({ pr, people, shell }) => pullAction(token, appId, pr, 'request-reviewers', { reviewers: people }, shell),
     // The note is the one the sheet showed for the ticked people, so it is posted exactly as it was read.
     ask_approval: ({ pr, people, note, shell }) => pullAction(token, appId, pr, 'ask-approval', { people, note }, shell),
+    // The PR is named in the record's own spelling: the record was matched to this PR without regard to letter case, and the
+    // platform compares the name exactly.
+    [FOLLOW]: ({ pr, record, choice, shell }) => {
+      const change = followChange(record, choice)
+      return onSetAutopilot(record, change.enabled, { pushMode: change.pushMode, repo: record.plan?.repo || record.repo, number: pr.number, ...shell })
+    },
   }
   const closeAction = () => setActing(null)
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls })} onConfirm={({ choice, people, note, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record)) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls, record: acting.record, capabilities })} onConfirm={({ choice, people, note, onConfirmed }) => actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== FOLLOW && (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record))) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       viewRef.current = acknowledgeAssignment(viewRef.current, keys, login, ++generation.current)
       setView(viewRef.current)
@@ -711,7 +718,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       {detailPr ? (
         // The detail is the page itself, not a swappable pane: the review
         // window overlays it and the assignment pane opens above it.
-        <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} initialTab={focusPull?.tab === 'review' ? 'review' : 'conversation'} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, opened || prKey(detailPr))} onAssign={() => assignSelection([detailPr], opened || prKey(detailPr))} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={null} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} holdUntilLoaded />
+        <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} initialTab={focusPull?.tab === 'review' ? 'review' : 'conversation'} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, opened || prKey(detailPr))} onAssign={() => assignSelection([detailPr], opened || prKey(detailPr))} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={null} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onSetAutopilot={onSetAutopilot} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} holdUntilLoaded />
       ) : data.loading || data.error || focusKey ? <Skeleton lines={8} label="Loading the pull request" /> : <p className="co-pr-note" role="status">This pull request is not in the open list. It may be closed. {NAMES.sync} to check.</p>}
       {/* A desk row's Fix these findings opens the PR straight into its fix window. */}
       {focusPull?.intent === 'fix' && onStartAgent ? <RunOnce ready={!!detailPr} nonce={focusPull.nonce} run={() => choose([detailPr], 'respond', prKey(detailPr))} /> : null}
@@ -791,7 +798,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
         </div>
         {assignAnchor === key ? assignPane : null}
         {relevantRuns.filter(run => runAnchor(run) === key).map(runPane)}
-        {opened === key ? <TaskPane id="task:detail" dock={false}>{detailPr ? <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, key)} onAssign={() => assignSelection([detailPr], key)} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} /> : <p>This pull request is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane> : null}
+        {opened === key ? <TaskPane id="task:detail" dock={false}>{detailPr ? <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, key)} onAssign={() => assignSelection([detailPr], key)} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={() => task?.open(`task:run:${statusFor(detailPr)?.run.id}`)} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onSetAutopilot={onSetAutopilot} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} /> : <p>This pull request is no longer in the current list. Refresh to see its latest status.</p>}</TaskPane> : null}
       </article></ReviewFrame>
     })}</div>
     </div>

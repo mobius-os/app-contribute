@@ -34,6 +34,7 @@ import { Icon } from './Icons.jsx'
 import { AgentHandoffButton } from './BatchAction.jsx'
 import { NAMES } from '../names.js'
 import { Shine } from './Shine.jsx'
+import { PauseResume } from './FollowLine.jsx'
 
 // One ledger row. Cards deliberately expose explicit targets only — the title
 // is the link on a linked PR/issue card, and prepared cards use their
@@ -843,7 +844,6 @@ function PublicationConnectionAction({ rec }) {
 // text rendered without markdown (they may quote untrusted reviewer text).
 function AutopilotPanel({ rec, onSetAutopilot }) {
   const block = autopilotState(rec)
-  const [busy, setBusy] = useState(false)
   const [note, setNote] = useState(null)
   if (!block || typeof onSetAutopilot !== 'function') return null
 
@@ -853,29 +853,13 @@ function AutopilotPanel({ rec, onSetAutopilot }) {
   const responding = isAutopilotResponding(rec)
   const escalated = needsHuman(rec)
 
-  const toggle = async () => {
-    setBusy(true)
-    setNote(null)
-    const next = !enabled
-    const outcome = (await onSetAutopilot(rec, next)) || {}
-    if (outcome.error) setNote(outcome.error)
-    setBusy(false)
-  }
-
   return (
     <div className={`co-autopilot${escalated ? ' is-escalated' : ''}${responding ? ' is-responding' : ''}`}>
       <div className="co-autopilot-head">
         <span className="co-autopilot-badge">
           {responding ? 'Autopilot working' : enabled ? 'Autopilot on' : 'Autopilot paused'}
         </span>
-        <button
-          type="button"
-          className="co-btn co-autopilot-toggle"
-          onClick={toggle}
-          disabled={busy}
-        >
-          {busy ? '…' : enabled ? 'Pause' : 'Resume'}
-        </button>
+        <PauseResume rec={rec} onSetAutopilot={onSetAutopilot} onNote={setNote} className="co-autopilot-toggle" />
       </div>
       {line ? <p className="co-autopilot-line">{line}</p> : null}
       {note ? <p className="co-autopilot-error">{note}</p> : null}

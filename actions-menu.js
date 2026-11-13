@@ -7,6 +7,7 @@ import { checkSummary, conversationCount } from './collaboration.js'
 import { isPersonalDraft } from './domain.js'
 import { allowedMergeMethods } from './action-copy.js'
 import { ownerConfirmOffered } from './owner-grant.js'
+import { FOLLOW_MODE_WORDS, canStartFollowing, followState } from './autopilot.js'
 import { NAMES } from './names.js'
 
 // The agent jobs and your own actions the menu shows, by machine action id, in
@@ -23,6 +24,10 @@ export const YOUR_INTENTS = new Set([...Object.keys(YOUR_MENU), ...Object.keys(O
 // has no such choice, so Merge itself lands the way the repository prefers; see withMergeOptions.
 export const MERGE_OPTIONS = 'merge_options'
 export const AGENT_INTENTS = new Set(Object.keys(AGENT_MENU))
+// Not a machine action either: following is a standing permission, not a job on this version, so the machine (and its twin in
+// the platform) knows nothing of it. The row exists only where this Möbius can switch following on after a PR was sent.
+export const FOLLOW = 'follow'
+const FOLLOW_CAPABILITY = 'follow_after_send'
 
 // One line of facts about a PR: checks and conflicts. Where it stands (a draft, who reviewed) is the machine's label or
 // sentence beside it; only a PR with no decision yet falls back to GitHub's own draft flag and review count.
@@ -93,10 +98,24 @@ function withMergeOptions(items, pr, capabilities) {
   return items.map(item => (item.intent === 'merge' ? { ...item, side } : item))
 }
 
-function agentItems(decision) {
-  const items = decision.actions.filter(action => AGENT_MENU[action.id]).map(action => asItem(action, AGENT_MENU[action.id]))
+// Follow this PR, on your own PR that Contribute sent: the row starts it, or says how it is followed now. A PR with no
+// record of ours, or one the platform would refuse (closed, part of a stack), has no row.
+function followItems(decision, record) {
+  const state = followState(record)
+  if (decision.role !== 'author' || !(state || canStartFollowing(record))) return []
+  const detail = !state ? 'An agent answers reviews and failing checks for you.' : state.paused ? 'Paused' : FOLLOW_MODE_WORDS[state.mode]
+  return [{ intent: FOLLOW, icon: 'cycle', title: state ? NAMES.following : NAMES.followPr, detail, rec: false, off: false, reason: '', danger: false }]
+}
+
+// Where following can start after Send it replaces Finish it for me in the menu: both leave an agent on the PR until it is
+// done, and following is the one the owner can pause and steer. The machine keeps finish_it, so a stopped job of that kind
+// still starts again from the next-step button.
+function agentItems(decision, { record, capabilities }) {
+  const follows = capabilities?.[FOLLOW_CAPABILITY] === true
+  const items = decision.actions.filter(action => AGENT_MENU[action.id] && !(follows && action.id === 'finish_it')).map(action => asItem(action, AGENT_MENU[action.id]))
   const rare = items.filter(item => item.intent === 'take_over')
-  return [...items.filter(item => item.intent !== 'take_over').sort((a, b) => Number(b.rec) - Number(a.rec)), ...rare]
+  const usual = items.filter(item => item.intent !== 'take_over').sort((a, b) => Number(b.rec) - Number(a.rec))
+  return [...usual, ...(follows ? followItems(decision, record) : []), ...rare]
 }
 
 // Several PRs at once: only a review (a private check on your own PRs) can run
@@ -115,5 +134,5 @@ export function actionsMenuModel(pulls, decisions, { record = null, capabilities
   if (list.length !== 1) return { header: list.length ? { label: `${list.length} PRs`, text: 'selected' } : null, headline: '', you: [], agent: list.length ? batchItems(list, decisions) : [] }
   const decision = decisions?.[0]
   if (!decision) return { header: pullHeader(list[0]), headline: '', you: [], agent: [] }
-  return { header: pullHeader(list[0], decision), standing: decision.label, headline: decision.headline, you: withMergeOptions(yourItems(decision, list[0], { record, capabilities }), list[0], capabilities), agent: agentItems(decision) }
+  return { header: pullHeader(list[0], decision), standing: decision.label, headline: decision.headline, you: withMergeOptions(yourItems(decision, list[0], { record, capabilities }), list[0], capabilities), agent: agentItems(decision, { record, capabilities }) }
 }

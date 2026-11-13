@@ -26,6 +26,7 @@ import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { PullChecks } from './PullChecks.jsx'
 import { PullEscalation } from './PullEscalation.jsx'
+import { FollowLine } from './FollowLine.jsx'
 export { DateLabel, PullFiles }
 
 // A quiet placeholder with the rough shape of the incoming text instead of a
@@ -232,7 +233,7 @@ export function PullRequestDetail(props) {
 }
 // `review` carries what the Review tab needs from the run list: whether the
 // viewer wrote the PR, busy and error state, the run actions, and the loaded PRs.
-function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, capabilities = null, readOnly = false, provenance = [], holdUntilLoaded = false, initialTab = 'conversation', review = {} }) {
+function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssign, onRefresh, canAssign, status, onProgress, onRecord, record, capabilities = null, onSetAutopilot = null, readOnly = false, provenance = [], holdUntilLoaded = false, initialTab = 'conversation', review = {} }) {
   const [tab, setTab] = useState(initialTab)
   const tips = useTipDismiss()
   // On a phone the four tabs can overflow; the open one is always brought into view.
@@ -408,6 +409,8 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /></a> : null}
       <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
     </div>
+    {/* Only where this Möbius can switch following on after Send: elsewhere the page stays as it was. */}
+    {capabilities?.follow_after_send === true ? <FollowLine record={record} onSetAutopilot={onSetAutopilot} readOnly={readOnly} /> : null}
     {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
     {conversationLoading ? null : <>
     <details className="co-gh-description">

@@ -30,11 +30,22 @@ export const NAMES = Object.freeze({
   // A stopped fix job (Fix these findings, Finish it for me, Respond to feedback, Take over) starts
   // over under these words, the same words as the Agent stopped hint.
   runAgain: 'Run it again',
-  // Three agent jobs on your own PR, kept apart on purpose (owner's choice, 2026-11-05).
+  // Three agent jobs on your own PR, kept apart on purpose (owner's choice, 2026-11-05). Finish it for me is
+  // offered only on a Möbius that cannot follow a PR after it was sent; elsewhere Follow this PR takes its place.
   fixFindings: 'Fix these findings',
   finishIt: 'Finish it for me',
   respond: 'Respond to feedback',
   takeOver: 'Take over',
+  // Following: an agent answers review activity on a PR you sent, until you pause it or the PR is merged or closed.
+  // Follow this PR is the menu row that starts it, Follow the button that does; Following and Paused say what is true.
+  followPr: 'Follow this PR',
+  follow: 'Follow',
+  following: 'Following',
+  followPaused: 'Following paused',
+  // The button that changes how a followed PR pushes its fixes.
+  changeFollowing: 'Change',
+  pause: 'Pause',
+  resume: 'Resume',
   approve: 'Approve',
   requestChanges: 'Request changes',
   // Setting a review aside asks why first, so it ends in an ellipsis (the PR machine's own word for it).
