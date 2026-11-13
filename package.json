@@ -3,7 +3,9 @@
   "version": "0.5.44",
   "private": true,
   "scripts": {
-    "test": "node --test test/*.test.mjs && python3 -m unittest discover -s test -p 'test_*.py'",
+    "test": "npm run -s test:node & npm run -s test:python; python=$?; wait $! && exit $python",
+    "test:node": "node --test test/*.test.mjs",
+    "test:python": "python3 test/parallel_unittest.py",
     "test:browser": "node test/workspace-browser.mjs"
   },
   "type": "module"
