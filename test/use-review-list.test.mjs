@@ -65,7 +65,7 @@ function harness() {
   const rows = () => [...view.entries].map(entry => `${entry.bucket}:${entry.chips.map(chip => chip.label).join('+')}`)
   const titles = () => [...view.entries].map(entry => entry.item.title)
   const flush = () => new Promise(resolve => setImmediate(resolve))
-  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: () => view.syncPulls() }
+  return { render, reads, rows, titles, flush, counts: () => JSON.parse(JSON.stringify(view.counts)), retry: () => view.retry(), sync: options => view.syncPulls(options) }
 }
 
 const head = letter => letter.repeat(40)
@@ -99,6 +99,17 @@ test('Sync with GitHub reads the same PRs again: an author push after "request c
   h.reads[1].resolve(live(pushed('CHANGES_REQUESTED', head('a')))); await h.flush()
   assert.deepEqual(h.rows(), ['waiting:New commits · review again'])
   assert.equal(h.counts().waiting, 1)
+})
+
+test('a quiet catch-up joins the hub\'s own read and waits out the cooldown; only the owner\'s Sync forces another', async () => {
+  const h = harness()
+  const saved = runsOf(review('needs_you', { verdict_proposal: requested }))
+  h.render({ ...base, runs: saved })
+  h.reads[0].resolve(live()); await h.flush()
+  void h.sync({ quiet: true }); await h.flush()
+  assert.equal(h.reads.length, 1, 'a catch-up right after a read does not read the live PRs again')
+  void h.sync()
+  assert.equal(h.reads.length, 2, 'the owner\'s Sync still reads at once')
 })
 
 test('a PR closed since the last read leaves To confirm once a Sync sees it', async () => {

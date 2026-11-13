@@ -4,7 +4,7 @@ import { SYNC_POLICY, onShownAgain } from '../refresh.js'
 import { SYNC_LINE_MS, syncLine } from '../sync-summary.js'
 
 // The one full sync of the open app and what the header says about it.
-//   refreshEverything() reads everything Sync reads and answers { ok, upstream }
+//   refreshEverything({ quiet }) reads everything Sync reads and answers { ok, upstream }; quiet reads GitHub's facts through the hub's automatic path
 //   facts             what the desk shows now (sync-summary.js syncFacts), compared before and after
 // The owner's press shows its progress and says what it changed; a quiet sync (the app shown again after a while) does
 // neither, and a failed quiet one leaves the last good time to age on its own. `markSynced` is for the first load,
@@ -25,7 +25,7 @@ export function useDeskSync({ refreshEverything, facts, booted, connected, enabl
     if (!quiet) setRefreshingAll(true)
     const before = latest.current.facts
     try {
-      const outcome = await latest.current.refreshEverything()
+      const outcome = await latest.current.refreshEverything({ quiet })
       if (outcome?.ok && outcome?.upstream?.ok !== false) {
         lastSyncRef.current = Date.now()
         setRefreshNote({ at: new Date().toISOString(), failed: false })

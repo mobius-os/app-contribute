@@ -1697,14 +1697,18 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // the header's Refresh renews everything on screen — local
   // sources, the contribution feed, review requests, repositories, upstream
   // checks — and bump refreshKey so every cached PR list reloads too.
-  async function refreshEverything() {
+  // The owner's Sync forces every read. A quiet catch-up (the app shown again) reads GitHub's facts the way the hub's
+  // own cadence does: it waits out their cooldown and joins a read the hub already made on showing, so the 55-point
+  // review-request read is never queued twice.
+  async function refreshEverything({ quiet = false } = {}) {
     const [sourceOk] = await Promise.all([
       refreshSources(),
       hub.refresh('ledger'),
     ])
     let upstream = null
     if (conn.state === 'connected') {
-      const [, , checked] = await Promise.all([loadRepositories(), refreshIncomingReviews(), checkUpstream(token, sourceProjects), refreshReviewRuns(), reviewList.syncPulls()])
+      const incoming = quiet ? hub.automatic('incoming') : refreshIncomingReviews()
+      const [, , checked] = await Promise.all([loadRepositories(), incoming, checkUpstream(token, sourceProjects), refreshReviewRuns(), reviewList.syncPulls({ quiet })])
       upstream = checked
       if (checked.ok) setUpstreamChecks(checked.results)
     }

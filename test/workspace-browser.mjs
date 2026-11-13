@@ -3433,6 +3433,7 @@ window.runSyncLineChecks = async () => {
   const syncButton = () => query('.co-toolbar-refresh')
   const line = () => query('.co-sync-result')
   const repositoryReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeRepositories')).length
+  const incomingReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributeIncomingReviews')).length
   const syncedAt = () => Date.parse(query('.co-sync-note time')?.getAttribute('datetime') || '')
   const advance = async seconds => { for (let step = 0; step < seconds; step++) await clock.advance(1000) }
   try {
@@ -3468,11 +3469,14 @@ window.runSyncLineChecks = async () => {
     window.setFrameVisible(false)
     await advance(10 * 60)
     reads = repositoryReads()
+    const inboxReads = incomingReads()
     const before = syncedAt()
     window.setFrameVisible(true)
     for (let step = 0; step < 30 && repositoryReads() === reads; step++) await advance(1)
     ensure(repositoryReads() > reads, 'The app shown again after ten minutes did not catch up on its own')
     await advance(5)
+    // The inbox read costs 55 GitHub points: the catch-up shares the hub's one read of it and never queues a second behind it.
+    ensure(incomingReads() === inboxReads + 1, 'The app shown again once read the review requests ' + (incomingReads() - inboxReads) + ' times, not once')
     ensure(!line() && syncButton().getAttribute('aria-busy') !== 'true', 'The catch-up showed progress or a line: it is meant to be quiet')
     ensure(syncedAt() > before, 'The header\'s time did not move with the catch-up')
     checks.push({ name: 'the app shown again after a while syncs quietly and the header time follows', status: 'pass' })

@@ -455,9 +455,11 @@ test('private proposals have one actionable home without another merge workflow'
 
 test('every refresh control renews the contribution feed and reports a partial one', () => {
   // The header's Sync with GitHub is the one full pass, and it keeps when it last ran.
-  const refresh = appSource.match(/async function refreshEverything\(\) \{[\s\S]*?\n  \}/)?.[0] || ''
+  const refresh = appSource.match(/async function refreshEverything\(\{ quiet = false \} = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || ''
   assert.match(refresh, /hub\.refresh\('ledger'\)/)
-  assert.match(refresh, /reviewList\.syncPulls\(\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
+  assert.match(refresh, /reviewList\.syncPulls\(\{ quiet \}\)/, 'Sync reads the reviewed PRs too, even when a held read waits for points')
+  // The quiet catch-up asks the hub for the review requests as its own cadence does; only the owner's Sync forces the read.
+  assert.match(refresh, /quiet \? hub\.automatic\('incoming'\) : refreshIncomingReviews\(\)/)
   assert.match(refresh, /checkUpstream\(token, sourceProjects\)/)
   assert.match(refresh, /return \{ ok: sourceOk && syncReadsCurrent\(\), upstream \}/)
   assert.match(appSource, /checks=\{upstreamChecks\}/)
