@@ -31,7 +31,9 @@ from typing import Any
 
 PREFIX = "contributions/"
 STATE_FILE = "ledger-scan.json"
-SCHEMA = 1
+# 2: a refusal saved before kept_for was understood may be a kept checkout;
+# starting from a fresh read drops those once instead of keeping them forever.
+SCHEMA = 2
 
 # Records the job polls, reconciles, or settles on every pass. A record still
 # `submitting` may hold a send GitHub has not confirmed (publication_observe.py).
@@ -221,6 +223,17 @@ class LedgerScan:
                     continue
             work.append((name, record, version))
         return work
+
+    def note_cleanup_result(self, name: str, checkout: str, result: dict) -> bool:
+        """Remember a refused cleanup; True when it is a new refusal to report.
+
+        A checkout the server kept for another unfinished contribution
+        (``kept_for``) is not a refusal: it may be removed once that one
+        finishes, so the record is asked about again on the next pass.
+        """
+        if result.get("cleaned") or result.get("kept_for") or not os.path.isdir(checkout):
+            return False
+        return self.note_cleanup_refused(name, checkout)
 
     def note_cleanup_refused(self, name: str, checkout: str) -> bool:
         """Remember a refusal; True when it is new rather than a repeat."""
