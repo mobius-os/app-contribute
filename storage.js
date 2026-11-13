@@ -279,37 +279,39 @@ async function readRecordBodies(readVersioned, entries) {
   return bodies
 }
 
-// What the desk shows, with the least read: the listing says which files exist and
-// which were written since the last visit. A current record, one written since, and
-// one this visit has no word on are read fresh; a settled one that did not move is
-// taken from the saved feed; older settled history is left unread (and says so, in
-// the index) until a screen that lists history asks for it. Reading is bounded by
-// what the owner has open or just changed, not by how long the ledger has grown.
-async function readDeskLedger(entries, saved, readVersioned) {
-  const jsonEntries = entries.filter(entry => entry.type === 'file' && entry.name.endsWith('.json'))
+// Sorts the listed record files for the desk: bodies the listing carried are taken; a settled record whose stamp did
+// not move comes from the saved feed (or, when the saved feed does not hold it, waits outside, unread); everything else
+// (a current record, one written since, one this visit has no word on) is to be read fresh.
+function sortLedgerFiles(jsonEntries, saved) {
   const savedByPath = new Map(saved.records.map(record => [record.path, record]))
-  const index = {}
-  const records = []
-  const toRead = []
-  const settledOutside = []
+  const sorted = { records: [], index: {}, toRead: [], settledOutside: [] }
   for (const entry of jsonEntries) {
     const known = saved.index[entry.name]
     if (hasContent(entry)) {
       const record = ledgerRecordOf(entry, entry.content)
-      if (record) records.push(record)
-      index[entry.name] = indexEntry(entry, record)
+      if (record) sorted.records.push(record)
+      sorted.index[entry.name] = indexEntry(entry, record)
     } else if (known && !known.current && known.stamp && known.stamp === listingStamp(entry)) {
-      index[entry.name] = known
-      if (savedByPath.has(recordPath(entry))) records.push(savedByPath.get(recordPath(entry)))
-      else settledOutside.push(entry)
+      sorted.index[entry.name] = known
+      if (savedByPath.has(recordPath(entry))) sorted.records.push(savedByPath.get(recordPath(entry)))
+      else sorted.settledOutside.push(entry)
     } else {
-      toRead.push(entry)
+      sorted.toRead.push(entry)
     }
   }
+  return sorted
+}
+
+// What the desk shows, with the least read: the listing says which files exist and which were written since the last
+// visit, so only what the owner has open or just changed is read, however long the ledger has grown. Older settled
+// history stays unread (the index says it is there) until a screen that lists history asks for it.
+async function readDeskLedger(entries, saved, readVersioned) {
+  const jsonEntries = entries.filter(entry => entry.type === 'file' && entry.name.endsWith('.json'))
+  const { records, index, toRead, settledOutside } = sortLedgerFiles(jsonEntries, saved)
   const omitted = []
-  async function readInto(entries) {
-    const bodies = await readRecordBodies(readVersioned, entries)
-    for (const entry of entries) {
+  async function readInto(files) {
+    const bodies = await readRecordBodies(readVersioned, files)
+    for (const entry of files) {
       const body = bodies.get(entry)
       if (body === null) { omitted.push(recordPath(entry)); continue }
       const record = ledgerRecordOf(entry, body)
@@ -320,9 +322,7 @@ async function readDeskLedger(entries, saved, readVersioned) {
   await readInto(toRead)
   // A layer of a stack the desk shows belongs with it, however old.
   const chains = new Set(records.map(record => stackMeta(record)?.id).filter(Boolean))
-  const layers = settledOutside.filter(entry => chains.has(index[entry.name].stack))
-  await readInto(layers)
-  for (const entry of settledOutside) if (!(entry.name in index)) index[entry.name] = saved.index[entry.name]
+  await readInto(settledOutside.filter(entry => chains.has(index[entry.name].stack)))
   return finishLedger({ records, omitted, index, jsonEntries, saved })
 }
 

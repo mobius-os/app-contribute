@@ -41,9 +41,10 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { createSyncHub, onShownAgain } from './refresh.js'
-import { loadDeskCopy, saveDeskCopy, settledPulls, slimReviewRow } from './desk-copy.js'
+import { settledPulls, slimReviewRow } from './desk-copy.js'
+import { useDeskCopySave, useSavedDeskCopy } from './ui/useDeskCopy.js'
 import { checkUpstream } from './upstream-check.js'
 import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, projectNeedsCount, settleReviewRequest, withOwnerPulls } from './desk.js'
 import { withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
@@ -679,24 +680,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     Promise.resolve(refreshIncomingReviews()).finally(() => setIncomingReady(true))
   }, [conn.state, refreshIncomingReviews, sendOnly])
 
-  // The last-known copy of the desk (desk-copy.js, with the saved feed and the project snapshot): when all three are
+  // The last-known copy of the desk (ui/useDeskCopy.js, with the saved feed and the project snapshot): when all three are
   // saved the app opens from them at once and updates quietly; without them (a first visit) it waits for its first reads.
-  const [saved, setSaved] = useState(null)
-  useEffect(() => {
-    if (sendOnly) return undefined
-    let cancelled = false
-    Promise.all([loadDeskCopy(), loadSavedFeedStamp()]).then(([copy, feed]) => {
-      if (cancelled) return
-      if (copy) {
-        // Anything a read has already answered is newer than the copy.
-        setIncomingReviews(old => (old.length ? old : copy.incoming))
-        setRepositoryAccess(old => (old.repositories.length ? old : { ...copy.repositories, error: '' }))
-      }
-      setSaved({ copy, hasFeed: !!feed })
-    })
-    return () => { cancelled = true }
-  }, [sendOnly])
-  const savedCopy = saved?.copy || null
+  const { saved, savedCopy } = useSavedDeskCopy({ enabled: !sendOnly, onCopy: copy => {
+    // Anything a read has already answered is newer than the copy.
+    setIncomingReviews(old => (old.length ? old : copy.incoming))
+    setRepositoryAccess(old => (old.repositories.length ? old : { ...copy.repositories, error: '' }))
+  } })
   // Who the desk's rows are for, before GitHub's account answers: the copy's own account.
   const login = conn.login || savedCopy?.login || ''
 
@@ -1826,14 +1816,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     if (synced) markSynced()
   }, [booted, openReadsAnswered, openSynced, conn.state, sourceError])
 
-  // What the next visit opens from: saved once the open has been synced, and again when a later read moved something.
   const reviewRows = useMemo(() => reviewList.entries.map(slimReviewRow).filter(Boolean), [reviewList.entries])
   const reviewPulls = useMemo(() => settledPulls(reviewList.livePulls), [reviewList.livePulls])
-  useEffect(() => {
-    if (sendOnly || !openSynced || !refreshNote?.at || refreshNote.failed || !conn.login) return undefined
-    const timer = setTimeout(() => { void saveDeskCopy({ login: conn.login, syncedAt: refreshNote.at, incoming: incomingReviews, repositories: repositoryAccess, reviewRows, reviewPulls }) }, 1500)
-    return () => clearTimeout(timer)
-  }, [sendOnly, openSynced, refreshNote, conn.login, incomingReviews, repositoryAccess, reviewRows, reviewPulls])
+  useDeskCopySave({ enabled: !sendOnly && openSynced, syncedAt: refreshNote?.at, failed: refreshNote?.failed, login: conn.login, incoming: incomingReviews, repositories: repositoryAccess, reviewRows, reviewPulls })
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable

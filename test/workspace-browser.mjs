@@ -4106,6 +4106,7 @@ window.runInstantOpenChecks = async () => {
     await until(() => query('.co-boot'), 'A first visit showed no opening screen')
     await frame(); await frame()
     ensure(query('.co-boot') && !rowOf('Approved change'), 'A first visit opened before its first answer')
+    await captureShot('instant-open-opening-screen')
     release('OwnFirst')
     await until(() => !query('.co-boot') && rowOf('Approved change'), 'The first answer did not open the desk')
     ensure(note() === 'Updating…', 'A first visit has no copy to age, so the header said: ' + note())
