@@ -17,6 +17,9 @@ export const WORKSPACE_CSS = `
 .co-workspace-title { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
 .co-workspace-title > div { flex:1; min-width:0; }
 .co-workspace-name-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.co-pin { display:flex; flex-wrap:wrap; align-items:center; gap:0 14px; margin:6px 0 0; }
+.co-pin-switch { display:inline-flex; align-items:center; gap:10px; min-height:var(--co-control-height); font-size:var(--co-text-meta); font-weight:500; color:var(--text); cursor:pointer; }
+.co-pin small { flex:1 1 220px; font-size:var(--co-text-meta); color:var(--muted); line-height:1.35; }
 .co-workspace-title .co-source-glyph { display:none; }
 .co-workspace-title h2 { font-size:var(--co-text-section); font-weight:600; line-height:1.25; letter-spacing:-.025em; margin:0; overflow-wrap:anywhere; }
 .co-workspace-title p { display:flex; flex-wrap:wrap; align-items:center; gap:0 12px; font-size:var(--co-text-meta); color:var(--muted); margin:4px 0 0; overflow-wrap:anywhere; }
@@ -856,6 +859,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-project-tabpanel > .co-cycle-outlet { margin-top:0; }
 .co-project-tabpanel > .co-work-progress-row { margin-bottom:8px; }
 .co-pr-intro,.co-mywork-empty { margin:0 0 14px; color:var(--muted); font-size:var(--co-text-body); }
+.co-pr-sync { margin:0 0 8px; padding:0 2px; }
 .co-pr-filters { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; margin:0 0 10px; padding:2px; }
 .co-pr-filters::-webkit-scrollbar { display:none; }
 .co-pr-filters button { flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; min-height:var(--co-control-height); padding:0 12px; border:1px solid transparent; border-radius:var(--co-radius-round); background:none; color:var(--muted); font:500 var(--co-text-meta) var(--font); cursor:pointer; }

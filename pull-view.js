@@ -13,8 +13,11 @@ export const emptyPullView = () => ({ inventory: [], rows: new Map(), assigned: 
 
 const IDENTITY = ['headRefOid', 'baseRefOid', 'baseRefName']
 
-// `inventory` is the open-list membership and order; `pinned` keeps one exact
-// destination (a focused closed or later-page PR) outside that membership.
+// `pinned` is a key, or the keys several screens hold, as a list.
+const pinnedKeys = pinned => [pinned].flat().filter(Boolean)
+
+// `inventory` is the open-list membership and order; `pinned` keeps exact
+// destinations (a focused closed or later-page PR) outside that membership.
 export function observePulls(view, pulls, generation, { inventory = view.inventory, pinned = '' } = {}) {
   const rows = new Map(view.rows)
   const assigned = new Map(view.assigned)
@@ -25,7 +28,7 @@ export function observePulls(view, pulls, generation, { inventory = view.invento
     const overlay = (assigned.get(key) || []).filter(receipt => receipt.generation > generation)
     overlay.length ? assigned.set(key, overlay) : assigned.delete(key)
   }
-  const kept = new Set([...inventory, pinned].filter(Boolean))
+  const kept = new Set([...inventory, ...pinnedKeys(pinned)])
   for (const key of rows.keys()) if (!kept.has(key)) { rows.delete(key); assigned.delete(key) }
   return { inventory, rows, assigned }
 }
@@ -47,9 +50,9 @@ function withAssignees(pr, receipts) {
   return { ...pr, assignees: { nodes: [...users.values()] } }
 }
 
-// Inventory order first; a pinned destination outside it is appended.
+// Inventory order first; pinned destinations outside it are appended.
 export function pullsInView(view, pinned = '') {
-  const keys = pinned && !view.inventory.includes(pinned) ? [...view.inventory, pinned] : view.inventory
+  const keys = [...view.inventory, ...pinnedKeys(pinned).filter(key => !view.inventory.includes(key))]
   return keys.filter(key => view.rows.has(key)).map(key => withAssignees(view.rows.get(key).pr, view.assigned.get(key)))
 }
 

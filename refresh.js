@@ -93,8 +93,10 @@ const movedKeys = (before, next) => new Set(before ? [...next].filter(([key, sig
 // when GitHub did not); changed(keys) hears which signatures moved since the last
 // answer, the first answer being only the baseline. Probes run once a minute while
 // the frame is shown, and never closer together however often it is shown again.
+// Each watcher is a name of its own with its own answer and cadence (the reviewed PRs, the pinned repositories).
 function createProbeWatcher({ policy, now, isVisible, isLow }) {
-  let current = null
+  const watchers = new Map()
+  const current = watcher => watchers.get(watcher.name) === watcher
 
   async function probeOnce(watcher) {
     clearTimeout(watcher.timer)
@@ -104,13 +106,13 @@ function createProbeWatcher({ policy, now, isVisible, isLow }) {
     try {
       if (!isVisible() || isLow()) return
       const next = await watcher.probe()
-      if (!next || current !== watcher) return
+      if (!next || !current(watcher)) return
       const moved = movedKeys(watcher.snapshot, next)
       watcher.snapshot = next
       if (moved.size) watcher.changed(moved)
     } finally {
       watcher.running = false
-      if (current === watcher) arm(watcher)
+      if (current(watcher)) arm(watcher)
     }
   }
 
@@ -125,16 +127,17 @@ function createProbeWatcher({ policy, now, isVisible, isLow }) {
 
   return {
     // Watching again keeps the last answer, so a re-render never forgets what changed.
-    watch(probe, changed) {
-      if (current) Object.assign(current, { probe, changed })
+    watch(name, probe, changed) {
+      const known = watchers.get(name)
+      if (known) Object.assign(known, { probe, changed })
       else {
-        current = { probe, changed, snapshot: null, timer: null, running: false, nextAt: -Infinity }
-        arm(current)
+        watchers.set(name, { name, probe, changed, snapshot: null, timer: null, running: false, nextAt: -Infinity })
+        arm(watchers.get(name))
       }
-      const mine = current
-      return () => { clearTimeout(mine.timer); if (current === mine) current = null }
+      const mine = watchers.get(name)
+      return () => { clearTimeout(mine.timer); if (current(mine)) watchers.delete(name) }
     },
-    visibilityChanged() { if (current) arm(current) },
+    visibilityChanged() { for (const watcher of watchers.values()) arm(watcher) },
   }
 }
 
@@ -143,9 +146,12 @@ const quiet = promise => promise.catch(() => {})
 
 // One refresh path for every fact the app shows, so no screen keeps a timer or
 // a focus handler of its own. A fact is registered with
-//   read({ early })  one read of its source; apply(value) shows it. A read that has a small first answer long before
+//   read({ early, paused })  one read of its source; apply(value) shows it. A read that has a small first answer long before
 //                    its whole one may show it at once with early(value), which calls apply(value, { early: true })
-//                    for as long as the read is running and still wanted; the read's own value follows and replaces it
+//                    for as long as the read is running and still wanted; the read's own value follows and replaces it.
+//                    A read made of many steps asks paused() between them: true when the frame is hidden or the account
+//                    low on points, which stops an automatic read (never the owner's own), and the step it did not
+//                    reach waits for the next read, as a failed GitHub read does
 //   failed(e) optional: a failed read keeps what is shown and is reported here;
 //             without it the failure belongs to whoever called refresh()
 //   every     { live, idle } ms cadence while shown, or none (read on events only)
@@ -177,13 +183,16 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
   async function readFact(fact) {
     if (!registered(fact)) return
     const generation = fact.generation
+    const owned = fact.owned
     fact.lastRead = now()
     fact.pending = false
     fact.urgent = false
+    fact.owned = false
     let value
     let reading = true
     const early = shown => { if (reading && stillWanted(fact, generation)) fact.spec.apply(shown, { early: true }) }
-    try { value = await fact.spec.read({ early }) } catch (error) {
+    const paused = () => !owned && (!visible || (fact.spec.github && lowOnPoints()))
+    try { value = await fact.spec.read({ early, paused }) } catch (error) {
       reading = false
       // A GitHub read that failed is still wanted: the cooldown reads it again, nothing else will
       // (the probe reports a change once, and its answer is already taken).
@@ -262,7 +271,7 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
     // Register a fact (again: the newest spec is used). Returns its unregister.
     fact(name, spec) {
       const known = facts.get(name)
-      const fact = known || { name, spec, generation: 0, lastRead: -Infinity, pending: false, urgent: false, timer: null, value: null }
+      const fact = known || { name, spec, generation: 0, lastRead: -Infinity, pending: false, urgent: false, owned: false, timer: null, value: null }
       fact.spec = spec
       if (!known) {
         fact.coordinator = createRefreshCoordinator(() => readFact(fact))
@@ -273,6 +282,7 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
     // The owner's action: read now, whatever the cooldown, the budget or visibility.
     refresh(name) {
       const fact = facts.get(name)
+      if (fact) fact.owned = true
       return fact ? run(fact) : Promise.resolve()
     },
     // Something this fact depends on changed (a review changed state): read now,
@@ -305,6 +315,6 @@ export function createSyncHub({ policy = SYNC_POLICY, remainingPoints = () => nu
       return quiet(run(fact))
     },
     every: (read, ms) => tickers.add(read, ms),
-    watch: (probe, changed) => probes.watch(probe, changed),
+    watch: (probe, changed, name = 'changes') => probes.watch(name, probe, changed),
   }
 }

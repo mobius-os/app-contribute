@@ -42,6 +42,7 @@ function ProjectGlyph({ project }) {
 function ProjectDetail({
   project,
   renderActivity,
+  renderRepositoryControls,
   navigation,
 }) {
   // The open PRs the project's PR list shows; null until that list has been read.
@@ -74,6 +75,7 @@ function ProjectDetail({
             <div className="co-workspace-name-row"><h2>{project.name}</h2></div>
             <p>{project.canonical_repo ? <a href={`https://github.com/${project.canonical_repo}`} target="_blank" rel="noopener noreferrer">{project.canonical_repo}</a> : <span>Only on your Möbius</span>}
             </p>
+            {renderRepositoryControls?.(project)}
           </div></div>
         </header>
         <div className="co-workspace-body">
@@ -191,6 +193,7 @@ export function SourceMap({
   loading,
   error,
   renderActivity,
+  renderRepositoryControls = null,
   addProject = null,
   onProjectOpenChange,
   checks = {},
@@ -435,6 +438,7 @@ export function SourceMap({
             key={selectedProject.key}
             project={selectedProject}
             renderActivity={renderActivity}
+            renderRepositoryControls={renderRepositoryControls}
             navigation={activityNavigation}
           />
         </div>

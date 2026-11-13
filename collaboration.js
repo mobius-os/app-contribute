@@ -58,7 +58,8 @@ export const isBotAuthor = login => /\[bot\]$|[-_]bot$/i.test(login || '') || BO
 export function matchingPulls(pulls, filter, login) {
   const same = value => value?.toLowerCase() === login?.toLowerCase()
   const test = {
-    unassigned: pr => !pr.assignees?.nodes?.length,
+    // A row that holds only its titles does not know its assignees yet: it is neither assigned nor unassigned.
+    unassigned: pr => !pr.titlesOnly && !pr.assignees?.nodes?.length,
     assigned: pr => pr.assignees?.nodes?.some(user => same(user.login)),
     authored: pr => same(pr.author?.login),
     drafts: pr => pr.isDraft,
@@ -68,7 +69,7 @@ export function matchingPulls(pulls, filter, login) {
   return test ? pulls.filter(test) : pulls
 }
 
-async function graph(token, query) {
+export async function graph(token, query) {
   const result = await fetchLiveStates(token, query)
   if (!result) throw new Error('Could not check GitHub. Sync to try again.')
   return result

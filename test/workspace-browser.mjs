@@ -1,6 +1,6 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Twenty-three scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Twenty-five scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
@@ -12,6 +12,8 @@
 // runRepositoryLinkChecks (a repository row with a GitHub update or no comparison links to Settings or the App Store, lined up under its text),
 // runSyncLineChecks (the whole app, on a fake clock: a Sync says what it changed in a line that goes away; the app shown again after a while syncs quietly),
 // runInstantOpenChecks (the whole app: it opens from its last-known copy and updates quietly; a first visit and a failed update behave as said),
+// runRepositoryListChecks (the whole app: a repository's list opens from its last-known copy and updates in place, titles come first for a repository with no copy, lists are read in the background only after the desk's reads, the always-load switch, and every action reads its PR as it starts),
+// runListCadenceChecks (the whole app, on a fake clock: a pinned list is kept current by one probe a minute and only the PRs that moved are read, and the hub's budget rules hold for it),
 // runShortRunsChecks (the whole app, on a Möbius that answers the short list of review runs: the Review tab reads the run itself before it shows a document),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
@@ -68,7 +70,10 @@ import { NAMES } from './names.js'
 import { COPY_REPLIES } from './respond-result.js'
 import { stageWords } from './publication-stage.js'
 import { saveDeskCopy } from './desk-copy.js'
+import { listCopyOf, saveListCopy } from './repository-list-copy.js'
 import { createSyncHub } from './refresh.js'
+import { createRepositoryLists } from './repository-lists.js'
+import { RepositoryListsContext } from './ui/useRepositoryList.js'
 import { SyncHubContext, useDeskReviewRuns } from './ui/useReviewList.js'
 import ContributeApp, { GithubPullsUnavailable } from './index.jsx'
 
@@ -99,7 +104,7 @@ const prepared = {
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
 const calls = { autopilot: [], exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], reviewRequests: [], merges: [], grants: [], githubRetries: 0 }
-const values = new Map(), versions = new Map(), navigation = [], reviewRuns = [], respondChats = []
+const values = new Map(), versions = new Map(), navigation = [], reviewRuns = [], respondChats = [], storageWatchers = {}
 let versionCounter = 0
 const pulls = [pull(7), pull(8, { headRefOid: SECOND_HEAD, assignees: { nodes: [{ login: 'teammate' }] } })]
 // Reachable only by exact read, as a closed PR is absent from open search.
@@ -119,14 +124,16 @@ const shortRun = run => ({ ...run, items: run.items.map(({ summary, tests, verdi
   ...(proposal ? { verdict_proposal: { id: proposal.id, state: proposal.state, event: proposal.event, head_sha: proposal.head_sha } } : {}) })) })
 // What GitHub charges, as measured on a real account: the full requests read 55 points, the reviewed PRs 14 per 25, the change probe 1.
 // Each answer carries the account's rateLimit, as the real API does.
-const GITHUB_COST = { ContributeIncomingReviews: 55, ContributeOwnPulls: 29, ContributeChangeProbe: 1 }
+const GITHUB_COST = { ContributeIncomingReviews: 55, ContributeOwnPulls: 29, ContributeChangeProbe: 1, ContributeListTitles: 1, ContributeListProbe: 1, ContributeOpenCounts: 1 }
 function charged(query, aliases = 0) {
   const name = /query (\w+)/.exec(query)?.[1]
-  const cost = name === 'ContributeReviewPulls' ? Math.ceil(aliases * 14 / 25) : GITHUB_COST[name] || 0
+  const cost = name === 'ContributeReviewPulls' ? Math.ceil(aliases * 14 / 25) : name === 'ContributeListDetails' ? Math.ceil(aliases * 6 / 10) : GITHUB_COST[name] || 0
   window.githubPoints += cost; window.githubRemaining -= cost
   return { cost, remaining: window.githubRemaining }
 }
 window.githubPoints = 0; window.githubRemaining = 5000
+// A PR as GitHub lists it now: PR 8 carries a new head once a scenario has pushed to it.
+const listedPull = pr => (window.fixtureChangedHead && pr.number === 8 ? { ...pr, headRefOid: 'e'.repeat(40) } : pr)
 const response = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })
 // A prompt preview resolves settings; it is a read, not a public action.
 // A read of the list of review runs, whichever form it asks for (the app asks for the short list).
@@ -161,6 +168,16 @@ window.fetch = async (url, options = {}) => {
   if (window.presetsMissing && call.url === '/api/github/contributions/fixture-app/review-presets') return new Response(JSON.stringify({detail:'Not Found'}), {status:404})
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
+  // What GitHub holds of each repository's open PRs, for the probe and for the count of open PRs (the same PRs its list reads).
+  if (call.url === '/api/github/graphql' && call.method === 'POST' && /query ContributeList(Probe)|query ContributeOpenCounts/.test(call.body.query)) {
+    const probing = call.body.query.includes('ContributeListProbe')
+    const aliases = [...call.body.query.matchAll(/(r\d+): search\(query:"repo:([^ "]+) is:pr is:open"/g)]
+    const probed = pr => ({ number: pr.number, updatedAt: pr.updatedAt, headRefOid: pr.headRefOid, isDraft: pr.isDraft, mergeable: pr.mergeable, commits: pr.commits })
+    return response({ data: { rateLimit: charged(call.body.query), ...Object.fromEntries(aliases.map(([, alias, repo]) => {
+      const open = repo === 'owner/other' || window.emptyPulls ? [] : pulls.map(listedPull)
+      return [alias, probing ? { issueCount: open.length, nodes: open.map(probed) } : { issueCount: open.length }]
+    })) } })
+  }
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '',
       ...(window.fullAppBinding ? { frozen_publication_binding: { record_fields: ['plan'] } } : {}) })
@@ -231,18 +248,22 @@ window.fetch = async (url, options = {}) => {
         ...listed,
       }}}})
     }
-    if (call.body.query.includes('ContributeReviewPulls')) {
-      // The review list reads each reviewed PR live, one alias per PR.
+    if (call.body.query.includes('ContributeReviewPulls') || call.body.query.includes('ContributeListDetails')) {
+      // The review list reads each reviewed PR live, one alias per PR; so does a repository's list for the details behind its titles, in groups.
+      if (window.holdDetails && call.body.query.includes('ContributeListDetails')) await new Promise(resolve => { (window.releaseDetails ||= []).push(resolve) })
       const reads = [...call.body.query.matchAll(/(p\d+):repository\(owner:"[^"]+",name:"[^"]+"\) \{ pullRequest\(number:(\d+)\)/g)]
-      return response({ data: { rateLimit: charged(call.body.query, reads.length), ...Object.fromEntries(reads.map(([, alias, number]) => [alias, { pullRequest: pulls.find(pr => pr.number === Number(number)) || null }])) } })
+      return response({ data: { rateLimit: charged(call.body.query, reads.length), ...Object.fromEntries(reads.map(([, alias, number]) => [alias, { pullRequest: pulls.find(pr => pr.number === Number(number)) ? listedPull(pulls.find(pr => pr.number === Number(number))) : null }])) } })
     }
-    if (!call.body.query.includes('ContributePullRequests')) return forbidden('unknown GraphQL query')(call.body.query)
+    // The titles of a repository's list (the quick first answer) and the whole list are the same PRs, as GitHub holds them.
+    const titlesOnly = call.body.query.includes('ContributeListTitles')
+    if (!titlesOnly && !call.body.query.includes('ContributePullRequests')) return forbidden('unknown GraphQL query')(call.body.query)
     if(window.failPulls) return new Response(JSON.stringify({detail:'Fixture pull read error'}),{status:503})
     if(window.holdPulls) await new Promise(resolve=>{window.releasePulls=resolve})
     let found = call.body.query.includes('repo:owner/other') || window.emptyPulls ? [] : pulls
     const laterPage = call.body.query.includes('after:"fixture-page-2"')
     if (window.fixturePaging) found = laterPage ? found.slice(1) : found.slice(0,1)
-    if (window.fixtureChangedHead) found = found.map(pr => pr.number===8 ? {...pr,headRefOid:'e'.repeat(40)} : pr)
+    found = found.map(listedPull)
+    if (titlesOnly) found = found.map(pr => ({ id: pr.url, number: pr.number, title: pr.title, url: pr.url, state: pr.state, isDraft: pr.isDraft, createdAt: pr.createdAt, updatedAt: pr.updatedAt, headRefOid: pr.headRefOid, author: pr.author, reviewDecision: pr.reviewDecision ?? null, repository: { nameWithOwner: pr.repository.nameWithOwner, viewerPermission: pr.repository.viewerPermission } }))
     return response({ data: { search: { nodes: found, issueCount: pulls.length,
       pageInfo: { hasNextPage: Boolean(window.fixturePaging && !laterPage), endCursor: window.fixturePaging && !laterPage ? 'fixture-page-2' : null } } } })
   }
@@ -365,7 +386,14 @@ window.mobius = {
     get: async key => structuredClone(values.get(key) ?? null),
     set: async (key, value) => { values.set(key, structuredClone(value)) },
     remove: async key => { values.delete(key) },
-    subscribe: () => () => {},
+    // A saved preference reaches the app as it does on Möbius: once when it subscribes, and at each write of its own. The followed
+    // repositories only where a scenario asks for them (mountDeskApp({ followed })): the other scenarios list what GitHub says.
+    subscribe: (key, listener) => {
+      const watchers = (storageWatchers[key] ||= new Set())
+      watchers.add(listener)
+      if (key !== 'followed-repositories.json' || window.deliverFollowed) Promise.resolve().then(() => watchers.has(listener) && listener(structuredClone(values.get(key) ?? null)))
+      return () => watchers.delete(listener)
+    },
     getWithVersion: async key => ({value:structuredClone(values.get(key) ?? null), version:values.has(key) ? versions.get(key) || 'fixture-version' : null}),
     // Compare-and-set like the platform: a stale version or create conflict fails.
     durableWrite: async (key, value, condition = {}) => {
@@ -373,6 +401,7 @@ window.mobius = {
       if ((condition.ifNoneMatch && version) || (condition.ifMatch && condition.ifMatch !== version)) throw Object.assign(new Error('CAS conflict'), {code:'conflict',status:412})
       const next = 'fixture-version-' + (++versionCounter)
       values.set(key,structuredClone(value)); versions.set(key,next)
+      for (const listener of storageWatchers[key] || []) listener(structuredClone(value))
       return {durability:'synced',version:next}
     },
   },
@@ -419,6 +448,10 @@ function Fixture() {
   // The review runs come through the same hub and hook the app uses: one shared copy for the PR page.
   const hub = useMemo(() => createSyncHub(), [])
   useEffect(() => hub.start(), [hub])
+  // The lists of open PRs the screens show. A scenario forgets them (window.forgetLists) to open a repository as a first visit does.
+  const [lists, setLists] = useState(() => createRepositoryLists())
+  window.forgetLists = () => setLists(createRepositoryLists())
+  window.fixtureLists = lists
   const deskRuns = useDeskReviewRuns({ hub, token: 'fixture-only', appId: 'fixture-app', connState: conn.state, sendOnly: false, pullPageOpen: false })
   window.setConnectionFixture = setConn
   async function retryGithub() {
@@ -482,7 +515,7 @@ function Fixture() {
     setSyncing(true)
     try { await retryAll() } finally { setSyncing(false) }
   }
-  return <SyncHubContext.Provider value={hub}><div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
+  return <SyncHubContext.Provider value={hub}><RepositoryListsContext.Provider value={lists}><div className="co-root"><style>{CSS}</style><main className="co-page is-sources">
     <button type="button" className="co-btn co-toolbar-refresh" onClick={syncFromHeader} disabled={syncing} aria-busy={syncing} aria-label="Sync with GitHub">Sync with GitHub</button>
     {selectionId ? <ReviewSelection selectionId={selectionId} token="fixture-only" appId="fixture-app" onClose={() => setSelectionId(null)} /> : <SourceMap projects={allProjects} focusKey={projectFocus} snapshot={{ generated_at: 'fixture-'+refreshKey }} conn={conn}
       addProject={quiet => <RepositoryPicker quiet={quiet} token="fixture-only" connected onAdded={repositoryAdded} />}
@@ -496,7 +529,7 @@ function Fixture() {
         renderPublicWork={view => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project} scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal}
           conn={conn} runs={deskRuns.runs} respondChats={deskRuns.respondChats} runsError={deskRuns.error} onRunsChanged={deskRuns.refresh} onRunPatched={deskRuns.patch} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} focusRun={focusRun} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
       />}</ProjectControls></> : null} />}
-  </main></div></SyncHubContext.Provider>
+  </main></div></RepositoryListsContext.Provider></SyncHubContext.Provider>
 }
 const root = createRoot(document.getElementById('root'))
 root.render(<Fixture />)
@@ -976,6 +1009,9 @@ window.runWorkspaceChecks = async () => {
       ensure(text(review()).includes('merges into the newest version of the target branch'),'Approval falsely pins the displayed base')
       ensure(text(review()).includes('all required checks pass'),'Review and required checks missing from approval')
       window.liveBase='d'.repeat(40)
+      // Every action reads its PR exactly as it starts (an assignment earlier in this scenario did too): this launch's own reads are the new ones.
+      const exactReads = () => calls.requests.filter(call=>call.body?.query?.includes('ContributeExactPull')).length
+      const exactBefore = exactReads()
       await enabled('Start, merge after approval')
       // Starting closes the review window and clears the selection; the run itself lives in its own conversation.
       await until(() => reviewRuns.length === 1 && !review(),'Review did not start')
@@ -985,7 +1021,7 @@ window.runWorkspaceChecks = async () => {
       ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
       ensure(write.body.items[0].head_sha===HEAD && write.body.items[1].head_sha===SECOND_HEAD,'Approval lost selected heads')
       ensure(write.body.items.every(item=>item.base_ref==='main' && item.base_sha===window.liveBase),'Exact launch did not re-read the current same-target tip')
-      ensure(calls.requests.filter(call=>call.body?.query?.includes('ContributeExactPull')).length===2,'Launch did not read exactly its selected PRs')
+      ensure(exactReads()-exactBefore===2,'Launch did not read exactly its selected PRs')
       window.liveBase=null
       ensure(query('.co-pr-list')===originalList,'Review replaced inventory')
       } finally { window.liveBase=null; await asOwner() }
@@ -1138,9 +1174,10 @@ window.runWorkspaceChecks = async () => {
       await backToPrs()
     })
     await check('saved public PRs wait for the open-PR list before any of them counts as Shared work', async () => {
-      // A list opened for the first time: the saved PRs are in the records before the project is opened, so it is a fresh read.
+      // A list opened for the first time (nothing is known of it): the saved PRs are in the records before the project is opened.
       await chooseProject('Other project')
       window.setRecordsFixture(old => [...old, savedPr('fixture-listed', 7, 'Saved listed PR'), savedPr('fixture-shared', 99, 'Saved shared PR')])
+      window.forgetLists()
       window.holdPulls = true
       await chooseProject('Fixture project')
       // #7 is in the live list once it is read; #99 is not.
@@ -1184,8 +1221,15 @@ window.runWorkspaceChecks = async () => {
       await click(checkButton())
       await until(()=>text(query('.co-pr-empty')).includes('No pull requests'),'Empty inventory missing')
       ensure(!query('.co-pr-row'),'Empty result kept stale rows')
+      // A list known to be empty reloads in place: it says it is empty and is being updated, with no placeholder rows.
       window.emptyPulls=false; window.holdPulls=true
       await click(checkButton())
+      await until(()=>window.releasePulls,'The reload did not start')
+      ensure(!query('.co-pr-skel') && text(query('.co-pr-empty')).includes('No pull requests') && text(query('.co-public-work')).includes('Updating…'),'A list known to be empty did not stay empty while it updated')
+      window.holdPulls=false; window.releasePulls(); window.releasePulls=null
+      await until(()=>document.querySelectorAll('.co-pr-row').length===3,'Released inventory did not load')
+      // A list nothing is known of is loading, never empty.
+      window.holdPulls=true; window.forgetLists()
       await until(()=>window.releasePulls && query('.co-pr-skel'),'Loading confused with empty')
       ensure(!text(query('.co-pr-empty')).includes('No pull requests'),'Loading claimed an empty result')
       window.holdPulls=false; window.releasePulls(); window.releasePulls=null
@@ -2057,11 +2101,12 @@ window.runWorkspaceChecks = async () => {
 
 // The whole app on a fresh page: a review the owner starts from a PR's own page
 // must show on that PR's Desk row without pressing Sync with GitHub.
-async function mountDeskApp({ pullPatch = {}, records = [] } = {}) {
+async function mountDeskApp({ pullPatch = {}, records = [], followed = null } = {}) {
   root.render(null)
   await frame(); await frame()
   window.fullAppFixture = true; window.fullAppConnected = true; window.fullAppDesk = true
-  values.set('followed-repositories.json', ['owner/project'])
+  window.deliverFollowed = !!followed
+  values.set('followed-repositories.json', followed || ['owner/project'])
   // Only the saved Respond answers and decisions are ever listed; every other folder is empty.
   // A test may hold the reads of the saved answers (window.holdResponsesRead) and let them go with window.releaseResponsesRead().
   window.responseGates = []
@@ -4146,6 +4191,271 @@ window.runInstantOpenChecks = async () => {
   }
 }
 
+// The whole app: a repository's list of open PRs opens from its last-known copy and updates in place, a repository with no copy shows its titles
+// first and the details behind them, the lists are read in the background only after the desk's own reads have answered, a repository
+// nothing is open in shows its empty list without a read, the always-load switch is the owner's, and every action reads its PR as it starts.
+window.runRepositoryListChecks = async () => {
+  const checks = []
+  const owner = 'reconnected-owner'
+  const hoursAgo = hours => new Date(Date.now() - hours * 3600e3).toISOString()
+  const row = number => query('.co-pr-row[data-pr="owner/project#' + number + '"]')
+  const note = () => text(query('.co-pr-sync'))
+  const rowCount = () => document.querySelectorAll('.co-pr-row').length
+  const listReads = repo => calls.requests.filter(call => /query ContributePullRequests|query ContributeListTitles/.test(call.body?.query || '') && (call.body.query.includes('repo:' + repo + ' '))).length
+  const releaseDetails = () => { window.holdDetails = false; (window.releaseDetails || []).splice(0).forEach(resolve => resolve()) }
+  const whole = number => ({ ...pull(number, { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] } }) })
+  const openProject = async name => {
+    if (getComputedStyle(query('.co-rail')).display !== 'none') {
+      await until(() => [...document.querySelectorAll('.co-rail-item.is-project')].find(node => text(node).includes(name)), 'The repository was not in the side menu')
+      await click([...document.querySelectorAll('.co-rail-item.is-project')].find(node => text(node).includes(name)))
+    } else {
+      await click(query('.co-desk-chips-projects'))
+      await until(() => query('.co-source-row'), 'The directory did not open')
+      await click([...document.querySelectorAll('.co-source-row')].find(node => text(node).includes(name)))
+    }
+  }
+  // What a previous visit saved: the desk, and the first page of this repository's list as it was three hours ago.
+  const saveCopies = async lists => {
+    values.set('feed-cache.json', { schema: 3, saved_at: hoursAgo(3), records: [], index: {} })
+    values.set('source-cache.json', { schema: 1, saved_at: hoursAgo(3), snapshot: { apps: [], platform: null } })
+    await saveDeskCopy({ login: owner, syncedAt: hoursAgo(3), incoming: [], repositories: { repositories: [], hasNextPage: false }, reviewRows: [], reviewPulls: [] })
+    if (lists) await saveListCopy(listCopyOf({ login: owner, lists }))
+  }
+  const reset = () => {
+    for (const key of ['feed-cache.json', 'source-cache.json', 'desk-cache.json', 'repository-lists.json', 'pinned-repositories.json']) values.delete(key)
+    Object.assign(window, { holdPulls: false, holdDetails: false, holdIncomingFull: false, holdOwnFirst: false, emptyPulls: false, failPulls: false, exactHeadChanged: false })
+    window.releasePulls?.(); window.releasePulls = null
+    releaseDetails()
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]
+    window.githubInvolved = []
+    calls.requests.length = 0; calls.reviewRequests.length = 0
+  }
+  try {
+    // 1. A returning visit: the repository opens from its last-known list at once, a quiet line says it is updating and how old the copy is,
+    // and the rows change where they stand when the answer arrives.
+    reset()
+    await saveCopies([{ repo: 'owner/project', syncedAt: hoursAgo(3), openedAt: '', total: 2, hasNextPage: false, endCursor: null, pulls: [{ ...whole(7), title: 'Title three hours ago' }, whole(8)] }])
+    window.holdPulls = true
+    await mountDeskApp()
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await openProject('owner/project')
+    await until(() => rowCount() === 2, 'The repository did not open from its saved list: ' + text(query('main')).slice(0, 300))
+    ensure(!query('.co-pr-skel'), 'The saved list showed placeholder rows')
+    ensure(text(row(7)).includes('Title three hours ago'), 'The saved list showed: ' + text(row(7)))
+    ensure(note().startsWith('Updating…') && note().includes('last synced') && /3 hours ago/.test(note()), 'The list said: ' + note())
+    await captureShot('repository-list-from-copy')
+    const kept = row(7)
+    await until(() => window.releasePulls, 'The list was not updated behind the saved rows')
+    window.holdPulls = false; window.releasePulls(); window.releasePulls = null
+    await until(() => text(row(7)).includes('Contribution 7') && note().startsWith('Last synced just now'), 'The update did not land: ' + text(row(7)) + ' / ' + note())
+    ensure(row(7) === kept && rowCount() === 2, 'The updated row was replaced by another element instead of changing where it stood')
+    checks.push({ name: 'a repository opens from its last-known list with no placeholder rows, says it is updating and how old the copy is, and the rows change in place', status: 'pass' })
+
+    // 2. Sync updates the list in place: the rows stay on screen while it is read again.
+    window.holdPulls = true
+    await click(query('.co-toolbar-refresh'))
+    await until(() => window.releasePulls, 'Sync did not read the list again')
+    ensure(rowCount() === 2 && !query('.co-pr-skel') && row(7) === kept, 'Sync emptied the list or replaced its rows')
+    ensure(note().startsWith('Updating…'), 'The list said during Sync: ' + note())
+    window.holdPulls = false; window.releasePulls(); window.releasePulls = null
+    await until(() => note().startsWith('Last synced just now'), 'The list never finished updating after Sync: ' + note())
+    ensure(row(7) === kept, 'Sync replaced the row')
+    checks.push({ name: 'Sync updates the list in place instead of emptying it', status: 'pass' })
+
+    // 3. A repository nothing is known of shows its titles first, and the details fill into the same rows.
+    reset(); await saveCopies(null)
+    Object.assign(window, { holdDetails: true })
+    await mountDeskApp()
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await openProject('owner/project')
+    await until(() => rowCount() === 2, 'The titles did not show: ' + text(query('main')).slice(0, 300))
+    ensure(!query('.co-pr-skel') && text(row(7)).includes('Contribution 7'), 'The titles row said: ' + text(row(7)))
+    ensure(!row(7).querySelector('.co-agent-menu-button, .co-pr-assign') && row(7).querySelector('input[type=checkbox]').disabled, 'A row that holds only its titles offered an action')
+    ensure(!row(7).querySelector('.co-gh-checks, .co-gh-label, .co-pr-agent-state') && !text(row(7)).includes('Couldn’t read'), 'A row that holds only its titles showed a badge: ' + text(row(7)))
+    await captureShot('repository-list-titles-first')
+    const light = row(7)
+    releaseDetails()
+    await until(() => row(7)?.querySelector('.co-agent-menu-button') && !row(7).querySelector('input[type=checkbox]').disabled, 'The details did not arrive in the rows')
+    ensure(row(7) === light, 'The row was replaced instead of filling in')
+    checks.push({ name: 'a repository with no saved list shows its titles at once with no action on them, and the details fill into the same rows', status: 'pass' })
+
+    // 4. Background reading starts only after the desk's own reads have answered, never before.
+    reset(); await saveCopies(null)
+    Object.assign(window, { holdIncomingFull: true, holdOwnFirst: true })
+    await mountDeskApp()
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects') || query('.co-boot'), 'The app did not start')
+    for (let waited = 0; waited < 25; waited += 1) await frame()
+    await new Promise(resolve => setTimeout(resolve, 400))
+    ensure(listReads('owner/project') === 0, 'A list was read while the desk\'s own reads were still out')
+    window.holdIncomingFull = false; window.releaseIncomingFull?.(); window.holdOwnFirst = false; window.releaseOwnFirst?.()
+    await until(() => listReads('owner/project') >= 1, 'The list was never read in the background')
+    const desk = calls.requests.map((call, index) => [index, call.body?.query || call.url]).filter(([, what]) => /ContributeIncomingReviews/.test(what)).map(([index]) => index)
+    const first = calls.requests.findIndex(call => /query ContributeListTitles/.test(call.body?.query || ''))
+    ensure(desk.length && first > Math.max(...desk), 'The first list read came before the desk\'s review requests: ' + JSON.stringify({ desk, first }))
+    checks.push({ name: 'the lists are read in the background only after the desk\'s own reads have answered', status: 'pass' })
+
+    // 5. A repository nothing is open in shows its empty list at once, without a read of its list.
+    reset(); await saveCopies(null)
+    await mountDeskApp({ followed: ['owner/project', 'owner/other'] })
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await until(() => calls.requests.some(call => /query ContributeOpenCounts/.test(call.body?.query || '')), 'The counts of open PRs were not asked for')
+    ensure(calls.requests.filter(call => /query ContributeOpenCounts/.test(call.body?.query || '')).length === 1, 'The counts were asked for more than once')
+    await openProject('owner/other')
+    await until(() => text(query('.co-pr-empty')).includes('No pull requests'), 'The empty list did not show at once: ' + text(query('main')).slice(0, 300))
+    ensure(listReads('owner/other') === 0, 'A repository known to have no open PRs was read when opened')
+    checks.push({ name: 'a repository with no open PRs shows its empty list at once, from one count asked for all of them', status: 'pass' })
+
+    // 6. The always-load switch is the owner's: saved as a preference, read at once, and its repository is watched.
+    reset(); await saveCopies(null)
+    await mountDeskApp({ followed: ['owner/project', 'owner/other'] })
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await openProject('owner/other')
+    await until(() => query('.co-pin input[role=switch]'), 'The repository had no always-load switch')
+    const pin = () => query('.co-pin input[role=switch]')
+    ensure(!pin().checked && text(query('.co-pin')).includes('Always load'), 'The switch said: ' + text(query('.co-pin')))
+    ensure(listReads('owner/other') === 0, 'A repository was read although nobody pinned it')
+    await captureShot('repository-always-load')
+    await click(pin())
+    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === true && pin().checked, 'The choice was not saved: ' + JSON.stringify(values.get('pinned-repositories.json')))
+    await until(() => listReads('owner/other') >= 1, 'A pinned repository was not read at once')
+    await click(pin())
+    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === false && !pin().checked, 'Turning it off was not saved')
+    checks.push({ name: 'the always-load switch is saved as a preference, reads the repository, and turns off again', status: 'pass' })
+
+    // 7. Every action reads its PR as it starts: a PR that changed since the list showed it is refused, and nothing is sent.
+    reset(); await saveCopies(null)
+    window.fixtureCapabilities = { request_review_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
+    window.fixtureAssignees = [owner, 'teammate']
+    Object.assign(pulls[0], { author: { login: owner }, reviewRequests: { totalCount: 0, nodes: [] } })
+    pulls.push(pull(9, { ...whole(9), author: { login: 'someone-else' }, reviewRequests: { totalCount: 0, nodes: [] } }))
+    await mountDeskApp({ pullPatch: { author: { login: owner }, reviewRequests: { totalCount: 0, nodes: [] } } })
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await openProject('owner/project')
+    await until(() => row(7)?.querySelector('[aria-label="Request review on PR 7"]'), 'The list did not offer Request review: ' + text(query('main')).slice(0, 300))
+    window.exactHeadChanged = true
+    await click(row(7).querySelector('[aria-label="Request review on PR 7"]'))
+    await until(() => query('.co-review-window input[type=checkbox]'), 'The sheet did not list people')
+    await click([...document.querySelectorAll('.co-review-window input[type=checkbox]')].find(box => box.closest('label').textContent.includes('teammate')))
+    await click([...query('.co-review-window').querySelectorAll('button')].find(node => text(node) === 'Request review'))
+    await until(() => text(query('.co-review-window')).includes('changed since this list loaded'), 'A changed PR was not refused: ' + text(query('.co-review-window')))
+    ensure(calls.reviewRequests.length === 0, 'A review was asked for on a PR that had changed')
+    await click([...query('.co-review-window').querySelectorAll('button')].find(node => text(node) === 'Cancel'))
+    // Assigning someone reads the PR the same way.
+    await click(row(9).querySelector('[aria-label="Assign PR 9"]'))
+    await until(() => query('[aria-label="Assign to teammate"]'), 'The assignment did not offer people')
+    await click(query('[aria-label="Assign to teammate"]'))
+    await until(() => text(query('.co-pr-assignment')).includes('changed since this list loaded'), 'A changed PR was assigned or not refused: ' + text(query('.co-pr-assignment')))
+    ensure(!calls.requests.some(call => call.url.endsWith('/assign-review')), 'Someone was assigned on a PR that had changed')
+    checks.push({ name: 'an action reads its PR as GitHub has it when the owner confirms, and a changed PR is refused with nothing sent', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 4000), forbidden: calls.forbidden }
+  } finally {
+    Object.assign(window, { holdPulls: false, holdDetails: false, holdIncomingFull: false, holdOwnFirst: false, exactHeadChanged: false })
+    window.releasePulls?.(); window.releaseIncomingFull?.(); window.releaseOwnFirst?.(); releaseDetails()
+    const extra = pulls.findIndex(pr => pr.number === 9)
+    if (extra >= 0) pulls.splice(extra, 1)
+  }
+}
+
+// The whole app, on a fake clock: a pinned repository's list is kept current by one cheap probe a minute and only the PRs that moved are
+// read again (a PR that came is taken in, one that closed goes), and every rule of the sync hub's budget holds for it: nothing while the
+// frame is hidden, a catch-up when it is shown again, and nothing automatic once the account runs low, while the owner's Sync still reads.
+window.runListCadenceChecks = async () => {
+  const checks = []
+  const clock = installClock()
+  const original = pulls.slice()
+  const owner = 'reconnected-owner'
+  const row = number => query('.co-pr-row[data-pr="owner/project#' + number + '"]')
+  const named = name => calls.requests.filter(call => call.url === '/api/github/graphql' && new RegExp('query ' + name + '\\b').test(call.body?.query || ''))
+  const probes = () => named('ContributeListProbe').length
+  const advance = async seconds => { for (let step = 0; step < seconds; step++) await clock.advance(1000) }
+  const openProject = async () => {
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    if (getComputedStyle(query('.co-rail')).display !== 'none') {
+      await until(() => query('.co-rail-item.is-project'), 'The repository was not in the side menu')
+      await click(query('.co-rail-item.is-project'))
+    } else {
+      await click(query('.co-desk-chips-projects')); await until(() => query('.co-source-row'), 'The directory did not open'); await click(query('.co-source-row'))
+    }
+  }
+  try {
+    for (const key of ['feed-cache.json', 'source-cache.json', 'desk-cache.json', 'repository-lists.json']) values.delete(key)
+    values.set('pinned-repositories.json', { 'owner/project': true })
+    reviewRuns.length = 0
+    window.githubRequests = [pulls[0]]; window.githubInvolved = []
+    await mountDeskApp()
+    await openProject()
+    await until(() => row(7) && row(8) && named('ContributeListDetails').length > 0 && !query('.co-pr-sync')?.textContent.startsWith('Updating'), 'The pinned list was not read in the background')
+    await until(() => probes() >= 1, 'The pinned repository was not probed')
+    const firstProbes = probes()
+    ensure(named('ContributePullRequests').length + named('ContributeListTitles').length === 1, 'The pinned list was read more than once at the open')
+    checks.push({ name: 'a pinned repository is read in full when the app opens and probed straight after', status: 'pass' })
+
+    // A quiet hour: one probe a minute, a point each, and nothing else read of the list.
+    const pointsBefore = window.githubPoints, readsBefore = calls.requests.filter(call => /ContributeList(Titles|Details)|ContributePullRequests/.test(call.body?.query || '')).length
+    await advance(3 * 60)
+    ensure(probes() - firstProbes === 3, 'The probe ran ' + (probes() - firstProbes) + ' times in three minutes')
+    ensure(calls.requests.filter(call => /ContributeList(Titles|Details)|ContributePullRequests/.test(call.body?.query || '')).length === readsBefore, 'The list was read again though nothing moved')
+    ensure(window.githubPoints - pointsBefore <= 3 + 6, 'Three quiet minutes cost ' + (window.githubPoints - pointsBefore) + ' points')
+    checks.push({ name: 'a quiet list costs one probe a minute and no read', status: 'pass' })
+
+    // A PR moves on GitHub: only that PR is read, and its row changes where it stands.
+    const kept = row(8)
+    pulls[1] = { ...pulls[1], title: 'Edited on GitHub', updatedAt: '2026-11-13T10:00:00Z' }
+    const detailsBefore = named('ContributeListDetails').length, fullBefore = named('ContributePullRequests').length
+    await advance(61)
+    await until(() => text(row(8)).includes('Edited on GitHub'), 'The row did not change: ' + text(row(8)))
+    ensure(row(8) === kept, 'The row was replaced instead of changing where it stood')
+    const read = named('ContributeListDetails').slice(detailsBefore)
+    ensure(read.length === 1 && (read[0].body.query.match(/pullRequest\(number:\d+\)/g) || []).join() === 'pullRequest(number:8)', 'More than the PR that moved was read: ' + read.map(call => call.body.query.slice(0, 200)).join(' | '))
+    ensure(named('ContributePullRequests').length === fullBefore, 'The whole list was read for one PR that moved')
+    checks.push({ name: 'a PR that moved is read again, alone, and its row changes in place', status: 'pass' })
+
+    // One closes and a new one opens: noticed by the probe, the closed row goes and the new row arrives.
+    pulls.splice(1, 1, pull(9, { title: 'A new PR', mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] } }))
+    const before = named('ContributeListDetails').length
+    await advance(61)
+    await until(() => row(9) && !row(8), 'The new PR did not arrive or the closed one stayed: ' + [...document.querySelectorAll('.co-pr-row')].map(node => node.dataset.pr).join())
+    const added = named('ContributeListDetails').slice(before)
+    ensure(added.length === 1 && added[0].body.query.includes('pullRequest(number:9)') && !added[0].body.query.includes('number:7'), 'The probe read more than the new PR')
+    checks.push({ name: 'a PR that came is taken in and one that closed goes, reading only the new one', status: 'pass' })
+
+    // Hidden: not one probe. Shown again: the catch-up is at once.
+    window.setFrameVisible(false)
+    const hiddenAt = calls.requests.length
+    await advance(6 * 60)
+    ensure(calls.requests.length === hiddenAt, 'The hidden app made ' + (calls.requests.length - hiddenAt) + ' reads')
+    const hiddenProbes = probes()
+    window.setFrameVisible(true)
+    await advance(3)
+    ensure(probes() === hiddenProbes + 1, 'The app shown again did not catch up with one probe')
+    checks.push({ name: 'a hidden app reads nothing and catches up with one probe when shown again', status: 'pass' })
+
+    // Low on points: nothing automatic; the owner's Sync still reads.
+    window.githubRemaining = 900
+    await advance(60); await advance(60)
+    const lowProbes = probes()
+    await advance(5 * 60)
+    ensure(probes() === lowProbes, 'The probe went on with the account low on points')
+    pulls[0] = { ...pulls[0], title: 'Moved while low' }
+    await click(query('.co-toolbar-refresh'))
+    await until(() => text(row(7)).includes('Moved while low'), 'The owner\'s Sync did not read the list while the account was low: ' + text(row(7)))
+    checks.push({ name: 'with the account low on points nothing is read by itself, and the owner\'s Sync still reads the list', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 4000), forbidden: calls.forbidden }
+  } finally {
+    clock.restore()
+    pulls.splice(0, pulls.length, ...original)
+    window.githubRemaining = 5000
+    window.setFrameVisible(true)
+  }
+}
+
 // The whole app, on a Möbius that answers the short list of review runs: the PR page's Review tab and the run's own page read the run
 // itself before they show a document, so a long review is never shown cut and a drafted verdict never shows without its words.
 window.runShortRunsChecks = async () => {
@@ -4457,7 +4767,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

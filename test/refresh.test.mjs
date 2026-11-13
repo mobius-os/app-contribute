@@ -566,3 +566,90 @@ test('a read that fails after an early answer is reported once and the early ans
   await hub.refresh('incoming')
   assert.deepEqual(events, ['early first', 'failed GitHub did not answer'])
 })
+
+// --- Several repositories' lists on one hub: named probes and a read that can stop between its steps ---
+
+test('each named probe keeps its own answer and its own cadence, and one going leaves the other watching', async () => {
+  const { hub, state, setVisible } = setup()
+  hub.start()
+  const reviews = [], lists = []
+  const signatures = { reviews: new Map([['requests', 'a']]), lists: new Map([['o/r', 'one']]) }
+  const probes = { reviews: 0, lists: 0 }
+  const stopReviews = hub.watch(async () => { probes.reviews += 1; return new Map(signatures.reviews) }, keys => reviews.push([...keys]))
+  hub.watch(async () => { probes.lists += 1; return new Map(signatures.lists) }, keys => lists.push([...keys]), 'lists')
+  await setVisible(true)
+  assert.deepEqual(probes, { reviews: 1, lists: 1 }, 'both took their baseline')
+  signatures.lists = new Map([['o/r', 'two']])
+  await elapse(SYNC_POLICY.probeMs)
+  assert.deepEqual([reviews, lists], [[], [['o/r']]], 'only the probe whose signature moved reported, and only to its own watcher')
+  assert.deepEqual(probes, { reviews: 2, lists: 2 })
+  stopReviews()
+  signatures.lists = new Map([['o/r', 'three']])
+  await elapse(SYNC_POLICY.probeMs)
+  assert.deepEqual(probes, { reviews: 2, lists: 3 }, 'the watcher that went was not probed again')
+  assert.deepEqual(lists, [['o/r'], ['o/r']])
+  assert.equal(state.probes, 0)
+})
+
+test('watching a name again keeps its last answer, so a re-render never forgets what changed', async () => {
+  const { hub, setVisible } = setup()
+  hub.start()
+  const heard = []
+  let signature = 'a'
+  const watch = () => hub.watch(async () => new Map([['o/r', signature]]), keys => heard.push([...keys]), 'lists')
+  await setVisible(true)
+  watch()
+  await settle()
+  watch()
+  signature = 'b'
+  await elapse(SYNC_POLICY.probeMs)
+  assert.deepEqual(heard, [['o/r']])
+})
+
+test('a read of many steps is told to stop between them when the frame is hidden or the account is low, but never on the owner\'s own Sync', async () => {
+  const { hub, state, setVisible } = setup()
+  hub.start()
+  const stops = []
+  hub.fact('lists', { github: true, read: async ({ paused }) => { stops.push(paused()); return 1 }, apply: () => {} })
+  await setVisible(true)
+  await hub.changed('lists')
+  assert.deepEqual(stops, [false], 'shown with points left: no reason to stop')
+  state.remaining = SYNC_POLICY.lowPoints - 1
+  await hub.refresh('lists')
+  assert.deepEqual(stops, [false, false], 'the owner\'s own read goes on however low the account is')
+  stops.length = 0
+  await elapse(SYNC_POLICY.githubCooldownMs + 1000)
+  await hub.catchUp('lists')
+  await setVisible(false)
+  await hub.refresh('lists')
+  assert.deepEqual(stops, [false], 'the owner reads while hidden too')
+})
+
+test('a read stopped between its steps waits for the next one, as a failed GitHub read does, and resumes after the cooldown', async () => {
+  const { hub, state, setVisible } = setup()
+  hub.start()
+  let steps = 0
+  hub.fact('lists', {
+    github: true, failed: () => {},
+    read: async ({ paused }) => {
+      for (const step of [1, 2, 3]) {
+        if (paused()) throw new Error('Paused')
+        steps += 1
+        if (step === 1 && !state.resumed) state.remaining = SYNC_POLICY.lowPoints - 1 // the account runs low in the middle of the read
+      }
+      return steps
+    },
+    apply: () => {},
+  })
+  await setVisible(true)
+  await hub.changed('lists')
+  assert.equal(steps, 1, 'the second step did not run on a low account')
+  state.remaining = 5000
+  state.resumed = true
+  await setVisible(false)
+  await setVisible(true) // shown again with points left: the unfinished read is wanted once the cooldown ends
+  await elapse(SYNC_POLICY.githubCooldownMs - 10000)
+  assert.equal(steps, 1, 'it did not resume before the cooldown ended')
+  await elapse(12000)
+  assert.equal(steps, 4, 'the cooldown read the lists again, all three steps')
+})
