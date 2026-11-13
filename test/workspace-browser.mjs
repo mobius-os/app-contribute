@@ -1,6 +1,6 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Twenty-five scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Twenty-eight scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
@@ -4280,6 +4280,18 @@ window.runRepositoryListChecks = async () => {
     ensure(row(7) === light, 'The row was replaced instead of filling in')
     checks.push({ name: 'a repository with no saved list shows its titles at once with no action on them, and the details fill into the same rows', status: 'pass' })
 
+    // 3b. Another account's saved list is not shown: the repository opens as a first visit does.
+    reset()
+    await saveCopies([{ repo: 'owner/project', syncedAt: hoursAgo(3), openedAt: '', total: 1, hasNextPage: false, endCursor: null, pulls: [{ ...whole(7), title: 'Somebody else\'s saved title' }] }])
+    values.set('repository-lists.json', { ...values.get('repository-lists.json'), login: 'somebody-else' })
+    window.holdPulls = true; window.holdDetails = true
+    await mountDeskApp()
+    await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
+    await openProject('owner/project')
+    await until(() => window.releasePulls || window.releaseDetails?.length || query('.co-pr-skel') || rowCount(), 'The repository did not start loading')
+    ensure(!text(query('main')).includes('Somebody else'), 'Another account\'s saved list was shown')
+    checks.push({ name: 'a list saved for another account is not shown', status: 'pass' })
+
     // 4. Background reading starts only after the desk's own reads have answered, never before.
     reset(); await saveCopies(null)
     Object.assign(window, { holdIncomingFull: true, holdOwnFirst: true })
@@ -4399,7 +4411,8 @@ window.runListCadenceChecks = async () => {
     await advance(3 * 60)
     ensure(probes() - firstProbes === 3, 'The probe ran ' + (probes() - firstProbes) + ' times in three minutes')
     ensure(calls.requests.filter(call => /ContributeList(Titles|Details)|ContributePullRequests/.test(call.body?.query || '')).length === readsBefore, 'The list was read again though nothing moved')
-    ensure(window.githubPoints - pointsBefore <= 3 + 6, 'Three quiet minutes cost ' + (window.githubPoints - pointsBefore) + ' points')
+    // Three probes of the pinned list (one point each) and the review requests' own probe (one point each minute): nothing else.
+    ensure(window.githubPoints - pointsBefore <= 3 + 3, 'Three quiet minutes cost ' + (window.githubPoints - pointsBefore) + ' points')
     checks.push({ name: 'a quiet list costs one probe a minute and no read', status: 'pass' })
 
     // A PR moves on GitHub: only that PR is read, and its row changes where it stands.

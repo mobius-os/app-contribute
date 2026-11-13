@@ -3,18 +3,16 @@
 // PRs moved, and the count of open PRs. Each goes through fetchLiveStates (api.js, via collaboration.js graph), so a
 // full read here completes the reviewers and marks carried approvals as every other read of PRs does.
 import { readExactPulls, validPullRef } from './api.js'
-import { graph, repositoryName } from './collaboration.js'
+import { PAGE_SIZE, graph, repositoryName } from './collaboration.js'
 
 // What a row can say from GitHub's quick answer: the title and who, when and in what state. Nothing about checks,
 // reviewers, labels or comments, so a row read this way is marked `titlesOnly` and shows only these.
 export const TITLE_FIELDS = 'id number title url state isDraft createdAt updatedAt headRefOid author { login } reviewDecision repository { nameWithOwner viewerPermission }'
-// A first page: what the list asks for (collaboration.js discoverPulls reads the same 50).
-export const PAGE_SIZE = 50
 // The details of a page are read in groups of this many PRs, all at once (measured: three groups of ten answer in 2.6 s,
 // the whole page as one read in 3.3 to 5.3 s).
 const GROUP_SIZE = 10
 // A probe sees this many PRs of a repository; a repository with more is read, not probed (repository-lists.js).
-export const PROBE_PAGE = 100
+const PROBE_PAGE = 100
 const COUNT_BATCH = 50
 
 function repositoriesOf(repos) {

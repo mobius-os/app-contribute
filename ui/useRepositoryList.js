@@ -43,7 +43,8 @@ export function useRepositoryList({ repo, token, connected, refreshKey, publicRe
   // aftermath, Try again) begin now, so what an action did is in the answer; a screen that only opens joins a read running.
   const load = useCallback(async (cursor = null, { fresh = true } = {}) => {
     if (cursor) { await lists.loadMore(list.repo, token); return }
-    try { await lists.read(list.repo, { token, fresh }) } catch { return } // the list says what failed
+    // A screen that only opens brings the list up to date from what moved (a point) when it can, and joins a read already running.
+    try { await lists.read(list.repo, { token, fresh, how: fresh ? 'refresh' : 'reconcile' }) } catch { return } // the list says what failed
     if (!alive.current) return
     // The owner's own reads show the PRs' pages as GitHub says now; a page that is open while the screen only updated is left as it is.
     if (fresh) { list.details.clear(); setDetailRevision(value => value + 1) }
@@ -62,9 +63,9 @@ export function useRepositoryList({ repo, token, connected, refreshKey, publicRe
     if (moved) void load(null)
     else {
       if (presentation !== 'page') lists.opened(repo)
-      if (!lists.fresh(repo, SYNC_POLICY.probeMs)) void load(null, { fresh: false })
+      if (!lists.confirmedWithin(repo, SYNC_POLICY.probeMs)) void load(null, { fresh: false })
     }
   }, [lists, connected, repo, token, refreshKey, publicRevision])
-  return { view: list.view, data: list.data, read: list.settled, listed: list.listed, syncedAt: list.syncedAt, load, readFocus, detailSnapshot, detailRevision,
+  return { view: list.view, data: list.data, read: list.settled, syncedAt: list.syncedAt, load, readFocus, detailSnapshot, detailRevision,
     acknowledge: (keys, login) => lists.acknowledge(list.repo, keys, login) }
 }

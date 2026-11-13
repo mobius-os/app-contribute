@@ -10,6 +10,8 @@ import { fullPull, installGithub } from './fake-lists.mjs'
 
 let github
 afterEach(() => { github?.restore(); github = null })
+// Waits for a held call to be reached (never for a time): `reached()` is true once the hook has been called.
+const until = async reached => { for (let turn = 0; turn < 200 && !reached(); turn += 1) await new Promise(resolve => setTimeout(resolve, 1)) }
 const many = (repo, count, extra = {}) => Array.from({ length: count }, (_, index) => fullPull(repo, index + 1, extra))
 const numbers = list => pullsInView(list.view).map(pr => pr.number)
 const saved = (repo, pulls, extra = {}) => ({ repo, syncedAt: '2026-11-12T07:00:00Z', openedAt: '', total: pulls.length, hasNextPage: false, endCursor: null, pulls, ...extra })
@@ -96,8 +98,10 @@ test('every screen that holds a list hears each change with what it was before, 
   const lists = createRepositoryLists()
   const heard = []
   const release = lists.hold('o/r', { focus: () => '', published: change => heard.push([change.before.inventory.length, change.after.inventory.length, change.announce]) })
+  await lists.read('o/r', { token: 't', fresh: true })
+  assert.deepEqual(heard[0], [0, 2, true], 'the owner\'s own read says so, so a notice about an earlier change is cleared')
   await lists.read('o/r', { token: 't' })
-  assert.deepEqual(heard[0], [0, 2, true])
+  assert.equal(heard.at(-1)[2], false, 'a read the owner did not ask for does not')
   const count = heard.length
   release()
   await lists.read('o/r', { token: 't' })
@@ -209,7 +213,7 @@ test('a newer exact read of a PR is never replaced by the titles or details of a
   github = installGithub({ 'o/r': many('o/r', 2) }, { hold: call => (call.name === 'ContributeListDetails' ? new Promise(resolve => { release = resolve }) : null) })
   const lists = createRepositoryLists()
   const reading = lists.read('o/r', { token: 't' })
-  await new Promise(resolve => setTimeout(resolve, 20))
+  await until(() => release)
   const list = lists.entry('o/r')
   lists.publish(list, [fullPull('o/r', 1, { title: 'Read exactly, later' })], lists.issue(list))
   release()
@@ -279,27 +283,37 @@ test('the copy holds the first page of every whole list with when it was read an
   lists.opened('o/a')
   lists.applyCounts(new Map([['o/b', 0]]))
   const saves = lists.listsToSave().sort((a, b) => a.repo.localeCompare(b.repo))
-  assert.deepEqual(saves.map(list => [list.repo, list.pulls.length, list.syncedAt, list.openedAt]), [['o/a', 2, '2026-11-13T12:00:00.000Z', '2026-11-13T12:00:00.000Z'], ['o/b', 0, '2026-11-13T12:00:00.000Z', '']])
+  assert.deepEqual(saves.map(list => [list.repo, list.pulls.length, list.syncedAt, list.openedAt]), [['o/a', 2, '2026-11-13T12:00:00.000Z', '2026-11-13T12:00:00.000Z']], 'o/b is empty only by a count, which is asked again at every open')
 })
 
 test('an assignment shows on the row at once, and a read that began before it cannot take it back', async () => {
-  github = installGithub({ 'o/r': many('o/r', 1) })
+  let release, held = 0
+  const world = { 'o/r': many('o/r', 1) }
+  github = installGithub(world, { hold: call => (call.name === 'ContributePullRequests' && ++held === 1 ? new Promise(resolve => { release = resolve }) : null) })
   const lists = createRepositoryLists()
-  await lists.read('o/r', { token: 't' })
+  lists.restore([saved('o/r', many('o/r', 1))])
+  const reading = lists.read('o/r', { token: 't' }) // GitHub answers it with nobody assigned
+  await until(() => release)
   lists.acknowledge('o/r', ['o/r#1'], 'teammate')
-  assert.deepEqual(pullsInView(lists.entry('o/r').view)[0].assignees.nodes.map(user => user.login), ['teammate'])
+  const assigned = () => pullsInView(lists.entry('o/r').view)[0].assignees.nodes.map(user => user.login)
+  assert.deepEqual(assigned(), ['teammate'])
+  release()
+  await reading
+  assert.deepEqual(assigned(), ['teammate'], 'the older answer did not take the assignment back')
+  await lists.read('o/r', { token: 't', fresh: true })
+  assert.deepEqual(assigned(), [], 'a read made after it is authoritative')
 })
 
 test('opening a repository is remembered, and a list is fresh for as long as it was confirmed recently', async () => {
   let clock = Date.parse('2026-11-13T12:00:00Z')
   github = installGithub({ 'o/r': many('o/r', 1) })
   const lists = createRepositoryLists({ now: () => clock })
-  assert.equal(lists.fresh('o/r', 60000), false, 'a list nothing has read is not fresh')
+  assert.equal(lists.confirmedWithin('o/r', 60000), false, 'a list nothing has read is not fresh')
   await lists.read('o/r', { token: 't' })
   clock += 30000
-  assert.equal(lists.fresh('o/r', 60000), true)
+  assert.equal(lists.confirmedWithin('o/r', 60000), true)
   clock += 31000
-  assert.equal(lists.fresh('o/r', 60000), false)
+  assert.equal(lists.confirmedWithin('o/r', 60000), false)
   lists.opened('o/r')
   assert.equal(lists.entry('o/r').openedAt, new Date(clock).toISOString())
   assert.equal(prKey(pullsInView(lists.entry('o/r').view)[0]), 'o/r#1')
@@ -312,7 +326,7 @@ test('a read asked for after an action does not join a read that began before it
   const lists = createRepositoryLists()
   lists.restore([saved('o/r', many('o/r', 2))])
   const before = lists.read('o/r', { token: 't' })
-  await new Promise(resolve => setTimeout(resolve, 10))
+  await until(() => release)
   world['o/r'] = [world['o/r'][0]] // the owner merged PR 2 while the first read was out
   const after = lists.read('o/r', { token: 't', fresh: true })
   release()
@@ -326,7 +340,7 @@ test('a row restored while the titles were being read is not replaced by a row w
   github = installGithub({ 'o/r': many('o/r', 2) }, { hold: call => (call.name === 'ContributeListTitles' ? new Promise(resolve => { release = resolve }) : null) })
   const lists = createRepositoryLists()
   const reading = lists.read('o/r', { token: 't' })
-  await new Promise(resolve => setTimeout(resolve, 10))
+  await until(() => release)
   lists.restore([saved('o/r', many('o/r', 2).map(pr => ({ ...pr, title: 'Last visit' })))])
   release()
   const seen = []
@@ -336,19 +350,94 @@ test('a row restored while the titles were being read is not replaced by a row w
   assert.deepEqual(pullsInView(lists.entry('o/r').view).map(pr => pr.title), ['Change 1', 'Change 2'])
 })
 
-test('a list holding only titles, or a page of more than the probe sees, is never confirmed current by a probe', async () => {
+test('a probe confirms a list that shows what GitHub holds, finds one that is behind, and leaves what a read must settle', async () => {
   github = installGithub({ 'o/r': many('o/r', 3) })
-  const lists = createRepositoryLists()
-  await lists.read('o/r', { token: 't' })
+  let clock = Date.parse('2026-11-13T12:00:00Z')
+  const lists = createRepositoryLists({ now: () => clock })
   const probe = { total: 3, pulls: many('o/r', 3).map(pr => ({ number: pr.number, signature: moveSignature(pr) })) }
+  assert.equal(lists.checkAgainst('o/r', probe), 'unchecked', 'a list nothing has read is no list to confirm')
+  await lists.read('o/r', { token: 't' })
   const before = lists.entry('o/r').syncedAt
   lists.entry('o/r').data = { ...lists.entry('o/r').data, partial: true }
-  lists.confirm('o/r', probe)
-  assert.equal(lists.entry('o/r').syncedAt, before, 'rows that hold only their titles are not what GitHub holds')
+  assert.equal(lists.checkAgainst('o/r', probe), 'unchecked', 'rows that hold only their titles are not what GitHub holds')
   lists.entry('o/r').data = { ...lists.entry('o/r').data, partial: false }
-  lists.confirm('o/r', { ...probe, total: 120 })
-  assert.equal(lists.entry('o/r').syncedAt, before, 'a probe of more than a page does not speak for the page')
-  await new Promise(resolve => setTimeout(resolve, 5))
-  lists.confirm('o/r', probe)
+  assert.equal(lists.checkAgainst('o/r', { ...probe, total: 120 }), 'unchecked', 'a probe of more than a page does not speak for the page')
+  assert.equal(lists.entry('o/r').syncedAt, before)
+  assert.equal(lists.checkAgainst('o/r', { ...probe, pulls: [{ number: 1, signature: 'moved' }, ...probe.pulls.slice(1)] }), 'behind')
+  assert.equal(lists.checkAgainst('o/r', { total: 4, pulls: [...probe.pulls, { number: 9, signature: 'new' }] }), 'behind', 'a PR that came')
+  assert.equal(lists.entry('o/r').syncedAt, before, 'a list that is behind is not called current')
+  clock += 60000
+  assert.equal(lists.checkAgainst('o/r', probe), 'current')
   assert.notEqual(lists.entry('o/r').syncedAt, before)
+})
+
+test('a list known to be empty only from a count is not saved, so it never takes the place of a list that was read', async () => {
+  github = installGithub({ 'o/real': many('o/real', 2) })
+  const lists = createRepositoryLists()
+  await lists.read('o/real', { token: 't' })
+  lists.applyCounts(new Map(Array.from({ length: 13 }, (_, index) => [`o/empty${index}`, 0])))
+  assert.equal(lists.entry('o/empty0').listed, true, 'it still shows its empty list at once')
+  assert.deepEqual(lists.listsToSave().map(list => list.repo), ['o/real'])
+  await lists.read('o/empty3', { token: 't' }) // opened: now it was read, and the copy keeps it
+  assert.deepEqual(lists.listsToSave().map(list => list.repo).sort(), ['o/empty3', 'o/real'])
+})
+
+test('a read that is not the owner\'s leaves a list they paged past its first page as it is, and their own read refreshes it', async () => {
+  github = installGithub({ 'o/big': many('o/big', 120) })
+  const lists = createRepositoryLists()
+  await lists.read('o/big', { token: 't' })
+  await lists.loadMore('o/big', 't')
+  assert.equal(numbers(lists.entry('o/big')).length, 100)
+  github.calls.length = 0
+  await lists.read('o/big', { token: 't' })
+  await lists.read('o/big', { token: 't', how: 'reconcile' })
+  assert.deepEqual([github.calls.length, numbers(lists.entry('o/big')).length], [0, 100], 'the pages the owner opened were not collapsed')
+  await lists.read('o/big', { token: 't', fresh: true })
+  assert.equal(numbers(lists.entry('o/big')).length, 50, 'Sync reads the first page again, as it always did')
+})
+
+test('the answer of a read that began before an action never shows once a read after the action is out', async () => {
+  const world = { 'o/r': many('o/r', 2) }
+  let release, held = 0
+  github = installGithub(world, { hold: call => (call.name === 'ContributePullRequests' && ++held === 1 ? new Promise(resolve => { release = resolve }) : null) })
+  const lists = createRepositoryLists()
+  lists.restore([saved('o/r', many('o/r', 3))]) // what the last visit saw; GitHub has two PRs when the first read is made
+  const seen = []
+  lists.subscribe(() => seen.push(numbers(lists.entry('o/r')).join()))
+  const before = lists.read('o/r', { token: 't' })
+  await until(() => release)
+  world['o/r'] = [world['o/r'][0]] // the owner merged PR 2 while that read was out
+  const after = lists.read('o/r', { token: 't', fresh: true })
+  seen.length = 0
+  release()
+  await Promise.all([before, after])
+  assert.ok(!seen.includes('1,2'), 'the list from before the action showed again: ' + seen.join(' | '))
+  assert.deepEqual(numbers(lists.entry('o/r')), [1])
+})
+
+test('a PR that closed between the probe and the read leaves the list instead of showing as open', async () => {
+  const world = { 'o/r': many('o/r', 2) }
+  github = installGithub(world)
+  const lists = createRepositoryLists()
+  await lists.read('o/r', { token: 't' })
+  world['o/r'][1] = fullPull('o/r', 2, { updatedAt: '2026-11-14T00:00:00Z' })
+  const exact = github.calls.length
+  const real = globalThis.fetch
+  globalThis.fetch = async (url, options) => {
+    // The PR is merged by the time its exact read is made.
+    if (/query ContributeListDetails/.test(options?.body || '')) { world['o/r'][1] = fullPull('o/r', 2, { state: 'MERGED' }); globalThis.fetch = real }
+    return real(url, options)
+  }
+  await lists.read('o/r', { token: 't', how: 'reconcile' })
+  assert.deepEqual(numbers(lists.entry('o/r')), [1])
+  assert.ok(github.calls.length > exact)
+})
+
+test('asking for the next page of a list whose details are still arriving keeps it marked as not whole', async () => {
+  let groups = 0
+  github = installGithub({ 'o/big': many('o/big', 70) }, { hold: call => { if (call.name === 'ContributeListDetails' && ++groups === 2) throw Object.assign(new Error('down'), { status: 502 }) } })
+  const lists = createRepositoryLists()
+  await assert.rejects(lists.read('o/big', { token: 't' }), /Could not read/)
+  await lists.loadMore('o/big', 't')
+  assert.equal(lists.entry('o/big').data.partial, true, 'page one still holds rows with only their titles')
 })

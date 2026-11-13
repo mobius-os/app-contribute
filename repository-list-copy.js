@@ -3,10 +3,11 @@
 // and updates it quietly. One file, with its own writer (the desk copy, desk-copy.js, is another), read whole.
 import { PR_FIELDS_STAMP } from './api.js'
 import { repositoryName } from './collaboration.js'
+import { sameLogin } from './domain.js'
 
 const LISTS_COPY = 'repository-lists.json'
-// The lists of the repositories read most recently. A list is at most one page (50 PRs, about 3 KB each as kept), so
-// the file stays near a quarter of a megabyte for an owner with many repositories.
+// The lists of the repositories read most recently. A list is at most one page (50 PRs, about 2.6 KB each as kept), so the
+// file is a few hundred KB for the usual account and 1.6 MB at the very most.
 export const MAX_SAVED_LISTS = 12
 // What a review's text becomes in the copy when it had any: the list reads a review's words only to know whether it
 // has some (pr-facts.js reviewWords), and the texts were 60% of what a list read returns.
@@ -42,6 +43,10 @@ export function normalizeListCopy(raw) {
   if (!raw || typeof raw !== 'object' || raw.pr_fields !== PR_FIELDS_STAMP || typeof raw.login !== 'string' || !raw.login || !Array.isArray(raw.lists)) return null
   return { login: raw.login, lists: raw.lists.map(normalizeList).filter(Boolean) }
 }
+
+// The lists of a copy for whoever is signed in: another account's are not theirs. With no account known yet the copy is
+// shown, as the desk's is, and dropped when the account answers (useBackgroundLists).
+export const listsForAccount = (copy, login) => (!login || sameLogin(copy.login, login) ? copy.lists : [])
 
 export async function loadListCopy() {
   try {

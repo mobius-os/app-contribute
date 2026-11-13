@@ -38,7 +38,12 @@ export function installGithub(world, { hold = null, moreReviewers = {} } = {}) {
     const name = /query (\w+)/.exec(query)[1]
     const record = { name, query, repos: [...query.matchAll(/repo:([\w.-]+\/[\w.-]+)/g)].map(match => match[1].toLowerCase()) }
     calls.push(record)
+    // As GitHub does: the answer is what it holds when it is asked, and a held answer is only late.
+    const data = compute(name, query)
     if (hold) await hold(record)
+    return data
+  }
+  function compute(name, query) {
     if (name === 'ContributePullRequests') {
       const repo = repoOf(query)
       const start = Number(/after:"c(\d+)"/.exec(query)?.[1] || 0)
@@ -65,7 +70,7 @@ export function installGithub(world, { hold = null, moreReviewers = {} } = {}) {
     // Exact PRs, one alias each (ContributeListDetails, ContributeReviewPulls).
     const reads = [...query.matchAll(/(p\d+):repository\(owner:"([^"]+)",name:"([^"]+)"\) \{ pullRequest\(number:(\d+)\)/g)]
     return Object.fromEntries(reads.map(([, alias, owner, repo, number]) => [alias, { pullRequest: (world[`${owner}/${repo}`.toLowerCase()] || []).find(pr => pr.number === Number(number)) || null }]))
-  }
+    }
   globalThis.fetch = async (url, options) => {
     // The comparison of two commits (carried-approvals.js): nothing can be told, so a mark of "unknown" is the proof it was asked.
     if (String(url).startsWith('/api/github/api/repos/')) { compared.push(String(url)); return new Response('{}', { status: 404 }) }

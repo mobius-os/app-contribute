@@ -96,11 +96,13 @@ export async function discoverRepository(token, value) {
   if (!data.repository) throw new Error('Repository not found, or your GitHub account cannot access it.')
   return data.repository
 }
+// The open PRs a list reads at a time (and a repository's lists keep as their first page).
+export const PAGE_SIZE = 50
 export async function discoverPulls(token, repo = '', cursor = null) {
   const queryText = repo ? `repo:${repo} is:pr is:open` : 'is:pr is:open involves:@me'
   if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('Choose a valid repository.')
   const data = await graph(token, `query ContributePullRequests {
-    search(query:${JSON.stringify(queryText)},type:ISSUE,first:50,after:${JSON.stringify(cursor)}) {
+    search(query:${JSON.stringify(queryText)},type:ISSUE,first:${PAGE_SIZE},after:${JSON.stringify(cursor)}) {
       nodes { ... on PullRequest { ${PR_FIELDS} } }
       issueCount pageInfo { hasNextPage endCursor }
     }

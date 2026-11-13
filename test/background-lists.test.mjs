@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import test, { afterEach } from 'node:test'
 
-import { probePinned, readListPass } from '../background-lists.js'
+import { newWanted, probePinned, readListPass } from '../background-lists.js'
 import { createRepositoryLists } from '../repository-lists.js'
 import { pullsInView } from '../pull-view.js'
 import { fullPull, installGithub } from './fake-lists.mjs'
@@ -11,7 +11,9 @@ let github
 afterEach(() => { github?.restore(); github = null })
 const many = (repo, count) => Array.from({ length: count }, (_, index) => fullPull(repo, index + 1))
 const tiers = (pinned = [], active = [], quiet = []) => ({ pinned, active, quiet })
-const run = (lists, extra) => readListPass({ lists, token: 't', paused: () => false, ...extra })
+// What a pass is asked to do besides its own work, as `moved` (repositories), `probed` and `syncing`.
+const asked = ({ moved = [], probed = false, syncing = false } = {}) => Object.assign(newWanted(), { moved: new Set(moved), probed, syncing })
+const run = (lists, { moved, probed, syncing, wanted = asked({ moved, probed, syncing }), ...extra }) => readListPass({ lists, token: 't', paused: () => false, wanted, ...extra })
 const readOf = call => call.repos[0]
 
 test('the pinned repositories are read first, then the active ones, one at a time, and the quiet ones are only counted', async () => {
@@ -25,7 +27,7 @@ test('the pinned repositories are read first, then the active ones, one at a tim
   assert.equal(github.names().at(-1), 'ContributeOpenCounts', 'the count of the quiet repositories comes last, as one question')
   assert.equal(github.calls.filter(call => call.name === 'ContributeOpenCounts').length, 1)
   assert.equal(github.calls.filter(call => /Titles|Pull/.test(call.name)).every(call => !['o/idle', 'o/other'].includes(call.repos[0])), true, 'a quiet repository is not read')
-  assert.ok(most <= 3, 'one list at a time: at most its own parallel groups of details were out together')
+  assert.equal(most, 1, 'one list at a time: each of these lists is one group of details')
   assert.deepEqual(['o/pinned', 'o/active'].map(repo => lists.entry(repo).sessionRead), [true, true])
   assert.deepEqual([lists.entry('o/idle').listed, lists.entry('o/other').listed], [true, false], 'the one with nothing open shows its empty list at once; the other waits to be opened')
 })
@@ -81,39 +83,48 @@ test('a repository that cannot be read does not stop the rest, and the pass fail
   assert.deepEqual([lists.entry('o/bad').listed, lists.entry('o/good').sessionRead], [false, true])
 })
 
-test('the probe of the pinned repositories signs each one, and says nothing when GitHub did not answer for all of them', async () => {
+test('the probe of the pinned repositories tells which lists are behind GitHub, and confirms the others current', async () => {
   const world = { 'o/a': many('o/a', 2), 'o/b': many('o/b', 1) }
   github = installGithub(world)
   const lists = createRepositoryLists()
-  const first = await probePinned('t', ['o/a', 'o/b'], lists)
-  assert.deepEqual([...first.keys()], ['o/a', 'o/b'])
-  assert.equal([...(await probePinned('t', ['o/a', 'o/b'], lists)).values()].join(), [...first.values()].join(), 'the same state signs the same')
+  await run(lists, { tiers: tiers(['o/a', 'o/b']) })
+  assert.deepEqual(await probePinned('t', ['o/a', 'o/b'], lists), [], 'nothing moved')
   world['o/b'].push(fullPull('o/b', 9))
-  const second = await probePinned('t', ['o/a', 'o/b'], lists)
-  assert.equal(second.get('o/a'), first.get('o/a'))
-  assert.notEqual(second.get('o/b'), first.get('o/b'), 'a PR that came is a move')
+  assert.deepEqual(await probePinned('t', ['o/a', 'o/b'], lists), ['o/b'], 'a PR that came')
   world['o/b'].pop(); world['o/b'].pop()
-  assert.notEqual((await probePinned('t', ['o/a', 'o/b'], lists)).get('o/b'), first.get('o/b'), 'and so is one that went')
+  assert.deepEqual(await probePinned('t', ['o/a', 'o/b'], lists), ['o/b'], 'and one that went')
+  assert.deepEqual(await probePinned('t', ['o/b'], lists), ['o/b'], 'a list that was not brought up to date is found behind again at the next probe')
   assert.equal(await probePinned('t', [], lists), null)
   github.restore()
   globalThis.fetch = async () => new Response('{}', { status: 502 })
-  assert.equal(await probePinned('t', ['o/a'], lists), null)
+  assert.equal(await probePinned('t', ['o/a'], lists), null, 'a failed probe is never a change')
 })
 
-test('a probe that finds a list showing exactly what GitHub holds confirms it current, and one that is behind is left for the read', async () => {
-  let clock = Date.parse('2026-11-13T12:00:00Z')
+test('a list read for the first time this visit is not found behind: its read is the pass\'s to make', async () => {
+  github = installGithub({ 'o/a': many('o/a', 2) })
+  const lists = createRepositoryLists()
+  lists.restore([{ repo: 'o/a', syncedAt: '2026-11-12T07:00:00Z', openedAt: '', total: 1, hasNextPage: false, endCursor: null, pulls: many('o/a', 1) }])
+  assert.deepEqual(await probePinned('t', ['o/a'], lists), [])
+})
+
+test('a probe\'s pass brings up to date only what moved, and never reads what the hub\'s cooldown keeps waiting', async () => {
   const world = { 'o/a': many('o/a', 2), 'o/b': many('o/b', 2) }
-  github = installGithub(world)
-  const lists = createRepositoryLists({ now: () => clock })
-  await run(lists, { tiers: tiers(['o/a', 'o/b']) })
-  const heard = []
-  lists.subscribe((repo, change) => heard.push([repo, change.confirmed]))
-  const readAt = lists.entry('o/a').syncedAt
-  clock += 90000
-  world['o/b'][0] = fullPull('o/b', 1, { updatedAt: '2026-11-14T00:00:00Z' })
-  await probePinned('t', ['o/a', 'o/b'], lists)
-  assert.equal(lists.entry('o/a').syncedAt, new Date(clock).toISOString(), 'the list that agrees with GitHub is known current as of the probe')
-  assert.notEqual(lists.entry('o/a').syncedAt, readAt)
-  assert.equal(lists.entry('o/b').syncedAt, readAt, 'the list that is behind is not called current')
-  assert.deepEqual(heard, [['o/a', true]], 'a confirmation is heard as one, so it is not saved again')
+  github = installGithub(world, { hold: call => { if (call.name === 'ContributeListTitles' && call.repos[0] === 'o/b') throw Object.assign(new Error('down'), { status: 502 }) } })
+  const lists = createRepositoryLists()
+  await assert.rejects(run(lists, { tiers: tiers(['o/a'], ['o/b']) }), /could not be read/)
+  github.calls.length = 0
+  world['o/a'][0] = fullPull('o/a', 1, { updatedAt: '2026-11-14T00:00:00Z' })
+  await run(lists, { tiers: tiers(['o/a'], ['o/b']), moved: ['o/a'], probed: true })
+  assert.deepEqual(github.names(), ['ContributeListProbe', 'ContributeListDetails'], 'o/b, which failed, was not read again by a probe')
+})
+
+test('what a pass was asked to bring up to date is asked again when it fails or is stopped, and not when it went through', async () => {
+  github = installGithub({ 'o/a': many('o/a', 2) })
+  const lists = createRepositoryLists()
+  await run(lists, { tiers: tiers(['o/a']) })
+  const wanted = asked({ moved: ['o/a'], syncing: true })
+  await assert.rejects(readListPass({ lists, token: 't', tiers: tiers(['o/a']), paused: () => true, wanted }), /paused/)
+  assert.deepEqual([[...wanted.moved], wanted.syncing], [['o/a'], true], 'the owner\'s Sync and what moved wait for the next pass')
+  await readListPass({ lists, token: 't', tiers: tiers(['o/a']), paused: () => false, wanted })
+  assert.deepEqual([wanted.moved.size, wanted.syncing, wanted.probed], [0, false, false], 'a pass that went through asks for nothing more')
 })

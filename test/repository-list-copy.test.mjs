@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { PR_FIELDS_STAMP } from '../api.js'
-import { MAX_SAVED_LISTS, listCopyOf, listsToKeep, loadListCopy, normalizeListCopy, saveListCopy, slimPull } from '../repository-list-copy.js'
+import { MAX_SAVED_LISTS, listCopyOf, listsForAccount, listsToKeep, loadListCopy, normalizeListCopy, saveListCopy, slimPull } from '../repository-list-copy.js'
 import { standingFor } from '../pr-standing.js'
 import { fullPull } from './fake-lists.mjs'
 
@@ -88,4 +88,11 @@ test('a copy that cannot be read, or a runtime that cannot save one, is no failu
   globalThis.window = { mobius: { storage: { get: async () => { throw new Error('offline') }, set: async () => { throw new Error('full') } } } }
   assert.equal(await loadListCopy(), null)
   assert.equal(await saveListCopy(listCopyOf({ login: 'owner', lists: [list('o/never')] })), false)
+})
+
+test('another account\'s lists are not shown, whichever of the copy and the account arrives first', async () => {
+  const copy = normalizeListCopy(await written({ lists: [list('o/r')] }))
+  assert.equal(listsForAccount(copy, 'Owner').length, 1, 'the same account, whatever the letter case')
+  assert.equal(listsForAccount(copy, '').length, 1, 'no account known yet: shown, as the desk\'s copy is, and dropped when the account answers')
+  assert.equal(listsForAccount(copy, 'someone-else').length, 0)
 })

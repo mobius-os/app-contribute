@@ -15,6 +15,8 @@ async function ui(t) {
     import { PullRequests } from './ui/PullRequests.jsx'
     import { RepositoryListsContext } from './ui/useRepositoryList.js'
     import { createRepositoryLists } from './repository-lists.js'
+    import { AlwaysLoad } from './ui/AlwaysLoad.jsx'
+    export const renderSwitch = props => renderToStaticMarkup(React.createElement(AlwaysLoad, props))
     export const makeLists = () => createRepositoryLists()
     export const render = (lists, props) => renderToStaticMarkup(React.createElement(RepositoryListsContext.Provider, { value: lists }, React.createElement(PullRequests, props)))
   `)
@@ -80,4 +82,15 @@ test('the same rows with their details offer their actions in the same place', a
   const html = render(lists, props)
   assert.match(html, /aria-label="Choose an action for PR 1"/)
   assert.doesNotMatch(html, /<input type="checkbox"[^>]*disabled=""[^>]*aria-label="Select/)
+})
+
+test('the always-load switch says in plain words what it does, and is on only for a repository that is pinned', async t => {
+  const { renderSwitch } = await ui(t) || {}
+  if (!renderSwitch) return
+  const off = renderSwitch({ repo: 'o/r', pinned: false, onChange: () => {} })
+  assert.match(off, /Always load/)
+  assert.match(off, /Keeps this repository’s pull requests up to date in the background\./)
+  assert.match(off, /role="switch"[^>]*aria-checked="false"/)
+  assert.doesNotMatch(off, /\bchecked=""/)
+  assert.match(renderSwitch({ repo: 'o/r', pinned: true, onChange: () => {} }), /role="switch"[^>]*aria-checked="true"/)
 })

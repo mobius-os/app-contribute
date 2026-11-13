@@ -530,7 +530,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A retry reopens the same job by its machine name, so its window reads right for whose PR it is.
   const RETRY_JOBS = { author: { review_fix_merge: 'finish_it' }, reviewer: { review_fix_merge: 'take_over' } }
   const retryJob = (run, pr) => RETRY_JOBS[standingOf(pr).role]?.[run.mode] || (standingOf(pr).role === 'author' ? 'check_my_pr' : 'review')
-  const retryPulls = run => (run.items || []).map(item => pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)).filter(pr => pr && isOpenPull(pr))
+  const retryPulls = run => (run.items || []).map(item => pulls.find(pr => prKey(pr) === `${item.repo.toLowerCase()}#${item.number}`)).filter(pr => pr && isOpenPull(pr) && !pr.titlesOnly)
   // Post and Discard act on the answer on screen, one at a time. Either way the saved answers and the runs are read again: an approval
   // may be written even when the chat could not be told, and the card must say where things stand. The card stays busy until the
   // refreshed answers are on screen (for at most REFRESH_WAIT_MS), so Post cannot be pressed again while the old state still shows.
@@ -582,6 +582,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   // A started Respond conversation holds its PR from now on: every screen shows it at work (and the old answer's Post held back)
   // at once, instead of after the next read of the runs.
   async function startRespond(pr, action) {
+    // The agent's brief names the PR's head and branch: it starts from the PR as GitHub has it now, not from the row.
+    const stale = await staleOutcome([pr])
+    if (stale) return { ok: false, error: stale.error }
     const started = await onStartAgent(action)
     if (started?.ok && started.chatId) onRespondStarted?.({ repo: pr.repository.nameWithOwner.toLowerCase(), number: pr.number, chat_id: started.chatId })
     return started
@@ -703,7 +706,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
     {!assignAnchor ? assignPane : null}
     {relevantRuns.filter(run => !visibleKeys.has(runAnchor(run))).map(runPane)}
     {data.loading && !pulls.length ? <div className="co-pr-skel" role="status" aria-label="Loading pull requests">{[3, 2, 3].map((lines, index) => <Skeleton key={index} lines={lines} label="" />)}</div> : null}
-    {!data.loading && !data.error && !visible.length ? <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} /> : null}
+    {!data.loading && !data.error && !visible.length ? (data.partial && filter !== 'all' ? <p className="co-pr-note" role="status">The details of these pull requests are still arriving.</p> : <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} />) : null}
     <div className="co-pr-list">{visible.map(pr => {
       const key = prKey(pr)
       // A row that holds only its titles shows what it knows (who, when, GitHub's review decision) and offers nothing that needs

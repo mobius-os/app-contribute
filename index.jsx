@@ -1850,7 +1850,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     hub, lists: repositoryLists, token, sendOnly, connected: conn.state === 'connected', started: openSynced, login: conn.login, projects: sourceProjects, pinned, runs: reviewRuns, respondChats,
   })
   // Always load is the owner's own switch: saved, then shown, and the pass that follows reads the repository.
-  const setPinned = useCallback(async (repo, on) => { setPinChoice(await setRepositoryPinned(repo, on)); void hub.changed('repositoryLists') }, [hub])
+  const setPinned = useCallback(async (repo, on) => { setPinChoice(await setRepositoryPinned(repo, on)) }, [])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
   // read settles, an unavailable GitHub status is rendered as a retryable
