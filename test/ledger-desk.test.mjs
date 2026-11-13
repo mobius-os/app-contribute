@@ -194,6 +194,20 @@ test('a canonical record still wins over a legacy-named copy in the desk read', 
   assert.deepEqual(records.map(rec => [rec.id, rec.status, rec.path]), [['twin', 'abandoned', 'contributions/twin.json']])
 })
 
+test('a canonical record that is settled and outside the saved feed still wins over its prepared legacy-named copy on a reopen', async () => {
+  const log = fakeStorage({
+    saved: savedFeed([], { 'twin.json': { stamp: stampOfFile('twin.json'), current: false } }),
+    listing: [stamp('twin.record.json'), file('twin')],
+    server: {
+      'contributions/twin.record.json': record('twin', { status: 'prepared' }),
+      'contributions/twin.json': record('twin', { status: 'abandoned', updated_at: '2026-11-12T10:00:00Z' }),
+    },
+  })
+  const { records } = await loadLedger()
+  assert.deepEqual(records.map(rec => [rec.id, rec.status, rec.path]), [['twin', 'abandoned', 'contributions/twin.json']])
+  assert.deepEqual([...log.reads].sort(), ['contributions/twin.json', 'contributions/twin.record.json'])
+})
+
 test('the saved feed carries the index of the folder as the last read found it', async () => {
   const log = fakeStorage({
     saved: savedFeed([], {}),

@@ -322,12 +322,14 @@ async function readDeskLedger(entries, saved, readVersioned) {
     }
   }
   await readInto(toRead)
-  // A layer of a stack the desk shows belongs with it, however old.
+  // Settled history joins the desk only when something shown needs it: a layer of a stack the desk shows, however old,
+  // and the canonical file of a record shown from its legacy-named copy, which owns the record's lifecycle.
   const chains = new Set(records.map(record => stackMeta(record)?.id).filter(Boolean))
-  const layers = settledOutside.filter(entry => chains.has(index[entry.name].stack))
-  await readInto(layers)
+  const legacyIds = new Set(records.filter(record => record.path === `${RECORD_PREFIX}${record.id}.record.json`).map(record => record.id))
+  const needed = settledOutside.filter(entry => chains.has(index[entry.name].stack) || legacyIds.has(entry.name.slice(0, -'.json'.length)))
+  await readInto(needed)
   // With nothing left unread the desk set is the whole history, and no screen needs to ask for more.
-  return finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistory: layers.length === settledOutside.length })
+  return finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistory: needed.length === settledOutside.length })
 }
 
 async function readLedger({ history }) {

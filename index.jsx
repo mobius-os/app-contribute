@@ -41,7 +41,7 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
 import { SYNC_POLICY, createSyncHub, onShownAgain } from './refresh.js'
 import { settledPulls, slimReviewRow } from './desk-copy.js'
 import { useDeskCopySave, useSavedDeskCopy } from './ui/useDeskCopy.js'
@@ -705,11 +705,14 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // ledger scan. It gives repeat visits a useful queue immediately while
       // the full ledger catches up without ever becoming a second truth.
       const cachedPromise = loadCachedFeed()
+      const savedFeedPromise = loadSavedFeedStamp()
       const ledgerPromise = Promise.resolve().then(() => loadLedger())
       const statusPromise = fetchGithubStatus(token)
       const settingsPromise = loadAppSettings()
       const cached = await cachedPromise
-      if (!cancelled && cached.length > 0) {
+      // A saved feed with no rows is still a known feed: the desk has nothing to wait for.
+      const savedFeed = await savedFeedPromise
+      if (!cancelled && savedFeed) {
         recordsRef.current = cached
         setRecords(cached)
         setLoading(false)

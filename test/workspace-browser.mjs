@@ -2066,7 +2066,10 @@ async function mountDeskApp({ pullPatch = {}, records = [] } = {}) {
   // A test may hold the reads of the saved answers (window.holdResponsesRead) and let them go with window.releaseResponsesRead().
   window.responseGates = []
   window.releaseResponsesRead = () => { window.holdResponsesRead = false; window.responseGates.splice(0).forEach(resolve => resolve()) }
-  window.mobius.storage.listWithStatus = async prefix => (window.holdResponsesRead && prefix.startsWith('respond-') ? await new Promise(resolve => window.responseGates.push(resolve)) : null, { complete: true, entries: prefix === 'contributions/' ? (window.deskRecords || records).map(record => ({ type: 'file', name: record.id + '.json', path: prefix + record.id + '.json', content: structuredClone(record) })) : !prefix.startsWith('respond-') ? [] : [...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ type: 'file', name: key.slice(prefix.length), path: key, content: structuredClone(value) })) })
+  // The same for the saved ledger (window.holdLedgerRead, window.releaseLedgerRead()).
+  window.ledgerGates = []
+  window.releaseLedgerRead = () => { window.holdLedgerRead = false; window.ledgerGates.splice(0).forEach(resolve => resolve()) }
+  window.mobius.storage.listWithStatus = async prefix => (window.holdResponsesRead && prefix.startsWith('respond-') ? await new Promise(resolve => window.responseGates.push(resolve)) : window.holdLedgerRead && prefix === 'contributions/' ? await new Promise(resolve => window.ledgerGates.push(resolve)) : null, { complete: true, entries: prefix === 'contributions/' ? (window.deskRecords || records).map(record => ({ type: 'file', name: record.id + '.json', path: prefix + record.id + '.json', content: structuredClone(record) })) : !prefix.startsWith('respond-') ? [] : [...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ type: 'file', name: key.slice(prefix.length), path: key, content: structuredClone(value) })) })
   // A PR GitHub read completely: without these facts its standing is "couldn't read" and nothing frames it.
   Object.assign(pulls[0], { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
     latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] }, ...pullPatch })
@@ -4062,15 +4065,18 @@ window.runInstantOpenChecks = async () => {
   try {
     // A returning open: the saved desk is on screen before anything answers.
     reset(); await saveCopy()
-    Object.assign(window, { holdOwnFirst: true, holdIncomingFull: true, holdRunsRead: true })
+    // The saved feed here has no rows (the owner has no proposals): it is still a known feed, so the saved desk
+    // opens while the live ledger read is still out.
+    Object.assign(window, { holdOwnFirst: true, holdIncomingFull: true, holdRunsRead: true, holdLedgerRead: true })
     await mountDeskApp()
-    await until(() => rowOf('Approved change'), 'The desk did not open from the last-known copy')
+    await until(() => rowOf('Approved change'), 'The desk did not open from the last-known copy while the ledger read was held')
     ensure(!query('.co-boot'), 'The opening screen showed although a saved copy exists')
     ensure(statusOf('Approved change').includes('Ready to merge'), 'The saved row said: ' + statusOf('Approved change'))
     ensure(note().startsWith('Updating…') && note().includes('last synced') && /2 hours ago/.test(note()), 'The header said: ' + note())
     noSpinnerOrRetry('The saved desk')
     await captureShot('instant-open-saved-desk')
-    checks.push({ name: 'a returning open shows the saved desk at once, with one quiet line saying it is updating and how old the copy is', status: 'pass' })
+    window.releaseLedgerRead()
+    checks.push({ name: 'a returning open shows the saved desk at once, with one quiet line saying it is updating and how old the copy is, even when the saved feed has no rows', status: 'pass' })
 
     // The first answer is the owner's own PRs: the row changes where it stands, with one soft highlight, and nothing moves.
     const row = rowOf('Approved change')
@@ -4135,8 +4141,8 @@ window.runInstantOpenChecks = async () => {
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
   } finally {
-    Object.assign(window, { holdOwnFirst: false, holdIncomingFull: false, holdRunsRead: false, failIncoming: false })
-    window.releaseOwnFirst?.(); window.releaseIncomingFull?.(); window.releaseRunsRead?.()
+    Object.assign(window, { holdOwnFirst: false, holdIncomingFull: false, holdRunsRead: false, holdLedgerRead: false, failIncoming: false })
+    window.releaseOwnFirst?.(); window.releaseIncomingFull?.(); window.releaseRunsRead?.(); window.releaseLedgerRead?.()
   }
 }
 
