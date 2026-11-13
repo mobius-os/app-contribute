@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CSS } from '../theme.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
+import { standingFor } from '../pr-standing.js'
 let renderer
 async function render(t, name, props) {
   if (!frontendModules) { t.skip('MOBIUS_FRONTEND_NODE_MODULES is required for real React SSR'); return null }
@@ -9,7 +10,8 @@ async function render(t, name, props) {
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { decide } from './pr-machine.js'
-    import { PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated } from './ui/PullRequestDetail.jsx'
+    import { PullRequestDetail, PullFiles, PullThreads, PullRelated } from './ui/PullRequestDetail.jsx'
+    import { PullChecks } from './ui/PullChecks.jsx'
     import { PullEscalation } from './ui/PullEscalation.jsx'
     const components = { decide, PullRequestDetail, PullFiles, PullChecks, PullThreads, PullRelated, PullEscalation }
     export function render(name, props) { return name === 'decide' ? decide(props) : renderToStaticMarkup(React.createElement(components[name], props)) }
@@ -22,18 +24,21 @@ test('detail opens on the GitHub-style Comments tab with Files changed and Check
   assert.match(html, /aria-pressed="true">Comments/)
   assert.match(html, />Files<span class="co-tab-more"> changed<\/span></)
   assert.match(html, />Checks<\/button>/)
-  // The header keeps the state and the author; branch names live in the Description fold.
-  assert.doesNotMatch(html, /co-branch-flow/)
-  assert.match(html, /by <b>/)
+  // The number leads the title, and one facts line carries the state, the author and the branch it merges into.
+  assert.match(html, /<h3 class="co-gh-pr-title"><span class="co-pr-title-num">#7<\/span> /)
+  assert.match(html, /by <b>[^<]*<\/b><\/span><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.doesNotMatch(html, /co-state-line/, 'the four-step line is gone: the state badge says where the PR stands')
   assert.match(html, /Loading the conversation/)
   assert.match(html, /aria-label="Choose an action for PR \d+"/)
   assert.match(html, /class="co-pr-detail-body"[^>]*data-tab="conversation"/, 'the page tells its CSS which tab is open')
 })
 
 test('an open PR page lifts the lists\' column and its header, Files changed keeps the whole width and every other tab a reading width', () => {
-  assert.match(CSS, /\.co-projects-view:has\(\.co-pull-page\), \.co-root:has\(\.co-pull-page\) \.co-header \{ max-width:none; \}/)
+  assert.match(CSS, /\.co-projects-view:has\(\.co-pull-page\) \{ max-width:none; \}/)
+  assert.doesNotMatch(CSS, /\.co-root:has\(\.co-pull-page\) \.co-header/, 'the header never changes with the page: it is full width and left on every screen')
   assert.match(CSS, /\.co-pr-detail-body:not\(\[data-tab="files"\]\) > \* \{ max-width:var\(--co-read-width\); \}/)
-  assert.match(CSS, /\.co-projects-view \{ width:100%; max-width:1192px;/, 'the lists keep their own column')
+  assert.match(CSS, /\.co-projects-view \{ width:100%; max-width:1400px; margin:0;/, 'the lists keep their own column, from the same left edge as the PR page')
+  assert.match(CSS, /\.co-pr-detail \{ --co-read-width:960px; \}/, 'the reading tabs share the lists\' column width')
 })
 for (const items of [[], [{ __typename: 'Issue', number: 2, title: 'Usable issue', url: 'https://github.com/team/repo/issues/2', repository: { nameWithOwner: 'team/repo' }, relationships: ['May close'] }]]) {
   test(`partial related context warns and retries with ${items.length} usable items`, async t => {
@@ -65,11 +70,50 @@ test('check outcomes stay written and partial source absence never claims succes
   const html = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 2, groups: [{ name: 'Check runs', total: 102, hasMore: false, items: [{ id: 1, name: 'Unit tests', status: 'completed', conclusion: 'failure', details_url: 'javascript:alert(1)' }, { id: 2, name: 'Build', status: 'queued' }] }] } })
   if (!html) return
   assert.match(html, /Unit tests/)
-  assert.match(html, /failure/)
-  assert.match(html, /queued/)
+  assert.match(html, /<b>Failed<\/b>/)
+  assert.match(html, /<b>Queued<\/b>/)
   assert.match(html, /page 2/)
   assert.match(html, /not an all-clear review/)
   assert.doesNotMatch(html, /href="javascript:/)
+  assert.doesNotMatch(html, /<a /, 'a check whose link is not safe has no link')
+})
+
+test('a read that found no checks says so, and one that could not read them never says there were none', async t => {
+  const none = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 1, groups: [{ name: 'Check runs', total: 0, hasMore: false, items: [] }, { name: 'Commit statuses', total: 0, hasMore: false, items: [] }], errors: [] } })
+  if (!none) return
+  assert.match(none, /No checks reported for this version/)
+  assert.doesNotMatch(none, /co-check-ring|co-pr-filters/, 'nothing to draw or filter')
+  assert.doesNotMatch(none, />0</, 'a count of nothing is never printed as a bare 0')
+  const failed = await render(t, 'PullChecks', { data: { head: 'a'.repeat(40), page: 1, groups: [], errors: ['Check runs: Could not load this information from GitHub (HTTP 503). Try again.'] } })
+  assert.match(failed, /Checks could not be read/)
+  assert.doesNotMatch(failed, /No checks reported/)
+})
+
+test('the Checks tab leads with a summary and Check again, then the chips, then the checks by what needs the owner', async t => {
+  const at = minutes => new Date(Date.now() - minutes * 60000).toISOString()
+  const run = (id, name, extra = {}) => ({ id, name, status: 'completed', conclusion: 'success', started_at: at(12), completed_at: new Date(Date.parse(at(12)) + 363000).toISOString(), details_url: 'https://github.com/team/repo/actions/runs/9/job/' + id, ...extra })
+  const passed = Array.from({ length: 8 }, (_, index) => run(10 + index, 'backend-tests (' + (index + 1) + ')'))
+  const items = [...passed, run(30, 'e2e', { conclusion: 'skipped' }), run(40, 'upgrade-path', { status: 'in_progress', conclusion: null, completed_at: null, started_at: at(4) })]
+  const data = { head: 'a1b2c3d4e5'.repeat(4), page: 1, readAt: at(1), groups: [{ name: 'Check runs', total: items.length, hasMore: false, items },
+    { name: 'Commit statuses', total: 1, hasMore: false, items: [{ id: 60, context: 'ci/package', state: 'pending', created_at: at(10), updated_at: at(9), target_url: 'https://ci.example/package/60' }] }], errors: [] }
+  const html = await render(t, 'PullChecks', { data, onCheckAgain: () => {} })
+  if (!html) return
+  assert.match(html, /<strong>2 running · 8 passed · 1 skipped<\/strong>/)
+  assert.match(html, /For commit <code>a1b2c3d<\/code> · <time[^>]*>read 1 minute ago<\/time>/)
+  assert.match(html, /aria-label="9 of 11 checks passed or skipped"/, 'the ring says it as the tab badge does')
+  assert.ok(html.indexOf('co-checks-summary') < html.indexOf('co-pr-note') && html.indexOf('co-pr-note') < html.indexOf('co-pr-filters') && html.indexOf('co-pr-filters') < html.indexOf('co-check-group'), 'summary, then the note, the chips, the checks')
+  assert.match(html, /<\/svg>.*Check again<\/button>/, 'Check again is in the summary')
+  const chips = [...html.matchAll(/<button type="button"( class="is-empty")? aria-pressed="(\w+)">(\w+)<span class="co-pr-filter-count">(\d+)/g)].map(match => [match[3], match[4], !!match[1], match[2]])
+  assert.deepEqual(chips, [['All', '11', false, 'true'], ['Failing', '0', true, 'false'], ['Running', '2', false, 'false'], ['Passed', '8', false, 'false'], ['Skipped', '1', false, 'false']], 'a state with no checks steps back')
+  assert.deepEqual([...html.matchAll(/<section class="co-check-group is-(\w+)"/g)].map(match => match[1]), ['running', 'passed', 'skipped'], 'running first, then passed, then skipped; no failing group when nothing fails')
+  assert.equal((html.match(/class="co-check is-passed"/g) || []).length, 3, 'eight passed checks show three and fold the rest')
+  assert.match(html, /aria-expanded="false">Show 5 more</)
+  assert.match(html, /<b><span class="co-shine"[^>]*>Running<\/span><\/b><span class="co-check-time"><time[^>]*>started 4 minutes ago/, 'a running check shines and says when it started')
+  assert.match(html, /<b>Passed<\/b><span class="co-check-time">6m 03s<\/span>/, 'a finished one says how long it took')
+  assert.match(html, /<b>Skipped<\/b><\/span>/, 'a skipped check has no time')
+  assert.match(html, /<span class="co-check-name">ci\/package<\/span><span class="co-check-meta"><b>Pending<\/b><\/span>/, 'a commit status is a row like the others, and one still pending reads Pending')
+  assert.match(html, /aria-label="View on GitHub: upgrade-path" data-tip="View on GitHub"/, 'the GitHub icon names itself, and the tooltip says the same')
+  assert.doesNotMatch(html, />View on GitHub</, 'no row spends a line on the words')
 })
 
 test('a failed check shows why: failed step names and annotations as text, with View on GitHub as the way to the log', async t => {
@@ -81,7 +125,7 @@ test('a failed check shows why: failed step names and annotations as text, with 
   assert.match(html, /Failed steps: <code>Run unit tests<\/code><code>Upload &lt;b&gt;report&lt;\/b&gt;<\/code>/)
   assert.match(html, /<code>test\/a\.test\.mjs:12<\/code> not ok 412 - desk counts a ready PR once/)
   assert.equal((html.match(/co-check-why/g) || []).length, 1, 'a failed check with no readable reason shows no empty box')
-  assert.equal((html.match(/>View on GitHub</g) || []).length, 2, 'every check keeps its link out')
+  assert.equal((html.match(/aria-label="View on GitHub: (Unit tests|Lint)"/g) || []).length, 2, 'every check keeps its link out')
   assert.doesNotMatch(html, /View result/)
 })
 
@@ -157,7 +201,7 @@ test('the description starts folded and unanswered feedback stays visible under 
     record: { attention: { type: 'changes_requested', url: 'https://github.com/team/repo/pull/9#pullrequestreview-777' } } })
   if (!html) return
   assert.doesNotMatch(html, /<details class="co-gh-description" open/)
-  assert.match(html, /class="co-desc-content"><p class="co-branch-flow" aria-label="Branches"><code>main<\/code>/)
+  assert.doesNotMatch(html, /class="co-desc-content"><p class="co-branch-flow"/, 'the branch is on the facts line, not folded into the description')
   assert.match(html, /class="co-pr-feedback-flag is-blocker"/)
   assert.match(html, /Changes requested/)
   assert.match(html, /Not addressed yet\. Read the review under Comments/)
@@ -326,6 +370,24 @@ test('the Commits banner hands its Review again to the foot bar on a phone only 
   assert.match(html, /class="co-decision-bar"[^>]*>.*Review again/)
   const quiet = await render(t, 'PullRequestDetail', props(await render(t, 'decide', { ...facts, role: 'author', author: 'sam' })))
   assert.doesNotMatch(quiet, /co-commits-again is-pinned/)
+})
+
+test('your own PR page has a Request review button beside Actions, apart from the Assign icon, and theirs does not', async t => {
+  const mine = { number: 7, state: 'OPEN', author: { login: 'me' }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main',
+    url: 'https://github.com/team/repo/pull/7', latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }
+  const open = (pr, extra = {}) => render(t, 'PullRequestDetail', { pr, canAssign: true, onAssign: () => {}, onReview: () => {}, capabilities: { request_review_now: true },
+    review: { standing: standingFor({ pr, login: 'me' }) }, ...extra })
+  const html = await open(mine)
+  if (!html) return
+  const buttons = html.slice(html.indexOf('co-pr-detail-actions'))
+  assert.match(buttons, /Choose an action for PR 7[\s\S]*class="co-btn co-request-review"[^>]*>[\s\S]*Request review<\/button>[\s\S]*aria-label="Assign"/, 'Actions, then Request review, then the Assign icon')
+  assert.doesNotMatch(buttons.slice(0, buttons.indexOf('aria-label="Assign"')), /co-btn-primary/, 'a plain button: the filled colour is the next step’s alone')
+  assert.doesNotMatch(await open({ ...mine, reviewRequests: { totalCount: 1 } }), /co-request-review/, 'once someone is asked the button steps aside; Actions offers asking one more')
+  assert.doesNotMatch(buttons, /aria-label="Request review"/, 'it is a labelled button, not a bare icon')
+  assert.doesNotMatch(await open({ ...mine, author: { login: 'sam' } }), /Request review/, 'only the author asks')
+  assert.doesNotMatch(await open(mine, { capabilities: {} }), /Request review/, 'a Möbius that cannot ask does not offer it')
+  assert.doesNotMatch(await open(mine, { readOnly: true }), /Request review/)
+  assert.match(await open({ ...mine, state: 'CLOSED' }), /<button class="co-btn co-request-review" disabled="" title="This PR is no longer open\."/, 'dimmed, with the reason, once the PR is closed')
 })
 
 test('a saved escalation shows on the PR page with its reason as plain text and the existing Resume', async t => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadPullActivity, loadPullChecks, loadPullCommitFiles, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullThreads, safeDetailLink } from '../pull-details.js'
+import { loadPullActivity, loadPullChecks, loadPullCommitFiles, loadPullCommits, loadPullDescription, loadPullFiles, loadPullRelated, loadPullReviewers, loadPullThreads, safeDetailLink } from '../pull-details.js'
 import { fetchRepoFile } from '../api.js'
 import { createImageReader } from '../image-source.js'
 import { MarkdownView } from './MarkdownView.jsx'
@@ -9,9 +9,10 @@ import { CopyId, commentReference } from './CopyId.jsx'
 import { Icon } from './Icons.jsx'
 import { BranchFlow } from './BranchFlow.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
+import { requestReviewButton, reviewRequested } from '../actions-menu.js'
 import { useTipDismiss } from './useTipDismiss.js'
 import { useKeepOnScreen } from './useKeepOnScreen.js'
-import { GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
+import { DateLabel, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
 import { checkSummary, conversationCount } from '../collaboration.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { ReviewTab, reviewContent } from './ReviewTab.jsx'
@@ -19,21 +20,14 @@ import { frameOf } from '../pr-standing.js'
 import { ROLE_TITLES } from '../provenance.js'
 import { NAMES } from '../names.js'
 import { showOpenTab } from './stripScroll.js'
-import { NextStep, StateLine } from './NextStep.jsx'
-import { nextStepModel } from '../next-step.js'
+import { NextStep } from './NextStep.jsx'
+import { nextStepModel, stageWord } from '../next-step.js'
 import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
+import { PullChecks } from './PullChecks.jsx'
 import { PullEscalation } from './PullEscalation.jsx'
 import { FollowLine } from './FollowLine.jsx'
-export { PullFiles }
-
-export function DateLabel({ value, prefix = '', time = false }) {
-  if (!value || !Number.isFinite(Date.parse(value))) return null
-  const at = new Date(value)
-  const day = at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-  const text = time ? `${day} · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : day
-  return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
-}
+export { DateLabel, PullFiles }
 
 // A quiet placeholder with the rough shape of the incoming text instead of a
 // "Loading…" sentence; the label keeps the state readable to assistive tech.
@@ -59,10 +53,6 @@ function openedLine(login, value) {
   return `${login || 'Someone'} opened ${day} · ${time}`
 }
 
-function DetailLink({ href, children }) {
-  const safe = safeDetailLink(href)
-  return safe ? <a className="co-btn co-btn-quiet" href={safe} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>
-}
 function threadLocation(thread) {
   const side = thread.diffSide === 'LEFT' ? 'old' : thread.diffSide === 'RIGHT' ? 'new' : 'unknown-side'
   if (thread.subjectType === 'FILE') return 'file discussion'
@@ -198,31 +188,6 @@ function PullProvenance({ record, onRecord, conversations }) {
 function ReadErrors({ errors, onRetry }) {
   return errors?.map(message => <p key={message} role="alert">{message} <button className="co-btn" onClick={onRetry}>Retry</button></p>)
 }
-// Why a failed check failed: its failed step names and first annotations, as plain text (an annotation is
-// whatever the check's own tool wrote). The log itself is on GitHub, behind the row's link.
-function CheckWhy({ why }) {
-  return <div className="co-check-why">
-    {why.steps.length ? <p>{why.steps.length === 1 ? 'Failed step' : 'Failed steps'}: {why.steps.map(name => <code key={name}>{name}</code>)}</p> : null}
-    {why.annotations.length ? <ul>{why.annotations.map((note, index) => <li key={index}>{note.where ? <code>{note.where}</code> : null} {note.text}</li>)}</ul> : null}
-  </div>
-}
-export function PullChecks({ data }) {
-  return <>
-    <p className="co-pr-note">Reported by GitHub for this version{data?.page > 1 ? ` · page ${data.page}` : ''}. Checks are not an all-clear review.</p>
-    {data?.groups?.map(group => <section key={group.name} aria-label={group.name}>
-      <h4>{group.name}{group.total !== null ? ` · ${group.total}` : ''}</h4>
-      {group.hasMore ? <p className="co-pr-note">More results remain on GitHub.</p> : null}
-      {group.items.map(item => <article className="co-activity-item" key={item.id}>
-        <header style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', overflowWrap: 'anywhere' }}><strong>{item.name || item.context || 'Unnamed check'}</strong><span>{(item.conclusion || item.status || item.state || 'unknown').replaceAll('_', ' ')}</span><DateLabel value={item.completed_at || item.updated_at || item.started_at || item.created_at} /></header>
-        {item.output?.title || item.description ? <p>{item.output?.title || item.description}</p> : null}
-        {item.why ? <CheckWhy why={item.why} /> : null}
-        {item.details_url || item.target_url || item.html_url ? <DetailLink href={item.details_url || item.target_url || item.html_url}>{NAMES.viewOnGitHub}</DetailLink> : null}
-      </article>)}
-      {!group.items.length ? <p>No {group.name.toLowerCase()} returned on this page.</p> : null}
-    </section>)}
-    {data?.capped ? <p>Only the first 100 result pages are available here. More results remain on GitHub.</p> : null}
-  </>
-}
 // One boxed row per related item, a pull-request or issue icon telling them
 // apart at a glance; the whole box opens the item on GitHub.
 function RelatedRow({ item }) {
@@ -327,7 +292,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     description: 'description:1',
     ...(tab === 'conversation'
       ? { activity: `activity:${number}`, threads: `threads:${threadCursor || ''}`, related: 'related' }
-      : tab === 'review' ? {} : tab === 'commits' ? { view: openCommit ? `commit:${openCommit.oid}` : `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
+      : tab === 'review' ? { reviewers: 'reviewers' } : tab === 'commits' ? { view: openCommit ? `commit:${openCommit.oid}` : `commits:${commitCursor || ''}` } : { view: `${tab}:${number}` }),
   }
   const keySignature = Object.values(keys).join('|')
   useEffect(() => {
@@ -363,7 +328,9 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       read(keys.activity, signal => loadPullActivity(token, pr, number, signal))
       read(keys.threads, signal => loadPullThreads(token, pr, threadCursor, signal))
       read(keys.related, signal => loadPullRelated(token, pr, signal))
-    } else if (tab !== 'review') {
+    } else if (tab === 'review') {
+      read(keys.reviewers, signal => loadPullReviewers(token, pr, signal))
+    } else {
       read(keys.view, signal => tab === 'files' ? loadPullFiles(token, pr, number, signal) : tab === 'commits' ? (openCommit ? loadPullCommitFiles(token, pr, openCommit.oid, signal) : loadPullCommits(token, pr, commitCursor, signal)) : loadPullChecks(token, pr, number, signal))
     }
   }, [keySignature, cache, writeCache, token, pr.number, pr.repository?.nameWithOwner, pr.headRefOid, pr.baseRefOid, pr.baseRefName])
@@ -373,8 +340,14 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     const mine = new Set(Object.values(keys))
     writeCache(old => Object.fromEntries(Object.entries(old).filter(([key, value]) => !mine.has(key) || (!value.error && !value.data?.errors?.length))))
   }
+  const checkAgain = () => {
+    writeCache(old => { const next = { ...old }; delete next[keys.view]; return next })
+  }
   const retryRelated = () => {
     writeCache(old => { const next = { ...old }; delete next[keys.related]; return next })
+  }
+  const retryReviewers = () => {
+    writeCache(old => { const next = { ...old }; delete next[keys.reviewers]; return next })
   }
   function readState(value, label, onRetry = tryAgain) {
     return <>{value.loading ? <Skeleton label={`Loading ${label}`} /> : null}{value.error ? <div role="alert"><p>{value.error}</p><button className="co-btn" onClick={value.stale ? onRefresh : onRetry}>{value.stale ? NAMES.sync : 'Try again'}</button></div> : null}<ReadErrors errors={value.data?.errors} onRetry={onRetry} /></>
@@ -406,6 +379,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     files: Number.isInteger(pr.changedFiles) ? pr.changedFiles : null,
   }
   const githubUrl = safeDetailLink(pr.url)
+  const requestOffer = requestReviewButton(review?.standing, { capabilities })
   // The machine's own review action, offered again on the Commits tab when the PR has commits the last review did not see.
   const againAction = readOnly ? null : review?.standing?.actions?.find(action => ['review', 'check_my_pr'].includes(action.id) && action.enabled) || null
   // The conversation loads as one unit: a single skeleton stands in for the
@@ -421,21 +395,22 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   return <div className="co-pr-detail" aria-label={`Details for PR ${pr.number}`}>
     <PullStickyTitle pr={pr} targetRef={titleRef} tone={FEEDBACK_FLAGS[record?.attention?.type]?.tone} />
     <header className="co-gh-pr-head">
-      <h3 className="co-gh-pr-title" ref={titleRef}>{pr.title} <span className="co-pr-title-num">#{pr.number}</span></h3>
-      {labels.length ? <div className="co-gh-labels">{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div> : null}
+      <h3 className="co-gh-pr-title" ref={titleRef}><span className="co-pr-title-num">#{pr.number}</span> {pr.title}</h3>
     </header>
+    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} note={stageWord(pr, review?.standing)} /><span className="co-pr-sub-num">#{pr.number}</span>
+      <span>by <b>{pr.author?.login || 'Someone'}</b></span>
+      <BranchFlow pr={pr} />
+      {labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div>
     <div className={'co-pr-detail-actions' + tips.className} onPointerOut={tips.onPointerOut} onBlur={tips.onBlur}>
-      {!readOnly ? <ActionsMenu variant="button" align="start" pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
+      {!readOnly ? <ActionsMenu variant="button" align="start" brief pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
+      {!readOnly && requestOffer && !reviewRequested(pr) ? <button className="co-btn co-request-review" disabled={stale || requestOffer.off} title={requestOffer.off ? requestOffer.reason : undefined} onClick={() => onReview?.('request_review')}><Icon name="plus" size={16} />{NAMES.requestReview}</button> : null}
       {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /></button> : null}
       {status && onProgress ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
       {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /></a> : null}
       <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
     </div>
-    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} /><span className="co-pr-sub-num">#{pr.number}</span>
-      <span>by <b>{pr.author?.login || 'Someone'}</b></span></div>
     {/* Only where this Möbius can switch following on after Send: elsewhere the page stays as it was. */}
     {capabilities?.follow_after_send === true ? <FollowLine record={record} onSetAutopilot={onSetAutopilot} readOnly={readOnly} /> : null}
-    <StateLine pr={pr} decision={review?.standing} />
     {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
     {conversationLoading ? null : <>
     <details className="co-gh-description">
@@ -444,7 +419,6 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
         <small>{openedLine(description.data?.user?.login || pr.author?.login, pr.createdAt)}</small>
       </summary>
       <div className="co-desc-content">
-        <BranchFlow pr={pr} />
         {readState(description, 'description')}
         {ready(description) ? <ClampedMarkdown markdown={description.data?.body || '_No description provided._'} /> : null}
       </div>
@@ -473,7 +447,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       {ready(related) ? <PullRelated data={related.data} /> : null}
       <p className="co-gh-merge-state">{[REVIEW_DECISION[pr.reviewDecision], pr.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : pr.mergeable === 'MERGEABLE' ? 'No conflicts with base branch' : null].filter(Boolean).join(' · ')}</p>
     </> : null}
-    {tab === 'review' ? <ReviewTab pr={pr} status={status} readOnly={readOnly} {...review} /> : null}
+    {tab === 'review' ? <ReviewTab pr={pr} status={status} readOnly={readOnly} {...review} reviewers={entry(keys.reviewers || '')} onRetryReviewers={retryReviewers} /> : null}
     {tab === 'commits' && openCommit ? <CommitChangesHead commit={openCommit} onBack={() => { returnFocus.current = openCommit.oid; setOpenCommit(null) }} /> : null}
     {tab === 'files' || tab === 'checks' || tab === 'commits' ? readState(view, tab) : null}
     {tab === 'commits' && openCommit && ready(view) ? <PullFiles data={view.data} startOpen={view.data.files.length <= COMMIT_OPEN_FILES} /> : null}
@@ -486,9 +460,8 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       </div> : null}
     </> : null}
     {tab === 'files' && ready(view) ? <PullFiles data={view.data} /> : null}
-    {tab === 'checks' && ready(view) ? <PullChecks data={view.data} /> : null}
+    {tab === 'checks' && ready(view) ? <PullChecks data={view.data} onCheckAgain={checkAgain} /> : null}
     {(tab === 'files' || tab === 'checks') && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
-    {tab === 'checks' && !view.loading ? <button className="co-btn co-btn-quiet" onClick={() => { writeCache(old => { const next = { ...old }; delete next[keys.view]; return next }) }}>{NAMES.checkAgain}</button> : null}
     </div>
     {review?.standing ? <NextStep bar decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
   </div>

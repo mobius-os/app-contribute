@@ -129,18 +129,18 @@ test('SSR review window starts takeover only when the entire selection is eligib
     const takeover = renderChoice(pulls, 'review_fix_merge')
     assert.doesNotMatch(takeover, /disabled="">Start, ask me before each push/, permission)
     const html = renderChoice(pulls)
-    assert.match(html, /Start private review/)
+    assert.match(html, /Start review/)
     // No option starts switched on (aria-checked="false" is not a checked box).
     assert.doesNotMatch(html, /type="checkbox"[^>]*\schecked=""/)
   }
   for (const permission of ['READ', 'TRIAGE', null]) {
     const pulls = [pull(), pull(8, { repository: { nameWithOwner: project.canonical_repo, viewerPermission: permission } })]
     assert.match(renderChoice(pulls, 'review_fix_merge'), /disabled="">Start, ask me before each push/, String(permission))
-    assert.match(renderChoice(pulls), /Start private review/)
+    assert.match(renderChoice(pulls), /Start review/)
   }
   assert.doesNotMatch(renderChoice([pull(7, { isDraft: true })], 'review_fix_merge'), /disabled="">Start, ask me before each push/, 'a draft can be finished or taken over: you open it for review yourself')
   const merge = renderChoice([pull()], 'review_merge', true)
-  assert.match(renderChoice([pull()], 'review_merge'), /Start review, merge when safe/)
+  assert.match(renderChoice([pull()], 'review_merge'), /Start, merge when safe/)
   assert.match(merge, /Exact versions/)
   assert.match(merge, /all required checks pass, it merges the PR or adds it to the merge queue/)
   assert.match(merge, /the merge\. No comments and no code changes\./)

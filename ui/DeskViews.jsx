@@ -5,7 +5,7 @@ import { savedFindings } from '../address-feedback.js'
 import { frameState, reviewForRecord } from '../review-frame.js'
 import { ReviewFrame } from './ReviewFrame.jsx'
 import { chipOf, frameOf } from '../pr-standing.js'
-import { decisionChip } from '../review-list.js'
+import { decisionChip, isDraftWord } from '../review-list.js'
 import { actionOf } from '../pr-machine.js'
 import { recordsForProject } from '../source-map.js'
 import { STATUS_LABELS } from '../domain.js'
@@ -37,7 +37,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
   // No decision pill while an agent works: the travelling frame says it, and a running review wears no tag (the owner's choice,
   // 3 Nov). A request's own pill already says "your turn" while the PR rests; the decision adds its words when it has some.
   const labelled = framed !== 'reviewing' && (!request || chipOf(decision))
-  const pills = [...(request ? [requestChip] : []), ...(labelled ? [decisionChip(decision)] : [])]
+  const pills = [...(request ? [requestChip] : []), ...(labelled && !isDraftWord(pr, decisionChip(decision)) ? [decisionChip(decision)] : [])]
   const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} /> : null]
   return (
     <ReviewFrame state={framed} inset={3} radius={10}>
@@ -47,7 +47,6 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
         facts={<>
           {order ? <span className="co-desk-order">{order}</span> : null}
           <span><DotLine parts={who} /></span>
-          {pr.isDraft ? <span>Draft</span> : null}
           <ChecksBadge pr={pr} />
           {Number.isInteger(pr.additions) ? <span className="co-change-total"><b>+{pr.additions}</b><em>−{pr.deletions}</em></span> : null}
         </>}

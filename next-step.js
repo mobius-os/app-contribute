@@ -1,10 +1,10 @@
-// The PR page's next-step panel and state line (findings 1, 10 and 13). Both only read
+// The PR page's next-step panel and the word beside its state badge (findings 1, 10 and 13). Both only read
 // the PR machine's decision (pr-machine.js): the pill says what is true, the hint is
 // the machine's own sentence, and the one filled button is the next step it names.
 // Pure, so every state's panel is tested without a browser.
 import { NAMES } from './names.js'
 import { mayRunYourAction, AGENT_INTENTS } from './actions-menu.js'
-import { frameOf } from './pr-standing.js'
+import { frameOf, isResting } from './pr-standing.js'
 
 // How each next step runs. 'menu' goes through the same handler as the Actions menu
 // (its confirm sheet or review window); 'review' opens the Review tab, where the
@@ -45,11 +45,12 @@ export function pillTone(decision) {
   return decision.turn === 'you' ? 'you' : 'quiet'
 }
 
-// { pill, hint, pointer, primary } for the panel under the facts line. `primary` is null when the
+// { pill, hint, pointer, primary } for the panel under the facts line, or null for a resting state, which the
+// state badge already says. `primary` is null when the
 // next step is not yours to take, cannot run yet (the menu says why), or this Möbius
 // cannot run it for you.
 export function nextStepModel(decision, { record = null, capabilities = null } = {}) {
-  if (!decision) return null
+  if (!decision || isResting(decision)) return null
   const action = decision.actions.find(item => item.id === actionToRun(decision))
   const route = ROUTES[decision.next]
   const allowed = action?.enabled && route && (route !== 'menu' || AGENT_INTENTS.has(action.id) || mayRunYourAction(action.id, { record, capabilities }))
@@ -63,14 +64,11 @@ export function nextStepModel(decision, { record = null, capabilities = null } =
   }
 }
 
-export const STATE_STEPS = ['Draft', 'In review', 'Approved', 'Merged']
-
-// Where a PR is on its way: Draft, In review, Approved, Merged. Real data only: a draft is
-// GitHub's draft flag, Approved is an approval of this exact version by someone other than
-// the author (the machine's own count), Merged is GitHub's. A closed PR has no line.
-export function stateLine(pr, decision) {
-  if (pr?.state === 'CLOSED' && !pr?.mergedAt) return null
-  const merged = !!pr?.mergedAt || pr?.state === 'MERGED'
-  const at = merged ? 3 : pr?.isDraft ? 0 : decision?.approvedBy?.length ? 2 : 1
-  return { steps: STATE_STEPS.map((label, index) => ({ label, done: index < at, current: index === at })), current: STATE_STEPS[at], at }
+// What the state badge adds to "Open": Approved is an approval of this exact version by someone other than
+// the author (the machine's own count), a resting state is the machine's own label ("Waiting on reviewers"),
+// and anything else is In review. A draft, merged or closed PR already says so in the badge.
+export function stageWord(pr, decision) {
+  if (!decision || pr?.isDraft || pr?.mergedAt || (pr?.state && pr.state !== 'OPEN')) return ''
+  if (decision.approvedBy?.length) return 'Approved'
+  return isResting(decision) ? decision.label : 'In review'
 }

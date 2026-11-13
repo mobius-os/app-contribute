@@ -37,6 +37,9 @@ export const TYPE_LABELS = {
 // opened for review from this connection.
 export const isPersonalDraft = record => record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
 
+// Two GitHub logins name the same person whatever their case; a missing login names nobody.
+export const sameLogin = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase()
+
 export const STATUS_LABELS = {
   prepared: 'Ready',
   submitting: 'Publishing',

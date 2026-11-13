@@ -37,6 +37,7 @@ test('check/status reads use selected immutable head and report each provider in
   const data = await loadPullChecks('fixture', pr)
   assert.equal(data.groups[0].items[0].conclusion, 'failure')
   assert.equal(data.groups[0].total, 101)
+  assert.ok(Number.isFinite(Date.parse(data.readAt)) && Date.now() - Date.parse(data.readAt) < 5000, 'the read says when it was read')
   assert.equal(data.hasMore, true)
   assert.match(data.errors[0], /Commit statuses/)
   assert.ok(calls.filter(call => !call.url.endsWith('/pulls/7')).every(call => call.url.includes(`/commits/${head}/`)))

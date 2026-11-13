@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { sameLogin } from '../desk.js'
+import { sameLogin } from '../domain.js'
 import { watchOverflow } from './watchOverflow.js'
 
 // The one layout of a desk row, wherever it lists a PR (Needs you, Review requests, My PRs, Agent runs, Merged):

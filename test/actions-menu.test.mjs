@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader } from '../actions-menu.js'
+import { AGENT_INTENTS, YOUR_INTENTS, actionsMenuModel, pullHeader, requestReviewButton, requestReviewForMany } from '../actions-menu.js'
 import { standingFor } from '../pr-standing.js'
 
 const HEAD = 'b'.repeat(40)
@@ -56,11 +56,42 @@ test('Merge on your PR is on offer before anyone approves it; only an approved v
 test('your own actions appear only where this Möbius can do them', () => {
   assert.deepEqual(ids(menu(mine(), {}).you), [])
   assert.deepEqual(ids(menu(mine(), { merge_now: true }).you), ['merge'])
-  assert.deepEqual(ids(menu(mine()).you), ['open_for_review', 'back_to_draft', 'ask_rereview', 'ask_approval', 'merge', 'close'])
-  assert.deepEqual(ids(menu(mine(), { ...ALL, ask_approval_now: false }).you), ['open_for_review', 'back_to_draft', 'ask_rereview', 'merge', 'close'], 'the note is offered only where this Möbius can post it')
+  assert.deepEqual(ids(menu(mine()).you), ['back_to_draft', 'merge', 'close'], 'an open PR nobody reviewed: no Open for review, and nobody to ask')
+  assert.deepEqual(ids(menu(mine({ isDraft: true })).you), ['open_for_review', 'merge', 'close'], 'a draft goes the other way: Open for review, never Back to draft')
+  const reviewed = mine({ latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'sam', __typename: 'User' }, commit: { oid: HEAD } }] } })
+  assert.deepEqual(ids(menu(reviewed).you).sort(), ['ask_approval', 'ask_rereview', 'back_to_draft', 'close', 'merge'], 'once someone reviewed, both asks are offered')
+  assert.ok(!ids(menu(reviewed, { ...ALL, ask_approval_now: false }).you).includes('ask_approval'), 'the note is offered only where this Möbius can post it')
   assert.deepEqual(ids(menu(pull()).you), ['merge', 'close'], 'on their PR you may merge or close, never change its draft state')
   const appDraft = menu(mine({ isDraft: true }), {}, { status: 'draft', submission_mode: 'github' })
   assert.deepEqual(ids(appDraft.you), ['open_for_review'], 'a draft this app sent opens through its own record')
+})
+
+test('once someone was asked, the menu offers Request another review; before that the page’s own button asks', () => {
+  const asking = { ...ALL, request_review_now: true }
+  assert.ok(!ids(menu(mine({ reviewRequests: { totalCount: 0 } }), asking).you).includes('request_review'))
+  const row = item(menu(mine({ reviewRequests: { totalCount: 2 } }), asking), 'request_review')
+  assert.deepEqual([row.title, row.off, row.rec], ['Request another review', false, false])
+  assert.equal(item(menu(mine({ reviewRequests: { totalCount: 2 } })), 'request_review'), undefined, 'only where this Möbius can ask')
+})
+
+
+test('how Merge lands is a second choice on the Merge row, never a row of its own', () => {
+  const twoWays = mine({ repository: { nameWithOwner: 'o/r', viewerPermission: 'WRITE', squashMergeAllowed: true, rebaseMergeAllowed: true } })
+  assert.equal(item(menu(twoWays, { ...ALL, owner_confirm: true }), 'merge').side, undefined, 'without Möbius’s own sheet on this page, Merge’s window already asks')
+  // Möbius's own sheet is offered only where the host advertises it and the page can ask for it.
+  globalThis.window = { mobius: { ownerGrant: { request() {} } } }
+  try {
+    const model = menu(twoWays, { ...ALL, owner_confirm: true })
+    assert.ok(!ids(model.you).includes('merge_options'))
+    assert.deepEqual(item(model, 'merge').side, { intent: 'merge_options', title: 'Merge options…', detail: 'Choose how it lands.' })
+    assert.equal(item(menu(mine(), { ...ALL, owner_confirm: true }), 'merge').side, undefined, 'one way to land is no choice')
+  } finally { delete globalThis.window }
+})
+
+test('the menu carries the machine’s short label beside its sentence, for a menu that has room for one line', () => {
+  const model = menu(mine())
+  assert.equal(model.standing, 'Waiting on reviewers')
+  assert.equal(model.headline, 'Your PR · waiting on reviewers')
 })
 
 test('a batch offers one review of each, off when any PR cannot take it', () => {
@@ -80,6 +111,8 @@ test('every menu intent is a machine action, and the header says what GitHub sho
   for (const intent of [...AGENT_INTENTS, ...YOUR_INTENTS]) assert.ok(standingFor({ pr: mine(), login: 'alex' }).actions.some(action => action.id === intent) || standingFor({ pr: pull(), login: 'alex' }).actions.some(action => action.id === intent), intent)
   assert.deepEqual(pullHeader(pull({ isDraft: true, reviewDecision: 'APPROVED', ...checks('FAILURE', 1), mergeable: 'CONFLICTING' })),
     { label: '#7', text: 'draft · no reviews · 1 failing check · conflicts with main' }, 'GitHub’s approval summary is not repeated: the headline says who approved which version')
+  const draft = pull({ isDraft: true, ...checks('FAILURE', 1) })
+  assert.deepEqual(pullHeader(draft, standingFor({ pr: draft, login: 'alex' })), { label: '#7', text: '1 failing check' }, 'with a decision, its label or sentence says draft and who reviewed, so the facts do not repeat them')
 })
 
 test('Close pull request is the one destructive row: red, apart, and last in You, whatever the machine highlights', () => {
@@ -102,4 +135,36 @@ test('a reviewer who looked again without approving is asked to approve first, a
   assert.equal(model.you[0].rec, true)
   assert.equal(item(model, 'ask_rereview').off, false, 'anyone who reviewed can be asked again, even someone who looked at this version')
   assert.equal(item(menu(looked, { ...ALL, ask_approval_now: undefined }), 'ask_approval'), undefined, 'a Möbius that cannot post the note does not offer it')
+})
+
+test('Request review is its own button beside Actions, never a menu row, and it still opens the same sheet path', () => {
+  const caps = { ...ALL, request_review_now: true }
+  const standing = standingFor({ pr: mine(), login: 'alex' })
+  assert.ok(!ids(menu(mine(), caps).you).includes('request_review'), 'the menu keeps its own rows')
+  assert.ok(YOUR_INTENTS.has('request_review'), 'choosing it opens its sheet like any action of yours')
+  assert.deepEqual(requestReviewButton(standing, { capabilities: caps }), { off: false, reason: '' })
+  assert.equal(requestReviewButton(standing, { capabilities: ALL }), null, 'a Möbius that cannot ask for the review does not offer it')
+  assert.equal(requestReviewButton(standing, {}), null)
+  assert.equal(requestReviewButton(null, { capabilities: caps }), null)
+})
+
+test('Request review is offered on your own PR even before anyone reviewed, dimmed with the reason once it is closed, and absent on theirs', () => {
+  const caps = { ...ALL, request_review_now: true }
+  assert.equal(requestReviewButton(standingFor({ pr: mine(), login: 'alex' }), { capabilities: caps }).off, false)
+  const closed = requestReviewButton(standingFor({ pr: mine({ state: 'CLOSED' }), login: 'alex' }), { capabilities: caps })
+  assert.deepEqual(closed, { off: true, reason: 'This PR is no longer open.' })
+  assert.equal(requestReviewButton(standingFor({ pr: pull(), login: 'alex' }), { capabilities: caps }), null, 'only the author asks')
+})
+
+test('Request review over a selection needs every PR to be your own and open, in one repository, and the capability', () => {
+  const caps = { ...ALL, request_review_now: true }
+  const decisionOf = pr => standingFor({ pr, login: 'alex' })
+  const a = mine({ number: 1 }), b = mine({ number: 2 }), theirs = pull({ number: 3 })
+  assert.deepEqual(requestReviewForMany([a, b].map(decisionOf), [a, b], { capabilities: caps }), { off: false, reason: '' })
+  assert.equal(requestReviewForMany([a, b].map(decisionOf), [a, b], { capabilities: ALL }), null, 'a Möbius that cannot ask offers nothing')
+  assert.deepEqual(requestReviewForMany([a, theirs].map(decisionOf), [a, theirs], { capabilities: caps }), { off: true, reason: 'Only your own PRs can ask for a review.' })
+  const closed = mine({ number: 4, state: 'CLOSED' })
+  assert.deepEqual(requestReviewForMany([a, closed].map(decisionOf), [a, closed], { capabilities: caps }), { off: true, reason: 'This PR is no longer open.' })
+  const elsewhere = mine({ number: 5, repository: { nameWithOwner: 'o/other', viewerPermission: 'WRITE' } })
+  assert.deepEqual(requestReviewForMany([a, elsewhere].map(decisionOf), [a, elsewhere], { capabilities: caps }), { off: true, reason: 'Choose PRs of one repository.' })
 })

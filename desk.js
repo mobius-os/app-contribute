@@ -3,6 +3,7 @@
 // ui/DeskViews.jsx; everything here is testable without a DOM.
 import { prKey } from './collaboration.js'
 import { attentionListItems } from './run.js'
+import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { standingFor } from './pr-standing.js'
 import { projectIsQuiet } from './source-map.js'
@@ -20,8 +21,6 @@ export const DESK_VIEWS = [
 // place or an older link to one of them lands there.
 export const FOLDED_VIEWS = { confirm: 'needs', edits: 'needs', merged: 'mine', work: 'runs', reviews: 'runs' }
 export const deskViewKey = key => FOLDED_VIEWS[key] || key
-
-export const sameLogin = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
 
 // The one decision (pr-standing.js) the repository list and the PR page read for a PR, so a desk row says what they say.
 // `facts` are what it is decided from besides the PR: the saved reviews, live conversations, answers and set-aside notes.

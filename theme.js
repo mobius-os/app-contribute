@@ -296,6 +296,10 @@ export const CSS = `
   font-size: var(--co-text-meta); font-weight: 600;
 }
 .co-source-row-wrap.is-quiet .co-source-row-facts { color: var(--muted); }
+/* The link to where an update is applied lines up with the row's text, one step in from the project icon (the row's padding, the icon and the gap). */
+.co-source-row-wrap { --co-source-indent: 59px; }
+.co-source-row-link { margin: -14px 0 8px; padding-left: var(--co-source-indent); }
+.co-source-row-link .co-btn { --co-btn-tone: var(--accent-text, var(--accent)); padding-inline: 0; gap: 4px; }
 .co-source-row-wrap + .co-source-row-wrap { border-top: 1px solid var(--border); }
 .co-source-row {
   display: grid; grid-template-columns: 36px minmax(0, 1fr) auto;
@@ -1473,6 +1477,7 @@ export const CSS = `
   .co-project-index, .co-review-list { border-radius: var(--co-radius-panel); }
   .co-source-group-label { padding-inline: 11px; }
   .co-source-row { min-height: 106px; padding: 18px 0; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 2px 9px; }
+  .co-source-row-wrap { --co-source-indent: 47px; }
   .co-source-glyph { width: 34px; height: 34px; }
   .co-source-row-facts { align-items: flex-start; white-space: normal; line-height: 1.35; }
   .co-source-row-facts > span {
@@ -1531,11 +1536,6 @@ export const CSS = `
 }
 
 
-/* mobius-ui:CenteredRail v1 */
-@media (min-width: 900px) {
-  .co-header-shell { width: min(100%, 1040px); margin-inline: auto; }
-}
-/* /mobius-ui:CenteredRail */
 
 /* PR work stays inside its project; selection reveals the batch action. */
 .co-workflow-option { display:flex; align-items:center; gap:12px; min-height:44px; margin:8px 0; font-size:var(--co-text-body); cursor:pointer; }

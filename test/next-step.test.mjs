@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { decide } from '../pr-machine.js'
-import { nextStepModel, pillTone, stateLine } from '../next-step.js'
+import { nextStepModel, pillTone, stageWord } from '../next-step.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 
 const facts = (extra = {}) => ({ author: 'sam', head: 'h', lifecycle: 'open', checks: 'pass', mergeable: 'yes', permission: 'WRITE', reviews: [],
@@ -18,7 +18,6 @@ const GALLERY = [
   ['their PR, new commits', { role: 'reviewer', myReview: { state: 'COMMENTED', commit: 'old' } }, 'New commits · review again', 'waiting', 'Review again', 'menu'],
   ['your PR, approved', { reviews: [{ by: 'kim', state: 'APPROVED', commit: 'h' }] }, 'Ready to merge', 'ready', 'Merge', 'menu'],
   ['agent stopped', { job: { kind: 'review', state: 'stalled' } }, 'Agent stopped', 'waiting', 'Review again', 'menu'],
-  ['waiting on others', {}, 'Waiting on reviewers', 'quiet', null, null],
 ]
 for (const [name, extra, pill, tone, button, route] of GALLERY) {
   test(`next step, ${name}: pill, the machine's own hint, and the one button`, () => {
@@ -46,17 +45,28 @@ test('the pill colour keeps one meaning per colour', () => {
   assert.equal(pillTone(decide(facts({ lifecycle: 'merged' }))), 'quiet')
 })
 
-test('the state line is Draft, In review, Approved, Merged from the PR itself, and a closed PR has none', () => {
-  const at = (pr, extra = {}) => stateLine(pr, decide(facts(extra))).current
-  assert.equal(at({ isDraft: true }, { lifecycle: 'draft' }), 'Draft')
-  assert.equal(at({ isDraft: false }), 'In review')
-  assert.equal(at({ isDraft: false }, { reviews: [{ by: 'kim', state: 'APPROVED', commit: 'h' }] }), 'Approved')
+test('a resting state draws no panel: the state badge says it', () => {
+  // Waiting on reviewers, merged, closed and someone else's draft have no step for anyone here.
+  assert.equal(nextStepModel(decide(facts()), { capabilities }), null)
+  assert.equal(nextStepModel(decide(facts({ lifecycle: 'merged' })), { capabilities }), null)
+  assert.equal(nextStepModel(decide(facts({ role: 'reviewer', lifecycle: 'draft' })), { capabilities }), null)
+  // Your own draft and an agent at work are not resting: one has a step of yours, the other is under way.
+  assert.equal(nextStepModel(decide(facts({ lifecycle: 'draft' })), { capabilities }).pill.label, 'Draft')
+  assert.equal(nextStepModel(decide(facts({ job: { kind: 'review', state: 'working' } })), { capabilities }).pill.label, 'Agent working')
+})
+
+test('the state badge of an open PR adds where it stands: the resting label, In review or Approved', () => {
+  const word = (pr, extra = {}) => stageWord({ state: 'OPEN', ...pr }, decide(facts(extra)))
+  assert.equal(word({}), 'Waiting on reviewers', 'a resting PR says the machine’s own label, never In review')
+  assert.equal(word({}, { checks: 'fail' }), 'In review')
+  assert.equal(word({}, { reviews: [{ by: 'kim', state: 'APPROVED', commit: 'h' }] }), 'Approved')
   // An approval of an older version is not an approval of this one.
-  assert.equal(at({ isDraft: false }, { reviews: [{ by: 'kim', state: 'APPROVED', commit: 'old' }] }), 'In review')
-  assert.equal(at({ state: 'MERGED', mergedAt: '2026-11-01T00:00:00Z' }), 'Merged')
-  assert.equal(stateLine({ state: 'CLOSED' }, decide(facts({ lifecycle: 'closed' }))), null)
-  const done = stateLine({ isDraft: false }, decide(facts({ reviews: [{ by: 'kim', state: 'APPROVED', commit: 'h' }] }))).steps
-  assert.deepEqual(done.map(item => [item.label, item.done, item.current]), [['Draft', true, false], ['In review', true, false], ['Approved', false, true], ['Merged', false, false]])
+  assert.equal(word({}, { reviews: [{ by: 'kim', state: 'APPROVED', commit: 'old' }] }), 'In review')
+  // Draft, merged and closed are already the badge's own word.
+  assert.equal(word({ isDraft: true }, { lifecycle: 'draft' }), '')
+  assert.equal(word({ state: 'MERGED', mergedAt: '2026-11-01T00:00:00Z' }, { lifecycle: 'merged' }), '')
+  assert.equal(word({ state: 'CLOSED' }, { lifecycle: 'closed' }), '')
+  assert.equal(stageWord({ state: 'OPEN' }, null), '', 'no decision yet, nothing to add')
 })
 
 test('the panel shows the pill, the hint and a filled button that runs the next step', async t => {
@@ -64,15 +74,14 @@ test('the panel shows the pill, the hint and a filled button that runs the next 
   const { render } = await renderModule(`
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
-    import { NextStep, StateLine } from './ui/NextStep.jsx'
-    export const render = props => renderToStaticMarkup(React.createElement('div', null, React.createElement(StateLine, { pr: { isDraft: false }, decision: props.decision }), React.createElement(NextStep, props)))
+    import { NextStep } from './ui/NextStep.jsx'
+    export const render = props => renderToStaticMarkup(React.createElement('div', null, React.createElement(NextStep, props)))
   `)
   const html = render({ decision: decide(facts({ reviews: [{ by: 'kim', state: 'APPROVED', commit: 'h' }] })), capabilities })
   assert.match(html, /class="co-next-step"/)
   assert.match(html, /co-desk-chip is-ready">Ready to merge/)
   assert.match(html, /Your PR · approved by kim at this version, checks green\. Merge it/)
   assert.match(html, /<button type="button" class="co-btn co-btn-primary">Merge<\/button>/)
-  assert.match(html, /<li class="is-current" aria-current="step">Approved<\/li>/)
   const waiting = render({ decision: decide(facts()), capabilities })
   assert.doesNotMatch(waiting, /co-btn-primary/)
 })
