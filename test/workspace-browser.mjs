@@ -1,7 +1,8 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Eighteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Nineteen scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
+// runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runPullReadingChecks (the whole app: reading a PR page: pictures, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
@@ -45,6 +46,8 @@ import { SourceMap } from './ui/SourceMap.jsx'
 import { ReviewSelection } from './ui/ReviewSelection.jsx'
 import { RepositoryPicker } from './ui/RepositoryPicker.jsx'
 import { ProjectControls } from './ui/ProjectControls.jsx'
+import { ReviewDialog } from './ui/ReviewDialog.jsx'
+import { ReviewConfirmation } from './ui/ReviewConfirmation.jsx'
 import { ProjectEdits } from './ui/ProjectEdits.jsx'
 import { localChangeSentence, localChangeSummary } from './source-map.js'
 import { PullRequests } from './ui/PullRequests.jsx'
@@ -2149,6 +2152,38 @@ window.runDeskFrameChecks = async () => {
 // What a thumb lands on is the browser's answer, so this asks it (elementFromPoint) at the edges of what is drawn and at the edges of the 44px box
 // that has to be around it: a neighbour's tap area must not cover a control's face, a border or a box that clips must not cut the area short,
 // and a control narrower than 44px needs its width too. Desktop draws 44px, so there the same probes show nothing covers a face.
+// The review window over a bulk selection: thirty selected PRs list in the head, and the window keeps its one size,
+// so the list scrolls inside the head and Start and Cancel stay on screen and reachable.
+window.runBulkReviewWindowChecks = async () => {
+  const checks = []
+  try {
+    const pulls = Array.from({ length: 30 }, (_, index) => ({ number: index + 1, title: 'Neutral change number ' + (index + 1), url: 'https://github.com/team/repo/pull/' + (index + 1),
+      headRefOid: 'a'.repeat(40), baseRefName: 'main', baseRefOid: 'd'.repeat(40), baseRef: { target: { oid: 'b'.repeat(40) } }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' },
+      author: { login: 'owner' }, assignees: { nodes: [] } }))
+    const choice = { mode: 'review', intent: 'review', pulls, options: { post_review: true, propose_verdict: true } }
+    const capabilities = { review_fix_merge: true, pr_machine: true, post_review: true, propose_verdict: true }
+    createRoot(document.getElementById('root')).render(<div className="co-root"><style>{CSS}</style><ReviewDialog onClose={() => {}}>
+      <ReviewConfirmation choice={choice} capabilities={capabilities} onConfirm={() => {}} onCancel={() => {}} onModeChange={() => {}} onOptionsChange={() => {}} />
+    </ReviewDialog></div>)
+    await until(() => review(), 'The review window did not open')
+    await captureShot('bulk-review-window')
+    const dialog = query('.co-dialog').getBoundingClientRect(), list = query('.co-rw-head .co-rw-list')
+    const inside = node => { const box = node.getBoundingClientRect(); return box.top >= dialog.top - 1 && box.bottom <= dialog.bottom + 1 }
+    const start = [...review().querySelectorAll('.co-rw-actions .co-btn-primary')][0], cancel = cancelButton(review())
+    ensure(start && cancel && inside(start) && inside(cancel), 'Start or Cancel is clipped by the window: dialog ' + Math.round(dialog.top) + ' to ' + Math.round(dialog.bottom) + ', Start ' + Math.round(start?.getBoundingClientRect().bottom))
+    const head = query('.co-rw-head').getBoundingClientRect()
+    ensure(head.height < dialog.height / 2, 'The head of ' + pulls.length + ' PRs takes ' + Math.round(head.height) + ' of the window\'s ' + Math.round(dialog.height) + 'px')
+    ensure(list && list.scrollHeight > list.clientHeight && getComputedStyle(list).overflowY === 'auto', 'The PR list does not scroll inside the head')
+    ensure(inside(query('.co-rw-body')) && query('.co-rw-body').getBoundingClientRect().height > 80, 'The settings area is squeezed out of the window')
+    list.scrollTop = list.scrollHeight
+    ensure(list.scrollTop > 0 && inside(start), 'Scrolling the PR list moved the window\'s buttons off screen')
+    checks.push({ name: 'a bulk review window keeps Start and Cancel on screen and scrolls its PR list', status: 'pass' })
+    return { status: 'pass', checks }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('#root')).slice(0, 1000) }
+  }
+}
+
 window.runTapBoxChecks = async () => {
   const checks = []
   const TAP = 44
@@ -3624,7 +3659,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

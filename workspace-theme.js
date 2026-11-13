@@ -744,6 +744,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-dialog > .co-review-window.is-sized > .co-rw-body::-webkit-scrollbar { display:none; }
 .co-dialog > .co-review-window.is-sized > .co-rw-body > * { flex-shrink:0; }
 .co-dialog > .co-review-window.is-sized > .co-rw-foot { position:static; margin-top:0; }
+/* A bulk selection lists every PR in the head, which sits outside the scrolling middle: the list scrolls in its own box, so the head stays compact and the foot stays on screen. */
+.co-dialog > .co-review-window.is-sized > .co-rw-head .co-rw-list { max-height:min(168px,24vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 .co-selection-page .co-review-window { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 @media(max-width:680px) {
  .co-dialog-backdrop { align-items:flex-end; padding:12px 12px max(22px,env(safe-area-inset-bottom)); }
