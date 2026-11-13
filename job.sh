@@ -196,11 +196,7 @@ def _reconcile_terminal_staging():
         {},
       )
       result = json.loads(raw) if raw else {}
-      if (
-        not result.get("cleaned")
-        and os.path.isdir(checkout)
-        and LEDGER.note_cleanup_refused(_name, checkout)
-      ):
+      if LEDGER.note_cleanup_result(_name, checkout, result):
         print(
           "contribute: terminal staging remains %s" % rec.get("id"),
           file=sys.stderr,

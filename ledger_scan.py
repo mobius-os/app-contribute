@@ -222,6 +222,17 @@ class LedgerScan:
             work.append((name, record, version))
         return work
 
+    def note_cleanup_result(self, name: str, checkout: str, result: dict) -> bool:
+        """Remember a refused cleanup; True when it is a new refusal to report.
+
+        A checkout the server kept for another unfinished contribution
+        (``kept_for``) is not a refusal: it may be removed once that one
+        finishes, so the record is asked about again on the next pass.
+        """
+        if result.get("cleaned") or result.get("kept_for") or not os.path.isdir(checkout):
+            return False
+        return self.note_cleanup_refused(name, checkout)
+
     def note_cleanup_refused(self, name: str, checkout: str) -> bool:
         """Remember a refusal; True when it is new rather than a repeat."""
         entry = self._entries.get(name)
