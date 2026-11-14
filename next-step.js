@@ -1,9 +1,9 @@
-// The PR page's next-step panel and the word beside its state badge (findings 1, 10 and 13). Both only read
+// The PR page's next-step panel and the word beside its state badge (findings 1, 10 and 13), and the same step for a desk row. They only read
 // the PR machine's decision (pr-machine.js): the pill says what is true, the hint is
 // the machine's own sentence, and the one filled button is the next step it names.
 // Pure, so every state's panel is tested without a browser.
 import { NAMES } from './names.js'
-import { mayRunYourAction, AGENT_INTENTS } from './actions-menu.js'
+import { mayRunYourAction, requestReviewButton, AGENT_INTENTS } from './actions-menu.js'
 import { frameOf, isResting } from './pr-standing.js'
 
 // How each next step runs. 'menu' goes through the same handler as the Actions menu
@@ -72,3 +72,18 @@ export function stageWord(pr, decision) {
   if (decision.approvedBy?.length) return 'Approved'
   return isResting(decision) ? decision.label : 'In review'
 }
+
+// What a desk row can be swiped to: the PR page's own next-step button (its intent and route), where it opens a window,
+// a sheet or a tab. A step that only reads GitHub again (Sync) is not worth a swipe.
+export function rowStep(decision, { record = null, capabilities = null } = {}) {
+  const primary = nextStepModel(decision, { record, capabilities })?.primary
+  return primary && primary.route !== 'sync' ? primary : null
+}
+
+// The ask a PR that waits on its reviewers can be given again: the first of these the PR machine offers and this Möbius can run,
+// as the intent of the sheet it opens (Ask for re-review, Ask for approval, Request review); null when none, so no button shows.
+const ASK_AGAIN = ['ask_rereview', 'ask_approval', 'request_review']
+const canAsk = (decision, id, capabilities) => (id === 'request_review'
+  ? requestReviewButton(decision, { capabilities })?.off === false
+  : !!decision.actions.find(action => action.id === id)?.enabled && mayRunYourAction(id, { capabilities }))
+export const askAgainIntent = (decision, { capabilities = null } = {}) => ASK_AGAIN.find(id => canAsk(decision, id, capabilities)) || null

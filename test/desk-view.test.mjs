@@ -255,7 +255,7 @@ test('a feedback card is shaped like a PR row: title, then #number, then its sta
   const html = api.view({ view: 'needs', projects: [project], records: [], login: 'owner', decisionsFor: () => [item], lastLooked: '', query: '', onOpenProject: () => {}, onOpenPull: () => {}, onOpenRecord: () => {} })
   assert.match(html, /class="co-desk-row is-changes"/)
   assert.match(html, /co-desk-row-title">Feedback title</, 'the number moves to the facts line, so the title is the title alone')
-  assert.match(html, /co-desk-row-meta"><span>#9 · <time[^>]*>detected /)
+  assert.match(html, /co-desk-row-meta"><span>#9 · detected <time/)
   assert.match(html, /co-desk-chip is-tone">Changes requested/)
   assert.match(html, /co-desk-row-why">A GitHub review requested changes\./)
   assert.doesNotMatch(html, /View PR/)
@@ -337,7 +337,7 @@ test('every Needs you row has one layout: title, #number · who · when, status,
   assert.ok(withNote[0].indexOf('co-row-pills') < withNote[0].indexOf('co-desk-note') && withNote[0].indexOf('</button><div class="co-desk-note"') > -1)
   assert.ok(withNote[0].includes(`>${note}<`), 'the whole note is in the page; one line shows and Show more reveals the rest')
   assert.match(items.at(-1), /Reviewed title/)
-  assert.match(items.at(-1), /#4 · teammate · <time[^>]*>you reviewed /)
+  assert.match(items.at(-1), /#4 · teammate · you reviewed <time/)
   assert.doesNotMatch(html, /Pull request #4/)
 })
 
@@ -457,20 +457,20 @@ test('attention rows and the show-more control stay inside the bar', () => {
 
 test('on a phone the four views are one segmented bar with every segment on screen, and the repository list is a button of its own', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
-  const { renderToStaticMarkup, React, DeskChips } = await (await renderModule(`
+  const { renderToStaticMarkup, React, DeskChips, DeskFind } = await (await renderModule(`
     import React from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
-    import { DeskChips } from './ui/Desk.jsx'
-    export { React, renderToStaticMarkup, DeskChips }
+    import { DeskChips, DeskFind } from './ui/Desk.jsx'
+    export { React, renderToStaticMarkup, DeskChips, DeskFind }
   `))
   const html = renderToStaticMarkup(React.createElement(DeskChips, { view: 'needs', counts: { questions: 1, requests: 2, merge: 3, fix: 1, mine: 17, reviewsRunning: 0 }, onView() {} }))
-  assert.equal((html.match(/<button/g) || []).length, 5, 'four views plus the project link, no scrolling row of nine')
+  assert.equal((html.match(/<button/g) || []).length, 4, 'four views, no scrolling row of nine; the repository list is a button of its own beside the search')
   assert.match(html, /aria-pressed="true" aria-label="Needs you, 7"><span>Needs you<\/span><b>7<\/b>/)
   assert.match(html, /aria-label="Review requests, 2"><span>Requests<\/span><b>2<\/b>/)
   assert.match(html, /aria-label="Agent runs"><span>Agent runs<\/span><\/button>/, 'a zero shows no number at all, not a stray 0 or dot')
   assert.doesNotMatch(html, /·/)
-  assert.match(html, /co-desk-chips-projects[^>]*>.*?All repositories/)
-  const withProjects = renderToStaticMarkup(React.createElement(DeskChips, { view: 'projects', counts: { mine: 1 }, projects: [{ key: 'a', name: 'Alpha' }, { key: 'b', name: 'Beta' }, { key: 'c', name: 'Gamma' }, { key: 'd', name: 'Delta' }], onView() {} }))
+  assert.match(renderToStaticMarkup(React.createElement(DeskFind, { view: 'needs', onView() {} })), /co-desk-chips-projects[^>]*>.*?All repositories/)
+  const withProjects = renderToStaticMarkup(React.createElement(DeskFind, { view: 'projects', projects: [{ key: 'a', name: 'Alpha' }, { key: 'b', name: 'Beta' }, { key: 'c', name: 'Gamma' }, { key: 'd', name: 'Delta' }], onView() {} }))
   assert.match(withProjects, /class="co-desk-chips-projects" aria-pressed="true"/, 'the button is lit while the repositories are shown')
   assert.equal((withProjects.match(/co-project-icon/g) || []).length, 3, 'three project icons, never more')
   assert.match(withProjects, /All repositories<\/span><b>4<\/b>/, 'it says how many repositories there are')

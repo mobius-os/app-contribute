@@ -905,7 +905,7 @@ window.runWorkspaceChecks = async () => {
       await click(query('[aria-label="Select all visible pull requests"]'))
       await openSecond(); await chooseAgent(query('.co-pr-detail'))
       // The review window is modal: filters behind it cannot change its scope.
-      ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Review window is not a modal dialog')
+      ensure(review().closest('dialog:modal'),'Review window is not a modal dialog')
       ensure(text(review()).includes('Contribution 8') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope')
       await closeReview(); await setFilter('all')
       ensure(mutationRequests().length===before,'Filtering an existing confirmation approved work')
@@ -996,7 +996,7 @@ window.runWorkspaceChecks = async () => {
       try {
       await warmCapabilities(query('.co-pr-box-head'))
       await chooseAgent(query('.co-pr-box-head'))
-      ensure(review().closest('[role=dialog]')?.getAttribute('aria-modal')==='true','Batch review did not use the modal review window')
+      ensure(review().closest('dialog:modal'),'Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
       ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
       ensure(button('Start & draft') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
@@ -1508,11 +1508,15 @@ window.runWorkspaceChecks = async () => {
       const links = [...provenance.querySelectorAll('.co-gh-chat-link')]
       const names = links.map(link => link.getAttribute('aria-label'))
       // The prepared PR, then one Open chat button per kind of conversation (where it started, the review).
-      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, NAMES.openChat + ' · where it started', NAMES.openChat + ' · review'].join('|') && links.every(link => !text(link)), 'Provenance is not one combined section of icon buttons: ' + names)
+      // Icon buttons with a mouse; on a touch screen (no hover to show the tooltip) each also says its own word.
+      const words = matchMedia('(hover: none)').matches ? [NAMES.preparedPr, NAMES.chat, NAMES.chat] : ['', '', '']
+      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, NAMES.openChat + ' · where it started', NAMES.openChat + ' · review'].join('|') && links.map(link => link.innerText.trim()).join('|') === words.join('|'), 'Provenance is not one combined section of icon buttons: ' + names + ' / ' + links.map(link => link.innerText.trim()))
       ensure(document.querySelectorAll('.co-gh-provenance').length === 1, 'Provenance repeated')
       for (const link of links) {
+        // A control drawn short on a phone is still tapped 44px tall (The Compact Phone Rule), so the tap is probed, not the drawn box.
+        link.scrollIntoView({ block: 'center' })
         const box = link.getBoundingClientRect()
-        ensure(box.height >= 44 && box.width >= 44, 'Provenance hit area below 44px: ' + text(link) + ' ' + box.width + 'x' + box.height)
+        ensure(box.width >= 44 && tapsFortyFour(link), 'Provenance hit area below 44px: ' + text(link) + ' ' + box.width + 'x' + box.height)
       }
       const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent')
       Object.defineProperty(window, 'parent', { configurable: true, value: { postMessage(message, target) {
@@ -2707,7 +2711,8 @@ async function checksTabChecks() {
 // rows, a review saved without a title reads its PR's title, My PRs says Part 1 of 2, and a merged row opens its PR page.
 window.runDeskListChecks = async () => {
   const checks = []
-  const rows = () => [...document.querySelectorAll('.co-desk-item')]
+  // The rows of the list: the quiet Waiting on others block under it is no part of Needs you, so no number counts it.
+  const rows = () => [...document.querySelectorAll('.co-desk-envelopes .co-desk-item')]
   const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
   const chips = () => [...document.querySelectorAll('.co-filter-line button')].map(node => text(node.querySelector('b')) + ' ' + text(node.querySelector('span')))
   const visible = node => node.getClientRects().length > 0
@@ -2858,7 +2863,8 @@ window.runRequestReviewChecks = async () => {
     const labels = [...toolbar.querySelectorAll('button, a')].map(node => text(node) || node.getAttribute('aria-label') || '')
     ensure(labels.indexOf('Request review') === labels.indexOf('Actions') + 1 && labels.indexOf('Actions') >= 0, 'Request review was not right after Actions: ' + labels.join(' | '))
     ensure(toolbar.querySelector('[aria-label="Assign"]'), 'The Assign icon went missing: ' + labels.join(' | '))
-    ensure(!toolbar.querySelector('[aria-label="Assign"]').textContent.trim(), 'Assign must stay a bare icon, apart from Request review')
+    // A bare icon with a mouse; on a touch screen (no hover to show the tooltip) it says its own word and nothing else.
+    ensure(toolbar.querySelector('[aria-label="Assign"]').innerText.trim() === (matchMedia('(hover: none)').matches ? 'Assign' : ''), 'Assign must stay a bare icon, apart from Request review, and say only Assign on a touch screen')
     ensure(!button('Request review').classList.contains('co-btn-primary'), 'Request review took the filled colour, which is the next step’s alone')
     ensure(sideways(), 'The PR page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
     const bar = toolbar.getBoundingClientRect()
@@ -4323,17 +4329,20 @@ window.runRepositoryListChecks = async () => {
     await mountDeskApp({ followed: ['owner/project', 'owner/other'] })
     await until(() => query('.co-rail') || query('.co-desk-chips-projects'), 'The desk did not open')
     await openProject('owner/other')
-    await until(() => query('.co-pin input[role=switch]'), 'The repository had no always-load switch')
-    const pin = () => query('.co-pin input[role=switch]')
-    ensure(!pin().checked && text(query('.co-pin')).includes('Always load'), 'The switch said: ' + text(query('.co-pin')))
+    await until(() => query('.co-pin-btn'), 'The repository had no pin button')
+    const pin = () => query('.co-pin-btn')
+    const pressed = () => pin().getAttribute('aria-pressed') === 'true'
+    ensure(!pressed() && text(pin()) === 'Pin', 'The button said: ' + text(query('.co-pin')))
+    ensure(pin().closest('.co-workspace-name-row'), 'The pin button was not on the repository title row')
     ensure(listReads('owner/other') === 0, 'A repository was read although nobody pinned it')
     await captureShot('repository-always-load')
     await click(pin())
-    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === true && pin().checked, 'The choice was not saved: ' + JSON.stringify(values.get('pinned-repositories.json')))
+    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === true && pressed(), 'The choice was not saved: ' + JSON.stringify(values.get('pinned-repositories.json')))
     await until(() => listReads('owner/other') >= 1, 'A pinned repository was not read at once')
+    await captureShot('repository-pinned')
     await click(pin())
-    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === false && !pin().checked, 'Turning it off was not saved')
-    checks.push({ name: 'the always-load switch is saved as a preference, reads the repository, and turns off again', status: 'pass' })
+    await until(() => values.get('pinned-repositories.json')?.['owner/other'] === false && !pressed(), 'Turning it off was not saved')
+    checks.push({ name: 'the pin button is saved as a preference, reads the repository, and turns off again', status: 'pass' })
 
     // 7. Every action reads its PR as it starts: a PR that changed since the list showed it is refused, and nothing is sent.
     reset(); await saveCopies(null)

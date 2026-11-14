@@ -27,7 +27,8 @@ const opinion = state => ({ latestOpinionatedReviews: { nodes: [{ state, author:
 // A review of someone else's PR that comes back to its owner: new commits since the review (the shared decision's "review again").
 const reviewAgain = { role: 'reviewer', turn: 'you', state: 'reviewer.re_review', next: 'review' }
 const entry = (number, repo, bucket) => ({ id: `${repo}#${number}`, bucket, at: number, run: { created_at: '2026-11-03T08:00:00Z' }, item: { repo, number, title: `Run ${number}` }, chips: [{ label: 'Needs you', tone: 'owner' }], decision: reviewAgain })
-const rowsIn = html => (html.match(/class="co-desk-row(?: is-[a-z_]+)*"/g) || []).length
+// The quiet "Waiting on others" block under the list is no part of Needs you (The One Count Rule), so no number counts its rows.
+const rowsIn = html => (html.split('class="co-envelope co-waiting"')[0].match(/class="co-desk-row(?: is-[a-z_]+)*"/g) || []).length
 
 // Review requests (1, 2), feedback card on #3, own PRs: #4 fails, #5 ready (a row each), #6 just waiting,
 // and agent runs: on #1 (already a row), #7 waiting (a row), #8 stalled (a row), #9 running (not waiting).

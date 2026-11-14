@@ -53,6 +53,8 @@ export const NAMES = Object.freeze({
   merge: 'Merge',
   // Where Möbius confirms Merge on its own sheet, the way it lands is chosen here first, only when the repository allows more than one.
   mergeOptions: 'Merge options…',
+  // The word beside the chevron of that second choice on a phone; a screen reader still hears Merge options….
+  options: 'Options',
   // The app's confirm sheet while Möbius's own sheet, over it, waits for the owner.
   waitingForMobius: 'Waiting for your confirmation in Möbius…',
   closePr: 'Close pull request',
@@ -62,6 +64,10 @@ export const NAMES = Object.freeze({
   askRereview: 'Ask for re-review',
   // Posts a note naming the reviewers who commented but have not approved (the PR machine's ask_approval).
   askApproval: 'Ask for approval',
+  // The quiet button on a PR that has waited on its reviewers for days. It opens the Ask or Request review sheet the PR machine offers for that PR.
+  askAgain: 'Ask again',
+  // The quiet block under Needs you: your own PRs that have waited on others for days. It is a reminder and counts in no badge.
+  waitingOnOthers: 'Waiting on others',
 
   // What reaches GitHub
   sendToGitHub: 'Send to GitHub',
@@ -76,6 +82,11 @@ export const NAMES = Object.freeze({
   // One word for taking a proposal or draft away, whatever it was (a verdict, a pushed fix, a prepared PR).
   discard: 'Discard',
   openChat: 'Open chat',
+  // The words beside the icons of the PR page's secondary buttons on a touch screen, where there is no hover to show a tooltip.
+  // A button of one chat says Chat; one that holds several says Chats and how many.
+  github: 'GitHub',
+  chat: 'Chat',
+  chats: 'Chats',
   answerInChat: 'Answer in chat',
   // A saved Respond to feedback answer on the Review tab: Post publishes it as you; Reply in chat opens its conversation to talk it
   // over first (answerInChat is for a question the agent asked); Send again re-sends an approved Post to the chat; Try again carries
@@ -98,9 +109,14 @@ export const NAMES = Object.freeze({
   moreRepositories: 'More repositories',
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
-  // The switch on a repository that has its pull requests read in the background, so they are there when it is opened.
-  alwaysLoad: 'Always load',
+  // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.
+  // One short word like Sync; the sentence says what it does. The state is the filled pin and aria-pressed, never the word alone.
+  pin: 'Pin',
+  pinHint: 'Keeps this repository’s pull requests up to date in the background.',
 })
+
+// How long a PR has waited on others, as the block under Needs you says it: "Waiting 3 days on Sam" ("reviewers" when no one is named).
+export const waitingWords = (days, who) => `Waiting ${days} days on ${who}`
 
 const REVIEW_JOBS = new Set(['review', 'review_merge'])
 // The words for starting a stopped agent job over: a review is reviewed again.

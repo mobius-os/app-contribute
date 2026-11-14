@@ -16,10 +16,12 @@ export const WORKSPACE_CSS = `
 .co-workspace-head { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:2px 0 12px; }
 .co-workspace-title { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
 .co-workspace-title > div { flex:1; min-width:0; }
-.co-workspace-name-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.co-pin { display:flex; flex-wrap:wrap; align-items:center; gap:0 14px; margin:6px 0 0; }
-.co-pin-switch { display:inline-flex; align-items:center; gap:10px; min-height:var(--co-control-height); font-size:var(--co-text-meta); font-weight:500; color:var(--text); cursor:pointer; }
-.co-pin small { flex:1 1 220px; font-size:var(--co-text-meta); color:var(--muted); line-height:1.35; }
+.co-workspace-name-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; }
+.co-workspace-name-row h2 { min-width:0; }
+.co-pin { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; }
+.co-pin-btn[aria-pressed=true] .co-icon { fill:currentColor; }
+.co-pin-failed { flex-basis:100%; font-size:var(--co-text-meta); color:var(--danger); }
 .co-workspace-title .co-source-glyph { display:none; }
 .co-workspace-title h2 { font-size:var(--co-text-section); font-weight:600; line-height:1.25; letter-spacing:-.025em; margin:0; overflow-wrap:anywhere; }
 .co-workspace-title p { display:flex; flex-wrap:wrap; align-items:center; gap:0 12px; font-size:var(--co-text-meta); color:var(--muted); margin:4px 0 0; overflow-wrap:anywhere; }
@@ -421,9 +423,12 @@ export const WORKSPACE_CSS = `
 .co-follow-line b { color:var(--text); font-weight:600; }
 .co-follow-line svg { flex:none; }
 .co-follow-error { flex-basis:100%; color:var(--danger-text,var(--danger)); }
-.co-gh-pr-sub code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
+.co-gh-pr-sub code,.co-desc-marks code { padding:1px 6px; border-radius:var(--co-radius-pill); background:color-mix(in srgb,var(--accent) 12%,var(--surface)); color:var(--text); font:var(--co-text-meta) var(--mono,monospace); }
 .co-branch-flow { display:inline-flex; align-items:center; gap:7px; min-width:0; }
 .co-gh-pr-sub .co-branch-flow { flex-direction:row; flex-wrap:wrap; margin:0; }
+/* The branches and labels are drawn twice: on the facts line (a wide screen) and in the Description row's head (a phone); one of the two shows. */
+.co-pr-marks { display:contents; }
+.co-desc-marks { display:none; }
 .co-branch-flow code { overflow-wrap:anywhere; }
 .co-branch-flow .co-icon { flex:0 0 auto; color:var(--muted); }
 .co-tab-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
@@ -447,6 +452,12 @@ export const WORKSPACE_CSS = `
 @media (prefers-reduced-motion:reduce) { .co-tip::after { transition-duration:0s; } }
 /* On a phone a tooltip hangs from its button's right edge. Centred, the last button's long label ran past the screen's edge, and although nothing showed, the page scrolled sideways to reach it. */
 @media (max-width:680px) { .co-tip::after { left:auto; right:0; transform:none; } }
+/* On a touch screen there is no hover to show a tooltip, so the PR page's icon buttons say their word beside the icon (a mouse keeps the icon and its tooltip). */
+.co-btn-word { display:none; }
+@media (hover:none) {
+ .co-pr-detail-actions .co-tip { min-width:0; min-height:var(--co-control-height); padding-inline:10px; }
+ .co-pr-detail-actions .co-btn-word { display:inline; }
+}
 .co-gh-provenance { display:contents; }
 .co-chat-group { position:relative; display:inline-flex; }
 .co-chat-group-list { position:absolute; z-index:30; top:calc(100% + 6px); left:0; width:min(320px,calc(100vw - 32px)); padding:6px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); box-shadow:0 12px 32px rgba(0,0,0,.28); }
@@ -576,6 +587,8 @@ export const WORKSPACE_CSS = `
 .co-agent-menu-pair > button:first-child { flex:1 1 auto; min-width:0; }
 .co-agent-menu-list .co-agent-menu-pair > .co-agent-menu-side { flex:none; width:44px; align-items:center; justify-content:center; padding:0; border-left:1px solid var(--border); border-radius:0 var(--co-radius-field) var(--co-radius-field) 0; }
 .co-agent-menu-list .co-agent-menu-side .co-icon { margin:0; transform:rotate(-90deg); }
+/* Merge's second choice names itself on a phone only: the word beside its chevron. A screen reader hears the button's label, Merge options…. */
+.co-agent-menu-side-word { display:none; }
 .co-rw-reason { display:grid; gap:6px; margin:0 0 14px; }
 .co-rw-reason textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:var(--co-radius-control); padding:10px 12px; resize:vertical; min-height:72px; }
 .co-rw-reason small { color:var(--muted); font-size:var(--co-text-meta); }
@@ -649,21 +662,26 @@ export const WORKSPACE_CSS = `
 .co-agent-menu-scrim,.co-agent-menu-list .co-agent-menu-cancel { display:none; }
 @media(max-width:680px) {
   .co-agent-menu-scrim { display:block; position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
-  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(86dvh,640px); overflow-y:auto; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
+  .co-agent-menu .co-agent-menu-list,.co-agent-menu.is-align-start .co-agent-menu-list { position:fixed; top:auto; left:0; right:0; bottom:0; width:auto; max-height:min(90dvh,720px); display:flex; flex-direction:column; overflow:hidden; overscroll-behavior:contain; padding:10px 12px max(14px,env(safe-area-inset-bottom)); border:0; border-top:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window) var(--co-radius-window) 0 0; box-shadow:0 -18px 44px rgba(0,0,0,.55); }
   .co-agent-menu-list { scrollbar-width:none; }
   .co-agent-menu-list::-webkit-scrollbar { display:none; }
-  .co-agent-menu-rows { max-height:none; overflow:visible; }
-  .co-agent-menu-list::before { content:''; display:block; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
+  /* The handle and the head stay on top and Cancel stays at the foot, above the safe area; only the rows between them scroll (the fade at their foot says there are more). */
+  .co-agent-menu-rows { flex:1 1 auto; min-height:0; max-height:none; }
+  .co-agent-menu-list::before { content:''; display:block; flex:none; width:44px; height:5px; margin:0 auto 10px; border-radius:var(--co-radius-round); background:var(--co-edge); }
+  .co-agent-menu-head { flex:none; }
   .co-agent-menu-list button:not(.co-agent-menu-cancel) { min-height:48px; margin:5px 0; border:1px solid var(--border); }
   .co-agent-menu-list button.is-rec { border-color:var(--accent); }
-  .co-agent-menu-list .co-agent-menu-cancel { display:flex; width:100%; margin-top:8px; border:1.5px solid var(--co-edge); font-weight:700; }
+  .co-agent-menu-list .co-agent-menu-cancel { display:flex; flex:none; width:100%; margin-top:8px; border:1.5px solid var(--co-edge); font-weight:700; }
+  .co-agent-menu-list .co-agent-menu-pair > .co-agent-menu-side { width:auto; padding:0 12px; gap:6px; }
+  .co-agent-menu-side-word { display:inline; font-size:var(--co-text-meta); font-weight:600; }
   .co-agent-menu-apart { margin-top:0; padding-top:0; border-top:0; }
 }
 
 /* The agent review window: protected focus for a consent with public effects. */
 /* The Window Rule (DESIGN.md): every pop-up over the page is one blurred, darkened backdrop and one round card with a faint accent edge. */
-.co-dialog-backdrop { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
-.co-dialog { width:min(520px,100%); max-height:calc(100% - 40px); overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); box-shadow:0 28px 90px rgba(0,0,0,.42); animation:co-dialog-in .16s ease-out; }
+/* A window is the browser's modal <dialog> (ui/ReviewDialog.jsx): the card is the dialog and the backdrop is its ::backdrop. The user-agent's own padding, colour and size caps are set back, and scrolling over the backdrop or inside the card never reaches the page. */
+.co-dialog::backdrop { background:rgba(0,0,0,.7); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); overflow:hidden; overscroll-behavior:contain; }
+.co-dialog { width:min(520px,calc(100% - 40px)); max-width:none; max-height:calc(100% - 80px); margin:auto; padding:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:var(--co-radius-window); background:var(--surface); color:var(--text); box-shadow:0 28px 90px rgba(0,0,0,.42); animation:co-dialog-in .16s ease-out; }
 .co-dialog::-webkit-scrollbar { display:none; }
 /* A project action (Send to GitHub, Mark ready) is a window like the rest: it sits in a .co-dialog and its own card chrome is gone. */
 .co-dialog > .co-task-dock { position:relative; margin:0; padding:32px 28px 28px; border:0; background:none; }
@@ -813,7 +831,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rw-versions p { margin:6px 0 0; }
 /* An agent window keeps one size, whatever is open inside it: the head and the foot stay put and the middle scrolls
    without a scrollbar (its foot fades while more is below: the scroll fade at the end of this sheet). */
-.co-dialog:has(> .co-review-window.is-sized) { display:flex; height:min(780px,calc(100% - 40px)); overflow:hidden; }
+.co-dialog[open]:has(> .co-review-window.is-sized) { display:flex; height:min(780px,calc(100% - 80px)); overflow:hidden; }
 .co-dialog > .co-review-window.is-sized { flex:1 1 auto; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .co-dialog > .co-review-window.is-sized > .co-rw-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; padding-bottom:20px; }
 .co-dialog > .co-review-window.is-sized > .co-rw-body::-webkit-scrollbar { display:none; }
@@ -823,9 +841,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-dialog > .co-review-window.is-sized > .co-rw-head .co-rw-list { max-height:min(168px,24vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 .co-selection-page .co-review-window { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
 @media(max-width:680px) {
- .co-dialog-backdrop { align-items:flex-end; padding:12px 12px max(22px,env(safe-area-inset-bottom)); }
- .co-dialog { width:100%; max-height:100%; }
- .co-dialog:has(> .co-review-window.is-sized) { height:min(780px,100%); }
+ .co-dialog { width:calc(100% - 24px); max-height:calc(100% - 12px - max(22px,env(safe-area-inset-bottom))); margin:auto auto max(22px,env(safe-area-inset-bottom)); }
+ .co-dialog[open]:has(> .co-review-window.is-sized) { height:min(780px,calc(100% - 12px - max(22px,env(safe-area-inset-bottom)))); }
  .co-rw-head { --rw-edge:20px; }
   .co-rw-icon { width:40px; height:40px; }
  .co-rw-foot { margin-top:0; padding-top:14px; }
@@ -925,18 +942,32 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-filter-line button b { color:var(--accent); font-variant-numeric:tabular-nums; }
 .co-filter-line button:hover,.co-filter-line button[aria-pressed=true] { color:var(--text); }
 .co-filter-line button[aria-pressed=true] span { text-decoration:underline 2px var(--accent); text-underline-offset:7px; }
-/* Phone only: the four views as one segmented bar, all on screen, the word first and its count after it.
-   Under it the repository list is a button of its own: project icons, the word, a count and a chevron. */
-.co-desk-chips { display:none; position:sticky; top:0; z-index:5; margin:0 0 10px; padding:6px 0; background:var(--bg); }
+/* Phone only: the four views as one segmented bar, all on screen, the word first and its count after it: one row where the bar's room holds
+   all four, two by two on the narrowest phones, never overlapping. Scrolling down slides the bar away and scrolling up brings it back
+   (content-first-noise-reduction); a browser without scroll-state queries keeps it where it is. */
+.co-desk-chips { display:none; position:sticky; top:0; z-index:5; margin:0 0 10px; padding:6px 0; background:var(--bg); container:co-views / inline-size; }
 .co-desk-seg { display:flex; flex-wrap:wrap; gap:2px; padding:3px; border:1px solid var(--co-edge); border-radius:var(--co-radius-panel); background:var(--surface); }
 .co-desk-seg button { flex:1 1 auto; min-width:0; display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:var(--co-control-height); padding:0 4px; border:0; border-radius:var(--co-radius-control); background:none; color:var(--muted); font:600 var(--co-text-meta) var(--font); white-space:nowrap; cursor:pointer; }
 .co-desk-seg button[aria-pressed=true] { background:var(--accent-dim, var(--surface-2)); color:var(--text); box-shadow:inset 0 0 0 1px var(--accent); }
 .co-desk-seg button b { color:var(--accent); font-variant-numeric:tabular-nums; }
-/* Four words and their counts do not fit one row at 14 px on the narrowest phones: two by two, never overlapping. */
-@media(max-width:400px) { .co-desk-seg button { flex:1 1 calc(50% - 2px); } }
-.co-desk-chips .co-desk-chips-projects { display:flex; align-items:center; gap:10px; width:100%; margin-top:8px; min-height:var(--co-control-height); padding:0 12px 0 10px; border:1px solid var(--co-edge); border-radius:var(--co-radius-panel); background:linear-gradient(90deg,var(--accent-dim, var(--surface-2)),var(--surface)); color:var(--text); font:600 var(--co-text-meta) var(--font); text-align:left; cursor:pointer; }
-.co-desk-chips .co-desk-chips-projects[aria-pressed=true] { border-color:var(--accent); }
-.co-desk-chips-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@container co-views (max-width:350px) { .co-desk-seg button { flex:1 1 calc(50% - 2px); } }
+@media(max-width:980px) {
+ .co-page { container:co-page / scroll-state; }
+ @container co-page scroll-state((scrolled: bottom) and (scrollable: top)) { .co-desk-chips { transform:translateY(-100%); } }
+ /* Keyboard focus keeps the bar in view; a tapped view button keeps no focus ring, so it does not pin the bar. */
+ .co-desk-chips:has(:focus-visible) { transform:none; }
+}
+@media(max-width:980px) and (prefers-reduced-motion:no-preference) { .co-desk-chips { transition:transform .2s ease-out; } }
+/* Under the bar the repository list is a button of its own beside the search: a few project icons, a count and a chevron (the word
+   only for a screen reader on a phone). Above 980px the side menu holds it and this one is not drawn. */
+.co-desk-find { display:flex; align-items:center; gap:8px; margin:0 0 16px; }
+.co-desk-find .co-search { flex:1; margin:0; }
+.co-desk-find .co-search input { text-overflow:ellipsis; }
+.co-desk-find .co-desk-chips-projects { display:none; }
+@media(max-width:980px) { .co-desk-find .co-desk-chips-projects { display:flex; align-items:center; flex:none; gap:8px; min-height:var(--co-control-height); padding:0 8px 0 10px; border:1px solid var(--co-edge); border-radius:var(--co-radius-control); background:linear-gradient(90deg,var(--accent-dim, var(--surface-2)),var(--surface)); color:var(--text); font:600 var(--co-text-meta) var(--font); text-align:left; cursor:pointer; } }
+.co-desk-find .co-desk-chips-projects[aria-pressed=true] { border-color:var(--accent); }
+.co-desk-chips-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media(max-width:680px) { .co-desk-chips-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0, 0, 0, 0); } } /* the .co-visually-hidden recipe, on a phone only */
 .co-desk-chips-projects b { color:var(--muted); font-weight:500; font-variant-numeric:tabular-nums; }
 .co-desk-chips-projects > .co-icon { color:var(--muted); }
 .co-desk-avatars { display:flex; }
@@ -994,6 +1025,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-desk-row-labels { display:flex; flex-wrap:wrap; gap:4px; }
 .co-desk-row-main > .co-pr-labels, .co-desk-row-main > .co-row-pills { margin-top:0; }
 .co-desk-row-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; color:var(--muted); font-size:var(--co-text-meta); }
+/* A phone reads a moment short (4m), both forms are in the page (TimeAgo short). */
+.co-time-short { display:none; }
 .co-desk-order { font-variant-numeric:tabular-nums; }
 .co-desk-chip { padding:1px 8px; border-radius:var(--co-radius-pill); font-size:var(--co-text-chip); font-weight:600; background:var(--surface-2); color:var(--text); }
 .co-desk-chip.is-you { background:var(--accent-dim, var(--surface-2)); color:var(--co-you-text); }
@@ -1221,10 +1254,16 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @keyframes co-fade-end { 0%,96% { --co-fade-end:28px; } 100% { --co-fade-end:0px; } }
 @media(max-width:680px) {
  .co-pr-detail { display:flex; flex-direction:column; }
- .co-pr-detail .co-gh-pr-sub { order:-2; margin:2px 0 0; }
- /* The facts sit above the title on a phone, and the Following line stays right under them. */
- .co-pr-detail .co-follow-line { order:-2; margin:0; }
- .co-pr-detail .co-gh-pr-head { order:-1; padding-right:0; }
+ /* The title leads on a phone, then one facts line (state, number, author) and the Following line right under it. The branches and labels sit in the Description row's head. */
+ .co-pr-detail .co-gh-pr-head { order:-2; padding-right:0; }
+ .co-pr-detail .co-gh-pr-sub { order:-2; margin:6px 0 0; }
+ .co-pr-detail .co-follow-line { order:-2; margin:6px 0 0; }
+ .co-pr-marks { display:none; }
+ .co-desc-marks { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; padding-left:22px; }
+ .co-desc-marks .co-branch-flow { flex-direction:row; flex-wrap:nowrap; min-width:0; max-width:100%; margin:0; gap:6px; }
+ .co-desc-marks .co-branch-to { flex:none; gap:6px; }
+ /* Folded, a long branch name keeps the row to one line and ends in an ellipsis; opened, the Description shows it whole. */
+ .co-gh-description:not([open]) .co-desc-marks code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
  .co-pr-detail .co-pr-title-num { display:none; }
  .co-pr-detail .co-pr-sub-num { display:inline; }
  .co-pull-page .co-gh-pr-title { margin-top:8px; font-size:var(--co-text-body); font-weight:600; line-height:1.32; letter-spacing:-.01em; }
@@ -1281,6 +1320,21 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-desk-item.co-desk-row-split { grid-template-columns:minmax(0,1fr); grid-template-areas:"row" "note" "action"; padding:0 14px 12px; }
  .co-desk-item.co-desk-row-split > .co-desk-note { padding:0 0 10px 26px; }
 }
+/* Swipe a row left to reach its next step (ui/SwipeReveal.jsx; only a touch screen draws it): the row and the button are one horizontal
+   scroll-snap scroller, so the browser does the swiping and vertical scrolling is never taken from the page. */
+.co-swipe { display:grid; grid-template-columns:100% max-content; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; overscroll-behavior:chain; }
+@media(prefers-reduced-motion:no-preference) { .co-swipe { scroll-behavior:smooth; } }
+.co-swipe-front { min-width:0; scroll-snap-align:start; }
+.co-swipe-panel { display:flex; align-items:center; padding:0 14px; background:var(--surface-2); scroll-snap-align:end; }
+/* The quiet block under Needs you (ui/WaitingOnOthers.jsx): the card look of the list above, with a muted head and no colour of its own. */
+.co-waiting { margin-top:16px; }
+.co-waiting h3 { margin:0; padding:6px 0; color:var(--muted); font-size:var(--co-text-meta); font-weight:600; }
+@media(max-width:680px) {
+ .co-waiting { margin-top:10px; }
+ .co-waiting .co-desk-item.co-desk-row-split { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"row action"; align-items:center; padding:0 8px 0 0; }
+ .co-waiting .co-desk-row-split > .co-desk-row { padding-left:12px; }
+ .co-waiting .co-desk-row-action { width:auto; }
+}
 /* ---- Compact on a phone (DESIGN.md, The Compact Phone Rule) ----
    The sizes are the phone set of the token sheet in theme.js. This block takes the air out of the lists
    and holds on to the two things that must not shrink with them: the tap area and the text you type. */
@@ -1301,11 +1355,18 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-pr-filters { padding-block:var(--co-tap-reach); }
  .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b { line-height:20px; }
  .co-desk-chips { margin-bottom:6px; padding:4px 0; }
- .co-filter-line { margin:0 0 4px; }
- .co-search { margin-bottom:10px; }
+ .co-filter-line { margin:0 0 calc(2 * var(--co-tap-reach)); }
+ .co-search, .co-desk-find { margin-bottom:10px; }
  .co-desk-envelopes { gap:10px; }
  .co-desk-row { padding:9px 12px; }
- .co-desk-row-main { gap:3px; }
+ /* A desk row is three lines: the title on one line, one facts line with the short time, then the labels and the status side by side.
+    Each of them wraps to another line only where it truly cannot fit. */
+ .co-desk-row-main { flex-direction:row; flex-wrap:wrap; align-items:center; align-content:flex-start; gap:3px 6px; }
+ .co-desk-row-title { flex:1 0 100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; overflow-wrap:normal; }
+ .co-desk-row-meta { flex:1 0 100%; gap:2px 10px; }
+ .co-desk-row-main > .co-pr-labels, .co-desk-row-main > .co-row-pills { flex:0 1 auto; min-width:0; }
+ .co-time-short { display:inline; }
+ .co-time-long { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; } /* the .co-visually-hidden recipe: the long form stays the reader's */
  .co-pr-row { padding-top:6px; padding-bottom:6px; }
  .co-source-row { min-height:0; padding:12px 4px; }
  /* A repository's sentences are detail under its name, not a second headline. */

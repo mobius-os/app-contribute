@@ -103,7 +103,7 @@ test('every agent and confirm window starts with the same head: repository and n
   assert.doesNotMatch(several, /co-branch-flow/, 'a window over several PRs lists them and names no one branch')
   assert.match(several, /<p class="co-rw-eyebrow">2 PRs<\/p>/)
   const detail = readFileSync(new URL('../ui/PullRequestDetail.jsx', import.meta.url), 'utf8')
-  assert.match(detail, /<BranchFlow pr=\{pr\} \/>/, 'the PR page and the windows draw the branches with the same component')
+  assert.match(detail, /<BranchFlow pr=\{pr\}( inline)? \/>/, 'the PR page and the windows draw the branches with the same component')
   assert.match(mod.head({ title: 'Withdraw this pull request?', eyebrow: 'team/repo #4' }), /<p class="co-rw-eyebrow">team\/repo #4<\/p><h3>Withdraw this pull request\?<\/h3><\/div>/, 'a record that is not a PR on GitHub names itself and shows no PR line')
   const dir = new URL('../ui/', import.meta.url)
   const own = readdirSync(dir).filter(file => file.endsWith('.jsx') && file !== 'WindowHead.jsx')

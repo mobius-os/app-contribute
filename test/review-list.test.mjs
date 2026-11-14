@@ -265,7 +265,7 @@ test('a review row reads like every desk row: title, #number · who · when, sta
   const pull = { title: 'Read from GitHub', author: { login: 'someone-else' }, state: 'MERGED' }
   const html = view({ ...base, reviews: reviews([{ ...row(112, 'mobius-os/mobius', 'done', [{ label: 'Merged', tone: 'good' }], { title: 'Read from GitHub' }), pull }]) })
   assert.match(html, /co-desk-row-title">Read from GitHub</)
-  assert.match(html, /co-desk-row-meta"><span>#112 · someone-else · <time[^>]*>you reviewed /)
+  assert.match(html, /co-desk-row-meta"><span>#112 · someone-else · you reviewed <time/)
   assert.ok(html.indexOf('co-desk-row-meta') < html.indexOf('co-row-pills'))
   assert.match(view({ ...base, reviews: reviews([row(113, 'mobius-os/mobius', 'done', [], { title: '' })]) }), /Pull request #113/, 'a PR GitHub could not read keeps the plain fallback')
 })

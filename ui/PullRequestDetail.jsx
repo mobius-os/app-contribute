@@ -143,6 +143,10 @@ const COMMIT_OPEN_FILES = 5
 // Which job a chat belongs to. Every chat button is Open chat; the kind tells several apart.
 const PROVENANCE_KINDS = { source: 'where it started', review: 'review', fix: 'fix', respond: 'feedback' }
 
+// An icon-only button says its word beside the icon on a touch screen, where no hover shows its tooltip (workspace-theme.js, @media (hover:none));
+// with a mouse it stays an icon with its tooltip. The button's own accessible name is unchanged.
+const ButtonWord = ({ children }) => <span className="co-btn-word">{children}</span>
+
 // One icon button per kind of conversation. Several chats of the same kind fold
 // into one dropdown listing Review #1, #2, … with each chat's own title
 // underneath. A PR with a single chat anywhere says just "Open chat".
@@ -158,15 +162,15 @@ function ProvenanceGroup({ role, links, lone }) {
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
   const kind = PROVENANCE_KINDS[role] || 'agent'
-  const many = `${NAMES.openChat} · ${links.length} ${kind}`
+  const many = `${NAMES.chats} ${links.length} · ${kind}`
   if (links.length === 1) {
     const name = lone ? NAMES.openChat : `${NAMES.openChat} · ${kind}`
     // The chat's own title rides in the tooltip; a role's stand-in title ("Source conversation") would only repeat the name.
     const title = links[0].title === ROLE_TITLES[role] ? '' : links[0].title
-    return <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => openAgentConversation(links[0].chat_id)} aria-label={name} data-tip={title ? `${name} · ${title}` : name}><Icon name="feedback" size={15} /></button>
+    return <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => openAgentConversation(links[0].chat_id)} aria-label={name} data-tip={title ? `${name} · ${title}` : name}><Icon name="feedback" size={15} /><ButtonWord>{NAMES.chat}</ButtonWord></button>
   }
   return <span className="co-chat-group" ref={root} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
-    <button type="button" className="co-btn co-tip co-gh-chat-link" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)} aria-label={many} data-tip={many}><Icon name="feedback" size={15} /><Icon name="chevron" size={14} /></button>
+    <button type="button" className="co-btn co-tip co-gh-chat-link" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)} aria-label={many} data-tip={many}><Icon name="feedback" size={15} /><ButtonWord>{NAMES.chats} {links.length}</ButtonWord><Icon name="chevron" size={14} /></button>
     {open ? <div className="co-chat-group-list" ref={list} role="menu" aria-label={many}>
       {links.map((link, index) => <button type="button" role="menuitem" key={link.chat_id} onClick={() => { setOpen(false); openAgentConversation(link.chat_id) }}>
         <strong>{kind[0].toUpperCase() + kind.slice(1)} #{index + 1}</strong>{link.title ? <small>{link.title}</small> : null}
@@ -180,7 +184,7 @@ function PullProvenance({ record, onRecord, conversations }) {
   if (!local && !conversations.length) return null
   const roles = [...new Set(conversations.map(link => link.role))]
   return <span className="co-gh-provenance" role="group" aria-label="Where this PR came from">
-    {local ? <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => onRecord(record)} aria-label="Open prepared PR" data-tip="Open prepared PR"><Icon name="draft" size={15} /></button> : null}
+    {local ? <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => onRecord(record)} aria-label="Open prepared PR" data-tip="Open prepared PR"><Icon name="draft" size={15} /><ButtonWord>{NAMES.preparedPr}</ButtonWord></button> : null}
     {roles.map(role => <ProvenanceGroup key={role} role={role} links={conversations.filter(link => link.role === role)} lone={conversations.length === 1} />)}
   </span>
 }
@@ -363,6 +367,8 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     {hasMore ? <button className="co-btn" onClick={() => set(current + 1)}>{unknown ? 'Check next page' : 'Next page'}</button> : null}
   </div> : null
   const labels = pr.labels?.nodes || []
+  // Where the PR goes and what it is tagged: beside the facts on a wide screen, in the folded Description's head on a phone (CSS shows one of the two).
+  const marks = <><BranchFlow pr={pr} inline />{labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</>
   const tabs = [['conversation', 'Comments'], ['commits', 'Commits'], ['files', <>Files<span className="co-tab-more"> changed</span></>], ['checks', 'Checks'], ['review', 'Review']]
   // GitHub-style tab badges: one neutral count pill per tab. Comments counts
   // the loaded conversation (comments and reviews); until it loads, GitHub's
@@ -397,16 +403,15 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     <header className="co-gh-pr-head">
       <h3 className="co-gh-pr-title" ref={titleRef}><span className="co-pr-title-num">#{pr.number}</span> {pr.title}</h3>
     </header>
-    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} note={stageWord(pr, review?.standing)} /><span className="co-pr-sub-num">#{pr.number}</span>
-      <span>by <b>{pr.author?.login || 'Someone'}</b></span>
-      <BranchFlow pr={pr} />
-      {labels.map(label => <GithubLabel key={label.name} name={label.name} color={label.color} />)}</div>
+    <div className="co-gh-pr-sub"><PullStateBadge pr={pr} note={stageWord(pr, review?.standing)} />
+      <span><span className="co-pr-sub-num">#{pr.number} · </span>by <b>{pr.author?.login || 'Someone'}</b></span>
+      <span className="co-pr-marks">{marks}</span></div>
     <div className={'co-pr-detail-actions' + tips.className} onPointerOut={tips.onPointerOut} onBlur={tips.onBlur}>
       {!readOnly ? <ActionsMenu variant="button" align="start" brief pulls={[pr]} decisions={review?.standing ? [review.standing] : []} record={record} capabilities={capabilities} disabled={stale} onChoose={mode => onReview?.(mode)} ariaLabel={`Choose an action for PR ${pr.number}`} /> : null}
       {!readOnly && requestOffer && !reviewRequested(pr) ? <button className="co-btn co-request-review" disabled={stale || requestOffer.off} title={requestOffer.off ? requestOffer.reason : undefined} onClick={() => onReview?.('request_review')}><Icon name="plus" size={16} />{NAMES.requestReview}</button> : null}
-      {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /></button> : null}
+      {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /><ButtonWord>{NAMES.assign}</ButtonWord></button> : null}
       {status && onProgress ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
-      {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /></a> : null}
+      {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /><ButtonWord>{NAMES.github}</ButtonWord></a> : null}
       <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
     </div>
     {/* Only where this Möbius can switch following on after Send: elsewhere the page stays as it was. */}
@@ -417,6 +422,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       <summary>
         <span className="co-desc-title"><Icon name="chevron" size={14} />Description</span>
         <small>{openedLine(description.data?.user?.login || pr.author?.login, pr.createdAt)}</small>
+        <span className="co-desc-marks">{marks}</span>
       </summary>
       <div className="co-desc-content">
         {readState(description, 'description')}

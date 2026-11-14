@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows } from '../desk.js'
+import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows, waitingOnOthers } from '../desk.js'
 import { conversationCount, prKey, reviewForPull } from '../collaboration.js'
 import { savedFindings } from '../address-feedback.js'
 import { frameState, reviewForRecord } from '../review-frame.js'
@@ -7,6 +7,8 @@ import { ReviewFrame } from './ReviewFrame.jsx'
 import { chipOf, frameOf } from '../pr-standing.js'
 import { decisionChip, isDraftWord } from '../review-list.js'
 import { actionOf } from '../pr-machine.js'
+import { rowStep } from '../next-step.js'
+import { recordsForPull } from '../provenance.js'
 import { recordsForProject } from '../source-map.js'
 import { STATUS_LABELS } from '../domain.js'
 import { groupNote, lookAtReason } from './AttentionList.jsx'
@@ -15,6 +17,7 @@ import { Icon } from './Icons.jsx'
 import { DeskRow, DotLine, StatusPill, whoOf } from './DeskRow.jsx'
 import { Envelope, EmptyView } from './Envelope.jsx'
 import { AgentRunsView, ReviewRow } from './ReviewsView.jsx'
+import { WaitingOnOthers } from './WaitingOnOthers.jsx'
 import { NAMES } from '../names.js'
 
 const matches = (query, ...parts) => !query.trim()
@@ -27,10 +30,19 @@ function NewDot({ value, lastLooked }) {
 
 const requestChip = { label: 'Asks for your review', tone: 'you' }
 
+// The row's next step as its swipe button: the one the PR page pins at its foot, run by the PR page itself (it opens straight into
+// the window or sheet that step uses, or onto the Review tab). A row with no step has no button, and so does not swipe.
+function swipeStep({ project, pr, decision, records, capabilities, onOpenPull }) {
+  const next = rowStep(decision, { record: recordsForPull(records, pr)[0], capabilities })
+  if (!next) return null
+  const [tab, intent] = next.route === 'review' ? ['review', ''] : ['conversation', next.intent]
+  return { title: next.title, label: `${next.title}: ${pr.title}`, run: () => onOpenPull(project, pr, tab, intent) }
+}
+
 // One PR under its project's card. The whole row opens the PR on its own page. Its status is the shared decision's
 // label (the repository list and the PR page say the same, whatever the screen); a review request keeps its own pill
 // beside it, and a PR with a review running or waiting wears the comet frame and opens on its Review tab.
-function DeskPullRow({ project, pr, request = false, order = '', lastLooked, facts, onOpenPull, login }) {
+function DeskPullRow({ project, pr, request = false, order = '', lastLooked, facts, onOpenPull, login, records, capabilities }) {
   const comments = conversationCount(pr)
   const decision = deskStanding(pr, login, facts)
   const framed = frameOf(decision)
@@ -38,7 +50,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
   // 3 Nov). A request's own pill already says "your turn" while the PR rests; the decision adds its words when it has some.
   const labelled = framed !== 'reviewing' && (!request || chipOf(decision))
   const pills = [...(request ? [requestChip] : []), ...(labelled && !isDraftWord(pr, decisionChip(decision)) ? [decisionChip(decision)] : [])]
-  const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} /> : null]
+  const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} short /> : null]
   return (
     <ReviewFrame state={framed} inset={3} radius={10}>
       <DeskRow
@@ -53,6 +65,7 @@ function DeskPullRow({ project, pr, request = false, order = '', lastLooked, fac
         labels={<span className="co-pr-labels"><PullLabels pr={pr} /></span>}
         pills={pills.map((chip, index) => <StatusPill key={index} chip={chip} />)}
         aside={comments ? <span className="co-pr-comments" title={`${comments} in the conversation: comments and reviews`}><Icon name="comment" size={15} />{comments}</span> : null}
+        step={swipeStep({ project, pr, decision, records, capabilities, onOpenPull })}
         onOpen={() => onOpenPull(project, pr, framed === 'idle' ? 'conversation' : 'review')}
       />
     </ReviewFrame>
@@ -65,7 +78,7 @@ function DeskAttentionRow({ item, pr, decision, login, onSelect, action = null }
   const reason = lookAtReason(item)
   const detectedAt = item.record?.attention?.detected_at
   const number = item.record?.number
-  const facts = [number ? `#${number}` : null, pr ? whoOf(pr.author?.login, login) : null, detectedAt ? <TimeAgo prefix="detected " value={detectedAt} /> : null, groupNote(item)]
+  const facts = [number ? `#${number}` : null, pr ? whoOf(pr.author?.login, login) : null, detectedAt ? <>detected <TimeAgo value={detectedAt} short /></> : null, groupNote(item)]
   return (
     <DeskRow
       tone={reason.key}
@@ -83,12 +96,12 @@ function DeskAttentionRow({ item, pr, decision, login, onSelect, action = null }
 
 // Rows per project and view. In Needs you each row is tagged with the step (desk.js NEEDS_CHIPS) that counts it:
 // the rows are desk.js needsRows, the same list the chips and the rail count.
-function projectRows(view, project, { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries, onOpenPull, onOpenRecord }) {
+function projectRows(view, project, { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries, records, capabilities, onOpenPull, onOpenRecord }) {
   const rows = []
   const facts = { runs, chats, responses, ignored }
   // The search finds a project by its name too: a name match keeps all of its rows.
   const keep = (...parts) => matches(query, project.name, ...parts)
-  const pullRow = (pr, step, extra = {}) => ({ chip: step, el: <DeskPullRow key={`pr:${pr.number}`} project={project} pr={pr} lastLooked={lastLooked} facts={facts} onOpenPull={onOpenPull} login={login} {...extra} /> })
+  const pullRow = (pr, step, extra = {}) => ({ chip: step, el: <DeskPullRow key={`pr:${pr.number}`} project={project} pr={pr} lastLooked={lastLooked} facts={facts} onOpenPull={onOpenPull} login={login} records={records} capabilities={capabilities} {...extra} /> })
   const all = decisionsFor(project)
   const ownPulls = authoredPulls(project.incomingReviews, login)
   // Your own agent review of your own PR found problems at its current version:
@@ -97,7 +110,7 @@ function projectRows(view, project, { login, decisionsFor, lastLooked, query, ru
     if (!pr || !savedFindings(reviewForPull(runs, pr), ignored)) return null
     // The machine decides whether Respond may start; a draft that already deals with the findings turns it off.
     if (!actionOf(decision, 'respond')?.enabled) return null
-    return { label: NAMES.fixFindings, run: () => onOpenPull(project, target, 'review', 'fix') }
+    return { label: NAMES.fixFindings, run: () => onOpenPull(project, target, 'review', 'respond') }
   }
   const openDecision = item => {
     const target = feedbackPull(item)
@@ -145,7 +158,7 @@ function MergedRows({ project, records, query, lastLooked, onOpenPull }) {
       return <DeskRow key={record.id}
         icon={<Icon name="merge" size={16} className="co-desk-merged-icon" />}
         title={<><NewDot value={record.updated_at} lastLooked={lastLooked} />{record.title || 'Untitled contribution'}</>}
-        facts={<span><DotLine parts={[record.number ? `#${record.number}` : null, 'yours', <TimeAgo value={record.updated_at || record.created_at} />]} /></span>}
+        facts={<span><DotLine parts={[record.number ? `#${record.number}` : null, 'yours', <TimeAgo value={record.updated_at || record.created_at} short />]} /></span>}
         pills={[<StatusPill key="status" chip={{ label: STATUS_LABELS[record.status] || record.status, tone: 'quiet' }} />]}
         onOpen={record.number && repo ? () => onOpenPull(project, { number: record.number, repository: { nameWithOwner: repo } }) : null} />
     })
@@ -180,17 +193,30 @@ function viewEnvelopes(view, projects, { records, query, lastLooked, needsFilter
   return envelopes
 }
 
+// The rows of the quiet block under Needs you (desk.js waitingOnOthers), across projects, the longest wait first. The search narrows
+// them like every row on the screen; the step chips do not, because the block is no part of that list.
+function waitingRows(projects, { login, runs, chats, responses, ignored, query, decisionsFor, reviewEntries }) {
+  return projects.flatMap(project => waitingOnOthers(project, decisionsFor(project), login, reviewEntries, { runs, chats, responses, ignored })
+    .filter(({ pr }) => matches(query, project.name, pr.title, String(pr.number))).map(row => ({ ...row, project })))
+    .sort((a, b) => b.days - a.days)
+}
+
 // The selected side view: one card per app, in the projects list's own order.
-export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', onOpenProject, onOpenPull, onOpenRecord }) {
+export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', capabilities = null, onOpenProject, onOpenPull, onOpenRecord }) {
   const [mineFilter, setMineFilter] = useState('open')
-  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], onOpenPull, onOpenRecord }
+  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], records, capabilities, onOpenPull, onOpenRecord }
   if (view === 'runs') return <AgentRunsView reviews={reviews} projects={projects} query={query} login={login} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} />
   const shownView = view === 'mine' && mineFilter === 'merged' ? 'merged' : view
   const envelopes = viewEnvelopes(shownView, projects, { records, query, lastLooked, needsFilter: view === 'needs' ? needsFilter : '', context, onOpenProject })
   const filter = view === 'mine' ? <MineFilter value={mineFilter} counts={counts} onChange={setMineFilter} /> : null
+  // Under the empty message and under the list alike; it is no row of Needs you, so no count or chip includes it.
+  const waitingRowsNow = view === 'needs' ? waitingRows(projects, context) : []
+  const waiting = <WaitingOnOthers rows={waitingRowsNow} capabilities={capabilities} onOpenPull={onOpenPull} />
   if (!envelopes.length) {
+    // A search that only the quiet block answers is no empty screen.
+    if (query.trim() && waitingRowsNow.length) return <>{filter}{waiting}</>
     const empty = view === 'needs' && needsFilter ? EMPTY.filtered : EMPTY[shownView] || EMPTY.needs
-    return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} /></>
+    return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} />{waiting}</>
   }
-  return <>{filter}<div className="co-desk-envelopes">{envelopes}</div></>
+  return <>{filter}<div className="co-desk-envelopes">{envelopes}</div>{waiting}</>
 }

@@ -1,6 +1,8 @@
 import { Fragment, createContext, useContext, useEffect, useRef, useState } from 'react'
 import { sameLogin } from '../domain.js'
 import { watchOverflow } from './watchOverflow.js'
+import { SwipeReveal } from './SwipeReveal.jsx'
+import { useTouchScreen } from './useTouchScreen.js'
 
 // The one layout of a desk row, wherever it lists a PR (Needs you, Review requests, My PRs, Agent runs, Merged):
 // the title, then "#number · who · when", then the status pills, then a one-line reason when there is one.
@@ -50,9 +52,11 @@ function RowReason({ text }) {
 }
 
 // `tone` colours a saved decision's row (its icon and pill). `action` is the row's own answer, a button beside it. A row
-// with no `onOpen` has nowhere to go and is not a button.
-export function DeskRow({ icon, title, facts, labels = null, pills = [], reason = '', aside = null, action = null, tone = '', onOpen = null }) {
+// with no `onOpen` has nowhere to go and is not a button. `step` ({ title, label, run }, see SwipeReveal) is the row's next step:
+// on a touch screen the row swipes left to reach it, and everywhere else the row is as it was.
+export function DeskRow({ icon, title, facts, labels = null, pills = [], reason = '', aside = null, action = null, step = null, tone = '', onOpen = null }) {
   const [arrived] = useState(useContext(RowArrivalContext))
+  const touch = useTouchScreen()
   const body = <>
     {icon}
     <span className="co-desk-row-main">
@@ -64,9 +68,10 @@ export function DeskRow({ icon, title, facts, labels = null, pills = [], reason 
     {aside}
   </>
   const className = 'co-desk-row' + (tone ? ' is-' + tone : '')
-  return <div className={'co-desk-item' + (action ? ' co-desk-row-split' : '') + (arrived ? ' is-arriving' : '')}>
+  const item = <div className={'co-desk-item' + (action ? ' co-desk-row-split' : '') + (arrived ? ' is-arriving' : '')}>
     {onOpen ? <button type="button" className={className} onClick={onOpen}>{body}</button> : <div className={className + ' is-static'}>{body}</div>}
     {reason ? <RowReason text={reason} /> : null}
     {action}
   </div>
+  return step && touch ? <SwipeReveal step={step}>{item}</SwipeReveal> : item
 }

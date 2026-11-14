@@ -3,6 +3,7 @@
  *  so a PR is recognisable here and on github.com in both shell themes. */
 import { Icon } from './Icons.jsx'
 import { checkSummary, isBotAuthor } from '../collaboration.js'
+import { timeAgo } from '../domain.js'
 
 // Labels and state pills are filled with their GitHub colour, 30% less intense:
 // 70% of the colour mixed into the page surface, then black or white text,
@@ -142,8 +143,16 @@ export function DateLabel({ value, prefix = '', time = false }) {
   return <time dateTime={value} title={at.toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
 }
 
-/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. */
-export function TimeAgo({ value, prefix = '' }) {
+// A moment in the room a phone's facts line has: domain.js timeAgo without its "ago" ("4m", "2h", "5d"). Beyond a month there is no short form and the date stands.
+function shortAgo(value) {
+  const ago = timeAgo(value)
+  if (ago === 'just now') return 'now'
+  return ago.endsWith(' ago') ? ago.slice(0, -4) : null
+}
+
+/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. With `short`, a phone reads "3h" in its place:
+ *  both are in the page and CSS shows one (the long one stays readable to a screen reader, as single-line-overflow's own markup does). */
+export function TimeAgo({ value, prefix = '', short = false }) {
   const time = Date.parse(value)
   if (!Number.isFinite(time)) return null
   const seconds = Math.max(0, (Date.now() - time) / 1000)
@@ -154,5 +163,8 @@ export function TimeAgo({ value, prefix = '' }) {
         : seconds < 7 * 86400 ? relative.format(-Math.round(seconds / 86400), 'day')
           : seconds < 30 * 86400 ? relative.format(-Math.round(seconds / (7 * 86400)), 'week')
             : `on ${new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(seconds > 300 * 86400 ? { year: 'numeric' } : {}) })}`
-  return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{text}</time>
+  const brief = short ? shortAgo(value) : null
+  return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>
+    {brief ? <><span className="co-time-long">{prefix}{text}</span><span className="co-time-short" aria-hidden="true">{brief}</span></> : <>{prefix}{text}</>}
+  </time>
 }

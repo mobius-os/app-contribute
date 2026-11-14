@@ -16,10 +16,12 @@ export function SeenOnGithub({ tone, text }) {
     return () => document.removeEventListener('pointerdown', away)
   }, [pinned])
   const quiet = tone === 'private'
-  // Escape closes a pinned card first; the window itself closes only on the next press.
+  // Escape closes a pinned card first; the window itself closes only on the next press. The window is a native dialog, which closes
+  // on the key's default action, so the press is taken here by cancelling it.
   const dismiss = event => {
     if (event.key !== 'Escape' || !pinned) return
     event.stopPropagation()
+    event.preventDefault()
     setPinned(false)
   }
   return <span ref={root} className={'co-rw-seen ' + (quiet ? 'is-private' : 'is-public') + (pinned ? ' is-pinned' : '')} onKeyDown={dismiss}>

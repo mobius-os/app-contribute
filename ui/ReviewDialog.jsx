@@ -1,25 +1,29 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+// Light dismiss (a press outside the card) is the browser's own where `closedby` exists; Safari has none, so the same press is caught here.
+const nativeLightDismiss = typeof HTMLDialogElement !== 'undefined' && 'closedBy' in HTMLDialogElement.prototype
+const outsideCard = (event, card) => {
+  const box = card.getBoundingClientRect()
+  return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom
+}
 
-// The one window over the page (DESIGN.md, The Window Rule): blurred backdrop, round card. The page behind stays put,
-// Tab stays inside, Escape or a click outside closes it, and focus returns to whatever opened it. `role` is
-// "alertdialog" for a question that must be answered (Withdraw, Discard).
-export function ReviewDialog({ onClose, label = 'Agent workflow', role = 'dialog', children }) {
-  const panel = useRef(null)
-  // Read while rendering, before the window's own children take focus in their effects.
-  const opener = useRef(typeof document === 'undefined' ? null : document.activeElement)
-  useEffect(() => () => { if (opener.current?.isConnected) opener.current.focus({ preventScroll: true }) }, [])
-  function keepFocusInside(event) {
-    if (event.key === 'Escape') { event.stopPropagation(); onClose(); return }
-    if (event.key !== 'Tab') return
-    const items = [...(panel.current?.querySelectorAll(FOCUSABLE) || [])]
-    if (!items.length) return
-    const first = items[0], last = items[items.length - 1]
-    if (event.shiftKey && document.activeElement === first) { last.focus(); event.preventDefault() }
-    else if (!event.shiftKey && document.activeElement === last) { first.focus(); event.preventDefault() }
+// The one window over the page (DESIGN.md, The Window Rule), on the browser's own modal <dialog>: the page behind is inert, Tab stays
+// inside, Escape (and in Chrome the Android Back gesture) closes it, and focus returns to what opened it. React still owns whether it is
+// open: a close request only calls `onClose`, and the window goes when it stops being rendered. `role` is "alertdialog" for a question
+// that must be answered (Withdraw, Discard).
+export function ReviewDialog({ onClose, label = 'Agent workflow', role, children }) {
+  const card = useRef(null)
+  const pressedOutside = useRef(false)
+  // Opened in the layout phase, before the window's own effects run, so what they focus (Keep, in a question) is already on screen.
+  // Removing an open dialog from the page gives focus back to nothing, so it is closed first: that is what returns focus to the opener.
+  useLayoutEffect(() => {
+    const dialog = card.current
+    dialog.showModal()
+    return () => dialog.close()
+  }, [])
+  const outsidePress = nativeLightDismiss ? {} : {
+    onPointerDown: event => { pressedOutside.current = outsideCard(event, card.current) },
+    onPointerUp: event => { if (pressedOutside.current && outsideCard(event, card.current)) onClose() },
   }
-  return <div className="co-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-    <div ref={panel} className="co-dialog" role={role} aria-modal="true" aria-label={label} onKeyDown={keepFocusInside}>{children}</div>
-  </div>
+  return <dialog ref={card} className="co-dialog" role={role} aria-label={label} closedby="any" onCancel={event => { event.preventDefault(); onClose() }} {...outsidePress}>{children}</dialog>
 }

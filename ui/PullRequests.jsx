@@ -10,6 +10,7 @@ import { PullRequestDetail, Skeleton } from './PullRequestDetail.jsx'
 import { Avatar, ChecksBadge, PullLabels, PullStateChips, PullStateIcon, SyncNote, TimeAgo } from './GithubParts.jsx'
 import { TaskPane, useProjectTask, focusActionRegion } from './TaskPane.jsx'
 import { useFocusLease } from './useFocusLease.js'
+import { useCapabilities } from './useCapabilities.js'
 import { useRepositoryList } from './useRepositoryList.js'
 import { Icon } from './Icons.jsx'
 import { ActionsMenu } from './ActionsMenu.jsx'
@@ -179,7 +180,7 @@ const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerC
 // `onRunsChanged` asks the hub to read it again, so every screen shows the change.
 // `onReviewPosted(repo, number)` tells it the owner's review of a PR reached GitHub,
 // so the row leaves Review requests without waiting for the next read.
-export function PullRequests({ appId, token, project, conn, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
+export function PullRequests({ appId, token, project, conn, capabilities: knownCapabilities = null, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
   const repo = project?.canonical_repo || ''
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   const task = useProjectTask()
@@ -259,7 +260,7 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
   const [choice, setChoice] = useState(null)
   const [resolved, setResolved] = useState(null)
   // The platform's advertised workflows, remembered across launches.
-  const [capabilities, setCapabilities] = useState(null)
+  const [capabilities, setCapabilities] = useCapabilities(token, appId, conn.state === 'connected', knownCapabilities)
   // Where Möbius confirms the owner's sensitive taps on its own sheet (owner-grant.js), the writes below ask it first; elsewhere null.
   const shellConfirm = ownerConfirmOffered(capabilities) ? askOwner : null
   const [busy, setBusy] = useState(false)
@@ -297,14 +298,6 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
       if (current() && runFocusRef.current?.nonce === focus.nonce && exact) { setLinked(exact); setLinkedError('') }
     } catch (error) { if (current()) setLinkedError(`This run's latest status is unavailable: ${error.message}`) }
   }, [token, appId])
-  // What this Möbius can do for the owner (Merge among it), asked once. An older
-  // Möbius answers 404 and keeps the menu as it was.
-  useEffect(() => {
-    if (capabilities || conn.state !== 'connected') return undefined
-    let alive = true
-    collaborationRequest(token, appId, 'review-presets').then(value => { if (alive) setCapabilities(value.capabilities || {}) }, () => {})
-    return () => { alive = false }
-  }, [conn.state, token, appId])
   // A Review tapped before the capabilities arrived opens on "Only me"; the draft default follows once they are known.
   useEffect(() => {
     const settled = settleDraftDefault(choice, capabilities)
@@ -675,8 +668,9 @@ export function PullRequests({ appId, token, project, conn, onChanged, onReviewP
         // window overlays it and the assignment pane opens above it.
         <PullRequestDetail key={`${prKey(detailPr)}:${detailPr.headRefOid}:${detailPr.baseRefOid}:${detailRevision}`} cacheStore={detailSnapshot(detailPr)} pr={detailPr} token={token} appId={appId} initialTab={focusPull?.tab === 'review' ? 'review' : 'conversation'} review={reviewProps(detailPr)} onReview={mode => choose([detailPr], mode, opened || prKey(detailPr))} onAssign={() => assignSelection([detailPr], opened || prKey(detailPr))} onRefresh={() => load()} readOnly={!isOpenPull(detailPr)} canAssign={mayAssign(detailPr.repository.viewerPermission)} status={statusFor(detailPr)} onProgress={null} record={recordsForPull(records, detailPr)[0]} capabilities={capabilities} onSetAutopilot={onSetAutopilot} onRecord={onRecord} provenance={pullConversations(records, relevantRuns, detailPr, respondChats)} holdUntilLoaded />
       ) : data.loading || data.error || focusKey ? <Skeleton lines={8} label="Loading the pull request" /> : <p className="co-pr-note" role="status">This pull request is not in the open list. It may be closed. {NAMES.sync} to check.</p>}
-      {/* A desk row's Fix these findings opens the PR straight into its fix window. */}
-      {focusPull?.intent === 'fix' && onStartAgent ? <RunOnce ready={!!detailPr} nonce={focusPull.nonce} run={() => choose([detailPr], 'respond', prKey(detailPr))} /> : null}
+      {/* A desk row (its Fix these findings, a swipe to its next step, Ask again) opens the PR straight into the window or sheet of the job
+          it names. One of your own sheets waits for what this Möbius can do, which it learns a moment after the page opens. */}
+      {focusPull?.intent && onStartAgent ? <RunOnce ready={!!detailPr && (!!capabilities || !YOUR_INTENTS.has(focusPull.intent))} nonce={focusPull.nonce} run={() => choose([detailPr], focusPull.intent, prKey(detailPr))} /> : null}
       {reviewDialog}
     {addressDialog}
     {actionDialog}

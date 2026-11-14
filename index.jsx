@@ -104,6 +104,7 @@ import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
 import { Shine, Words } from './ui/Shine.jsx'
 import { RowArrivalContext, useDeskPainted } from './ui/DeskRow.jsx'
+import { useCapabilities } from './ui/useCapabilities.js'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -1707,10 +1708,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     reviewEntries: reviewList.entries,
     ...standingFacts,
   }), [sourceProjects, contributionRun, incomingReviews, records, login, reviewList.counts, reviewList.entries, standingFacts])
+  // The desk's rows offer a PR's next step, and the Waiting on others block asks again, only where this Möbius can run them.
+  const [capabilities] = useCapabilities(token, appId, conn.state === 'connected')
   const desk = {
     view: deskView,
     onView: setDeskView,
     counts: deskCountsValue,
+    capabilities,
     login,
     records,
     runs: reviewRuns,
@@ -1736,7 +1740,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       records: recordsForProject(records, project), reviewStatus, projects: [project],
     }) : contributionRun
   }
-  // `intent` lets a desk row open the PR straight into a window ('fix' = Respond to feedback).
+  // `intent` lets a desk row open the PR straight into the window or sheet of one job (its id: 'respond' is Respond to feedback, 'merge' the Merge sheet).
   function openPullPage(project, pr, tab = 'conversation', intent = '') {
     const repo = pr?.repository?.nameWithOwner || project?.canonical_repo || ''
     if (!repo || !pr?.number) return
@@ -1746,13 +1750,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // and where to report the open PR count. Without it the list shows all PRs.
   function renderPullRequests(project, navigation, view = null, page = null) {
     if (page) {
-      return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token}
+      return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token} capabilities={capabilities}
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
         runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
         presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
         records={recordsForProject(records, project)} />
     }
-    return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token}
+    return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token} capabilities={capabilities}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
       runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
       scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
@@ -1849,7 +1853,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const { syncLists } = useBackgroundLists({
     hub, lists: repositoryLists, token, sendOnly, connected: conn.state === 'connected', started: openSynced, login: conn.login, projects: sourceProjects, pinned, runs: reviewRuns, respondChats,
   })
-  // Always load is the owner's own switch: saved, then shown, and the pass that follows reads the repository.
+  // Pin is the owner's own button: saved, then shown, and the pass that follows reads the repository.
   const setPinned = useCallback(async (repo, on) => { setPinChoice(await setRepositoryPinned(repo, on)) }, [])
 
   // The toolbar reflects only the app's first connection/feed read. Once that
