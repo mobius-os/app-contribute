@@ -2,8 +2,9 @@
 
 Mode file of the `contributing` skill. The core
 ([SKILL.md](SKILL.md): Hard stops, privacy allowlist,
-approval gate, file table) always applies. Nothing here runs without the
-partner's scoped approval (Hard stop #1).
+approval gate, file table) always applies. Every public action here needs the
+partner's scoped approval (Hard stop #1). Printing the card in **Offering Send
+in chat** is read-only and part of preparation, so it needs none.
 
 ## The green light
 
@@ -84,16 +85,18 @@ The card is that chat's live view of its contributions, read from the ledger:
 - **The newest card wins.** Only the last card printed in a chat is live; an
   earlier one folds to "Continued below". Print a new card whenever this
   chat prepares more work, instead of pointing the owner at an older one.
-- **It stays current by itself.** It re-reads its records when it appears,
-  when a turn in this chat settles and when the tab is shown again, so after
-  you restage, review or the owner sends from Contribute, the card already
-  shows it. A lost response keeps the card locked as **Checking GitHub**: it
+- **It stays current by itself.** It re-reads its records when a turn in
+  this chat settles, when the tab is shown again or reloaded, and when the
+  owner presses its action: after you restage or review, it shows the change
+  once your turn settles, and a send made in Contribute when the tab is shown
+  again. Scrolling an idle card into view does not by itself re-read it. A
+  lost response keeps the card locked as **Checking GitHub**: it
   asks the platform to read GitHub for the exact attempt (read-only `/observe`)
   and never resends. **Changed on GitHub** means the target no longer matches
   the reviewed attempt; **With Autopilot** means the record's Autopilot owns
   the recovery.
   Neither is proof that nothing was sent. Once sent, each row links
-  its pull request and the header says what happened.
+  its pull request and the card's status line says what happened.
 
 The card is not approval: do not describe a printed card as sent or approved,
 and do not send the same work again yourself while the card owns it. Cards
