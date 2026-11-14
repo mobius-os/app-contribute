@@ -64,9 +64,10 @@ belongs upstream.
    records ([ledger.md](ledger.md)). Never replace
    this relation with an app-owned chat whose prompt or opaque scope merely
    mentions the source chat.
-4. Stop with the prepared records in Contribute. Report what was prepared and
-   what was intentionally left local, private, incomplete, duplicated, or
-   blocked. Nothing public happens in this intent.
+4. Hand off the prepared records as in [prepare.md](prepare.md), with the
+   Send card for ready PRs. Report what was prepared and what was
+   intentionally left local, private, incomplete, duplicated, or blocked.
+   Nothing public happens in this intent.
 
 When this spans several projects or review units, make it a durable Goal with
 inventory, preparation, verification, and handoff stages. A single small
