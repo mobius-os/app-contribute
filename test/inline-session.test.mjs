@@ -1977,6 +1977,18 @@ test('a read issued after a settlement still lands (control)', async () => {
 })
 
 // ---- Truthful state: loading is not empty, and counts are real.
+test('every session report opts into footer status, including the settled first read', async () => {
+  const pending = deferred()
+  const h = harness({ ids: ['one'], records: [prepared('one')], loadExact: () => pending.promise })
+  h.session.start()
+  assert.equal(h.last(), undefined, 'an idle remount leaves the host display alone')
+  pending.resolve(prepared('one'))
+  await tick()
+  assert.equal(h.last().loading, false)
+  assert.ok(h.states.length >= 1)
+  assert.ok(h.states.every(report => report.statusPlacement === 'footer'))
+})
+
 test('before the first exact read answers, no synthetic loading report replaces the host display', async () => {
   const gate = deferred()
   const h = harness({ ids: ['one', 'two'], records: [prepared('one'), prepared('two')], loadExact: async (id, store) => { await gate.promise; return structuredClone(store.get(id)) } })

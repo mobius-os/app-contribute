@@ -38,6 +38,7 @@ class PreparedBlockTests(unittest.TestCase):
     block = self.card(record('one'))
     self.assertEqual(block['intent'], 'chat:contributions', 'one intent, so the host can tell the newest card')
     self.assertEqual((block['inline'], block['interaction'], block['expand']), (True, 'inline', False))
+    self.assertEqual(block['status_placement'], 'footer')
     self.assertEqual((block['item_facts'], block['confirm_facts']), ('values', 'values'))
     self.assertEqual(block['title'], '1 contribution', 'a printed card claims no readiness, only a count')
     self.assertEqual(block['items'], [{'title': 'Change one', 'intent': 'review:one',

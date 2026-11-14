@@ -863,6 +863,11 @@ export function createInlineSession({ sessionId, actions, items = null, features
     const ask = reports.find(report => report.ask)?.ask || null
     publish({
       sessionId, actions: reports.map(report => report.state), title,
+      // Opt in to the host's compact card grammar on every reported state.
+      statusPlacement: 'footer',
+      // In-flight ownership can still report during the first exact read;
+      // an idle remount above leaves the host's last display undisturbed.
+      loading: firstRead(),
       ...(asks ? { ask } : {}),
       // Rows only for the chat the host attests; otherwise the card's own
       // fallback rows stay, and nothing is read.
