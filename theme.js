@@ -291,10 +291,12 @@ export const CSS = `
 .co-source-group { min-width: 0; }
 .co-source-group + .co-source-group { border-top: 1px solid var(--border); }
 .co-source-group-label {
-  min-height: 36px; display: flex; align-items: center; padding: 8px 14px;
+  min-height: 36px; display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 14px;
   background: var(--surface-2, var(--surface)); color: var(--muted);
   font-size: var(--co-text-meta); font-weight: 600;
 }
+/* A heading with a count is the twin of the folded group's row (workspace-theme.js .co-quiet-projects): the same type, a bare face, the same chip. */
+.co-source-group-label.is-counted { min-height: 52px; padding: 0 12px; background: transparent; font-size: var(--co-text-body); font-weight: 500; }
 .co-source-row-wrap.is-quiet .co-source-row-facts { color: var(--muted); }
 /* The link to where an update is applied lines up with the row's text, one step in from the project icon (the row's padding, the icon and the gap). */
 .co-source-row-wrap { --co-source-indent: 59px; }

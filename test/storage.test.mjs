@@ -294,6 +294,7 @@ test('an offline empty mirror falls back to the assembled feed cache', async () 
     records: [{ id: 'cached' }],
     fromCache: true,
     omitted: [],
+    worked: {},
   })
 })
 
@@ -340,7 +341,7 @@ test('legacy null listing falls back to the assembled cache even while online', 
     },
   }
   assert.deepEqual(await loadLedger(), {
-    records: [{ id: 'cached' }], fromCache: true, omitted: [],
+    records: [{ id: 'cached' }], fromCache: true, omitted: [], worked: {},
   })
 })
 
@@ -383,6 +384,7 @@ test('ledger stays authoritative through online, offline, and reconnect listings
     records: [{ id: 'cached-complete-feed' }],
     fromCache: true,
     omitted: [],
+    worked: {},
   })
 
   listing = {

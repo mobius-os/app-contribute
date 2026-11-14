@@ -107,6 +107,8 @@ export const NAMES = Object.freeze({
   // The app's list of followed repositories. Say repository, not project or app: "Projects" is the Möbius shell's own word for something else.
   repositories: 'Repositories',
   moreRepositories: 'More repositories',
+  workedWith: 'Worked with',
+  otherRepositories: 'Other repositories',
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
   // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.

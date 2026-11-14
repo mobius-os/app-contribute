@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   projectHasSharedUpdates,
-  projectIsQuiet,
   projectNeedsSorting,
   projectReadyToPrepare,
   projectBoardFacts,
@@ -133,7 +132,7 @@ export function ProjectRow({ project, selected, onSelect, check = null, needs = 
         <span className="co-source-row-id"><strong>{project.name}</strong>{tag ? <span className="co-source-tag">{tag}</span> : null}</span>
         <span className="co-source-row-facts">
           {quiet ? (showShared ? <span>{shared}</span> : null) : <>
-            <span>{facts.work}</span>
+            <span>{project.lastWorkedAt && !facts.hasWork ? <TimeAgo prefix="Last activity " value={new Date(project.lastWorkedAt).toISOString()} /> : facts.work}</span>
             {showShared ? <span className="co-source-shared">{shared}</span> : null}
             {attention ? <span className="co-source-attention">{attention}</span> : null}
           </>}
@@ -148,21 +147,21 @@ export function ProjectRow({ project, selected, onSelect, check = null, needs = 
   )
 }
 
-function ProjectGroup({ label, projects, selectedKey, onSelect, checks = {}, attention = {}, quiet = false }) {
+function ProjectGroup({ label, counted = false, projects, selectedKey, onSelect, checks = {}, attention = {}, quiet = false }) {
   if (!projects.length) return null
   return (
     <div className="co-source-group">
-      {label ? <div className="co-source-group-label">{label}</div> : null}
+      {label ? <h3 className={'co-source-group-label' + (counted ? ' is-counted' : '')}><span>{label}</span>{counted ? <b>{projects.length}</b> : null}</h3> : null}
       {projects.map((project) => <ProjectRow key={project.key} project={project} selected={project.key === selectedKey} onSelect={onSelect} check={checks[project.key]} needs={attention[project.key] || 0} quiet={quiet} />)}
     </div>
   )
 }
 
-// Apps with nothing for the owner fold away; a search opens them.
-function QuietProjects({ projects, onSelect, checks, searching }) {
+// The installed repositories the owner has not worked with fold away; a search opens them.
+function OtherRepositories({ projects, onSelect, checks, searching }) {
   if (!projects.length) return null
   return <details className="co-quiet-projects" open={searching ? true : undefined}>
-    <summary><span>Repositories with nothing to do</span><b>{projects.length}</b><Icon name="chevron" size={14} /></summary>
+    <summary><span>{NAMES.otherRepositories}</span><b>{projects.length}</b><Icon name="chevron" size={14} /></summary>
     <ProjectGroup label="" projects={projects} selectedKey="" onSelect={onSelect} checks={checks} quiet />
   </details>
 }
@@ -322,17 +321,11 @@ export function SourceMap({
     ? projects.find((project) => project.key === selected) || null
     : null
   useEffect(() => { onProjectOpenChange?.(!!selectedProject) }, [selectedProject, onProjectOpenChange])
-  const builtHere = filtered.filter((project) => project.builtHere)
-  const tracked = filtered.filter((project) => !project.builtHere && project.kind !== 'external')
-  // Projects with something going on lead; quiet ones follow, as in Kanban.
-  const isQuiet = project => projectIsQuiet(project) && !attention[project.key]
-  const trackedActive = tracked.filter((project) => !isQuiet(project))
-  const trackedQuiet = tracked.filter(isQuiet)
-  const external = filtered.filter((project) => project.kind === 'external')
-  // The rail and the side views keep the directory's own order: active work
-  // first, then local-only apps, quiet apps, and repositories on GitHub.
+  const { workedWith, other, builtHere, external } = splitProjects(filtered, attention)
+  // The rail and the side views keep the directory's own order: the repositories worked with
+  // first, then local-only apps, the other installed ones, and repositories on GitHub.
   const deskGroups = splitProjects(projects, attention)
-  const orderedProjects = [...deskGroups.active, ...deskGroups.builtHere, ...deskGroups.quiet, ...deskGroups.external]
+  const orderedProjects = [...deskGroups.workedWith, ...deskGroups.builtHere, ...deskGroups.other, ...deskGroups.external]
   const openView = key => { desk.onClosePull(); if (selected) closeProject(); setNeedsFilter(''); desk.onView(deskViewKey(key)) }
   const openProjectFromRail = key => { desk.onClosePull(); void openProject(key) }
   function openRecordFromDesk(project, item) {
@@ -410,14 +403,15 @@ export function SourceMap({
           ) : (
             <div className="co-project-index">
               <ProjectGroup
-                label=""
-                projects={trackedActive}
+                label={NAMES.workedWith}
+                counted
+                projects={workedWith}
                 selectedKey=""
                 onSelect={openProject}
                 checks={checks}
                 attention={attention}
               />
-              <QuietProjects projects={trackedQuiet} onSelect={openProject} checks={checks} searching={!!query.trim() || !trackedActive.length} />
+              <OtherRepositories projects={other} onSelect={openProject} checks={checks} searching={!!query.trim() || !workedWith.length} />
               <ProjectGroup
                 label="Only on your Möbius"
                 projects={builtHere}

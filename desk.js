@@ -226,14 +226,17 @@ export function feedbackPull(item) {
   return { number, repository: { nameWithOwner: repo } }
 }
 
-// The rail's project groups, in the directory's own order: projects with
-// something going on first, quiet apps folded, externals last.
+// The project groups, in the directory's own order: the repositories the owner works with first, the other installed ones
+// folded, externals last. Worked with is what has something going on, then what they contributed to before, the latest first
+// (lastWorkedAt, source-map.js): finished work does not make a repository "nothing to do".
 export function splitProjects(projects, attention = {}) {
   const tracked = (projects || []).filter(project => project.kind !== 'external' && !project.builtHere)
-  const isQuiet = project => projectIsQuiet(project) && !attention[project.key] && !(project.reviewRequests?.length)
+  const isQuiet = project => projectIsQuiet(project) && !attention[project.key]
+  const quiet = tracked.filter(isQuiet)
+  const workedBefore = quiet.filter(project => project.lastWorkedAt != null).sort((a, b) => b.lastWorkedAt - a.lastWorkedAt)
   return {
-    active: tracked.filter(project => !isQuiet(project)),
-    quiet: tracked.filter(isQuiet),
+    workedWith: [...tracked.filter(project => !isQuiet(project)), ...workedBefore],
+    other: quiet.filter(project => project.lastWorkedAt == null),
     builtHere: (projects || []).filter(project => project.builtHere),
     external: (projects || []).filter(project => project.kind === 'external'),
   }
