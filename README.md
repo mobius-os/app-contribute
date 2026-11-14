@@ -388,7 +388,7 @@ visible as unfinished; this iteration does not resume old cycles automatically.
 Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
 **Actions ▾ → Review** (who sees the result: **Only me**, **Draft for me** or,
 where this Möbius supports it, **Agent posts**; with a draft, optionally **Merge
-after I approve**, drawn off and dimmed with its reason where it cannot be turned on), **Review** on your own
+after I approve**, drawn only where it can be turned on), **Review** on your own
 PR (a private check), or **Finish it for me** /
 **Take over**, plus model and effort, in the review window. Settings →
 *Default agent* saves one agent and effort (`review_agent` in the app settings)
