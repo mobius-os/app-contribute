@@ -482,7 +482,8 @@ existing action owners, and adds no alternate public authority or merge path.
 intent `chat:contributions` (the same for every card, so the chat host can tell
 the newest one), one action in the earlier card's shape (`chat-send:<id>` for
 one record, `chat-send-batch:<16-hex handle>` over all of them), `"expand":
-false` (no inline app view), and one item per record (`review:<id>`, with
+false` (no inline app view), optional `"status_placement": "footer"` (a compact
+host draws status beneath the card rather than above its rows), and one item per record (`review:<id>`, with
 **Project** and **Change** facts). It adds every other
 contribution of its chat that is ready with its whole stack (`--chat-id`,
 default `$CHAT_ID`, required) and every prepared layer of any stack it names,
@@ -513,7 +514,10 @@ intent is `chat:contributions`:
   checking 1…", "1 of 2 sent · 1 needs a fix", "2 of 3 sent · 1 not confirmed",
   "1 of 2 sent · couldn’t load 1", "2 need a fix"), with a
   check, spinner or exclamation mark. It is a neutral count until a tap's
-  check finds the set ready, and loading is never shown as empty. Every held
+  check finds the set ready, and loading is never shown as empty. The session
+  reports optional `statusPlacement: 'footer'` on every update, including its
+  first read; hosts that do not support this hint retain their prior layout.
+  Every held
   record shows its own reason and is counted; an unreadable record or a
   blocked GitHub account is named as such, never as a fix. While a
   check, a send or GitHub's answer is underway the header says so and no
