@@ -1304,7 +1304,8 @@ test('the host draws an old card as this chat\'s status rows, and only an open l
     assert.match(rows, /2 lines added, 0 removed/)
     assert.match(rows, /<strong>1 pull request<\/strong>/)
     assert.match(rows, /href="https:\/\/github.com\/owner\/repo\/pull\/7"/)
-    assert.doesNotMatch(rows, /Open a new pull request|<footer>/, 'the saved facts give way to the app\'s rows')
+    assert.doesNotMatch(rows, /Open a new pull request|<button[^>]*>Send/, 'the saved facts and send control give way to the app\'s rows')
+    assert.match(rows, /<footer><div class="md-app-block__footer-status"><strong>1 pull request<\/strong>/)
     const elsewhere = await rendered(published(prepared('one', { record: { chat_id: OTHER, chat_ids: [OTHER] } })), host.features, context)
     assert.doesNotMatch(elsewhere, /pull\/7|Change one<\/a>/, 'another chat\'s record is not drawn')
   }
@@ -1345,7 +1346,7 @@ test('the host draws the live card: ledger rows, one action, a sent ending, and 
     assert.match(sent.split('<footer>')[1], /md-app-block__results[^]*>#3101<svg[^]*>#3102<svg/)
   } else assert.doesNotMatch(sent, /<footer>/)
   const earlier = await render({ context: { chatId: CHAT, latest: false, intent: CHAT_INTENT } }, { onJump() {} })
-  assert.match(earlier, /<section class="[^"]*md-app-block--folded" aria-label="Continued below">/)
+  assert.match(earlier, /<section class="[^"]*md-app-block--folded(?: [^"]*)?" aria-label="Continued below">/)
   assert.match(earlier, />Jump to latest<svg/)
 })
 
@@ -1987,6 +1988,25 @@ test('every session report opts into footer status, including the settled first 
   assert.equal(h.last().loading, false)
   assert.ok(h.states.length >= 1)
   assert.ok(h.states.every(report => report.statusPlacement === 'footer'))
+})
+
+test('an owned pending first read reports loading and footer, then a failed read settles', async () => {
+  const pending = deferred()
+  const checkpoint = { id: 'cp', data: encodeCheckpoint([{ id: 'a1', unitKey: 'record:one', ids: ['one'], at: Date.now(), state: 'unknown' }]) }
+  const h = harness({ ids: ['one'], records: [prepared('one')], checkpoint, retain: true,
+    loadExact: () => pending.promise })
+  h.session.start()
+  assert.equal(h.last().loading, true, 'an owned recovery reports while the read is pending')
+  assert.equal(h.last().statusPlacement, 'footer')
+  pending.resolve(Promise.reject(new Error('offline')))
+  await tick()
+  assert.equal(h.last().loading, false, 'a failed read is settled, not indefinitely loading')
+  assert.equal(h.last().statusPlacement, 'footer')
+  const failed = harness({ ids: ['two'], records: [prepared('two')], loadExact: () => Promise.reject(new Error('offline')) })
+  failed.session.start(); await tick()
+  assert.equal(failed.last().loading, false)
+  assert.equal(failed.last().statusPlacement, 'footer')
+  assert.equal(failed.row('two').pill, HOLD.unread)
 })
 
 test('before the first exact read answers, no synthetic loading report replaces the host display', async () => {
