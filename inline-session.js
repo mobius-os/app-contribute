@@ -852,6 +852,10 @@ export function createInlineSession({ sessionId, actions, items = null, features
     try { data = encodeCheckpoint(attempts) } catch { fault = 'This card has too many unresolved results. Open Contribute to check them.' }
     if (fault) data = lastCheckpoint?.data ?? null
     if (data !== (lastCheckpoint?.data ?? null)) lastCheckpoint = data ? { id: crypto.randomUUID(), data } : null
+    // A remounted idle card has not observed anything yet. Do not overwrite
+    // the host's last settled display with a synthetic Loading snapshot.
+    // Recovery and in-flight ownership must still be reported immediately.
+    if (firstRead() && !fault && !lastCheckpoint && !frozen && !activating && !sending() && !ackNonce) return
     const key = card?.key || ''
     const head = heading(key)
     const { title = '', titleTone = 'neutral', titleBusy = false } = head

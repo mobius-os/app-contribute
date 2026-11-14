@@ -1966,16 +1966,29 @@ test('a read issued after a settlement still lands (control)', async () => {
 })
 
 // ---- Truthful state: loading is not empty, and counts are real.
-test('before the first exact read answers, the card is loading, never empty', async () => {
+test('before the first exact read answers, no synthetic loading report replaces the host display', async () => {
   const gate = deferred()
   const h = harness({ ids: ['one', 'two'], records: [prepared('one'), prepared('two')], loadExact: async (id, store) => { await gate.promise; return structuredClone(store.get(id)) } })
   h.session.start(); await tick()
-  assert.equal(h.last().title, '', 'the host keeps the saved title')
-  assert.equal('rows' in h.last(), false, 'the host keeps the printed rows; nothing claims there are none')
-  assert.deepEqual([h.action(KEY).label, h.action(KEY).hidden], ['Loading…', false])
+  assert.equal(h.last(), undefined, 'the host keeps its pending or last observed display, without fresh controls')
   gate.resolve(); await tick()
   assert.equal(h.last().title, '2 contributions')
   assert.equal(h.last().rows.length, 2)
+})
+
+test('a remounted published card reports the exact PR first, never a loading replacement', async () => {
+  const gate = deferred()
+  const h = harness({ ids: ['one'], records: [published(prepared('one'), 34)],
+    loadExact: async (id, store) => { await gate.promise; return structuredClone(store.get(id)) } })
+  h.session.start(); await tick()
+  h.session.refresh('turn'); await tick()
+  assert.equal(h.last(), undefined)
+  gate.resolve(); await tick()
+  assert.equal(h.last().title, '1 pull request')
+  assert.deepEqual(h.row('one').links, [{ label: '#34', url: 'https://github.com/owner/repo/pull/34' }])
+  assert.equal(h.action(KEY).hidden, true)
+  assert.equal(h.needs.length, 0)
+  assert.equal(h.sends.length, 0)
 })
 
 test('every unreadable record and every row that needs a fix is counted', async () => {
