@@ -90,6 +90,9 @@ const PATHS = {
   reply: <><path d="M9 14 4 9l5-5" /><path d="M4 9h9a7 7 0 0 1 7 7v3" /></>,
   takeover: <><path d="M4 12h11" /><path d="m11 7 5 5-5 5" /><path d="M20 4v16" /></>,
   act: <><circle cx="12" cy="12" r="9" /><path d="M10.5 8.5 15.5 12l-5 3.5Z" /></>,
+  // Lucide's refresh-cw and refresh-cw-off, as drawn there: the Auto-sync button's arrows keep inside the box at a small size, and off strikes them through.
+  sync: <><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></>,
+  syncOff: <><path d="M21 8 18.74 5.74A9.75 9.75 0 0 0 12 3c-1 0-1.97.16-2.87.47" /><path d="M8 16H3v5" /><path d="M3 12c0-2.49 1-4.74 2.64-6.36" /><path d="m3 16 2.26 2.26A9.75 9.75 0 0 0 12 21c2.49 0 4.74-1 6.36-2.64" /><path d="M21 12c0 1-.16 1.97-.47 2.87" /><path d="M21 3v5h-5" /><path d="M22 22 2 2" /></>,
   cycle: <><path d="M20 7h-6V1" /><path d="M4 17h6v6" /><path d="M20 7a9 9 0 0 0-15-2" /><path d="M4 17a9 9 0 0 0 15 2" /></>,
 }
 

@@ -110,7 +110,7 @@ export const NAMES = Object.freeze({
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
   // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.
-  // Named after Sync, because it is Sync done for the owner; the sentence says what it does. The state is the tint and aria-pressed.
+  // Named after Sync, because it is Sync done for the owner; the sentence says what it does. The state is aria-pressed, shown by colour, edge and icon together.
   autoSync: 'Auto-sync',
   autoSyncHint: 'Keeps this repository’s pull requests up to date in the background.',
 })

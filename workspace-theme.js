@@ -19,7 +19,9 @@ export const WORKSPACE_CSS = `
 .co-workspace-name-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; }
 .co-workspace-name-row h2 { min-width:0; }
 .co-pin { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:4px 10px; }
-.co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; }
+.co-pin-btn { flex:none; gap:6px; padding:0 12px 0 10px; }
+.co-pin-btn[aria-pressed=true] { border-color:color-mix(in srgb,var(--green) 55%,var(--border)); background:color-mix(in srgb,var(--green) 12%,var(--surface-2,var(--bg))); color:var(--green-text,var(--green)); }
+.co-pin-btn[aria-pressed=false] { border-style:dashed; border-color:color-mix(in srgb,var(--muted) 70%,var(--border)); background:none; color:var(--muted); }
 .co-pin-failed { flex-basis:100%; font-size:var(--co-text-meta); color:var(--danger); }
 .co-workspace-title .co-source-glyph { display:none; }
 .co-workspace-title h2 { font-size:var(--co-text-section); font-weight:600; line-height:1.25; letter-spacing:-.025em; margin:0; overflow-wrap:anywhere; }

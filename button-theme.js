@@ -26,8 +26,6 @@ export const BUTTON_CSS = `
    Fully rounded with a faint fill so it reads as pressable; the accent shows while it is pressed. */
 .co-btn-chip { min-width: 0; max-width: 100%; padding: 0 14px 0 8px; border-radius: var(--co-radius-round); background: var(--surface-2, var(--bg)); text-align: left; white-space: normal; }
 .co-btn-chip:not(:disabled):active { border-color: var(--accent); background: var(--accent-dim, var(--surface-2)); }
-/* A chip that is also a toggle: pressed, it takes the accent tint and its text, as every tinted pill does (Auto-sync). */
-.co-btn-chip[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2, var(--bg))); color: var(--co-you-text, var(--accent)); }
 .co-btn > .co-icon { flex: 0 0 auto; align-self: center; margin: 0; }
 @media (hover: hover) {
   .co-btn:not(:disabled):hover { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: var(--surface-2, var(--surface)); }
