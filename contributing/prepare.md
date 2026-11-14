@@ -127,7 +127,9 @@ private review intents. The owner should not have to restate the usual rubric.
 4. Record `changes_needed` while a sound finding remains and `all_clear` only
    after the complete current head passes. Restaging drops the verdict unless
    the reviewed diff and text are byte-identical.
-5. Stop with the durable verdict visible in Contribute. Review work does not
+5. Finish the review step with the durable verdict visible in Contribute;
+   continue other authorized work if the chat's original outcome is unfinished.
+   Review work does not
    authorize a push, PR, comment, review, merge, or other GitHub mutation.
 
 ## Prepare for review
@@ -256,8 +258,21 @@ honestly be recorded, leave the record visibly at **Review needed** or
 **Changes needed**—never tell the partner it is sendable.
 
 Status stays `prepared` until publication. After a prepare-only request, give
-one short, text-only handoff summarizing the staged work. If publication is
-already authorized, continue through [publish.md](publish.md) instead of asking
-again. A prepared review is not an app build completion. Do not navigate the
-workspace, place an app, or link a completion notification to an app as part of
-this handoff.
+a short summary. When preparation is the requested outcome, or publication is
+a separate optional step, show the inline Send block for prepared, `all_clear`
+PR records.
+Read **Offering Send in chat** in [publish.md](publish.md) and use its read-only
+helper; paste the emitted fence unchanged in the source chat. This is part of
+preparation, not publication. Do not duplicate the block with a separate
+publication approval question. A successful Send does not resume this chat.
+If continuing the original Goal depends on a new publication decision, finish
+independent authorized work and use one saved approval card instead of the
+Send block; its answer resumes this Goal through the ordinary guarded path.
+Preparation or publication alone does not complete a larger unfinished Goal.
+Explain blocked work or unsupported record
+types in prose rather than presenting them as sendable.
+
+If publication is already authorized, continue through [publish.md](publish.md)
+instead of asking again. A prepared review is not an app build completion.
+Do not navigate the workspace, place an app, or link a completion notification
+to an app as part of this handoff.
