@@ -4332,7 +4332,7 @@ window.runRepositoryListChecks = async () => {
     await until(() => query('.co-pin-btn'), 'The repository had no pin button')
     const pin = () => query('.co-pin-btn')
     const pressed = () => pin().getAttribute('aria-pressed') === 'true'
-    ensure(!pressed() && text(pin()) === 'Pin', 'The button said: ' + text(query('.co-pin')))
+    ensure(!pressed() && text(pin()) === 'Auto-sync', 'The button said: ' + text(query('.co-pin')))
     ensure(pin().closest('.co-workspace-name-row'), 'The pin button was not on the repository title row')
     ensure(listReads('owner/other') === 0, 'A repository was read although nobody pinned it')
     await captureShot('repository-always-load')

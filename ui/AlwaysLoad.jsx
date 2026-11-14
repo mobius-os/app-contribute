@@ -4,7 +4,7 @@ import { Icon } from './Icons.jsx'
 
 // The owner's button for one repository: its pull requests are read in the background and kept up to date, so they are
 // there when it is opened. A preference of this workspace; it changes nothing the repository allows (repositories.js).
-// A toggle button, so the name stays "Pin" and aria-pressed carries the state; the filled pin shows it to the eye.
+// A toggle button, so the name stays "Auto-sync" and aria-pressed carries the state; the tint shows it to the eye.
 export function AlwaysLoad({ repo, pinned, onChange }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -14,9 +14,9 @@ export function AlwaysLoad({ repo, pinned, onChange }) {
     try { await onChange(repo, !pinned) } catch { setFailed(true) } finally { setBusy(false) }
   }
   return <div className="co-pin">
-    <button type="button" className="co-btn co-btn-chip co-pin-btn" aria-pressed={pinned} aria-describedby={hint} title={NAMES.pinHint} disabled={busy} onClick={change}>
-      <Icon name="pin" size={16} /><span>{NAMES.pin}</span>
+    <button type="button" className="co-btn co-btn-chip co-pin-btn" aria-pressed={pinned} aria-describedby={hint} title={NAMES.autoSyncHint} disabled={busy} onClick={change}>
+      <Icon name="cycle" size={16} /><span>{NAMES.autoSync}</span>
     </button>
-    <small id={hint} className={failed ? 'co-pin-failed' : 'co-visually-hidden'} role={failed ? 'alert' : undefined}>{failed ? 'Could not save this. Try again.' : NAMES.pinHint}</small>
+    <small id={hint} className={failed ? 'co-pin-failed' : 'co-visually-hidden'} role={failed ? 'alert' : undefined}>{failed ? 'Could not save this. Try again.' : NAMES.autoSyncHint}</small>
   </div>
 }

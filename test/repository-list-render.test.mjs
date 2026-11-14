@@ -84,11 +84,11 @@ test('the same rows with their details offer their actions in the same place', a
   assert.doesNotMatch(html, /<input type="checkbox"[^>]*disabled=""[^>]*aria-label="Select/)
 })
 
-test('the pin button says in plain words what it does, and is pressed only for a repository that is pinned', async t => {
+test('the Auto-sync button says in plain words what it does, and is pressed only for a repository that is pinned', async t => {
   const { renderPin } = await ui(t) || {}
   if (!renderPin) return
   const off = renderPin({ repo: 'o/r', pinned: false, onChange: () => {} })
-  assert.match(off, /<span>Pin<\/span>/)
+  assert.match(off, /<span>Auto-sync<\/span>/)
   assert.match(off, /Keeps this repository’s pull requests up to date in the background\./)
   assert.match(off, /aria-pressed="false"/)
   assert.match(renderPin({ repo: 'o/r', pinned: true, onChange: () => {} }), /aria-pressed="true"/)
