@@ -110,9 +110,9 @@ export const NAMES = Object.freeze({
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
   // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.
-  // One short word like Sync; the sentence says what it does. The state is the filled pin and aria-pressed, never the word alone.
-  pin: 'Pin',
-  pinHint: 'Keeps this repository’s pull requests up to date in the background.',
+  // Named after Sync, because it is Sync done for the owner; the sentence says what it does. The state is the tint and aria-pressed.
+  autoSync: 'Auto-sync',
+  autoSyncHint: 'Keeps this repository’s pull requests up to date in the background.',
 })
 
 // How long a PR has waited on others, as the block under Needs you says it: "Waiting 3 days on Sam" ("reviewers" when no one is named).

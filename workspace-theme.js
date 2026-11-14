@@ -20,7 +20,6 @@ export const WORKSPACE_CSS = `
 .co-workspace-name-row h2 { min-width:0; }
 .co-pin { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:4px 10px; }
 .co-pin-btn { flex:none; gap:6px; padding:0 14px 0 10px; }
-.co-pin-btn[aria-pressed=true] .co-icon { fill:currentColor; }
 .co-pin-failed { flex-basis:100%; font-size:var(--co-text-meta); color:var(--danger); }
 .co-workspace-title .co-source-glyph { display:none; }
 .co-workspace-title h2 { font-size:var(--co-text-section); font-weight:600; line-height:1.25; letter-spacing:-.025em; margin:0; overflow-wrap:anywhere; }
@@ -347,6 +346,9 @@ export const WORKSPACE_CSS = `
  .co-projects-view { padding-top:8px; }
  .co-workspace-head { padding:0 0 6px; }
  .co-workspace-title p { margin-top:0; line-height:20px; }
+ .co-pin { margin-left:auto; }
+ /* The tabs start right under the repository's name. The actions section before them is empty until one of its panes is open, and its margin would still hold the tabs away. */
+ .co-workspace .co-run > .co-local-work:not(:has(.co-task-content)), .co-workspace .co-run > .co-project-tabs { margin-top:0; }
  .co-public-work > .co-task-content { padding:16px; }
  .co-pr-detail-body { height:clamp(280px,42dvh,440px); }
 }
@@ -1038,6 +1040,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-directory-add { margin:18px 0 0; }
 .co-desk-back { display:inline-flex; align-items:center; gap:7px; min-height:40px; padding:6px 10px 6px 4px; margin:0 0 6px -4px; border:0; border-radius:var(--co-radius-field); background:none; color:var(--muted); font:600 var(--co-text-body) var(--font); cursor:pointer; }
 .co-desk-back:hover { color:var(--text); background:var(--surface-2); }
+.co-pull-page .co-public-work.is-page { margin-top:0; }
 .co-public-work.is-page .co-pr-detail { border:0; padding:0; }
 /* The page scrolls as one: the PR page's comments never get their own inner
    scrollbar, and long comment lists fold behind Show all instead. */
@@ -1266,7 +1269,8 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-gh-description:not([open]) .co-desc-marks code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
  .co-pr-detail .co-pr-title-num { display:none; }
  .co-pr-detail .co-pr-sub-num { display:inline; }
- .co-pull-page .co-gh-pr-title { margin-top:8px; font-size:var(--co-text-body); font-weight:600; line-height:1.32; letter-spacing:-.01em; }
+ .co-pull-page > .co-desk-back { margin-bottom:0; }
+ .co-pull-page .co-gh-pr-title { font-size:var(--co-text-body); font-weight:600; line-height:1.32; letter-spacing:-.01em; }
  .co-pr-detail-actions { flex-wrap:wrap; gap:6px; margin:12px 0 10px; }
  /* Tighter sides so Actions, Request review, Assign and the GitHub link share one row on a phone rather than leaving the link alone on a second. */
  .co-pr-detail-actions .co-btn:not(.co-tip) { padding-inline:10px; }
