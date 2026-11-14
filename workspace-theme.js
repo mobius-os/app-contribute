@@ -227,7 +227,7 @@ export const WORKSPACE_CSS = `
 /* Agent picker: the chat composer's model rows and effort track (sizes kept in
    step with the shell's ChatSettingsPanel/EffortStepper), behind a compact trigger. */
 .co-agent-picker { max-width:440px; margin:4px 0 18px; }
-.co-review-window .co-agent-picker { max-width:none; }
+.co-review-window .co-agent-picker { max-width:none; margin:0; }
 .co-agent-trigger { display:flex; align-items:center; gap:10px; width:100%; min-height:48px; padding:6px 10px; border:1px solid var(--border); border-radius:var(--co-radius-control); background:var(--surface); color:var(--text); font:inherit; text-align:left; cursor:pointer; }
 .co-agent-trigger:hover { background:var(--surface-2,var(--surface)); }
 .co-agent-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
@@ -275,7 +275,7 @@ export const WORKSPACE_CSS = `
 .co-model-note { margin:8px 10px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-model-note button { margin-left:6px; border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; text-decoration:underline; }
 @media (max-width:520px) { .co-model-row { min-height:44px; gap:10px; padding:7px 8px; } .co-effort-indent { margin-left:8px; margin-right:8px; } .co-effort-label { order:-1; flex-basis:100%; min-width:0; text-align:left; } }
-@media (prefers-reduced-motion:reduce) { .co-effort-stop::before,.co-agent-trigger-chevron { transition:none; } }
+@media (prefers-reduced-motion:reduce) { .co-effort-stop::before,.co-agent-trigger-chevron,.co-rw-fold-chevron { transition:none; } }
 .co-change-total { display:inline-flex; align-items:baseline; gap:7px; font-variant-numeric:tabular-nums; }
 .co-change-total b { color:var(--green); font-weight:650; }
 .co-change-total em { color:var(--danger); font-style:normal; font-weight:650; }
@@ -708,11 +708,14 @@ export const WORKSPACE_CSS = `
 .co-rw-icon { display:grid; place-items:center; width:44px; height:44px; margin-bottom:4px; border-radius:var(--co-radius-round); background:var(--accent-dim); color:var(--accent); }
 .co-rw-eyebrow { margin:0; color:var(--co-you-text); font-size:var(--co-text-meta); font-weight:800; letter-spacing:.08em; text-transform:uppercase; overflow-wrap:anywhere; }
 .co-rw-head h3 { margin:0; font-size:var(--co-text-section); font-weight:650; letter-spacing:-.03em; line-height:1.2; overflow-wrap:anywhere; }
-.co-rw-pr { margin:0; color:var(--muted); font-size:var(--co-text-body); line-height:1.4; }
-.co-rw-pr strong { display:block; font-weight:500; overflow-wrap:anywhere; }
-/* The branch line (BranchFlow) under the PR name: the same markup as the PR page, as two small chips that wrap on a phone rather than stack. */
-.co-rw-lines .co-branch-flow { flex-direction:row; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; margin:2px 0 0; color:var(--muted); }
-.co-rw-lines .co-branch-flow code,.co-chip-code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
+/* The branch line (BranchFlow) under the job: the same markup as the PR page, as two small chips that always share one line.
+   A long name gives way in its middle: its start shrinks behind an ellipsis, its end and the target stay whole. */
+.co-rw-lines .co-branch-flow { display:flex; flex-direction:row; flex-wrap:nowrap; justify-content:center; align-items:center; gap:6px; max-width:100%; margin:2px 0 0; color:var(--muted); }
+.co-rw-lines .co-branch-flow code { display:flex; min-width:0; padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); white-space:nowrap; overflow-wrap:normal; }
+.co-rw-lines .co-branch-start { min-width:2ch; overflow:hidden; text-overflow:ellipsis; }
+.co-rw-lines .co-branch-to { flex:none; }
+/* A code chip in running text (a branch in a result line): the same small pill the branch line uses. */
+.co-chip-code { padding:2px 8px; border:1px solid var(--border); border-radius:var(--co-radius-pill); background:var(--bg); color:var(--text); font-size:var(--co-text-meta); }
 .co-rw-list { width:100%; margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:var(--co-text-meta); text-align:left; }
 .co-rw-list li span { display:block; font-size:var(--co-text-meta); }
 .co-rw-close { position:absolute; top:10px; right:10px; display:grid; place-items:center; width:40px; height:40px; }
@@ -751,6 +754,17 @@ input[type=checkbox].co-switch:checked { border-color:var(--accent); background:
 input[type=checkbox].co-switch:checked::after { transform:translateX(18px); background:#fff; }
 input[type=checkbox].co-switch:disabled { opacity:.45; cursor:default; }
 input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+/* The line under "Who sees the result?" says what the chosen answer does: plain words, no box. */
+.co-rw-who-note { margin:0; padding:0 2px; color:var(--muted); font-size:var(--co-text-meta); line-height:1.45; }
+/* "What happens" is folded: one row that opens the numbered steps. */
+.co-rw-fold { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
+.co-rw-fold > summary { display:flex; align-items:center; gap:8px; min-height:44px; padding:0 14px; list-style:none; cursor:pointer; font-size:var(--co-text-body); font-weight:600; }
+.co-rw-fold > summary::-webkit-details-marker { display:none; }
+.co-rw-fold-chevron { margin-left:auto; color:var(--muted); transition:transform .15s; }
+.co-rw-fold[open] .co-rw-fold-chevron { transform:rotate(180deg); }
+.co-rw-fold > summary small { color:var(--muted); font-size:var(--co-text-meta); font-weight:400; }
+.co-rw-fold > summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--co-radius-panel); }
+.co-rw-fold > .co-rw-steps { border:0; background:none; padding-top:4px; }
 .co-rw-note,.co-rw-blocker { margin:0; padding:12px 14px; border-radius:var(--co-radius-panel); font-size:var(--co-text-body); }
 .co-rw-note { border:1px dashed var(--border); color:var(--muted); }
 .co-rw-blocker { background:color-mix(in srgb,var(--co-warn) 12%,transparent); color:var(--text); }
@@ -850,7 +864,10 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
  .co-rw-head { --rw-edge:20px; }
   .co-rw-icon { width:40px; height:40px; }
  .co-rw-foot { margin-top:0; padding-top:14px; }
- .co-rw-actions { flex-direction:column-reverse; align-items:stretch; }
+ /* Cancel left, the main button right and wider. Labels too long to share the line wrap, the main button on top. */
+ .co-rw-actions { flex-wrap:wrap-reverse; }
+ .co-rw-actions > .co-btn { flex:1 1 auto; }
+ .co-rw-actions > .co-btn-primary { flex-grow:2; }
  .co-dialog > .co-task-dock { padding:24px 20px 20px; }
  .co-task-dock > .co-run-approval .co-run-approval-actions { display:flex; flex-direction:column-reverse; align-items:stretch; }
 }

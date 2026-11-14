@@ -615,8 +615,7 @@ async function chooseDraftThenMergeSwitch() {
   ensure(whoIs('Draft for me') && !button('Agent posts',review()),'Someone else\'s PR did not open on Draft for me (never on Agent posts)')
   ensure(!review().querySelector('[role=switch]').checked && !review().querySelector('[role=switch]').disabled,'Drafting a verdict did not offer an unchecked merge switch')
   await click(button('Only me',review()))
-  const dimmed=review().querySelector('[role=switch]')
-  ensure(dimmed && !dimmed.checked && dimmed.disabled && text(review()).includes('Needs “Draft for me”'),'Only me did not leave the merge switch off and dimmed with its reason')
+  ensure(!review().querySelector('[role=switch]'),'Only me still drew a merge switch: it belongs to Draft for me alone')
   await captureShot('review-only-me-merge-off')
   await click(button('Draft for me',review()))
   const mergeSwitch=review().querySelector('[role=switch]')
@@ -906,7 +905,7 @@ window.runWorkspaceChecks = async () => {
       await openSecond(); await chooseAgent(query('.co-pr-detail'))
       // The review window is modal: filters behind it cannot change its scope.
       ensure(review().closest('dialog:modal'),'Review window is not a modal dialog')
-      ensure(text(review()).includes('Contribution 8') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope')
+      ensure(text(review().querySelector('.co-rw-head')).includes('#8') && !text(review().querySelector('.co-rw-head')).includes('#7'),'Individual review changed PR scope')
       await closeReview(); await setFilter('all')
       ensure(mutationRequests().length===before,'Filtering an existing confirmation approved work')
       firstCheckbox=query('input[aria-label="Select owner/project #7"]')
@@ -959,7 +958,7 @@ window.runWorkspaceChecks = async () => {
       await warmCapabilities(query('[data-pr="owner/project#7"]'), NAMES.review)
       title.focus(); await click(title); await until(()=>query('.co-task-content'),'The PR detail did not reopen')
       await chooseAgent(query('.co-task-content'), NAMES.review)
-      ensure(text(review()).includes('Contribution 8') && text(review()).includes('ccccccc') && !text(review()).includes('Contribution 7'),'Individual review changed PR scope or version')
+      ensure(text(review().querySelector('.co-rw-head')).includes('#8') && !text(review().querySelector('.co-rw-head')).includes('#7'),'Individual review changed PR scope')
       ensure(button('Start & draft'),'Individual review did not open on Draft for me, or granted merge by default')
       const mergeSwitch=await chooseDraftThenMergeSwitch()
       ensure(button('Start & draft'),'Drafting a verdict granted merge or lost its start label')
@@ -991,14 +990,13 @@ window.runWorkspaceChecks = async () => {
       ensure(assigned.map(call => call.body.number).join(',') === '7,8,8','Successful assignment was repeated')
       ensure(firstCheckbox.checked && secondCheckbox.checked && reviewRuns.length === 0,'Assignment started review or lost selection')
     })
-    await check('inline batch review enumerates exact versions and starts only after approval', async () => {
+    await check('inline batch review names every PR and starts only after approval, with the heads it selected', async () => {
       await asReviewer()
       try {
       await warmCapabilities(query('.co-pr-box-head'))
       await chooseAgent(query('.co-pr-box-head'))
       ensure(review().closest('dialog:modal'),'Batch review did not use the modal review window')
       ensure(text(review()).includes('Contribution 7') && text(review()).includes('Contribution 8'),'Batch lost a PR')
-      ensure(text(review()).includes('aaaaaaa') && text(review()).includes('ccccccc'),'Exact heads absent')
       ensure(button('Start & draft') && reviewRuns.length === 0,'Draft for me was not the default, or something started')
       const mergeToggle=await chooseDraftThenMergeSwitch()
       ensure(navigation.length === inventoryNavigationDepth && query('.co-pr-list') === originalList,'Review changed screens or remounted list')
@@ -1058,7 +1056,7 @@ window.runWorkspaceChecks = async () => {
         await checkGithub('The changed PR did not load')
         await warmCapabilities(query('[data-pr="owner/project#7"]'), NAMES.review)
         await chooseAgent(query('[data-pr="owner/project#8"]'), NAMES.reviewAgain)
-        ensure(text(review().querySelector('h3')) === NAMES.reviewAgain, 'The window is not titled Review again: ' + text(review().querySelector('h3')))
+        ensure(text(review().querySelector('h3')).startsWith(NAMES.reviewAgain + ' #'), 'The window is not titled Review again with its number: ' + text(review().querySelector('h3')))
         await until(() => /2 new commits since your review of [^.]*3/.test(text(review())), 'The window did not say how many commits are new: ' + text(review()))
         ensure(whoIs('Draft for me') && button('Start & draft'), 'A re-review did not open on Draft for me')
         await captureShot('review-again-window')
@@ -1627,7 +1625,7 @@ window.runWorkspaceChecks = async () => {
       await until(() => focusedDetail(8), 'Later-page link did not open its exact PR')
       await chooseAgent(focusedDetail(8))
       await frame(); await frame()
-      ensure(prRow(8) && review() && text(review()).includes('Contribution 8'), 'The linked row or its review window disappeared')
+      ensure(prRow(8) && review() && text(review().querySelector('.co-rw-head')).includes('#8'), 'The linked row or its review window disappeared')
       ensure(!calls.releases.includes('later-action'), 'Opening the review window released the link')
       await closeReview()
       await until(() => !prRow(8), 'Closing the pane kept the linked row pinned')
@@ -2217,13 +2215,18 @@ window.runDeskFrameChecks = async () => {
     await until(() => review(), 'Review window did not open')
     await captureShot('review-window')
     // The lock (green) or globe (amber) takes its colour from --seen: a quiet button's own colour must not win over it.
+    // Where the window asks who sees the result, that answer says what reaches GitHub and there is no lock or globe.
+    // Any other window keeps it, and it takes its colour from --seen: a quiet button's own colour must not win over it.
     const seen = review().querySelector('.co-rw-seen'), seenButton = seen?.querySelector('.co-rw-seen-btn')
-    ensure(seenButton, 'The review window has no lock or globe')
-    seenButton.style.transition = 'none'
-    seen.style.setProperty('--seen', 'rgb(1, 2, 3)')
-    ensure(getComputedStyle(seenButton).color === 'rgb(1, 2, 3)', 'The lock or globe lost its colour: ' + getComputedStyle(seenButton).color)
-    seen.style.removeProperty('--seen')
-    checks.push({ name: 'the review window lock or globe keeps its green or amber', status: 'pass' })
+    const choosesWho = !!review().querySelector('.co-rw-who')
+    ensure(choosesWho !== !!seenButton, 'The review window must say what reaches GitHub exactly once: by the who-sees choice or by the lock or globe')
+    if (seenButton) {
+      seenButton.style.transition = 'none'
+      seen.style.setProperty('--seen', 'rgb(1, 2, 3)')
+      ensure(getComputedStyle(seenButton).color === 'rgb(1, 2, 3)', 'The lock or globe lost its colour: ' + getComputedStyle(seenButton).color)
+      seen.style.removeProperty('--seen')
+    }
+    checks.push({ name: 'the review window says what reaches GitHub exactly once', status: 'pass' })
     const start = () => [...review().querySelectorAll('button')].find(node => text(node).startsWith('Start'))
     await until(() => start() && !start().disabled, 'The review window never offered Start')
     await click(start())

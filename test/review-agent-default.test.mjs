@@ -83,10 +83,13 @@ test('Settings offers one default agent for reviews and fixes, with a plain sent
   assert.equal(api.render('DefaultAgentSettings', { token: 't', agent: saved }), '', 'nothing to save to, nothing shown')
 })
 
-test('what GitHub sees is one labelled icon at the foot of the window, above its buttons, and the words stay in the page for a screen reader', async t => {
+test('what GitHub sees is one labelled icon at the foot of a window with no who-sees choice, above its buttons, and the words stay in the page for a screen reader', async t => {
   const api = await windows(t)
   if (!api) return
-  const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
+  const choosing = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {}, onCancel() {} })
+  assert.doesNotMatch(choosing, /What GitHub sees/, 'where you pick who sees the result, that answer says what reaches GitHub (the owner’s choice, 2026-11-14)')
+  // A saved link's choice cannot be changed in the window, so the window says what it grants.
+  const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onCancel() {} })
   assert.match(html, /<footer class="co-rw-foot"><span class="co-rw-seen is-public">/, 'it is the first line of the foot, the last thing read before the start button')
   assert.doesNotMatch(html, /co-rw-tools/, 'and no longer in the head')
   assert.match(html, /<button type="button" class="co-btn co-btn-quiet is-toned co-rw-seen-btn" aria-describedby="[^"]*" aria-pressed="false"><span>What GitHub sees<\/span><svg/, 'the icon is named in words, and the words come before it so the card’s arrow stays under the icon')
@@ -107,7 +110,7 @@ test('Who sees the result sits on one row: the question on the left, the three c
   if (!api) return
   const html = api.render('ReviewConfirmation', { choice: { pulls: [pr], mode: 'review', intent: 'review', options: posting }, capabilities: caps, onModeChange() {}, onOptionsChange() {} })
   assert.match(html, /<div class="co-rw-who-row"><h4 class="co-rw-label">Who sees the result\?<\/h4><div class="co-seg" role="radiogroup"/)
-  assert.match(html, /<\/div><\/div><p class="co-rw-note">Posts approve, request changes or comment/, 'the explanation is below the row, not beside it')
+  assert.match(html, /<\/div><\/div><p class="co-rw-who-note">Posts approve, request changes or comment/, 'the explanation is below the row, not beside it, and plain: no box')
 })
 
 test('the dialog styles give the row, the steps and the hover card their room', () => {
