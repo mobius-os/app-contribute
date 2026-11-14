@@ -1300,8 +1300,10 @@ test('the host draws an old card as this chat\'s status rows, and only an open l
   if (host.features.includes('rows-v2')) {
     const context = { chatId: CHAT, latest: true, intent: 'review:one' }
     const rows = await rendered(published(prepared('one')), host.features, context)
-    assert.match(rows, /<p class="md-app-block__item-meta">owner\/repo · \+2\u00a0−0<\/p>/)
-    assert.match(rows, /md-app-block__title-mark is-success/)
+    assert.match(rows, /<p class="md-app-block__item-meta">owner\/repo · /)
+    assert.match(rows, /2 lines added, 0 removed/)
+    assert.match(rows, /<strong>1 pull request<\/strong>/)
+    assert.match(rows, /href="https:\/\/github.com\/owner\/repo\/pull\/7"/)
     assert.doesNotMatch(rows, /Open a new pull request|<footer>/, 'the saved facts give way to the app\'s rows')
     const elsewhere = await rendered(published(prepared('one', { record: { chat_id: OTHER, chat_ids: [OTHER] } })), host.features, context)
     assert.doesNotMatch(elsewhere, /pull\/7|Change one<\/a>/, 'another chat\'s record is not drawn')
@@ -1324,19 +1326,26 @@ test('the host draws the live card: ledger rows, one action, a sent ending, and 
   }
   const ready = await render({})
   assert.match(ready, /<strong>2 contributions<\/strong>/)
-  assert.match(ready, /intent=review%3Aone">Show confirmation rows in place<\/a><p class="md-app-block__item-meta">owner\/repo · \+142\u00a0−38<\/p>/)
+  assert.match(ready, /intent=review%3Aone">Show confirmation rows in place<\/a><p class="md-app-block__item-meta">owner\/repo · /)
+  assert.match(ready, /142 lines added, 38 removed/)
   assert.doesNotMatch(ready, /From this conversation|<dt>|Rows from/, 'every row is the app\'s')
-  assert.match(ready, /<footer>[^]*>Contribute all<\/button>/)
+  assert.match(ready, /<footer>[^]*>Send 2<\/button>/)
   const confirming = await render({ confirm: true })
   assert.match(confirming, /<li class="is-confirmation">[^]*<dt>Project<\/dt>/, 'Confirm\'s rows keep their labels')
   assert.match(confirming, />Not now<\/button><button[^>]*>Confirm<\/button>/)
   const sentRecords = records.map((record, n) => published(record, 3101 + n))
   const sent = await render({ records: sentRecords })
   assert.match(sent, /md-app-block__title-mark is-success[^]*<strong>2 pull requests<\/strong>/)
-  assert.doesNotMatch(sent, /<footer>/, 'the button goes away')
-  assert.match(sent, />#3101<svg[^]*md-app-block__pill is-success">Open</)
+  assert.doesNotMatch(sent, /<button/, 'published results cannot send again')
+  assert.match(sent, /href="https:\/\/github.com\/owner\/repo\/pull\/3101"/)
+  assert.match(sent, /href="https:\/\/github.com\/owner\/repo\/pull\/3102"/)
+  // Hosts with a stable action lane keep it for results; earlier hosts put
+  // the same links on the rows and omit the empty footer.
+  if (sent.includes('md-app-block--action-lane')) {
+    assert.match(sent.split('<footer>')[1], /md-app-block__results[^]*>#3101<svg[^]*>#3102<svg/)
+  } else assert.doesNotMatch(sent, /<footer>/)
   const earlier = await render({ context: { chatId: CHAT, latest: false, intent: CHAT_INTENT } }, { onJump() {} })
-  assert.match(earlier, /<section class="md-app-block md-app-block--value-facts md-app-block--folded" aria-label="Continued below">/)
+  assert.match(earlier, /<section class="[^"]*md-app-block--folded" aria-label="Continued below">/)
   assert.match(earlier, />Jump to latest<svg/)
 })
 
@@ -1480,8 +1489,10 @@ test('the B2 host accepts a confirmation that names screenshots', async t => {
   ]
   const parsed = b2.confirmationOf(items)
   assert.ok(parsed, 'the host rejected the list, which would keep Confirm disabled')
-  assert.equal(parsed[0].facts.find(fact => fact.label === 'Change').value, '1 file · +2\u00a0−0 · 2 screenshots')
-  assert.match(parsed[1].facts.find(fact => fact.label === 'Change').value, /1 screenshot$/)
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Screenshots').value, '2 screenshots')
+  assert.equal(parsed[1].facts.find(fact => fact.label === 'Screenshots').value, '1 screenshot')
+  assert.deepEqual(parsed[0].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+2\u00a0−0', lines: { added: 2, removed: 0 } })
+  assert.deepEqual(parsed[1].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+1\u00a0−0', lines: { added: 1, removed: 0 } })
 })
 
 test('Confirm names a draft opening, adds nothing for ready, and sends exactly that stage even if the setting changes first', async () => {
