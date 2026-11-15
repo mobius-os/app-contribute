@@ -2130,6 +2130,16 @@ window.runPullIntentChecks = async () => {
     window.releaseRepository(); for (let turn = 0; turn < 8; turn++) await frame()
     ensure(text(query('.co-pull-page')).includes('Closed contribution'), 'Older discovery replaced newer PR')
     checks.push({ name: 'successive intents keep newest even when older discovery resolves last', status: 'pass' })
+    await click(query('.co-desk-back'))
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'Desk did not return')
+    window.releaseRepository = null
+    send('pull-request:team/community#8', 'slow-manual')
+    await until(() => window.releaseRepository, 'Manual race discovery did not start')
+    await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+    await until(() => query('.co-pull-page .co-pr-detail') && text(query('.co-pull-page')).includes('Contribution 7'), 'Manual PR did not open')
+    window.releaseRepository(); for (let turn = 0; turn < 8; turn++) await frame()
+    ensure(text(query('.co-pull-page')).includes('Contribution 7'), 'Older discovery replaced manually opened PR')
+    checks.push({ name: 'manual PR navigation supersedes pending discovery', status: 'pass' })
     window.holdRepository = false; window.failRepository = true
     send('pr:team:community:8', 'missing')
     await until(() => text(query('[role="alert"]')).includes('Repository not found'), 'Discovery failure was not visible')

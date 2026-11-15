@@ -1768,6 +1768,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   function openPullPage(project, pr, tab = 'conversation', intent = '') {
     const repo = pr?.repository?.nameWithOwner || project?.canonical_repo || ''
     if (!repo || !pr?.number) return
+    pullFocusRef.current = null
     setPullPage({ key: project?.key || '', repo, number: pr.number, tab, intent, nonce: crypto.randomUUID() })
   }
   // `view` comes from the project tabs: which PRs to show, how to switch tabs,
