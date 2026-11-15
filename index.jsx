@@ -238,11 +238,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // lease back when the owner leaves that PR's detail or the project.
   const [pullFocus, setPullFocus] = useState(null)
   const pullFocusRef = useRef(null)
-  pullFocusRef.current = pullFocus
   const sourceProjectsRef = useRef([])
   const tokenRef = useRef(token)
   tokenRef.current = token
-  const releasePullFocus = useCallback(nonce => setPullFocus(old => old?.nonce === nonce ? null : old), [])
+  const releasePullFocus = useCallback(nonce => {
+    if (pullFocusRef.current?.nonce === nonce) pullFocusRef.current = null
+    setPullFocus(old => old?.nonce === nonce ? null : old)
+  }, [])
   // Open the project that owns a repository: the local one when known,
   // otherwise the repository as an external project.
   function openRepository(repoName, nonce) {
@@ -258,14 +260,33 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       releasePullFocus(nonce)
     })
   }
-  function openPullFocus(target, nonce) {
+  async function openPullFocus(target, nonce) {
     setSelectionError('')
-    setPullFocus({ repo: target.repo, number: target.number, nonce })
-    openRepository(target.repo, nonce)
+    // Hold the intent synchronously: discovery may settle after another link.
+    pullFocusRef.current = { nonce }
+    setPullFocus(null)
+    setReviewFocus(null)
+    setPullPage(null)
+    const project = sourceProjectsRef.current.find(item => item.canonical_repo?.toLowerCase() === target.repo.toLowerCase())
+    try {
+      const repository = project ? null : await discoverRepository(tokenRef.current, target.repo)
+      if (pullFocusRef.current?.nonce !== nonce) return
+      const external = repository && {
+        key: `external:${repository.nameWithOwner.toLowerCase()}`, kind: 'external',
+        name: repository.nameWithOwner, canonical_repo: repository.nameWithOwner,
+        viewerPermission: repository.viewerPermission, available: false, state: 'unavailable',
+      }
+      setPullPage({ key: project?.key || external.key, project: external, repo: target.repo, number: target.number, tab: 'conversation', intent: '', nonce })
+    } catch (error) {
+      if (pullFocusRef.current?.nonce === nonce) setSelectionError(error.message)
+    }
   }
   // A run link opens the run's own project with that run's detail.
   async function openRunFocus(id, nonce) {
     setSelectionError('')
+    pullFocusRef.current = { runId: id, nonce }
+    setPullPage(null)
+    setReviewFocus(null)
     setPullFocus({ runId: id, nonce })
     // Read the exact run: the recent list is capped and would hide older runs.
     let run = null
@@ -861,10 +882,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         return
       }
       const selectionId = reviewSelectionIdFromIntent(event.data.intent)
-      if (selectionId) { void openSelection(selectionId); return }
+      if (selectionId) { pullFocusRef.current = null; setPullFocus(null); setPullPage(null); void openSelection(selectionId); return }
       const target = contributionReviewTargetFromIntent(event.data.intent)
       if (!target) return
       closeSelection()
+      pullFocusRef.current = null
+      setPullFocus(null)
+      setPullPage(null)
       setReviewFocus({
         ...target,
         nonce: String(event.data.nonce ?? Date.now()),
@@ -1731,7 +1755,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       if (!pullPage) return null
       const project = sourceProjects.find(item => item.key === pullPage.key)
         || sourceProjects.find(item => item.canonical_repo?.toLowerCase() === pullPage.repo.toLowerCase())
-        || null
+        || pullPage.project || null
       return renderPullRequests(project, null, null, pullPage)
     },
   }

@@ -224,23 +224,29 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/graphql' && call.method === 'POST') {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
     if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
-    if (call.body.query.includes('ContributeRepository')) return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
+    if (call.body.query.includes('ContributeRepository')) {
+      if (window.holdRepository) await new Promise(resolve => { window.releaseRepository = resolve })
+      if (window.failRepository) return response({data:{repository:null}})
+      return response({data:{repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'}}})
+    }
     if (call.body.query.includes('ContributeExactPull')) {
       const number=Number(call.body.query.match(/pullRequest\(number:(\d+)/)?.[1])
       const pr=pulls.find(pr=>pr.number===number) || closedPulls.find(pr=>pr.number===number)
-      ensure(call.body.query.includes('owner:"owner"') && call.body.query.includes('name:"project"'),'Exact read used another repository')
+      ensure((call.body.query.includes('owner:"owner"') && call.body.query.includes('name:"project"')) || (call.body.query.includes('owner:"team"') && call.body.query.includes('name:"community"')),'Exact read used another repository')
       return response({data:{repository:{pullRequest:{...pr,
+        ...(call.body.query.includes('owner:"team"') ? { repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'} } : {}),
         headRefOid:window.exactHeadChanged?'e'.repeat(40):pr.headRefOid,
         baseRef:{target:{oid:window.liveBase || BASE}},
       }}}})
     }
     if (call.body.query.includes('ContributePullContext')) {
       const pr=[...pulls, ...closedPulls].find(pr=>pr.number===call.body.variables.number)
-      ensure(call.body.variables.owner==='owner' && call.body.variables.name==='project','Wrong context repository')
+      ensure((call.body.variables.owner==='owner' && call.body.variables.name==='project') || (call.body.variables.owner==='team' && call.body.variables.name==='community'),'Wrong context repository')
       // window.fixtureCommits: the PR's commits, oldest first, as GitHub lists them (the Commits tab and the re-review window read them).
       const listed=window.fixtureCommits ? { headRefOid:window.fixtureChangedHead && pr.number===8 ? 'e'.repeat(40) : pr.headRefOid, commits:{ totalCount:window.fixtureCommits.length, pageInfo:{hasNextPage:false,endCursor:null},
         nodes:window.fixtureCommits.map(oid=>({ commit:{ oid, abbreviatedOid:oid.slice(0,7), url:'', messageHeadline:'A commit', messageBody:'', committedDate:'2026-11-04T10:00:00Z', authors:{nodes:[]}, statusCheckRollup:null } })) } } : {}
       return response({data:{repository:{pullRequest:{...pr,
+        ...(call.body.variables.owner === 'team' ? { repository:{nameWithOwner:'team/community',viewerPermission:'WRITE'} } : {}),
         ...(window.pullCommits ? { commits: window.pullCommits } : {}),
         reviewThreads:{nodes:[],pageInfo:{hasNextPage:false,endCursor:null}},
         closingIssuesReferences:{nodes:[],pageInfo:{hasNextPage:false}},
@@ -325,7 +331,7 @@ window.fetch = async (url, options = {}) => {
     if(window.failScope) return new Response(JSON.stringify({detail:'Fixture scope unavailable'}),{status:503})
     return response({ chats: [] })
   }
-  if (call.url.startsWith('/api/github/api/repos/owner/project/') && call.method === 'GET') {
+  if ((call.url.startsWith('/api/github/api/repos/owner/project/') || call.url.startsWith('/api/github/api/repos/team/community/')) && call.method === 'GET') {
     // GitHub's comparison of a version against the base tip: each scenario says what the PR's own files are at each commit.
     if(call.url.includes('/compare/')) return window.compareAnswers ? response(window.compareAnswers(call.url.split('...')[1])) : forbidden('unexpected comparison')(call.url)
     // A file of the repository as the contents API answers it: a scenario fills window.repoFiles (path to answer); anything else is not found.
@@ -2099,6 +2105,39 @@ window.runWorkspaceChecks = async () => {
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
   }
+}
+
+// Notification and chat PR links use the standalone page, preserving the desk below it.
+window.runPullIntentChecks = async () => {
+  const checks = []
+  const send = (intent, nonce) => window.dispatchEvent(new MessageEvent('message', { origin: window.location.origin, source: window.parent, data: { type: 'moebius:app-intent', intent, nonce } }))
+  try {
+    await mountDeskApp()
+    await until(() => query('.co-desk-row'), 'Desk did not load')
+    send('pr:owner:project:7', 'first')
+    await until(() => query('.co-pull-page .co-pr-detail') && text(query('.co-pull-page')).includes('Contribution 7'), 'Notification did not open standalone PR')
+    await click(query('.co-desk-back'))
+    await until(() => !query('.co-pull-page') && query('.co-desk-row'), 'Back did not restore desk')
+    checks.push({ name: 'notification opens standalone PR and Back restores desk', status: 'pass' })
+    send('pull-request:team/community#8', 'external')
+    await until(() => query('.co-pull-page .co-pr-detail') && text(query('.co-pull-page')).includes('Contribution 8'), 'Unknown repository PR did not open')
+    checks.push({ name: 'unknown repository is discovered and opens', status: 'pass' })
+    window.holdRepository = true
+    send('pull-request:team/community#8', 'slow')
+    await until(() => window.releaseRepository, 'Discovery did not start')
+    send('pull-request:owner/project#11', 'newer')
+    await until(() => query('.co-pull-page') && text(query('.co-pull-page')).includes('Closed contribution'), 'Newer closed PR did not open')
+    window.releaseRepository(); for (let turn = 0; turn < 8; turn++) await frame()
+    ensure(text(query('.co-pull-page')).includes('Closed contribution'), 'Older discovery replaced newer PR')
+    checks.push({ name: 'successive intents keep newest even when older discovery resolves last', status: 'pass' })
+    window.holdRepository = false; window.failRepository = true
+    send('pr:team:community:8', 'missing')
+    await until(() => text(query('[role="alert"]')).includes('Repository not found'), 'Discovery failure was not visible')
+    ensure(!query('.co-pull-page'), 'Failed discovery retained a misleading PR page')
+    checks.push({ name: 'repository discovery failure is visible', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks }
+  } catch (error) { return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 3000), forbidden: calls.forbidden } }
 }
 
 // The whole app on a fresh page: a review the owner starts from a PR's own page
@@ -4792,7 +4831,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {
