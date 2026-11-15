@@ -336,6 +336,7 @@ export function SourceMap({
   const openView = key => { desk.onClosePull(); if (selected) closeProject(); setNeedsFilter(''); desk.onView(deskViewKey(key)) }
   const openProjectFromRail = key => { desk.onClosePull(); void openProject(key) }
   function openRecordFromDesk(project, item) {
+    desk.onClosePull()
     void openProject(project.key)
     if (item?.id) openWork(item.id)
   }

@@ -1750,7 +1750,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     decisionsFor: project => projectRun(project).decisions,
     onOpenPull: openPullPage,
     pull: pullPage,
-    onClosePull: () => setPullPage(null),
+    onClosePull: () => { pullFocusRef.current = null; setPullPage(null) },
     renderPull: () => {
       if (!pullPage) return null
       const project = sourceProjects.find(item => item.key === pullPage.key)

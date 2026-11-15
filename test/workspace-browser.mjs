@@ -2140,6 +2140,15 @@ window.runPullIntentChecks = async () => {
     window.releaseRepository(); for (let turn = 0; turn < 8; turn++) await frame()
     ensure(text(query('.co-pull-page')).includes('Contribution 7'), 'Older discovery replaced manually opened PR')
     checks.push({ name: 'manual PR navigation supersedes pending discovery', status: 'pass' })
+    await click(query('.co-desk-back'))
+    window.releaseRepository = null
+    send('pull-request:team/community#8', 'slow-view')
+    await until(() => window.releaseRepository, 'View race discovery did not start')
+    const viewButton = [...document.querySelectorAll('.co-rail-views button, .co-desk-seg button')].find(button => button.getClientRects().length)
+    await click(viewButton)
+    window.releaseRepository(); for (let turn = 0; turn < 8; turn++) await frame()
+    ensure(!query('.co-pull-page'), 'Older discovery replaced manual view navigation')
+    checks.push({ name: 'manual view navigation supersedes pending discovery', status: 'pass' })
     window.holdRepository = false; window.failRepository = true
     send('pr:team:community:8', 'missing')
     await until(() => text(query('[role="alert"]')).includes('Repository not found'), 'Discovery failure was not visible')
