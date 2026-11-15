@@ -17,7 +17,7 @@ contribution. This app is the dashboard for that loop:
   requests, public progress, questions and history belong to their project.
   There is no separate Reviews destination. All, **With local changes** and
   **Behind GitHub** filter the same searchable overview, where each project
-  carries a Platform or App tag and apps with nothing to do fold away.
+  carries a Platform or App tag. **Worked with** leads: what has something going on, then the repositories you contributed to before, the latest first, each saying when. The installed repositories you have not worked with fold into **Other repositories**.
 - **Needs you holds the blockers** — the Needs you destination lists what needs
   you on tracked contributions, blockers before news; a project page no longer
   repeats them in a banner. Each row names the reason (Merge

@@ -8,6 +8,7 @@ const DAY = 24 * 60 * 60 * 1000
 const stamp = (name, at = '2026-11-01T10:00:00.000000Z', size = 100) => ({ name, path: `contributions/${name}`, type: 'file', modified_at: at, size })
 const file = (id, at, size) => stamp(`${id}.json`, at, size)
 const record = (id, extra = {}) => ({ id, status: 'merged', updated_at: '2026-11-01T10:00:00Z', ...extra })
+const MOVED_AT = Date.parse('2026-11-01T10:00:00Z')
 const stampOfFile = (name, at, size) => listingStamp(stamp(name, at, size))
 
 // One fake storage: `server` holds the record bodies, `listing` the folder as the server lists it, `saved` the feed
@@ -36,7 +37,7 @@ function fakeStorage({ saved = null, server = {}, listing, online = true, versio
 }
 
 // What a visit saved: the desk's records, and the index of every file it listed.
-const savedFeed = (records, index) => ({ schema: 3, saved_at: '2026-11-13T07:00:00Z', records: records.map(rec => ({ ...rec, path: `contributions/${rec.id}.json` })), index })
+const savedFeed = (records, index) => ({ schema: 4, saved_at: '2026-11-13T07:00:00Z', records: records.map(rec => ({ ...rec, path: `contributions/${rec.id}.json` })), index })
 
 test('a settled record that did not move is taken from the saved feed and never read again', async () => {
   const kept = record('kept', { title: 'from the saved feed' })
@@ -178,7 +179,7 @@ test('a runtime that cannot read one record fresh reads the whole ledger instead
 test('an incomplete listing, or being offline, serves the saved feed', async () => {
   fakeStorage({ saved: savedFeed([record('cached')], {}), listing: [] })
   window.mobius.storage.listWithStatus = async () => ({ complete: false, entries: [] })
-  assert.deepEqual(await loadLedger(), { records: [{ ...record('cached'), path: 'contributions/cached.json' }], fromCache: true, omitted: [] })
+  assert.deepEqual(await loadLedger(), { records: [{ ...record('cached'), path: 'contributions/cached.json' }], fromCache: true, omitted: [], worked: {} })
 })
 
 test('a canonical record still wins over a legacy-named copy in the desk read', async () => {
@@ -220,10 +221,10 @@ test('the saved feed carries the index of the folder as the last read found it',
   const { records } = await loadLedger()
   await cacheFeed(records)
   const [{ value }] = log.writes
-  assert.equal(value.schema, 3)
+  assert.equal(value.schema, 4)
   assert.deepEqual(value.index, {
-    'open-one.json': { stamp: stampOfFile('open-one.json'), current: true },
-    'merged-one.json': { stamp: stampOfFile('merged-one.json', '2026-11-02T10:00:00.000000Z', 70), current: false },
+    'open-one.json': { stamp: stampOfFile('open-one.json'), current: true, repo: '', at: MOVED_AT },
+    'merged-one.json': { stamp: stampOfFile('merged-one.json', '2026-11-02T10:00:00.000000Z', 70), current: false, repo: '', at: MOVED_AT },
   })
 })
 
@@ -283,4 +284,32 @@ test('a file that reads as gone or empty is not remembered, so a record caught b
   assert.deepEqual((await loadLedger()).records, [])
   await cacheFeed([])
   assert.deepEqual(log.writes.at(-1).value.index, {}, 'nothing was learned about it')
+})
+
+test('the index remembers when each repository was last worked in, settled history included', async () => {
+  fakeStorage({
+    saved: savedFeed([], {}),
+    listing: [file('old-merged'), file('newer-merged'), file('elsewhere'), file('no-repo')],
+    server: {
+      'contributions/old-merged.json': record('old-merged', { repo: 'Acme/Widgets', updated_at: '2026-09-01T10:00:00Z' }),
+      'contributions/newer-merged.json': record('newer-merged', { plan: { repo: 'acme/widgets' }, updated_at: '2026-10-01T10:00:00Z' }),
+      'contributions/elsewhere.json': record('elsewhere', { repo: 'other/project', updated_at: '2026-08-01T10:00:00Z' }),
+      'contributions/no-repo.json': record('no-repo'),
+    },
+  })
+  const { worked } = await loadLedger()
+  assert.deepEqual(worked, { 'acme/widgets': Date.parse('2026-10-01T10:00:00Z'), 'other/project': Date.parse('2026-08-01T10:00:00Z') })
+})
+
+test('a saved feed whose index predates the repository is read whole once, so no old history goes unnoticed', async () => {
+  const log = fakeStorage({
+    saved: { ...savedFeed([], { 'settled.json': { stamp: stampOfFile('settled.json'), current: false } }), schema: 3 },
+    listing: [file('settled')],
+    server: { 'contributions/settled.json': record('settled', { repo: 'acme/widgets' }) },
+  })
+  const { worked } = await loadLedger()
+  assert.deepEqual(log.lists, [{ prefix: 'contributions/', options: { includeContent: true } }], 'the whole ledger came in one listing with its content')
+  assert.deepEqual(Object.keys(worked), ['acme/widgets'])
+  await cacheFeed([])
+  assert.equal(log.writes[0].value.schema, 4)
 })

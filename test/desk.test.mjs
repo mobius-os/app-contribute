@@ -152,12 +152,27 @@ test('the counts name next steps and the rail badges follow them', () => {
   assert.equal(railBadge('runs', { reviewsRunning: 2 }), 2)
 })
 
-test('projects with review requests never fold into the quiet group', () => {
-  const quiet = { key: 'a', kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0 }
+test('projects with review requests are worked with, never among the other repositories', () => {
+  const quiet = { key: 'a', kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0, lastWorkedAt: null }
   const asked = { ...quiet, key: 'b', reviewRequests: [pr(1)] }
   const groups = splitProjects([quiet, asked], {})
-  assert.deepEqual(groups.quiet.map(project => project.key), ['a'])
-  assert.deepEqual(groups.active.map(project => project.key), ['b'])
+  assert.deepEqual(groups.other.map(project => project.key), ['a'])
+  assert.deepEqual(groups.workedWith.map(project => project.key), ['b'])
+})
+
+test('finished work keeps a repository worked with, after what is going on and latest first', () => {
+  const resting = { kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0, lastWorkedAt: null }
+  const projects = [
+    { ...resting, key: 'never' },
+    { ...resting, key: 'long-ago', lastWorkedAt: 1000 },
+    { ...resting, key: 'busy', workingFiles: 2 },
+    { ...resting, key: 'reviewed-only', lastWorkedAt: 0 },
+    { ...resting, key: 'yesterday', lastWorkedAt: 5000 },
+  ]
+  const groups = splitProjects(projects, {})
+  assert.deepEqual(groups.workedWith.map(project => project.key), ['busy', 'yesterday', 'long-ago', 'reviewed-only'])
+  assert.deepEqual(groups.other.map(project => project.key), ['never'])
+  assert.deepEqual(splitProjects(projects, { never: 1 }).workedWith.map(project => project.key).slice(0, 2), ['never', 'busy'], 'a card that needs the owner is current work')
 })
 
 test('feedback on a published PR opens the PR itself; publication decisions keep their card', async () => {

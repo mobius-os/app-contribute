@@ -416,7 +416,7 @@ test('the Projects summary reserves its row while source checks refresh', () => 
 test('project status and essential controls remain visible with a readable type floor', () => {
   assert.doesNotMatch(controlsSource, /More actions|View reviews/)
   assert.match(controlsSource, /className="co-btn co-btn-primary co-task-primary"/)
-  assert.match(sourceMapSource, /<span>\{facts\.work\}<\/span>/)
+  assert.match(sourceMapSource, /: facts\.work\}<\/span>/)
   assert.match(sourceMapSource, /className="co-source-shared">\{shared\}/)
   const sizes = [...(themeSource + workspaceTheme).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map(match => Number(match[1]))
   assert.ok(sizes.every(size => size === 0 || size >= 14))

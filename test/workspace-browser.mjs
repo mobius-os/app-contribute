@@ -1,9 +1,10 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Twenty-eight scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Twenty-nine scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
+// runRepositoryGroupChecks (the project fixture: the list leads with Worked with, each with its last activity, and folds the rest into Other repositories),
 // runDeskFrameChecks (the whole app: a review started on a PR page frames its Desk row),
 // runPullReadingChecks (the whole app: reading a PR page: pictures, the Checks tab, why a check failed, one commit's diff, the wide page, the escalation and the next-steps strip),
 // runDeskListChecks (the whole app: Needs you rows share one layout and their counts, Agent runs has three tabs, a merged row opens its PR page),
@@ -684,6 +685,40 @@ window.runProjectScreenChecks = async () => {
       ensure(document.documentElement.scrollWidth <= window.innerWidth, 'A project ' + label + ' makes the page scroll sideways')
       checks.push({ name: 'a project ' + label + ' opens straight on its tabs', status: 'pass' })
     }
+    return { status: 'pass', checks }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 2000) }
+  }
+}
+window.runRepositoryGroupChecks = async () => {
+  const checks = []
+  const DAY = 24 * 60 * 60 * 1000
+  const app = (name, extra = {}) => ({ key: 'app:' + name.toLowerCase(), kind: 'app', name, available: true, canonical_repo: 'owner/' + name.toLowerCase(),
+    viewerPermission: 'WRITE', head_sha: HEAD, base_sha: BASE, localFiles: 0, workingFiles: 0, contributions: [], lastWorkedAt: null, ...extra })
+  const names = selector => [...document.querySelectorAll(selector + ' .co-source-row strong')].map(node => text(node))
+  try {
+    await until(() => query('.co-source-row'), 'Project list did not render')
+    window.setProjectsFixture(() => [
+      app('Notes', { workingFiles: 3 }), app('Recipes', { lastWorkedAt: Date.now() - 3 * DAY }), app('Weather', { lastWorkedAt: Date.now() - 40 * DAY }),
+      app('Maps'), app('Music'), app('Photos'),
+    ])
+    await until(() => query('.co-quiet-projects'), 'The other repositories did not fold')
+    await frame(); await frame()
+    await captureShot('repository-groups')
+    const foldedAtFirst = !query('.co-quiet-projects').open
+    query('.co-quiet-projects > summary').click()
+    await frame(); await frame()
+    await captureShot('repository-groups-open')
+    const worked = query('.co-source-group-label.is-counted')
+    ensure(text(worked) === 'Worked with3', 'Worked with did not say how many: ' + text(worked))
+    ensure(names('.co-source-group:has(.is-counted)').join('|') === 'Notes|Recipes|Weather', 'Worked with was not open work first, then the latest activity: ' + names('.co-source-group:has(.is-counted)'))
+    const recipes = [...document.querySelectorAll('.co-source-row-wrap')].find(row => text(row.querySelector('strong')) === 'Recipes')
+    ensure(/Last activity 3 days ago/.test(text(recipes)), 'A repository worked with did not say when: ' + text(recipes))
+    const other = query('.co-quiet-projects')
+    ensure(text(other.querySelector('summary')) === 'Other repositories3' && foldedAtFirst, 'Other repositories was not folded with its count')
+    ensure(names('.co-quiet-projects').join('|') === 'Maps|Music|Photos', 'Other repositories held the wrong repositories: ' + names('.co-quiet-projects'))
+    ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The groups make the page scroll sideways')
+    checks.push({ name: 'the list leads with the repositories worked with and folds the others into Other repositories', status: 'pass' })
     return { status: 'pass', checks }
   } catch (error) {
     return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 2000) }
@@ -4159,7 +4194,7 @@ window.runInstantOpenChecks = async () => {
   const release = name => { window['hold' + name] = false; window['release' + name]?.() }
   // The copy a previous visit saved, written the way the app writes it.
   const saveCopy = async () => {
-    values.set('feed-cache.json', { schema: 3, saved_at: hoursAgo(2), records: [], index: {} })
+    values.set('feed-cache.json', { schema: 4, saved_at: hoursAgo(2), records: [], index: {} })
     values.set('source-cache.json', { schema: 1, saved_at: hoursAgo(2), snapshot: { apps: [], platform: null } })
     await saveDeskCopy({ login: owner, syncedAt: hoursAgo(2), incoming: [mine(approvedBy)], repositories: { repositories: [], hasNextPage: false }, reviewRows: [], reviewPulls: [] })
   }
@@ -4283,7 +4318,7 @@ window.runRepositoryListChecks = async () => {
   }
   // What a previous visit saved: the desk, and the first page of this repository's list as it was three hours ago.
   const saveCopies = async lists => {
-    values.set('feed-cache.json', { schema: 3, saved_at: hoursAgo(3), records: [], index: {} })
+    values.set('feed-cache.json', { schema: 4, saved_at: hoursAgo(3), records: [], index: {} })
     values.set('source-cache.json', { schema: 1, saved_at: hoursAgo(3), snapshot: { apps: [], platform: null } })
     await saveDeskCopy({ login: owner, syncedAt: hoursAgo(3), incoming: [], repositories: { repositories: [], hasNextPage: false }, reviewRows: [], reviewPulls: [] })
     if (lists) await saveListCopy(listCopyOf({ login: owner, lists }))
@@ -4850,7 +4885,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

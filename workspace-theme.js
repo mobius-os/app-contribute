@@ -913,7 +913,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-quiet-projects { border-top:1px solid var(--border); }
 .co-quiet-projects > summary { display:flex; align-items:center; gap:10px; min-height:52px; padding:0 12px; color:var(--muted); font-size:var(--co-text-body); font-weight:500; list-style:none; cursor:pointer; }
 .co-quiet-projects > summary::-webkit-details-marker { display:none; }
-.co-quiet-projects > summary b { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); font-size:var(--co-text-chip); font-weight:600; line-height:22px; text-align:center; }
+.co-quiet-projects > summary b, .co-source-group-label.is-counted b { min-width:22px; padding:0 7px; border-radius:var(--co-radius-round); background:var(--surface-2,var(--surface)); font-size:var(--co-text-chip); font-weight:600; line-height:22px; text-align:center; }
 .co-quiet-projects > summary .co-icon { margin-left:auto; transition:transform .15s; }
 .co-quiet-projects[open] > summary .co-icon { transform:rotate(180deg); }
 .co-quiet-projects > summary:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:var(--co-radius-field); }
@@ -1376,7 +1376,7 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-desk-seg { row-gap:calc(2 * var(--co-tap-reach)); }
  .co-rw-tools { gap:calc(2 * var(--co-tap-reach)); }
  .co-pr-filters { padding-block:var(--co-tap-reach); }
- .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b { line-height:20px; }
+ .co-source-tag,.co-rail-count,.co-tab-count,.co-quiet-projects > summary b,.co-source-group-label.is-counted b { line-height:20px; }
  .co-desk-chips { margin-bottom:6px; padding:4px 0; }
  .co-filter-line { margin:0 0 calc(2 * var(--co-tap-reach)); }
  .co-search, .co-desk-find { margin-bottom:10px; }
@@ -1394,6 +1394,6 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-source-row { min-height:0; padding:12px 4px; }
  /* A repository's sentences are detail under its name, not a second headline. */
  .co-source-row-facts { gap:2px; color:var(--muted); font-size:var(--co-text-meta); line-height:1.4; }
- .co-quiet-projects > summary { min-height:44px; }
+ .co-quiet-projects > summary, .co-source-group-label.is-counted { min-height:44px; }
 }
 `
