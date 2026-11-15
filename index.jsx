@@ -98,7 +98,7 @@ import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, PINNED_REPOSITORIES, followedRepositories, pinChoices, pinnedRepositories, setRepositoryPinned } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
+import { collaborationRequest, discoverRepositories, discoverRepository, repositoryName } from './collaboration.js'
 import { chatBlockTarget, validRecordId } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
@@ -378,6 +378,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // lists them asks (the fold of finished work), and every later pass of the ledger keeps them too.
   const [historyComplete, setHistoryComplete] = useState(false)
   const historyWantedRef = useRef(false)
+  // When the owner last contributed to each repository, from the whole ledger index (storage.js workedRepositories); read with
+  // the saved feed so the first screen already groups the repositories they worked with.
+  const [workedRepos, setWorkedRepos] = useState({})
+  const keepWorkedRepos = useCallback(next => setWorkedRepos(old => (JSON.stringify(old) === JSON.stringify(next) ? old : next)), [])
   // Whether the last read of the review requests came back; the hub settles a failed read without throwing.
   const incomingReadOkRef = useRef(true)
   useEffect(() => { connRef.current = conn }, [conn])
@@ -724,6 +728,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       const savedFeed = await savedFeedPromise
       if (!cancelled && savedFeed) {
         recordsRef.current = cached
+        keepWorkedRepos(savedFeed.worked)
         setRecords(cached)
         setLoading(false)
         setFeedKnown(true)
@@ -758,6 +763,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       const recs = reconcileLedgerSnapshot(recordsRef.current, ledger.records)
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
+      keepWorkedRepos(ledger.worked)
       setRecords(recs)
       setFromCache(ledger.fromCache)
       ledgerCurrentRef.current = !ledger.fromCache
@@ -826,6 +832,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       refreshConnectionRef.current?.(),
     ])
     setOmittedCount(ledger.omitted.length)
+    keepWorkedRepos(ledger.worked)
     ledgerCurrentRef.current = !ledger.fromCache
     if (ledger.wholeHistory) { historyWantedRef.current = true; setHistoryComplete(true) }
     if (!ledger.fromCache) {
@@ -1668,11 +1675,17 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // A waiting agent run on a repository nothing else involves still gets its card (and so its badge).
   const runReposKey = agentRunsWaiting(reviewList.entries, new Set()).map(entry => String(entry.item.repo)).sort().join('|')
   const runRepos = useMemo(() => (runReposKey ? [...new Set(runReposKey.split('|'))] : []), [runReposKey])
+  // Reviews the owner ran count as work in a repository too, though no date comes with them.
+  const reviewedReposKey = reviewList.entries.map(entry => repositoryName(entry.item?.repo)).filter(Boolean).sort().join('|')
+  const workHistory = useMemo(
+    () => ({ ...Object.fromEntries(reviewedReposKey ? [...new Set(reviewedReposKey.split('|'))].map(repo => [repo, 0]) : []), ...workedRepos }),
+    [reviewedReposKey, workedRepos],
+  )
   const sourceProjects = useMemo(
     () => attachSourceProjects(sourceSnapshot, records, incomingReviews,
       linkedRepository ? [...repositoryAccess.repositories, linkedRepository] : repositoryAccess.repositories,
-      linkedRepository ? [...followedRepos, linkedRepository.nameWithOwner] : followedRepos, runRepos),
-    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, linkedRepository, runRepos],
+      linkedRepository ? [...followedRepos, linkedRepository.nameWithOwner] : followedRepos, runRepos, workHistory),
+    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, linkedRepository, runRepos, workHistory],
   )
   sourceProjectsRef.current = sourceProjects
   const contributionRun = useMemo(() => buildContributionRun({

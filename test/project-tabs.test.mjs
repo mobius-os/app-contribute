@@ -53,18 +53,23 @@ test('the PR list follows its tab: requests explain themselves and My work shows
   assert.doesNotMatch(mine, /Search pull requests|co-pr-box/)
 })
 
-test('the projects list tags each project and folds apps with nothing to do', async t => {
+test('the projects list tags each project, leads with the repositories worked with and folds the others', async t => {
   const { render } = await ui(t) || {}
   if (!render) return
   const platform = { key: 'platform', kind: 'platform', name: 'Möbius', available: true, canonical_repo: 'mobius-os/mobius', localFiles: 2, contributions: [] }
-  const quiet = { key: 'app:2', kind: 'app', name: 'Quiet app', available: true, canonical_repo: 'owner/quiet', contributions: [] }
+  const quiet = { key: 'app:2', kind: 'app', name: 'Quiet app', available: true, canonical_repo: 'owner/quiet', contributions: [], lastWorkedAt: null }
   const busy = { ...project, key: 'app:3', name: 'Busy app', contributions: [], reviewRequests: [{ number: 1, repository: { nameWithOwner: 'owner/repo' } }] }
-  const html = render('SourceMap', { projects: [platform, quiet, busy], conn: { state: 'connected' }, attention: { 'app:3': 2 } })
+  const past = { ...quiet, key: 'app:4', name: 'Past app', canonical_repo: 'owner/past', lastWorkedAt: Date.parse('2026-10-01T10:00:00Z') }
+  const html = render('SourceMap', { projects: [platform, quiet, busy, past], conn: { state: 'connected' }, attention: { 'app:3': 2 } })
   assert.match(html, /Möbius<\/strong><span class="co-source-tag">Platform<\/span>/)
   assert.match(html, /Busy app<\/strong><span class="co-source-tag">App<\/span>/)
   assert.match(html, /1 PR waits for your review\. 2 things need you\./)
-  assert.match(html, /<details class="co-quiet-projects"><summary><span>Repositories with nothing to do<\/span><b>1<\/b>/)
-  assert.doesNotMatch(html, /Everything else/)
+  assert.match(html, /<h3 class="co-source-group-label is-counted"><span>Worked with<\/span><b>3<\/b><\/h3>/)
+  assert.match(html, /Past app<\/strong>[\s\S]*?Last activity/)
+  assert.match(html, /<details class="co-quiet-projects"><summary><span>Other repositories<\/span><b>1<\/b>/)
+  const list = html.slice(html.indexOf('co-project-index'))
+  assert.ok(list.indexOf('Past app') < list.indexOf('Other repositories') && list.indexOf('Other repositories') < list.indexOf('Quiet app'), 'the repository never worked with sits under the fold')
+  assert.doesNotMatch(html, /nothing to do|Everything else/)
 })
 
 test('the Review requests tab never calls the inbox empty while more PRs can load', async t => {

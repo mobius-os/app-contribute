@@ -1,3 +1,4 @@
+import { repositoryName } from './collaboration.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { stackMeta } from './stack.js'
 
@@ -11,6 +12,9 @@ import { stackMeta } from './stack.js'
 // "none". The assembled feed is also cached to feed-cache.json.
 
 const FEED_CACHE = 'feed-cache.json'
+// The shape of what feed-cache.json holds. A saved index of another shape is not trusted: the next visit reads the whole ledger
+// once and writes it again (schema 4 added each record's repository and time to the index).
+const FEED_SCHEMA = 4
 const SOURCE_CACHE = 'source-cache.json'
 const CYCLE_STATE = 'cycle-state.json'
 const RECORD_PREFIX = 'contributions/'
@@ -92,7 +96,7 @@ function readSavedFeed() {
       try {
         const saved = await window.mobius.storage.get(FEED_CACHE)
         if (!saved || typeof saved !== 'object') return null
-        const index = saved.index && typeof saved.index === 'object' && !Array.isArray(saved.index) ? saved.index : null
+        const index = saved.schema === FEED_SCHEMA && saved.index && typeof saved.index === 'object' && !Array.isArray(saved.index) ? saved.index : null
         if (index && !ledgerIndex) ledgerIndex = index
         return { records: Array.isArray(saved.records) ? saved.records : [], index, savedAt: typeof saved.saved_at === 'string' ? saved.saved_at : '' }
       } catch {
@@ -111,7 +115,7 @@ export async function loadCachedFeed() {
 // still a saved copy, so a new account is told apart from one with nothing yet.
 export async function loadSavedFeedStamp() {
   const saved = await readSavedFeed()
-  return saved ? { savedAt: saved.savedAt, count: saved.records.length } : null
+  return saved ? { savedAt: saved.savedAt, count: saved.records.length, worked: workedRepositories(saved.index) } : null
 }
 
 // A shell review handoff names one already-validated contribution id. Resolve
@@ -216,7 +220,17 @@ function ledgerRecordOf(entry, body) {
 // what counts here, never a display status laid over it from GitHub.
 function indexEntry(entry, record) {
   const stack = record ? stackMeta(record)?.id : undefined
-  return { stamp: listingStamp(entry), current: isCurrentRecord(record), ...(stack ? { stack } : {}) }
+  return { stamp: listingStamp(entry), current: isCurrentRecord(record), repo: repositoryName(record?.repo || record?.plan?.repo), at: recordTime(record), ...(stack ? { stack } : {}) }
+}
+
+// The repositories the owner has contributed to, however long ago, as { 'owner/name': when the last record moved (ms) }.
+// The index remembers every record file, so this covers the settled history the desk never reads.
+export function workedRepositories(index) {
+  const worked = {}
+  for (const { repo, at } of Object.values(index || {})) {
+    if (repo) worked[repo] = Math.max(worked[repo] || 0, at || 0)
+  }
+  return worked
 }
 
 // Every record, bodies and all: the first visit, an older saved copy without an
@@ -258,7 +272,7 @@ function finishLedger({ records, omitted, index, jsonEntries, saved, wholeHistor
     ]
   }
   ledgerIndex = index
-  return { records: preferCanonicalLedgerRecords(assembled), fromCache: omitted.length > 0, omitted, wholeHistory }
+  return { records: preferCanonicalLedgerRecords(assembled), fromCache: omitted.length > 0, omitted, wholeHistory, worked: workedRepositories(index) }
 }
 
 // Reads a few record files fresh from the server, a handful at a time. A file the
@@ -338,7 +352,7 @@ async function readLedger({ history }) {
   const desk = !history && saved?.index && readVersioned
   const listing = await listLedgerFolder({ includeContent: !desk })
   if (listing?.complete !== true) {
-    return { records: saved?.records ?? [], fromCache: true, omitted: [] }
+    return { records: saved?.records ?? [], fromCache: true, omitted: [], worked: workedRepositories(saved?.index) }
   }
   const entries = listing.entries || []
   return desk ? readDeskLedger(entries, saved, readVersioned) : readWholeLedger(entries, saved)
@@ -361,7 +375,7 @@ export function loadLedger({ history = false } = {}) {
 export async function cacheFeed(records) {
   try {
     await window.mobius.storage.set(FEED_CACHE, {
-      schema: 3,
+      schema: FEED_SCHEMA,
       saved_at: new Date().toISOString(),
       records: buildFeedSnapshot(records),
       ...(ledgerIndex ? { index: ledgerIndex } : {}),
