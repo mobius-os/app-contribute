@@ -852,6 +852,10 @@ export function createInlineSession({ sessionId, actions, items = null, features
     try { data = encodeCheckpoint(attempts) } catch { fault = 'This card has too many unresolved results. Open Contribute to check them.' }
     if (fault) data = lastCheckpoint?.data ?? null
     if (data !== (lastCheckpoint?.data ?? null)) lastCheckpoint = data ? { id: crypto.randomUUID(), data } : null
+    // A remounted idle card has not observed anything yet. Do not overwrite
+    // the host's last settled display with a synthetic Loading snapshot.
+    // Recovery and in-flight ownership must still be reported immediately.
+    if (firstRead() && !fault && !lastCheckpoint && !frozen && !activating && !sending() && !ackNonce) return
     const key = card?.key || ''
     const head = heading(key)
     const { title = '', titleTone = 'neutral', titleBusy = false } = head
@@ -859,6 +863,11 @@ export function createInlineSession({ sessionId, actions, items = null, features
     const ask = reports.find(report => report.ask)?.ask || null
     publish({
       sessionId, actions: reports.map(report => report.state), title,
+      // Opt in to the host's compact card grammar on every reported state.
+      statusPlacement: 'footer',
+      // In-flight ownership can still report during the first exact read;
+      // an idle remount above leaves the host's last display undisturbed.
+      loading: firstRead(),
       ...(asks ? { ask } : {}),
       // Rows only for the chat the host attests; otherwise the card's own
       // fallback rows stay, and nothing is read.

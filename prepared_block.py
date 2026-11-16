@@ -193,6 +193,7 @@ def card_block(records, ledger=None, chat_id=None):
   block = {'app': 'contribute', 'intent': CHAT_INTENT,
     'title': '1 contribution' if len(records) == 1 else f'{len(records)} contributions',
     'inline': True, 'interaction': 'inline', 'expand': False,
+    'status_placement': 'footer',
     # Every value reads on its own, so fallback and Confirm rows show values
     # only (labels kept for assistive technology).
     'item_facts': 'values', 'confirm_facts': 'values', 'items': items,
