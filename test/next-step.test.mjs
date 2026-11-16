@@ -53,6 +53,9 @@ test('a resting state draws no panel: the state badge says it', () => {
   // Your own draft and an agent at work are not resting: one has a step of yours, the other is under way.
   assert.equal(nextStepModel(decide(facts({ lifecycle: 'draft' })), { capabilities }).pill.label, 'Draft')
   assert.equal(nextStepModel(decide(facts({ job: { kind: 'review', state: 'working' } })), { capabilities }).pill.label, 'Agent working')
+  // Only an agent at work offers its conversation in the panel.
+  assert.equal(nextStepModel(decide(facts({ job: { kind: 'review', state: 'working' } })), { capabilities }).chat, true)
+  assert.equal(nextStepModel(decide(facts({ lifecycle: 'draft' })), { capabilities }).chat, false)
 })
 
 test('the state badge of an open PR adds where it stands: the resting label, In review or Approved', () => {

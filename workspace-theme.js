@@ -463,11 +463,13 @@ export const WORKSPACE_CSS = `
  .co-pr-detail-actions .co-btn-word { display:inline; }
 }
 .co-gh-provenance { display:contents; }
-.co-chat-group { position:relative; display:inline-flex; }
-.co-chat-group-list { position:absolute; z-index:30; top:calc(100% + 6px); left:0; width:min(320px,calc(100vw - 32px)); padding:6px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); box-shadow:0 12px 32px rgba(0,0,0,.28); }
-.co-chat-group-list button { display:flex; flex-direction:column; gap:2px; width:100%; padding:9px 10px; border:0; border-radius:var(--co-radius-field); background:none; color:var(--text); text-align:left; font:inherit; cursor:pointer; }
-.co-chat-group-list button:hover { background:var(--surface-2,var(--surface)); }
-.co-chat-group-list small { color:var(--muted); font-size:var(--co-text-meta); overflow-wrap:anywhere; }
+/* The Chats list is the Actions menu's popup; the arc marks the chat an agent is working in. */
+.co-chat-row-text { flex:1 1 auto; min-width:0; }
+.co-agent-menu-list .co-arc { align-self:center; }
+/* A hairline parts what you do with the PR from where it can be opened. It goes on a phone, where the row wraps, and on a PR with nothing to do before it. */
+.co-detail-actions-rule { align-self:stretch; width:1px; margin:6px 2px; background:var(--border); }
+.co-detail-actions-rule:first-child { display:none; }
+@media (max-width:680px) { .co-detail-actions-rule { display:none; } }
 .co-gh-chat-link { gap:6px; }
 .co-gh-chat-link .co-icon { color:var(--muted); }
 .co-pr-detail .co-detail-tabs { display:flex; width:100%; gap:20px; margin:14px 0 0; border-bottom:1px solid var(--border); overflow-x:auto; }
@@ -572,8 +574,8 @@ export const WORKSPACE_CSS = `
 .co-pr-assign,.co-agent-menu-button { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; white-space:nowrap; }
 .co-pr-row:hover .co-pr-assign,.co-pr-row:hover .co-agent-menu-button,.co-pr-row:focus-within .co-agent-menu-button { color:var(--text); }
 .co-agent-menu-button.is-button { padding:6px 12px; }
-.co-agent-menu-button > .co-icon:last-child { transition:transform .15s; }
-.co-agent-menu-button[aria-expanded=true] > .co-icon:last-child { transform:rotate(180deg); }
+.co-agent-menu-button > .co-icon:last-child,.co-chats-button > .co-icon:last-child { transition:transform .15s; }
+.co-agent-menu-button[aria-expanded=true] > .co-icon:last-child,.co-chats-button[aria-expanded=true] > .co-icon:last-child { transform:rotate(180deg); }
 .co-agent-menu { position:relative; display:inline-flex; }
 .co-agent-menu-list { position:absolute; z-index:30; top:calc(100% + 6px); right:0; width:min(340px,calc(100vw - 32px)); padding:6px; border:1.5px solid var(--co-edge); border-radius:var(--co-radius-panel); background:var(--surface); box-shadow:0 12px 32px rgba(0,0,0,.28); }
 .co-agent-menu.is-align-start .co-agent-menu-list { right:auto; left:0; }
@@ -638,6 +640,10 @@ export const WORKSPACE_CSS = `
 .co-review-stack { display:grid; gap:12px; }
 .co-next-pointer { display:block; min-height:44px; padding:0; border:0; background:none; color:var(--accent); font:inherit; text-align:left; text-decoration:underline; cursor:pointer; }
 .co-next-step .co-btn { flex:0 0 auto; }
+/* While an agent works, its conversation is a link at the end of the line: plain, so the one filled button stays the next step's. */
+.co-next-chat { flex:0 0 auto; min-height:44px; padding:0 2px; border:0; background:none; color:var(--accent); font:600 var(--co-text-meta) var(--font); cursor:pointer; }
+.co-next-chat:hover { text-decoration:underline; }
+.co-next-chat:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--co-radius-field); }
 /* Phone: the button leaves the panel and pins to the foot of the page, above the safe area. */
 .co-decision-bar { display:none; }
 @media(max-width:680px) {
@@ -879,7 +885,7 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 @media(prefers-reduced-motion:reduce) {
  .co-dialog,.co-icon.is-spinning { animation:none; }
  .co-rw-seen-card { transition:none; }
- input[type=checkbox].co-switch,input[type=checkbox].co-switch::after,.co-agent-menu-button > .co-icon:last-child { transition:none; }
+ input[type=checkbox].co-switch,input[type=checkbox].co-switch::after,.co-agent-menu-button > .co-icon:last-child,.co-chats-button > .co-icon:last-child { transition:none; }
  .co-btn.co-rw-seen-btn { animation:none; }
 }
 /* Project tabs: one tab per job under the project controls. */
