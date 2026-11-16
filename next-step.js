@@ -45,10 +45,11 @@ export function pillTone(decision) {
   return decision.turn === 'you' ? 'you' : 'quiet'
 }
 
-// { pill, hint, pointer, primary } for the panel under the facts line, or null for a resting state, which the
+// { pill, hint, pointer, chat, primary } for the panel under the facts line, or null for a resting state, which the
 // state badge already says. `primary` is null when the
 // next step is not yours to take, cannot run yet (the menu says why), or this Möbius
 // cannot run it for you.
+// `chat` says an agent is at work, so the panel offers that agent's conversation.
 export function nextStepModel(decision, { record = null, capabilities = null } = {}) {
   if (!decision || isResting(decision)) return null
   const action = decision.actions.find(item => item.id === actionToRun(decision))
@@ -60,6 +61,7 @@ export function nextStepModel(decision, { record = null, capabilities = null } =
     pill: { label: decision.label, tone: pillTone(decision) },
     hint: decision.headline,
     pointer: POINTERS[decision.next] || '',
+    chat: decision.state === 'working',
     primary: allowed ? { intent: action.id, route, title } : null,
   }
 }

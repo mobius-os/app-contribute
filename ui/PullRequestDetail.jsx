@@ -12,12 +12,13 @@ import { ActionsMenu } from './ActionsMenu.jsx'
 import { requestReviewButton, reviewRequested } from '../actions-menu.js'
 import { useTipDismiss } from './useTipDismiss.js'
 import { useKeepOnScreen } from './useKeepOnScreen.js'
+import { useDismissableMenu } from './useDismissableMenu.js'
 import { DateLabel, GithubLabel, PullStateBadge, REVIEW_DECISION } from './GithubParts.jsx'
 import { checkSummary, conversationCount } from '../collaboration.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { ReviewTab, reviewContent } from './ReviewTab.jsx'
 import { frameOf } from '../pr-standing.js'
-import { ROLE_TITLES } from '../provenance.js'
+import { ROLE_TITLES, workingChatId } from '../provenance.js'
 import { NAMES } from '../names.js'
 import { showOpenTab } from './stripScroll.js'
 import { NextStep } from './NextStep.jsx'
@@ -140,52 +141,74 @@ const COMMENT_PREVIEW = 4
 // A commit with this many files or fewer opens its diffs already unfolded.
 const COMMIT_OPEN_FILES = 5
 
-// Which job a chat belongs to. Every chat button is Open chat; the kind tells several apart.
-const PROVENANCE_KINDS = { source: 'where it started', review: 'review', fix: 'fix', respond: 'feedback' }
+// Which job a chat belongs to: the Chats list is grouped under these names.
+const PROVENANCE_KINDS = { source: 'Where it started', review: 'Review', fix: 'Fix', respond: 'Feedback' }
 
 // An icon-only button says its word beside the icon on a touch screen, where no hover shows its tooltip (workspace-theme.js, @media (hover:none));
 // with a mouse it stays an icon with its tooltip. The button's own accessible name is unchanged.
 const ButtonWord = ({ children }) => <span className="co-btn-word">{children}</span>
 
-// One icon button per kind of conversation. Several chats of the same kind fold
-// into one dropdown listing Review #1, #2, … with each chat's own title
-// underneath. A PR with a single chat anywhere says just "Open chat".
-function ProvenanceGroup({ role, links, lone }) {
+// One row of the Chats list: the chat's own title (a role's stand-in title would only repeat the group's name), and the
+// arc on the one an agent is working in.
+function ChatRow({ link, index, working, onPick }) {
+  const title = link.title === ROLE_TITLES[link.role] ? `Chat ${index + 1}` : link.title
+  return <button type="button" role="menuitem" onClick={() => onPick(link.chat_id)}>
+    <span className="co-agent-menu-tile"><Icon name="feedback" size={17} /></span>
+    <span className="co-chat-row-text"><strong>{title}</strong>{working ? <small>An agent is working here</small> : null}</span>
+    {working ? <span className="co-arc" aria-hidden="true" /> : null}
+  </button>
+}
+
+// Every chat of a PR behind one button, whatever their number: a list grouped by kind (where it started, review, fix,
+// feedback). It is the Actions menu's own popup, so on a phone it is the same sheet from the bottom edge with Cancel.
+function ChatsMenu({ conversations, workingChat }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const list = useRef(null)
+  useDismissableMenu(root, open, setOpen)
   useKeepOnScreen(list, open)
-  useEffect(() => {
-    if (!open) return undefined
-    const closeOutside = event => { if (!root.current?.contains(event.target)) setOpen(false) }
-    document.addEventListener('pointerdown', closeOutside)
-    return () => document.removeEventListener('pointerdown', closeOutside)
-  }, [open])
-  const kind = PROVENANCE_KINDS[role] || 'agent'
-  const many = `${NAMES.chats} ${links.length} · ${kind}`
-  if (links.length === 1) {
-    const name = lone ? NAMES.openChat : `${NAMES.openChat} · ${kind}`
-    // The chat's own title rides in the tooltip; a role's stand-in title ("Source conversation") would only repeat the name.
-    const title = links[0].title === ROLE_TITLES[role] ? '' : links[0].title
-    return <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => openAgentConversation(links[0].chat_id)} aria-label={name} data-tip={title ? `${name} · ${title}` : name}><Icon name="feedback" size={15} /><ButtonWord>{NAMES.chat}</ButtonWord></button>
+  function close() {
+    setOpen(false)
+    root.current?.querySelector('button')?.focus({ preventScroll: true })
   }
-  return <span className="co-chat-group" ref={root} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
-    <button type="button" className="co-btn co-tip co-gh-chat-link" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)} aria-label={many} data-tip={many}><Icon name="feedback" size={15} /><ButtonWord>{NAMES.chats} {links.length}</ButtonWord><Icon name="chevron" size={14} /></button>
-    {open ? <div className="co-chat-group-list" ref={list} role="menu" aria-label={many}>
-      {links.map((link, index) => <button type="button" role="menuitem" key={link.chat_id} onClick={() => { setOpen(false); openAgentConversation(link.chat_id) }}>
-        <strong>{kind[0].toUpperCase() + kind.slice(1)} #{index + 1}</strong>{link.title ? <small>{link.title}</small> : null}
-      </button>)}
-    </div> : null}
-  </span>
+  function pick(chatId) {
+    close()
+    openAgentConversation(chatId)
+  }
+  const name = `${NAMES.chats} ${conversations.length}`
+  const roles = [...new Set(conversations.map(link => link.role))]
+  return <div className="co-agent-menu is-align-start" ref={root}>
+    <button type="button" className="co-btn co-gh-chat-link co-chats-button" aria-haspopup="menu" aria-expanded={open} aria-label={name} onClick={() => setOpen(value => !value)}>
+      <Icon name="feedback" size={15} /><span>{name}</span><Icon name="chevron" size={14} />
+    </button>
+    {open ? <>
+      <div className="co-agent-menu-scrim" aria-hidden="true" onClick={close} />
+      <div className="co-agent-menu-list" ref={list} role="menu" aria-label={name} tabIndex={-1}>
+        <div className="co-agent-menu-rows">
+          {roles.map(role => <div key={role} role="group" aria-label={PROVENANCE_KINDS[role]}>
+            <p className="co-agent-menu-group">{PROVENANCE_KINDS[role]}</p>
+            {conversations.filter(link => link.role === role).map((link, index) => <ChatRow key={link.chat_id} link={link} index={index} working={link.chat_id === workingChat} onPick={pick} />)}
+          </div>)}
+        </div>
+        <button type="button" className="co-btn co-agent-menu-cancel" onClick={close}>{NAMES.cancel}</button>
+      </div>
+    </> : null}
+  </div>
 }
 
-function PullProvenance({ record, onRecord, conversations }) {
+// A PR with one chat opens it straight from an icon button, that chat's own title in the tooltip.
+function OneChat({ link }) {
+  const title = link.title === ROLE_TITLES[link.role] ? '' : link.title
+  return <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => openAgentConversation(link.chat_id)} aria-label={NAMES.openChat} data-tip={title ? `${NAMES.openChat} · ${title}` : NAMES.openChat}><Icon name="feedback" size={15} /><ButtonWord>{NAMES.chat}</ButtonWord></button>
+}
+
+function PullProvenance({ record, onRecord, conversations, workingChat }) {
   const local = record && onRecord
   if (!local && !conversations.length) return null
-  const roles = [...new Set(conversations.map(link => link.role))]
   return <span className="co-gh-provenance" role="group" aria-label="Where this PR came from">
     {local ? <button type="button" className="co-btn co-tip co-gh-chat-link" onClick={() => onRecord(record)} aria-label="Open prepared PR" data-tip="Open prepared PR"><Icon name="draft" size={15} /><ButtonWord>{NAMES.preparedPr}</ButtonWord></button> : null}
-    {roles.map(role => <ProvenanceGroup key={role} role={role} links={conversations.filter(link => link.role === role)} lone={conversations.length === 1} />)}
+    {conversations.length === 1 ? <OneChat link={conversations[0]} /> : null}
+    {conversations.length > 1 ? <ChatsMenu conversations={conversations} workingChat={workingChat} /> : null}
   </span>
 }
 
@@ -386,6 +409,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   }
   const githubUrl = safeDetailLink(pr.url)
   const requestOffer = requestReviewButton(review?.standing, { capabilities })
+  const workingChat = workingChatId(review?.standing, status?.run, provenance)
   // The machine's own review action, offered again on the Commits tab when the PR has commits the last review did not see.
   const againAction = readOnly ? null : review?.standing?.actions?.find(action => ['review', 'check_my_pr'].includes(action.id) && action.enabled) || null
   // The conversation loads as one unit: a single skeleton stands in for the
@@ -411,12 +435,13 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       {!readOnly && requestOffer && !reviewRequested(pr) ? <button className="co-btn co-request-review" disabled={stale || requestOffer.off} title={requestOffer.off ? requestOffer.reason : undefined} onClick={() => onReview?.('request_review')}><Icon name="plus" size={16} />{NAMES.requestReview}</button> : null}
       {!readOnly && canAssign ? <button className="co-btn co-tip" disabled={stale} onClick={onAssign} aria-label="Assign" data-tip="Assign"><Icon name="person" /><ButtonWord>{NAMES.assign}</ButtonWord></button> : null}
       {status && onProgress ? <button className="co-btn" onClick={onProgress}>Agent progress</button> : null}
+      {githubUrl ? <span className="co-detail-actions-rule" aria-hidden="true" /> : null}
       {githubUrl ? <a className="co-btn co-tip" href={githubUrl} target="_blank" rel="noopener noreferrer" aria-label={`View on GitHub: PR ${pr.number}`} data-tip="View on GitHub"><Icon name="github" /><ButtonWord>{NAMES.github}</ButtonWord></a> : null}
-      <PullProvenance record={record} onRecord={onRecord} conversations={provenance} />
+      <PullProvenance record={record} onRecord={onRecord} conversations={provenance} workingChat={workingChat} />
     </div>
     {/* Only where this Möbius can switch following on after Send: elsewhere the page stays as it was. */}
     {capabilities?.follow_after_send === true ? <FollowLine record={record} onSetAutopilot={onSetAutopilot} readOnly={readOnly} /> : null}
-    {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
+    {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} onOpenChat={workingChat ? () => openAgentConversation(workingChat) : null} /> : null}
     {conversationLoading ? null : <>
     <details className="co-gh-description">
       <summary>

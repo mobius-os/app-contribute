@@ -1533,7 +1533,7 @@ window.runWorkspaceChecks = async () => {
       window.focusPullFixture({ repo: 'owner/project', number: 8, nonce: 'later-page' })
       await until(() => focusedDetail(8) && prRow(8)?.classList.contains('is-highlighted'), 'Later-page link did not open its exact PR')
       window.setRecordsFixture(old => [...old, { id: 'fixture-closed', type: 'pr', status: 'closed', repo: 'owner/project', number: 11,
-        title: 'Closed contribution', chat_id: 'source-11', quality_review: { chat_id: 'review-11' } }])
+        title: 'Closed contribution', chat_id: 'source-11', chat_title: 'Start the contribution', quality_review: { chat_id: 'review-11' } }])
       window.focusPullFixture({ repo: 'owner/project', number: 11, nonce: 'closed' })
       await until(() => focusedDetail(11) && prRow(11)?.classList.contains('is-highlighted'), 'Closed link did not open its exact PR')
       ensure(!prRow(8), 'A replaced link stayed pinned')
@@ -1546,10 +1546,11 @@ window.runWorkspaceChecks = async () => {
       const provenance = query('.co-gh-provenance')
       const links = [...provenance.querySelectorAll('.co-gh-chat-link')]
       const names = links.map(link => link.getAttribute('aria-label'))
-      // The prepared PR, then one Open chat button per kind of conversation (where it started, the review).
-      // Icon buttons with a mouse; on a touch screen (no hover to show the tooltip) each also says its own word.
-      const words = matchMedia('(hover: none)').matches ? [NAMES.preparedPr, NAMES.chat, NAMES.chat] : ['', '', '']
-      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, NAMES.openChat + ' · where it started', NAMES.openChat + ' · review'].join('|') && links.map(link => link.innerText.trim()).join('|') === words.join('|'), 'Provenance is not one combined section of icon buttons: ' + names + ' / ' + links.map(link => link.innerText.trim()))
+      // The prepared PR, then one Chats button for both conversations (where it started, the review), never one per kind.
+      // The prepared PR is an icon button with a mouse and says its word on a touch screen; Chats always says its word and count.
+      const chats = NAMES.chats + ' 2'
+      const words = [matchMedia('(hover: none)').matches ? NAMES.preparedPr : '', chats]
+      ensure(names.join('|') === ['Open prepared ' + NAMES.pr, chats].join('|') && links.map(link => link.innerText.trim()).join('|') === words.join('|'), 'Provenance is not the prepared PR and one Chats button: ' + names + ' / ' + links.map(link => link.innerText.trim()))
       ensure(document.querySelectorAll('.co-gh-provenance').length === 1, 'Provenance repeated')
       for (const link of links) {
         // A control drawn short on a phone is still tapped 44px tall (The Compact Phone Rule), so the tap is probed, not the drawn box.
@@ -1562,8 +1563,18 @@ window.runWorkspaceChecks = async () => {
         ensure(message.type === 'moebius:open-chat' && target === '*', 'Wrong shell conversation command')
         calls.opened.push(message.chatId)
       } } })
-      try { await click(links[1]) } finally { Object.defineProperty(window, 'parent', parentDescriptor) }
-      ensure(calls.opened.at(-1) === 'source-11', 'Provenance opened another conversation')
+      try {
+        // Chats opens a list grouped by kind, each chat under its own title; choosing one opens that conversation and closes the list.
+        await click(links[1])
+        const list = provenance.querySelector('.co-agent-menu-list')
+        ensure(list && [...list.querySelectorAll('.co-agent-menu-group')].map(text).join('|') === 'Where it started|Review', 'The Chats list is not grouped by kind: ' + text(list))
+        ensure(text(list.querySelector('[role=menuitem]')).includes('Start the contribution'), 'A chat did not show its own title: ' + text(list))
+        const listBox = list.getBoundingClientRect()
+        ensure(listBox.left >= 0 && listBox.right <= window.innerWidth, 'The Chats list ran off the screen: ' + Math.round(listBox.left) + ' to ' + Math.round(listBox.right))
+        await captureShot('chats-list')
+        await click(list.querySelector('[role=menuitem]'))
+      } finally { Object.defineProperty(window, 'parent', parentDescriptor) }
+      ensure(calls.opened.at(-1) === 'source-11' && !provenance.querySelector('.co-agent-menu-list'), 'Choosing a chat opened another conversation or left the list open')
       await click(links[0])
       ensure(calls.opened.at(-1) === 'record:fixture-closed', 'Local preparation did not open its record')
       query('[data-task="task:detail"]').focus(); await nativeEscape()
@@ -3060,7 +3071,7 @@ window.runRequestReviewListChecks = async () => {
     }
   }
   const tick = async name => click([...document.querySelectorAll('.co-review-window input[type=checkbox]')].find(box => box.closest('label').textContent.includes(name)))
-  const facts = { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] } }
+  const facts = { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] }, comments: { totalCount: 2 } }
   try {
     reviewRuns.length = 0
     respondChats.length = 0
@@ -3070,7 +3081,7 @@ window.runRequestReviewListChecks = async () => {
     Object.assign(pulls[1], facts, { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } })
     // A third PR that is someone else's: it keeps Assign, and no selection that includes it can ask.
     pulls.push(pull(9, { ...facts, author: { login: 'someone-else' }, reviewRequests: { totalCount: 0, nodes: [] } }))
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
+    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] }, comments: { totalCount: 2 } } })
     await until(() => query('.co-rail'), 'The Desk did not render')
     await openProject()
     await until(() => document.querySelectorAll('.co-pr-row').length === 3, 'The PR list did not show all three PRs: ' + text(query('main')).slice(0, 400))
@@ -3079,6 +3090,16 @@ window.runRequestReviewListChecks = async () => {
     ensure(row(8).querySelector('[aria-label="Request review on PR 8"]') && row(8).querySelector('.co-pr-aside .co-gh-avatars'), 'PR 8 lost its request button or its assignee')
     ensure(sideways(), 'The list scrolls sideways')
     checks.push({ name: 'your own PRs offer Request review where Assign was, and an assignee stays visible', status: 'pass' })
+    // The comment count is the last thing before Actions, so it holds one place down the list whether a row offers the wide
+    // Request review, the Assign icon or an assignee before it. A phone's rows carry no count.
+    const counts = [7, 8, 9].map(number => row(number).querySelector('.co-pr-comments'))
+    ensure(counts.every(Boolean), 'A row lost its comment count')
+    if (getComputedStyle(counts[0]).display !== 'none') {
+      const rights = counts.map(node => Math.round(node.getBoundingClientRect().right))
+      ensure(new Set(rights).size === 1, 'The comment counts do not line up down the list: ' + rights.join(' | '))
+      ensure(counts.every(node => node.nextElementSibling?.classList.contains('co-agent-menu')), 'A comment count is not right before Actions')
+    }
+    checks.push({ name: 'the comment count holds one place down the list, right before Actions', status: 'pass' })
     await captureShot('request-review-list')
     // 2. One row: the sheet asks about that PR alone and sends one request.
     await click(row(7).querySelector('[aria-label="Request review on PR 7"]'))
@@ -3300,6 +3321,12 @@ window.runRespondAnswerChecks = async () => {
     await until(() => text(query('.co-next-hint')) === 'An agent is working on it', 'The panel did not follow the chat to working: ' + text(query('.co-next-hint')))
     await until(() => reviewBody().includes('Working on feedback'), 'The Review tab did not follow the chat to working: ' + reviewBody())
     ensure(!reviewBody().includes('No review yet') && !query('.co-next-pointer'), 'A working chat still showed the question state: ' + reviewBody())
+    // While the agent works, the panel itself opens that agent's conversation, on a phone too.
+    const openedBefore = sent.length
+    ensure(text(query('.co-next-chat')) === NAMES.openChat && query('.co-next-chat').getBoundingClientRect().height >= 44, 'The working panel did not offer Open chat: ' + text(query('.co-next-step')))
+    await captureShot('agent-working-open-chat', query('.co-next-step'))
+    await click(query('.co-next-chat'))
+    ensure(sent.length === openedBefore + 1 && sent.at(-1)[0].chatId === 'respond-chat-fixture', 'Open chat in the working panel sent: ' + JSON.stringify(sent.slice(openedBefore)))
     checks.push({ name: 'a Respond chat at work is shown as working, with its conversation one button away', status: 'pass' })
     ensure(document.documentElement.scrollWidth <= window.innerWidth, 'The page scrolls sideways: ' + document.documentElement.scrollWidth + ' of ' + window.innerWidth)
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))

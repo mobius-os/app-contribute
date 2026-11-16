@@ -33,3 +33,13 @@ export function pullConversations(records, runs, pr, respondChats = []) {
   add(respondChatOf(respondChats, pr)?.chat_id, 'respond')
   return [...links.values()]
 }
+
+// The conversation of the agent job a PR's machine says is working, or '' when none is known. A job of kind
+// 'respond' is the live Respond conversation; any other is the review run's own chat (pr-facts.js picks the
+// job the same way).
+export function workingChatId(decision, run, conversations) {
+  if (decision?.state !== 'working') return ''
+  const respond = decision.jobKind === 'respond' ? conversations.find(link => link.role === 'respond') : null
+  const chatId = respond ? respond.chat_id : run?.chat_id
+  return typeof chatId === 'string' && CHAT_ID.test(chatId) ? chatId : ''
+}
