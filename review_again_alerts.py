@@ -13,6 +13,13 @@ State lives in the runner's per-app ``APP_JOB_STATE_DIR``. A pass with no
 saved state (the first one, or after the state was lost) records what it
 sees without notifying, so it can never announce a backlog at once. Without
 a state directory nothing is sent, because a repeat could not be prevented.
+
+GitHub returns both connections a page at a time. The search window is the
+most recently updated PRs only, and a PR's opinionated reviews can run past
+the first page, so this pass treats a truncated read as partial: it pages a
+PR's reviews until it finds the owner's opinion, and it keeps a saved head for
+a PR merely absent from a short search window, forgetting one only when the
+PR is seen and confirmed to no longer be waiting.
 """
 from __future__ import annotations
 
@@ -25,37 +32,123 @@ from typing import Any, Callable
 
 SCHEMA = 1
 STATE_FILE = "review-again-alerts.json"
+_REVIEW_PAGE = 30
 # One page of the most recently updated PRs the owner reviewed: a pass is one request.
-QUERY = """
+SEARCH_QUERY = """
 query ContributeReviewAgainAlerts {
   viewer { login }
   search(query: "is:pr is:open reviewed-by:@me -author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
+    pageInfo { hasNextPage }
     nodes { ... on PullRequest {
       number title headRefOid
       repository { nameWithOwner }
       author { login }
-      latestOpinionatedReviews(first: 30) { nodes { state author { login } commit { oid } } }
+      latestOpinionatedReviews(first: %d) {
+        pageInfo { hasNextPage endCursor }
+        nodes { state author { login } commit { oid } }
+      }
     } }
   }
 }
-"""
+""" % _REVIEW_PAGE
+# Page one PR's opinionated reviews further when the owner's is past the first page.
+REVIEWS_QUERY = """
+query ContributeReviewAgainReviews($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      latestOpinionatedReviews(first: %d, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { state author { login } commit { oid } }
+      }
+    }
+  }
+}
+""" % _REVIEW_PAGE
 _REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 
 Call = Callable[..., Any]
+RunGraphql = Callable[..., Any]
 
 
-def read_github() -> dict[str, Any] | None:
-    """The owner's reviewed PRs as GitHub shows them now, or None when it cannot be read."""
+def _run_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """One GraphQL request's ``data``, or None when GitHub cannot be read."""
+    args = ["gh", "api", "graphql", "-f", "query=" + query]
+    for key, value in (variables or {}).items():
+        if value is None:
+            continue
+        args += ["-F" if isinstance(value, int) else "-f", "%s=%s" % (key, value)]
     try:
-        out = subprocess.run(["gh", "api", "graphql", "-f", "query=" + QUERY],
-                             capture_output=True, text=True, timeout=30)
+        out = subprocess.run(args, capture_output=True, text=True, timeout=30)
         return json.loads(out.stdout).get("data") if out.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 
+def _owner_review_present(nodes: list[dict[str, Any]], me: Any) -> bool:
+    return any(_same((node.get("author") or {}).get("login"), me) for node in nodes)
+
+
+def _page_in_owner_review(pull: dict[str, Any], me: Any, run: RunGraphql) -> None:
+    """Follow the review connection for one PR until the owner's opinion shows or it ends."""
+    connection = pull.get("latestOpinionatedReviews") or {}
+    nodes = list(connection.get("nodes") or [])
+    page = connection.get("pageInfo") or {}
+    repo = (pull.get("repository") or {}).get("nameWithOwner") or ""
+    owner, _, name = repo.partition("/")
+    number = pull.get("number")
+    seen_cursors: set[str] = set()
+    while (owner and name and isinstance(number, int)
+           and page.get("hasNextPage") and not _owner_review_present(nodes, me)):
+        cursor = page.get("endCursor")
+        if not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
+        data = run(REVIEWS_QUERY, {"owner": owner, "name": name, "number": number, "after": cursor})
+        connection = (((data or {}).get("repository") or {}).get("pullRequest") or {}).get("latestOpinionatedReviews")
+        if not connection:
+            break
+        nodes.extend(connection.get("nodes") or [])
+        page = connection.get("pageInfo") or {}
+    pull["latestOpinionatedReviews"] = {"nodes": nodes}
+
+
+def read_github(run: RunGraphql = _run_graphql) -> dict[str, Any] | None:
+    """The owner's reviewed PRs as GitHub shows them now, or None when it cannot be read.
+
+    Each PR's opinionated reviews are paged until the owner's own review is
+    found or the connection is exhausted, so a change request is never missed
+    for sitting past the first review page.
+    """
+    data = run(SEARCH_QUERY)
+    if not data:
+        return None
+    me = (data.get("viewer") or {}).get("login")
+    for pull in (data.get("search") or {}).get("nodes") or []:
+        _page_in_owner_review(pull, me, run)
+    return data
+
+
 def _same(left: Any, right: Any) -> bool:
     return bool(left) and str(left).lower() == str(right).lower()
+
+
+def _pull_key(repo: str, number: Any) -> str:
+    return "%s#%s" % (repo.lower(), number)
+
+
+def window_keys(data: dict[str, Any]) -> set[str]:
+    """Every valid PR key the search window actually returned this pass."""
+    keys = set()
+    for pull in (data.get("search") or {}).get("nodes") or []:
+        repo = (pull.get("repository") or {}).get("nameWithOwner") or ""
+        if _REPO.fullmatch(repo):
+            keys.add(_pull_key(repo, pull.get("number")))
+    return keys
+
+
+def window_is_complete(data: dict[str, Any]) -> bool:
+    """True when the search returned every eligible PR, not just one page of them."""
+    return not ((data.get("search") or {}).get("pageInfo") or {}).get("hasNextPage")
 
 
 def stale_change_requests(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -71,7 +164,7 @@ def stale_change_requests(data: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         reviewed = (mine.get("commit") or {}).get("oid")
         if reviewed and reviewed != head:
-            found.append({"key": "%s#%s" % (repo.lower(), pull.get("number")), "repo": repo,
+            found.append({"key": _pull_key(repo, pull.get("number")), "repo": repo,
                           "number": pull.get("number"), "title": pull.get("title") or "",
                           "author": (pull.get("author") or {}).get("login") or "The author", "head": head})
     return found
@@ -139,7 +232,7 @@ class Alerts:
         if not data:
             return
         known = self._load()
-        heads = {}
+        heads: dict[str, str] = {}
         for pull in stale_change_requests(data):
             previous = None if known is None else known.get(pull["key"])
             if known is None or previous == pull["head"] or self._announce(pull):
@@ -147,4 +240,11 @@ class Alerts:
             elif previous:
                 # A send that failed keeps its old entry, so the next pass tries this head again.
                 heads[pull["key"]] = previous
+        if known is not None and not window_is_complete(data):
+            # A short search window hid some PRs; keep their saved heads so a
+            # later re-entry on the same head is not announced a second time.
+            seen = window_keys(data)
+            for key, head in known.items():
+                if key not in seen and key not in heads:
+                    heads[key] = head
         self._save(heads)
