@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { OWNER_ITEM_STATES, REVIEW_STATE_NAMES, ignoredNote, reviewItemProgress, reviewRunHalted, reviewRunTitle, reviewStartedAt } from '../collaboration.js'
+import { OWNER_ITEM_STATES, REVIEW_STATE_NAMES, ignoredNote, reviewBlocked, reviewItemProgress, reviewRunHalted, reviewRunTitle, reviewStartedAt } from '../collaboration.js'
 import { reviewDate } from '../review-copy.js'
 import { postableFindings, reviewActionPlan, reviewStoppable } from '../review-actions.js'
 import { frameOf } from '../pr-standing.js'
@@ -47,6 +47,7 @@ export function reviewContent(status, ctx) {
   if (ctx?.covered === 'repair') return { key: 'fix_ready', title: 'A fix is ready to push', box: 'verdict' }
   if (progress.turn === 'author') return { key: 'waiting', title: progress.label }
   if (ignoredNote(item, ctx?.ignored)) return { key: 'ignored', title: 'Set aside' }
+  if (reviewBlocked(item) && !progress.waiting) return { key: 'blocked', title: 'Review not finished', box: 'changes' }
   if (item.state === 'needs_you' && item.verdict_proposal?.event === 'REQUEST_CHANGES') return { key: 'changes', title: 'Changes found', box: 'changes' }
   if (item.state === 'needs_you' && !progress.waiting) return { key: 'findings', title: ctx?.own ? 'Your check found problems' : 'Problems found', box: 'verdict' }
   // A conversation that asked you something is answered first, whatever the review itself is doing. A step whose
@@ -56,6 +57,9 @@ export function reviewContent(status, ctx) {
   if (item.state === 'all_clear') return { key: 'clear', title: 'Review clear', box: 'clear' }
   return { key: 'settled', title: progress.label }
 }
+
+// Why a review ended early, in the reviewer's own words when the run itself is at hand.
+const blockedNote = item => `The review stopped before it finished${typeof item.blocked === 'string' ? `: ${item.blocked}` : '.'} This is not a verdict, and nothing was sent to GitHub.`
 
 const allowed = (standing, ...ids) => !!standing?.actions?.some(action => ids.includes(action.id) && action.enabled)
 
@@ -149,6 +153,7 @@ function SavedReview({ quiet = false, token, appId, status: listed, response = n
     </div>
     {running ? <p className="co-review-note">The agent is reading the PR. Its findings appear here when it finishes. You can leave this page: the frame on the list shows when it is done.</p> : null}
     {tone.key === 'halted' && run.summary ? <p className="co-review-note">{run.summary}</p> : null}
+    {tone.key === 'blocked' ? <p className="co-review-note">{blockedNote(item)}</p> : null}
     {item.summary && tone.key !== 'fix_ready' ? <ClampedMarkdown markdown={item.summary} /> : null}
     {item.verdict_proposal ? <VerdictProposal proposal={item.verdict_proposal} mode={run.mode} busy={busy} own={own}
       onDecide={onVerdict ? (proposal, decision, extra) => onVerdict(item, proposal, decision, extra) : null} onCheck={onCheck || null} /> : null}

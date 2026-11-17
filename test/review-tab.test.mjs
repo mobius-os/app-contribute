@@ -374,3 +374,13 @@ test('the Review tab says nothing about reviewers while they load or when nobody
   const failed = await render(t, 'ReviewTab', { pr, status: null, reviewers: { loading: false, error: 'GitHub did not answer.' }, onRetryReviewers: () => {} })
   assert.match(failed, /role="alert">Could not read who was asked to review\. <button class="co-btn">Try again<\/button>/)
 })
+
+test('a review that named an obstacle says it did not finish and why, and offers another review, never a verdict', async t => {
+  const blocked = status('needs_you', { summary: 'I could not read the diff.', blocked: 'GitHub refuses the diff (404)' }, { state: 'needs_you', execution_state: 'completed' })
+  const html = await render(t, 'ReviewTab', { pr, status: blocked, own: false, canPost: true, onStart: () => {}, onPost: () => {}, onIgnore: () => {} })
+  if (html === null) return
+  assert.match(html, /Review not finished/)
+  assert.match(html, /GitHub refuses the diff \(404\)/)
+  assert.match(html, /Review again/)
+  assert.doesNotMatch(html, /Problems found|Post to GitHub|Set aside…/)
+})

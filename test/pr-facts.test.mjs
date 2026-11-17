@@ -384,3 +384,9 @@ test('nobody asked rewords only the wait for a first review: a PR that has revie
 test('the PR read carries the count of review requests and nothing about who they are', () => {
   assert.match(PR_FIELDS, /reviewRequests\(first:1\) \{ totalCount \}/)
 })
+
+test('a review that was blocked is not a result: their PR is still yours to review', () => {
+  const blocked = decideFor(pull(), [run({ state: 'needs_you', summary: 'Could not read the diff.', blocked: true })])
+  assert.equal(blocked.state, 'reviewer.to_review')
+  assert.equal(decideFor(pull(), [run({ state: 'needs_you', summary: 'A bug.' })]).state, 'reviewer.result_ready', 'findings still wait for your verdict')
+})

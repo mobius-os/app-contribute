@@ -2,7 +2,7 @@
 // what Contribute's own review runs hold for that PR. A fact that could not be
 // read is 'unknown' (or readComplete is false), never a guess from older data.
 // Pure: no DOM, no network.
-import { checkSummary, ignoredNote, isBotAuthor, reviewItemProgress, waitingRepair } from './collaboration.js'
+import { checkSummary, ignoredNote, isBotAuthor, reviewBlocked, reviewItemProgress, waitingRepair } from './collaboration.js'
 import { isOwnPull } from './pull-view.js'
 import { responseFor, responseOutbox } from './respond-result.js'
 
@@ -128,7 +128,7 @@ function resultOf(item, progress, ignored) {
   // A clean review has no verdict to send and no finding to set aside, and the Review tab offers
   // neither: it stands as a private review of this version ("kept private"), not as work waiting on you.
   if (item.state === 'all_clear') return { head: item.head_sha, outcome: 'clear', setAside: true }
-  if (item.state !== 'needs_you' || progress.waiting || progress.halted) return null
+  if (item.state !== 'needs_you' || progress.waiting || progress.halted || reviewBlocked(item)) return null
   const setAside = !!ignoredNote(item, ignored) || ['discarded', 'not_dispatched'].includes(item.verdict_proposal?.state)
   return { head: item.head_sha, outcome: 'findings', setAside }
 }

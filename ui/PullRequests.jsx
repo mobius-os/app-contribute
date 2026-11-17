@@ -592,7 +592,7 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
     void refreshRuns()
     if (outcome?.ok) onReviewPosted?.(posting.pr.repository.nameWithOwner, posting.pr.number)
   }
-  const postDialog = posting ? <ReviewDialog onClose={closePost}><PostFindings pr={posting.pr} run={posting.run} item={posting.item} own={posting.own} token={token} appId={appId} onDone={findingsPosted} onClose={closePost} /></ReviewDialog> : null
+  const postDialog = posting ? <ReviewDialog onClose={closePost}><PostFindings pr={posting.pr} run={posting.run} item={posting.item} own={posting.own} token={token} appId={appId} shellConfirm={shellConfirm} onDone={findingsPosted} onClose={closePost} /></ReviewDialog> : null
   const ignoreDialog = ignoring ? <ReviewDialog onClose={closeIgnore}><IgnoreReview pr={ignoring.pr} onPick={reason => { onIgnoreReview(ignoring.item, reason); closeIgnore() }} onClose={closeIgnore} /></ReviewDialog> : null
   // Each of your own actions runs the app's one guarded handler for it.
   const actionHandlers = {

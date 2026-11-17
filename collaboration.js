@@ -192,6 +192,10 @@ export const reviewRunStateLabel = run => REVIEW_STATE_NAMES[run.execution_state
 // known to be false; null (unknown) never does.
 // `ignored` is the owner's notes of findings set aside (ignoreKey -> { reason }):
 // a finding the owner ignored for this exact version no longer waits on them.
+// The reviewer named an obstacle that ended the review early (the platform's `blocked`: its words in the run itself,
+// only `true` in a list). Such a review found nothing and decided nothing: it is not a result, and the PR is still to review.
+export const reviewBlocked = item => !!item?.blocked
+
 export function reviewItemProgress(run, item, { own = null, ignored = null } = {}) {
   const found = item.state === 'needs_you'
   const verdict = item.verdict_proposal
@@ -203,7 +207,7 @@ export function reviewItemProgress(run, item, { own = null, ignored = null } = {
   const halted = !settled && HALTED_RUNS.has(run.execution_state)
   const waiting = !settled && run.execution_state === 'awaiting_owner'
   const label = requested ? 'Changes requested' : handedOver ? 'Review posted' : dropped ? 'Verdict discarded' : waived ? 'Set aside'
-    : halted ? 'Not finished' : REVIEW_STATE_NAMES[item.state] || item.state
+    : halted || reviewBlocked(item) ? 'Not finished' : REVIEW_STATE_NAMES[item.state] || item.state
   const turn = handedOver ? 'author' : settled ? 'none' : halted || waiting || OWNER_ITEM_STATES.has(item.state) ? 'owner' : 'agent'
   return { label, halted, waiting, settled, turn }
 }
@@ -323,8 +327,8 @@ export function reviewRunRequest(choice) {
 // shell's own sheet comes first, for exactly the body about to be sent: a cancel or a refusal is the outcome and nothing is sent.
 // `onConfirmed` runs once the owner has nothing left to confirm, just before the request goes out, so the app's own sheet can say
 // "Merging…" only from then on.
-async function publicWrite(token, appId, path, body, { code, words, receipt, action, shellConfirm, onConfirmed }) {
-  const stopped = action && shellConfirm ? await shellConfirm(action, {}, body) : null
+async function publicWrite(token, appId, path, body, { code, words, receipt, action, scope = {}, shellConfirm, onConfirmed }) {
+  const stopped = action && shellConfirm ? await shellConfirm(action, scope, body) : null
   if (stopped) return stopped
   onConfirmed?.()
   let result
@@ -428,10 +432,11 @@ export const previewPostedFindings = (token, appId, run, item) =>
     { repo: item.repo, number: item.number, head_sha: item.head_sha })
 
 // Post exactly the previewed words, once, as a plain comment review at the reviewed version. Same
-// outcome shapes as mergePull.
-export const postFindings = (token, appId, run, item, preview) => publicWrite(token, appId,
+// outcome shapes as mergePull. `shell` is { shellConfirm, onConfirmed } of publicWrite: Möbius confirms the same words first.
+export const postFindings = (token, appId, run, item, preview, shell = {}) => publicWrite(token, appId,
   `review-runs/${encodeURIComponent(run.id)}/post`,
   { repo: item.repo, number: item.number, head_sha: item.head_sha, preview_sha256: preview.preview_sha256 }, {
+    action: 'post_findings', scope: { run_id: run.id }, ...shell,
     code: 'post_unconfirmed', words: 'GitHub may have posted it. Check the pull request before trying again.',
     receipt: result => result?.state === 'posted' ? { state: 'posted', url: result.url || '' } : null,
   })
