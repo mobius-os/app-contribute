@@ -89,7 +89,12 @@ def _owner_review_present(nodes: list[dict[str, Any]], me: Any) -> bool:
 
 
 def _page_in_owner_review(pull: dict[str, Any], me: Any, run: RunGraphql) -> None:
-    """Follow the review connection for one PR until the owner's opinion shows or it ends."""
+    """Follow the review connection for one PR until the owner's opinion shows or it ends.
+
+    The PR's ``pageInfo.hasNextPage`` afterwards says whether the owner's
+    opinion is still unknown because a later page could not be read (a failed
+    request, or a cursor that did not advance): ``unfinished_keys`` reports it.
+    """
     connection = pull.get("latestOpinionatedReviews") or {}
     nodes = list(connection.get("nodes") or [])
     page = connection.get("pageInfo") or {}
@@ -109,7 +114,8 @@ def _page_in_owner_review(pull: dict[str, Any], me: Any, run: RunGraphql) -> Non
             break
         nodes.extend(connection.get("nodes") or [])
         page = connection.get("pageInfo") or {}
-    pull["latestOpinionatedReviews"] = {"nodes": nodes}
+    unfinished = bool(page.get("hasNextPage")) and not _owner_review_present(nodes, me)
+    pull["latestOpinionatedReviews"] = {"nodes": nodes, "pageInfo": {"hasNextPage": unfinished}}
 
 
 def read_github(run: RunGraphql = _run_graphql) -> dict[str, Any] | None:
@@ -142,6 +148,17 @@ def window_keys(data: dict[str, Any]) -> set[str]:
     for pull in (data.get("search") or {}).get("nodes") or []:
         repo = (pull.get("repository") or {}).get("nameWithOwner") or ""
         if _REPO.fullmatch(repo):
+            keys.add(_pull_key(repo, pull.get("number")))
+    return keys
+
+
+def unfinished_keys(data: dict[str, Any]) -> set[str]:
+    """The PRs whose review read stopped early, so the owner's opinion on them is unknown."""
+    keys = set()
+    for pull in (data.get("search") or {}).get("nodes") or []:
+        repo = (pull.get("repository") or {}).get("nameWithOwner") or ""
+        page = (pull.get("latestOpinionatedReviews") or {}).get("pageInfo") or {}
+        if page.get("hasNextPage") and _REPO.fullmatch(repo):
             keys.add(_pull_key(repo, pull.get("number")))
     return keys
 
@@ -240,11 +257,14 @@ class Alerts:
             elif previous:
                 # A send that failed keeps its old entry, so the next pass tries this head again.
                 heads[pull["key"]] = previous
-        if known is not None and not window_is_complete(data):
-            # A short search window hid some PRs; keep their saved heads so a
-            # later re-entry on the same head is not announced a second time.
-            seen = window_keys(data)
-            for key, head in known.items():
-                if key not in seen and key not in heads:
-                    heads[key] = head
+        if known is not None:
+            # Keep the saved head of every PR this pass could not judge, so a
+            # later pass on the same head is not announced a second time: one
+            # a short search window hid, and one whose review pages did not all load.
+            undecided = unfinished_keys(data)
+            if not window_is_complete(data):
+                undecided |= set(known) - window_keys(data)
+            for key in undecided - set(heads):
+                if key in known:
+                    heads[key] = known[key]
         self._save(heads)

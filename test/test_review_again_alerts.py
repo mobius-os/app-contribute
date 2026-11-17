@@ -149,6 +149,31 @@ class ReviewAgainAlertsTest(unittest.TestCase):
         self.assertEqual(stale_change_requests(data), [], "no owner opinion means nothing to announce")
         self.assertEqual(len(calls), 2, "paging halts once the connection ends")
 
+    def test_a_review_page_that_fails_to_load_keeps_the_saved_head_until_the_read_recovers(self):
+        made = pull(7, review_page={"hasNextPage": True, "endCursor": "c1"})
+        made["latestOpinionatedReviews"]["nodes"] = made["latestOpinionatedReviews"]["nodes"][:1]
+        first = github(made)
+
+        def read(second):
+            fresh = json.loads(json.dumps(first))
+            return read_github(run=lambda query, variables=None: second if variables else fresh)
+
+        self.run_pass(github())
+        self.assertEqual(self.run_pass(github(pull(7))).sent, ["team/repo#7"])
+        # The owner's review sits on page two, and that request fails (None is a timeout or a GitHub error).
+        self.assertEqual(self.run_pass(read(None)).sent, [])
+        self.assertEqual(self.run_pass(read({"repository": {"pullRequest": None}})).sent, [])
+        # Recovered: the owner's unchanged change request on the same head must not be announced again.
+        self.assertEqual(self.run_pass(github(pull(7))).sent, [])
+        with open(os.path.join(self.dir.name, review_again_alerts.STATE_FILE), encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["heads"], {"team/repo#7": NEW})
+
+    def test_a_pr_whose_reviews_loaded_fully_without_the_owner_is_still_forgotten(self):
+        self.run_pass(github())
+        self.run_pass(github(pull(7)))
+        self.run_pass(github(pull(7, reviewer="someone-else")))
+        self.assertEqual(self.run_pass(github(pull(7))).sent, ["team/repo#7"])
+
     def test_an_overlong_link_falls_back_to_the_app(self):
         sent = notification("10", {"repo": "o" * 90 + "/" + "r" * 90, "number": 7, "title": "", "author": "maker"})
         self.assertEqual(sent["target"], "/shell/?app=10")
