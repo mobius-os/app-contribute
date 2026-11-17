@@ -127,6 +127,18 @@ from github_events import (
   trusted_changes_request,
 )
 
+# A PR the owner asked changes on that has new commits (review_again_alerts.py).
+# It reads GitHub, not the ledger, so it runs before the empty-ledger exit below,
+# and its failure must not stop the passes after it.
+import review_again_alerts
+
+try:
+  review_again_alerts.Alerts(
+    _call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None,
+  ).run()
+except Exception as exc:
+  print("contribute: review-again alert error: %s" % exc, file=sys.stderr)
+
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
 records = LEDGER.records_needing_work()
 if not records:

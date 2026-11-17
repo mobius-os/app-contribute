@@ -338,6 +338,13 @@ prepared and adds a **Looks already landed** dismissal hint instead. Every
 reconciliation write uses the record version originally read, so a concurrent
 Send, Discard, or agent refresh wins.
 
+The scheduled job also tells you when someone else's PR that you asked changes
+on gets new commits (`review_again_alerts.py`): one notification per new head,
+opening that PR. It reads GitHub, not the ledger, and keeps only the last head
+it announced per PR in the job's state folder. A pass with no saved state
+records what it sees without notifying, so a backlog is never announced at
+once.
+
 The scheduled job also adds `needs_attention` + `attention`
 when GitHub activity, changes requested, failing checks, or a merge conflict need
 follow-up. It and the Discard flow both write with `If-Match` (compare-and-swap)
