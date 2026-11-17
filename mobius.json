@@ -95,6 +95,7 @@
     "prepared_reconcile.py",
     "ledger_scan.py",
     "publication_observe.py",
+    "review_again_alerts.py",
     "github_events.py",
     "agent_snapshot.py",
     "contributing/SKILL.md",

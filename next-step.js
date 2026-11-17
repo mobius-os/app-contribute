@@ -18,9 +18,9 @@ const ROUTES = {
 // Where the machine's own action title would be a sentence, the button says the job.
 const TITLES = { draft_verdict: 'See the review', send_draft: 'Read the draft', retry: NAMES.sync }
 
-// A next step answered on another tab, with no button here. An agent's question is answered in the Review tab,
-// the one place its conversation is offered, so the panel only says where. The pointer is its own line: the
-// hint stays the machine's sentence, which its twin in the platform must read the same.
+// An agent's question is answered in its conversation, so the panel opens that conversation (`answer`). Only when
+// the conversation is not known does the panel point to the Review tab, whose box offers it. The pointer is its
+// own line: the hint stays the machine's sentence, which its twin in the platform must read the same.
 const POINTERS = { open_job: 'Answer it in the Review tab.' }
 
 // A stopped job starts over as the same job through the Actions menu's own window: the machine lets
@@ -45,11 +45,12 @@ export function pillTone(decision) {
   return decision.turn === 'you' ? 'you' : 'quiet'
 }
 
-// { pill, hint, pointer, chat, primary } for the panel under the facts line, or null for a resting state, which the
+// { pill, hint, pointer, chat, answer, primary } for the panel under the facts line, or null for a resting state, which the
 // state badge already says. `primary` is null when the
 // next step is not yours to take, cannot run yet (the menu says why), or this Möbius
 // cannot run it for you.
-// `chat` says an agent is at work, so the panel offers that agent's conversation.
+// `chat` says an agent is at work, so the panel offers that agent's conversation; `answer` says it waits on your
+// answer there, so opening that conversation is the next step.
 export function nextStepModel(decision, { record = null, capabilities = null } = {}) {
   if (!decision || isResting(decision)) return null
   const action = decision.actions.find(item => item.id === actionToRun(decision))
@@ -62,6 +63,7 @@ export function nextStepModel(decision, { record = null, capabilities = null } =
     hint: decision.headline,
     pointer: POINTERS[decision.next] || '',
     chat: decision.state === 'working',
+    answer: decision.state === 'needs_answer',
     primary: allowed ? { intent: action.id, route, title } : null,
   }
 }

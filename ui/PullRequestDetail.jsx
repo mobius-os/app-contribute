@@ -18,7 +18,7 @@ import { checkSummary, conversationCount } from '../collaboration.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { ReviewTab, reviewContent } from './ReviewTab.jsx'
 import { frameOf } from '../pr-standing.js'
-import { ROLE_TITLES, workingChatId } from '../provenance.js'
+import { ROLE_TITLES, jobChatId, workingChatId } from '../provenance.js'
 import { NAMES } from '../names.js'
 import { showOpenTab } from './stripScroll.js'
 import { NextStep } from './NextStep.jsx'
@@ -410,6 +410,8 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   const githubUrl = safeDetailLink(pr.url)
   const requestOffer = requestReviewButton(review?.standing, { capabilities })
   const workingChat = workingChatId(review?.standing, status?.run, provenance)
+  const jobChat = jobChatId(review?.standing, status?.run, provenance)
+  const openJobChat = jobChat ? () => openAgentConversation(jobChat) : null
   // The machine's own review action, offered again on the Commits tab when the PR has commits the last review did not see.
   const againAction = readOnly ? null : review?.standing?.actions?.find(action => ['review', 'check_my_pr'].includes(action.id) && action.enabled) || null
   // The conversation loads as one unit: a single skeleton stands in for the
@@ -441,7 +443,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     </div>
     {/* Only where this Möbius can switch following on after Send: elsewhere the page stays as it was. */}
     {capabilities?.follow_after_send === true ? <FollowLine record={record} onSetAutopilot={onSetAutopilot} readOnly={readOnly} /> : null}
-    {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} onOpenChat={workingChat ? () => openAgentConversation(workingChat) : null} /> : null}
+    {review?.standing ? <NextStep decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} onOpenChat={openJobChat} /> : null}
     {conversationLoading ? null : <>
     <details className="co-gh-description">
       <summary>
@@ -494,6 +496,6 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     {tab === 'checks' && ready(view) ? <PullChecks data={view.data} onCheckAgain={checkAgain} /> : null}
     {(tab === 'files' || tab === 'checks') && ready(view) ? pager(number, view.data?.hasMore, view.data?.paginationUnknown, value => setPage(old => ({ ...old, [tab]: value }))) : null}
     </div>
-    {review?.standing ? <NextStep bar decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} /> : null}
+    {review?.standing ? <NextStep bar decision={review.standing} record={record} capabilities={capabilities} disabled={stale || readOnly} onChoose={mode => onReview?.(mode)} onReviewTab={() => setTab('review')} onSync={onRefresh} onOpenChat={openJobChat} /> : null}
   </div>
 }

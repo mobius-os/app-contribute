@@ -103,7 +103,8 @@ test('a stopped job starts over as the same job, through the menu action it came
   assert.equal(again({ role: 'reviewer', permission: 'WRITE', job: { kind: 'review_fix_merge', state: 'stalled' } }), null)
 })
 
-// A question from an agent is answered where its conversation is offered (the Review tab), so the panel has no button for it.
+// A question from an agent is answered in its conversation, so the panel's next step opens it (`answer`). The model has no
+// menu button for it, and keeps the Review-tab pointer for a conversation that is not known.
 // The hint stays the machine's own sentence; the pointer is a separate line owned by this panel.
 const ASKS = [
   ['your PR, a review run asks', { role: 'author', job: { kind: 'review', state: 'needs_answer' } }],
@@ -113,13 +114,14 @@ const ASKS = [
   ['your PR, a Respond conversation asks', { role: 'author', job: { kind: 'respond', state: 'needs_answer' } }],
 ]
 for (const [name, extra] of ASKS) {
-  test(`an agent's question, ${name}: no button, the machine's sentence, and a pointer to the Review tab`, () => {
+  test(`an agent's question, ${name}: the machine's sentence, its conversation as the next step, and the Review-tab pointer as the fallback`, () => {
     const decision = decide(facts(extra))
     const model = nextStepModel(decision, { capabilities })
     assert.equal(decision.state, 'needs_answer')
     assert.equal(model.pill.label, 'Agent asks you')
     assert.equal(model.hint, decision.headline, 'the sentence is the machine’s own, so its twin in the platform stays the single source')
     assert.equal(model.primary, null)
+    assert.equal(model.answer, true)
     assert.equal(model.pointer, 'Answer it in the Review tab.')
   })
 }
@@ -137,9 +139,10 @@ test('only a question carries a pointer: every other state keeps its own button 
     assert.equal(model.pointer, '', name)
   }
   for (const [, extra] of GALLERY) assert.equal(nextStepModel(decide(facts(extra)), { capabilities }).pointer, '')
+  for (const [, extra] of GALLERY) assert.equal(nextStepModel(decide(facts(extra)), { capabilities })?.answer || false, false)
 })
 
-test('the panel shows the question with a link to the Review tab, and the phone bar has nothing to repeat', async t => {
+test('a question whose conversation is not known points to the Review tab, and the phone bar has nothing to repeat', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { render } = await renderModule(`
     import React from 'react'
@@ -156,4 +159,25 @@ test('the panel shows the question with a link to the Review tab, and the phone 
   assert.equal(panel.match(/<button/g)?.length, 1, 'the only control is the pointer, which opens the Review tab')
   assert.match(panel, /<button type="button" class="co-next-pointer">Answer it in the Review tab\.<\/button>/)
   assert.equal(render({ decision, capabilities, bar: true }), '', 'no bottom bar on a phone for a state with no button')
+})
+
+test('an agent question opens its conversation from the panel and the phone bar: Answer in chat, never a detour through the Review tab', async t => {
+  if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
+  const { render } = await renderModule(`
+    import React from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { NextStep } from './ui/NextStep.jsx'
+    export const render = props => renderToStaticMarkup(React.createElement(NextStep, props))
+  `)
+  const decision = decide(facts({ role: 'reviewer', job: { kind: 'review', state: 'needs_answer' } }))
+  const onOpenChat = () => {}
+  const panel = render({ decision, capabilities, onOpenChat, disabled: true })
+  assert.match(panel, /The agent has a question for you/)
+  assert.doesNotMatch(panel, /Answer it in the Review tab/)
+  assert.equal(panel.match(/<button/g)?.length, 1, 'one next step')
+  assert.match(panel, /<button type="button" class="co-btn co-btn-primary">Answer in chat<\/button>/, 'answering is never disabled by a stale page')
+  assert.match(render({ decision, capabilities, onOpenChat, bar: true }), /co-decision-bar.*Answer in chat/)
+  // An agent at work keeps its plain link, and its own next step.
+  const working = render({ decision: decide(facts({ job: { kind: 'review', state: 'working' } })), capabilities, onOpenChat })
+  assert.doesNotMatch(working, /Answer in chat/)
 })

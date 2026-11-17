@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { chatBlockTarget } from '../chat-blocks.js'
-import { pullConversations, recordsForPull, workingChatId } from '../provenance.js'
+import { jobChatId, pullConversations, recordsForPull, workingChatId } from '../provenance.js'
 import { acknowledgeAssignment, emptyPullView, invalidatedSelection, isOpenPull, observePulls, pullsInView } from '../pull-view.js'
 
 const pr = (number, extra = {}) => ({ number, title: `PR ${number}`, headRefOid: 'a', baseRefOid: 'b', baseRefName: 'main',
@@ -65,8 +65,13 @@ test('the working chat is the job’s own conversation, and only while an agent 
   assert.equal(workingChatId({ state: 'working', jobKind: 'review' }, run, links), 'run-1')
   assert.equal(workingChatId({ state: 'working', jobKind: 'respond' }, run, links), 'respond-1', 'a Respond job is its conversation, not an older run')
   assert.equal(workingChatId({ state: 'working', jobKind: 'respond' }, null, []), '', 'a job whose conversation is not listed yet offers no chat')
-  assert.equal(workingChatId({ state: 'needs_answer', jobKind: 'review' }, run, links), '', 'a question is answered in the Review tab')
+  assert.equal(workingChatId({ state: 'needs_answer', jobKind: 'review' }, run, links), '', 'a job that asks is not at work: the chats menu does not mark it')
   assert.equal(workingChatId(null, run, links), '')
+  // The job's conversation is also known while it waits on your answer: that is where the question is answered.
+  assert.equal(jobChatId({ state: 'needs_answer', jobKind: 'review' }, run, links), 'run-1')
+  assert.equal(jobChatId({ state: 'needs_answer', jobKind: 'respond' }, run, links), 'respond-1')
+  assert.equal(jobChatId({ state: 'working', jobKind: 'review' }, run, links), 'run-1')
+  assert.equal(jobChatId({ state: 'reviewer.to_review' }, run, links), '')
   assert.equal(workingChatId({ state: 'working', jobKind: 'review' }, { chat_id: 'bad id!' }, links), '')
 })
 
