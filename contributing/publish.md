@@ -56,6 +56,16 @@ python3 /data/apps/contribute/prepared_block.py <record-id> [<record-id> …]
 ```
 
 Paste the printed `mobius-app` fence unchanged, in the chat whose work it is.
+
+**Put the card last.** Say everything you have to say about the work first,
+closing message included, then print the card as the final thing in the reply.
+A card in the middle of a reply scrolls out of view, and the chat points the
+owner back only to a card in its last message. Do not follow it with a
+question card asking whether the work was sent, or what happened: the card
+reads the ledger itself and shows the result, and a second card makes the
+owner answer one decision twice ([SKILL.md](SKILL.md) "One decision, no
+duplicate approval").
+
 The card is that chat's live view of its contributions, read from the ledger:
 
 - **What it shows.** One row per contribution: its PR title over its project
