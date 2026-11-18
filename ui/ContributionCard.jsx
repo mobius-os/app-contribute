@@ -27,6 +27,8 @@ import {
   needsHuman,
 } from '../autopilot.js'
 import { needsSourceRefresh, reviewIncomplete as recordReviewIncomplete, sendNeedsAttention } from '../send-readiness.js'
+import { discardKeepsPull } from '../lifecycle-write.js'
+import { clearReconciliationHint, lifecycleWriterOf, loadAppSettings } from '../storage.js'
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { useScreenshots } from './useScreenshots.js'
@@ -458,7 +460,21 @@ function AttentionCallout({ rec, onFeedback, onInspect }) {
   )
 }
 
-function ReconciliationHint({ hint, onDismiss }) {
+// What the Discard confirmation says. Discarding a prepared update only drops the update when the
+// engine writes the record (the pull request stays public and tracked); every other case, and every
+// case while the engine is not the writer, abandons the record and keeps its restore.
+const DISMISS_TEXT = 'It will leave your active list and can be restored from Dismissed.'
+const UPDATE_DISCARD = {
+  title: `${NAMES.discard} this update?`,
+  text: 'Only this update is dropped. The pull request stays on GitHub and Contribute keeps following it.',
+}
+export function dismissCopy(rec, { engine = false, isPr = true } = {}) {
+  if (engine && discardKeepsPull(rec)) return UPDATE_DISCARD
+  return { title: `${NAMES.discard} this ${isPr ? 'prepared pull request' : 'draft'}?`, text: DISMISS_TEXT }
+}
+
+// The hint is only a suggestion: this clears it alone (the PR stays prepared); Discard is the other way out.
+function ReconciliationHint({ hint, onDismiss, onClear, clearing }) {
   if (!hint || hint.type !== 'already_landed') return null
   const landingUrl = hint.landing_pr?.url
   return (
@@ -471,6 +487,11 @@ function ReconciliationHint({ hint, onDismiss }) {
             View possible landing PR
           </a>
         ) : null}
+        <p>
+          <button type="button" className="co-btn co-btn-quiet" disabled={clearing} aria-busy={clearing || undefined} onClick={onClear}>
+            Dismiss hint
+          </button>
+        </p>
       </div>
       <button type="button" className="co-btn" onClick={onDismiss}>
         {NAMES.discard}
@@ -563,9 +584,20 @@ function ReviewActions({
   // Dismiss removes the prepared record from the active list. It is reversible
   // from the Run's Dismissed fold, but still must not fire on a stray tap.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
+  const [clearingHint, setClearingHint] = useState(false)
+  // The saved record shows the hint until the next read of the ledger; once cleared it stays hidden here.
+  const [hintCleared, setHintCleared] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
+  // Which writer discards decides what Discard does to an update, so its confirmation asks once.
+  const [engineWriter, setEngineWriter] = useState(false)
+  useEffect(() => {
+    if (!isUpdate) return undefined
+    let live = true
+    loadAppSettings().then(settings => { if (live) setEngineWriter(lifecycleWriterOf(settings) === 'engine') })
+    return () => { live = false }
+  }, [isUpdate])
   const blocked = needsSourceRefresh(reviewState)
   // A failed publication needs the source-aware agent recovery above this
   // action row. Do not offer the same blind GitHub mutation again while its
@@ -619,6 +651,21 @@ function ReviewActions({
     }
   }
 
+  async function clearHint() {
+    setClearingHint(true)
+    setNote(null)
+    try {
+      const outcome = (await clearReconciliationHint({ rec })) || {}
+      if (outcome.ok) setHintCleared(true)
+      else if (outcome.conflict !== undefined || outcome.gone) setNote('This contribution just changed. Reload it to see its latest state.')
+      else setNote(outcome.error === 'offline'
+        ? 'You are offline — dismissing the hint needs a connection; try again once you are back online.'
+        : 'Could not dismiss the hint: ' + outcome.error)
+    } finally {
+      setClearingHint(false)
+    }
+  }
+
   async function dismiss() {
     setDismissing(true)
     setNote(null)
@@ -641,20 +688,24 @@ function ReviewActions({
 
   if (accepted) return null
 
+  const discardCopy = dismissCopy(rec, { engine: engineWriter, isPr })
+
   return (
     <div className="co-action-block">
-      {!confirmingDismiss ? (
+      {!confirmingDismiss && !hintCleared ? (
         <ReconciliationHint
           hint={rec.reconciliation_hint}
           onDismiss={() => setConfirmingDismiss(true)}
+          onClear={clearHint}
+          clearing={clearingHint}
         />
       ) : null}
       {confirmingDismiss ? (
         <ConfirmWindow
           label="Confirm dismissal"
           eyebrow={recordWhere(rec)}
-          title={`${NAMES.discard} this ${isPr ? 'prepared pull request' : 'draft'}?`}
-          text="It will leave your active list and can be restored from Dismissed."
+          title={discardCopy.title}
+          text={discardCopy.text}
           keep="Keep"
           confirm={NAMES.discard}
           working="Discarding…"

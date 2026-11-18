@@ -105,6 +105,7 @@
     "lifecycle-tables.js",
     "lifecycle-engine.js",
     "lifecycle-record.js",
+    "lifecycle-write.js",
     "job_github.py",
     "lifecycle_job.py",
     "lifecycle_backfill.py",
