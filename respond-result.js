@@ -4,12 +4,16 @@
 // The app reads strictly: a file that breaks a rule is not a response at all, never half shown. The helper
 // has already enforced the same rules, so a file that fails here was edited or is from another version.
 import { NAMES } from './names.js'
+import { stateOf } from './lifecycle-record.js'
+import { LIFECYCLE_TABLES as TABLES } from './lifecycle-tables.js'
 
 // THE GATE on Post. The responding agent shares the app's storage, so it can write an approval itself: a matching approval file does
 // not show the owner pressed Post. Post is therefore offered only when this Möbius confirms it on its own sheet (owner-grant.js,
 // ownerConfirmOffered): approveResponse asks that sheet for a grant bound to this answer, and respond_result.py spends it before it posts.
 // Until the host offers it (or when its capabilities cannot be read) Post is off.
 export const COPY_REPLIES = 'Copy replies'
+// The quiet button of an approved answer whose chat never started: it removes the approval, so nothing is posted and Post is offered again.
+export const TAKE_BACK = 'Take back Post'
 // Why Post is off, naming only the controls the card has in that state: the chat button is Reply in chat until Post was
 // pressed once, and Open chat after (Send again, Try again); Copy replies is named only when there are replies to copy.
 export function postOffReason(status = 'ready', hasReplies = true) {
@@ -114,8 +118,10 @@ export function normalizeResult(raw) {
   if (!screenshots || !rerequest || !rerequest.every(login => LOGIN.test(login)) || !points || !replies || !commits || !files || !receipts) return null
   const failure = error && typeof error === 'object' && typeof error.step === 'string' && typeof error.message === 'string' ? { step: error.step, message: error.message } : null
   if (error !== null && !failure) return null
+  // The helper's own stamp of the post (respond_lifecycle.py), kept as written: respond-lifecycle.js decides whether it is usable.
+  const stamp = raw.lifecycle && typeof raw.lifecycle === 'object' && !Array.isArray(raw.lifecycle) ? { lifecycle: raw.lifecycle } : {}
   return { version: VERSION, id, repo, number, chat_id: chatId, created_at: createdAt, state, pr: { head_sha: pr.head_sha, head_ref: pr.head_ref, base_ref: pr.base_ref, head_repo: pr.head_repo },
-    tip_sha: tip, points, replies, description, rerequest, tests, screenshots, commits, files, digest, receipts, error: failure }
+    tip_sha: tip, points, replies, description, rerequest, tests, screenshots, commits, files, digest, receipts, error: failure, ...stamp }
 }
 
 // What the owner decided: only Post (approved) and Discard are ever written.
@@ -131,7 +137,7 @@ const samePr = (result, pr) => result.repo.toLowerCase() === pr?.repository?.nam
 export const responseFor = (responses, pr) => (responses || []).find(entry => entry?.result && samePr(entry.result, pr)) || null
 
 // The owner's decision, counted only for the exact answer it names: another result, or the same result changed since, ignores it.
-const decisionOf = entry => (entry.decision && entry.decision.result_id === entry.result.id && entry.decision.digest === entry.result.digest ? entry.decision.decision : null)
+export const decisionOf = entry => (entry.decision && entry.decision.result_id === entry.result.id && entry.decision.digest === entry.result.digest ? entry.decision.decision : null)
 
 // Where a response stands on its PR:
 //   ready (fresh, nothing decided), approved (Post pressed, the chat has not started), stale (the PR moved after the answer),
@@ -147,9 +153,12 @@ export function responseStatus(entry, pr) {
   return decision === 'approved' ? 'approved' : 'ready'
 }
 
+// How long a post may go without a step going out before it is taken as stopped: the deadline of the POSTING state, in minutes.
+export const POSTING_SILENCE_MINUTES = TABLES.regions.respond.states.POSTING.deadline.seconds / 60
+
 // The seconds after Post. Both real posts had the message at the chat in 2 s, the first step done by 8.6 s and everything posted by 13 s.
-// The chat gets this long to start before the card offers Send again.
-export const RESEND_AFTER_MS = 30000
+// The chat gets this long to start before the card offers Send again: the deadline of the APPROVED state, read from the tables.
+export const RESEND_AFTER_MS = TABLES.regions.respond.states.APPROVED.deadline.seconds * 1000
 // After Post an answer is read closely for this long, then on the idle cadence: a chat that never starts is not read fast for ever.
 export const WATCH_MS = 300000
 // A clock a few seconds behind the one that pressed Post is normal; further off, the time is not trusted.
@@ -187,9 +196,16 @@ export const pointsAnswering = (view, run, item) => (['ready', 'posted'].include
 // that stopped part-way still reads as not confirmed.
 const OUTBOX_STATES = { ready: 'drafted', approved: 'sending', posting: 'sending', failed: 'unconfirmed' }
 
+// An approved answer whose chat never started is not "sending" for ever: the loader (respond-store.js) puts the region in `lifecycle`,
+// and NOT_STARTED (30 seconds, lifecycle_tables.py) is the owner's move again, like a draft. An entry with no `lifecycle` (one not
+// loaded from the store) reads as it always did.
+const OUTBOX_NOT_STARTED = { approved: 'drafted' }
+
 // `review` is the PR's newest saved review ({ run, item }): the answer covers its findings when it took them on.
 export function responseOutbox(entry, pr, review = null) {
-  const state = OUTBOX_STATES[responseStatus(entry, pr)]
+  const status = responseStatus(entry, pr)
+  const waiting = stateOf(entry?.lifecycle, 'respond') === 'NOT_STARTED' ? OUTBOX_NOT_STARTED[status] : null
+  const state = waiting || OUTBOX_STATES[status]
   return state ? { kind: 'answer', head: pr.headRefOid, state, covers: answeredPoints(entry.result, review?.run, review?.item) > 0 } : null
 }
 

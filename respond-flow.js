@@ -1,8 +1,9 @@
-// What Post and Discard do. Neither posts anything: Post writes the owner's approval and tells the chat to run the helper, which
-// checks the approval itself; Discard writes the decision that takes the answer off the PR. Post does nothing at all until the host
+// What Post, Discard and Take back Post do. None posts anything: Post writes the owner's approval and tells the chat to run the helper, which
+// checks the approval itself; Discard writes the decision that takes the answer off the PR; Take back Post removes an approval the chat never acted on. Post does nothing at all until the host
 // confirms it on its own sheet (respond-result.js, THE GATE): an approval the agent could have written itself is not the owner's press.
 import { respondScope } from './address-feedback.js'
-import { clearDecision, readFreshResult, writeDecision } from './respond-store.js'
+import { clearDecision, readFreshDecision, readFreshResult, withdrawDecision, writeDecision } from './respond-store.js'
+import { canWithdraw, respondStateAt } from './respond-lifecycle.js'
 import { postMessage, postOffReason } from './respond-result.js'
 import { askOwner, ownerConfirmOffered } from './owner-grant.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
@@ -11,12 +12,15 @@ import { NAMES } from './names.js'
 const here = () => new Date().toISOString()
 
 // The answer on the server, only if it is the one on screen (`digest`). `ok: false` says what to tell the owner.
-async function currentAnswer(slug, digest, storage) {
-  const result = await readFreshResult(slug, storage)
+async function currentAnswer(slug, digest, storage, now = Date.now()) {
+  const result = await readFreshResult(slug, storage, now)
   if (!result) return { ok: false, error: 'This answer is no longer saved.' }
   if (result.digest !== digest) return { ok: false, error: 'This answer changed while you were reading it. Read it again.' }
   return { ok: true, result }
 }
+
+// Why Post cannot be taken back in a state the answer is in (any other state: there is no approval to take back).
+const WITHDRAW_REFUSED = { APPROVED: 'The chat is still starting, so Post cannot be taken back yet.', POSTING: 'This answer is being posted, so Post cannot be taken back.', POSTED: 'This answer was already posted.' }
 
 // Where the PR may be for this answer to go out: where it was built, or (after a stopped post) where the push left it.
 const placedFor = (result, pr) => (result.state === 'ready' ? [result.pr.head_sha] : [result.pr.head_sha, result.tip_sha]).includes(pr?.headRefOid)
@@ -29,6 +33,11 @@ function blocker(result, pr, chat) {
   if (chat?.state === 'needs_answer') return `The conversation is waiting for your answer to its own card. Answer it in the chat first, then press ${NAMES.postAnswer}.`
   return ''
 }
+
+// The answers whose Post was taken back, in this session, by answer: the chat may still hold the message that Post sent, and the platform drops a
+// repeated message id as a duplicate, so the next Post of that answer is given an id of its own (as Send again is, below).
+const takenBack = new Map()
+const postCid = result => (takenBack.has(result.id) ? `respond-post-${result.id}-${takenBack.get(result.id)}` : `respond-post-${result.id}`)
 
 // A refusal that says the chat did not take the message at all (a status, or a deleted conversation), as against a lost connection.
 const refused = delivery => Boolean(delivery.status || delivery.gone)
@@ -48,7 +57,7 @@ export async function approveResponse({ slug, digest, pr, chat = null, token, st
   if (stopped) return { ok: false, error: stopped.error || '' }
   const written = await writeDecision(slug, { result_id: result.id, digest: result.digest, decision: 'approved', at: now() }, storage)
   if (!written.ok) return written
-  const delivery = await deliver(token, { scope: respondScope(result.repo, result.number), cid: again ? `respond-retry-${result.id}-${Date.now()}` : `respond-post-${result.id}`, title: `Respond to feedback on #${result.number}`,
+  const delivery = await deliver(token, { scope: respondScope(result.repo, result.number), cid: again ? `respond-retry-${result.id}-${Date.now()}` : postCid(result), title: `Respond to feedback on #${result.number}`,
     scopeLabel: `Respond to feedback on ${result.repo} #${result.number}`, draft: postMessage(result), chatId: result.chat_id, applyModel: false })
   if (delivery.ok) return { ok: true }
   // The chat definitely did not take it: nothing may stay approved. If it may have, the approval stays so Send again can finish it.
@@ -61,4 +70,21 @@ export async function discardResponse({ slug, digest, storage, now = here }) {
   if (!current.ok) return current
   if (current.result.state !== 'ready') return { ok: false, error: 'This answer is being posted, so it cannot be discarded.' }
   return writeDecision(slug, { result_id: current.result.id, digest: current.result.digest, decision: 'discarded', at: now() }, storage)
+}
+
+// "Take back Post": the chat never started, so the approval is removed and the answer is ready again. Nothing is posted. The tables
+// allow it only from NOT_STARTED (30 seconds after Post, the chat not started), so it can never race a chat that is starting; a
+// chat that starts late finds no approval and posts nothing (the helper checks the approval itself).
+export async function withdrawResponse({ slug, digest, storage, clock = Date.now }) {
+  const now = clock()
+  const current = await currentAnswer(slug, digest, storage, now)
+  if (!current.ok) return current
+  const entry = { slug, result: current.result, decision: await readFreshDecision(slug, storage) }
+  const options = { now: Math.floor(now / 1000) }
+  if (canWithdraw(entry, options)) {
+    const taken = await withdrawDecision(slug, storage)
+    if (taken.ok) takenBack.set(current.result.id, (takenBack.get(current.result.id) || 0) + 1)
+    return taken
+  }
+  return { ok: false, error: WITHDRAW_REFUSED[respondStateAt(entry, options)] || 'There is nothing to take back.' }
 }

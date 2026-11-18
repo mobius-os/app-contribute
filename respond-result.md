@@ -112,6 +112,13 @@ keeps its digest). `receipts.screenshots` appears only for a result that has scr
 
 * `state`: `ready` (saved, nothing public done) → `posting` (the `post` command is running)
   → `posted`, or `failed` (it stopped part-way; see `error` and `receipts`).
+* `lifecycle` (optional, written only by `post`): the stamp of the post, a vector of the lifecycle's `respond` region
+  (`lifecycle_tables.py`): `{"v": 1, "regions": {"respond": {"state", "since", "deadline"}}, "history": [...]}`, times in whole
+  seconds since the epoch. `post` stamps `POSTING` when it starts (or resumes), raises `PROGRESS` with every write that follows
+  a completed step (a receipt, or the note that a reply is about to be sent), and ends on `POSTED` or `FAILED`. The app reads it
+  to apply the deadline of `POSTING` (see "What the app does with it"). A result with none (saved before it existed, or not
+  posted yet) is read from its `state` word, which stays what it was: `ready`, `posting`, `failed`, `posted`. It is outside the
+  digest, and the helper never trusts a stamp that contradicts `state`.
 * `pr.*` is read from GitHub at save time. `pr.head_sha` is the PR head the work was built
   on; `tip_sha` is the last commit of the work (`tip_sha == pr.head_sha` when there are no
   commits). `commits` are `pr.head_sha..tip_sha`, oldest first.
@@ -248,6 +255,11 @@ gate, above) and, when that is refused, exits 3 before touching anything. Then, 
    already went out stays in the receipts;
 7. sets `state` to `posted`.
 
+An interruption that Python can see (Ctrl-C, an exit) in the middle of a step sets `state` to `failed` with
+`error: {"step", "message": "the post was interrupted"}`, keeps the receipts and re-raises it. One it cannot (a restart, a
+kill) leaves `posting` on disk; the app treats a post with no progress for 3 minutes as stopped, and the next `post` for it
+simply continues (the lock belongs to the process, so a dead run leaves nothing to release).
+
 Refusals before step 6 change nothing and exit 3 with the reason (the owner's confirmation is
 missing or already used, not approved, digest or id mismatch, PR closed, PR moved or retargeted). A failure inside step 6 sets `state` to `failed` with
 `error`, keeps the receipts and exits 4. Every GitHub write goes through `gh api` with the
@@ -267,8 +279,17 @@ Exit codes: 0 done, 2 bad input, 3 refused, 4 failed part-way.
   `failed`, or none (discarded). For the first 30 s after the decision's `at`, `approved` is "the
   chat is starting": the card says **Sent to the chat** with a spinner and offers no Send again
   (both real posts had the message at the chat in 2 s and the first step done by 8.6 s). After
-  that it says **Not started yet** and offers Send again; if the message to the chat failed it
-  offers Send again at once.
+  that it says **Not started yet** and offers Send again, and **Take back Post** where the
+  screen can do it (the approval is removed, nothing was posted, the answer reads "Replies ready"
+  again); if the message to the chat failed it offers Send again at once.
+* **Deadlines** (the lifecycle's `respond` region; the words above are mapped to its states by
+  `RESPOND_WORDS` in `respond-lifecycle.js`, and no word is new). Nothing runs a timer: every load of the
+  saved answers (`loadResponses`, `readFreshResult`) applies the deadlines that have passed.
+  `APPROVED` has 30 seconds, then `NOT_STARTED`: the owner's move (Send again, or take it back), and the
+  PR logic reads it as a draft waiting for the owner instead of "sending". `POSTING` has 3 minutes measured from
+  the helper's last progress (the stamp, or for a post with no stamp, its last receipt or the owner's press): after that it is
+  `FAILED`. The saved answer then reads `failed` with the receipts of what went out untouched, Try again asks the
+  owner for a fresh confirmation, and the helper skips every step that has a receipt.
 * **PR logic** (unchanged): `ready` and `approved` supply the existing "draft" fact, `posting` the
   "sending" fact, `failed` the "unconfirmed" fact. `stale` and none supply nothing, so the PR
   reads "Feedback to answer" again.

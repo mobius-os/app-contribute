@@ -18,6 +18,13 @@ export function pendingContinuation(runtime) {
     || Number(runtime.background_helpers?.count) > 0
 }
 
+// Terminal run statuses of the platform that end a run without finishing it
+// (chat_writer.py _TERMINAL_RUN_STATUSES; `completed` is the other one). The
+// run is the owner's move, so it must not read as "Not running". `parked` and
+// `resume_pending` are not here: the platform resumes those by itself
+// (pendingContinuation, above).
+const STOPPED_RUN_STATUSES = ['stopped', 'interrupted']
+
 // Observe explicit runtime facts; an unavailable or incomplete status is not
 // evidence that the owner paused, stopped, or completed the work.
 export function projectCyclePhase(runtime) {
@@ -31,6 +38,9 @@ export function projectCyclePhase(runtime) {
   if (status === 'paused') return 'paused'
   if (['stopped', 'cancelled', 'canceled'].includes(status)) return 'stopped'
   if (['completed', 'complete', 'succeeded'].includes(status)) return 'complete'
+  // No goal says how the work ended, so the last run does.
+  if (runtime.run_status === 'failed') return 'failed'
+  if (STOPPED_RUN_STATUSES.includes(runtime.run_status)) return 'stopped'
   return runtime.running === false ? 'inactive' : 'unknown'
 }
 
