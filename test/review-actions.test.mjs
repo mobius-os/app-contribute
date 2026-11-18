@@ -116,3 +116,9 @@ test('setting a finding aside has one name on the buttons: Set aside…, and Und
   assert.ok(labels(reviewActionPlan({ tone: 'findings', own: true, chat: true, can: everything })).includes('Set aside…'))
   assert.deepEqual(labels(reviewActionPlan({ tone: 'ignored', chat: true, can: { undo: true } })), ['Undo set aside', 'Ask the reviewer something'])
 })
+
+test('a review that did not finish offers another review first, then its conversation: there is nothing to post or set aside', () => {
+  assert.deepEqual(keys(reviewActionPlan({ tone: 'blocked', own: false, chat: true, can: { ...everything, post: true } })), ['again', 'ask'])
+  assert.equal(reviewActionPlan({ tone: 'blocked', chat: true, can: everything })[0].primary, true)
+  assert.deepEqual(keys(reviewActionPlan({ tone: 'blocked', chat: true, can: {} })), ['ask'])
+})

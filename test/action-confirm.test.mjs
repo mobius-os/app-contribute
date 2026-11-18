@@ -236,6 +236,14 @@ test('Post to GitHub reads the exact words first and posts them once, with the o
     assert.equal(sent[0].url, '/api/github/contributions/10/review-runs/run%201/post')
     assert.deepEqual(sent[0].body, { repo: 'team/repo', number: 9, head_sha: 'abcdef0123456789', preview_sha256: 'f'.repeat(64) }, 'the post names the words it was shown')
   })
+  await withFetch(() => [200, { state: 'posted', url: 'u' }], async sent => {
+    const asked = []
+    const shellConfirm = async (...ask) => { asked.push(ask); return null }
+    await postFindings('t', 10, run, item, preview, { shellConfirm })
+    assert.deepEqual(asked, [['post_findings', { run_id: 'run 1' }, sent[0].body]], 'Möbius confirms exactly the request that is then sent, for this run')
+    assert.deepEqual(await postFindings('t', 10, run, item, preview, { shellConfirm: async () => ({ cancelled: true }) }), { cancelled: true })
+    assert.equal(sent.length, 1, 'a closed confirmation sends nothing')
+  })
   await withFetch(() => [409, { detail: 'The pull request changed since you looked. Refresh and check it again.' }], async () => {
     assert.deepEqual(await postFindings('t', 10, run, item, preview), { error: 'The pull request changed since you looked. Refresh and check it again.' })
   })
