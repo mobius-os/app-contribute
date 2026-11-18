@@ -264,6 +264,13 @@ test('the Send-in-chat guidance describes the live chat card and its one action'
   assert.match(readme, /"expand": false/)
 })
 
+test('the chat card goes last in the reply, and no second card asks what happened to it', () => {
+  const publish = read('contributing/publish.md').replace(/\s+/g, ' ')
+  assert.match(publish, /\*\*Put the card last\.\*\*/)
+  assert.match(publish, /print the card as the final thing in the reply/)
+  assert.match(publish, /Do not follow it with a question card asking whether the work was sent/)
+})
+
 test('prepared PRs name the bug cause and show visible changes with attached screenshots', () => {
   const prepare = mode('prepare.md').replace(/\s+/g, ' ')
   const ledger = mode('ledger.md').replace(/\s+/g, ' ')
