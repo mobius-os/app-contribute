@@ -113,6 +113,7 @@
     "job_github.py",
     "lifecycle_job.py",
     "lifecycle_backfill.py",
+    "review-reading.js",
     "publication_observe.py",
     "review_again_alerts.py",
     "github_events.py",

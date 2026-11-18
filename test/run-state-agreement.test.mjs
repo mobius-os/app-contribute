@@ -22,7 +22,6 @@ const REVIEWER = ['reviewer'] // GitHub refuses a verdict on your own PR, and no
 
 const HEAD = 'b'.repeat(40)
 const verdict = (state, event = 'APPROVE') => ({ verdict_proposal: { state, event, head_sha: HEAD } })
-const HALTED_RUN_DISAGREEMENT = 'review-frame.js frameState reads a halted run as idle (its test: "the chip says it"), while pr-standing.js frameOf holds the amber frame for the stalled job (Agent stopped)'
 const HELPER_STILL_WORKING = { name: 'its own turn ended while its reviewer helper still works', state: 'reviewing', execution: 'completed', item: { state: 'reviewing' }, job: 'running', meaning: AT_WORK }
 
 const CASES = [
@@ -35,8 +34,8 @@ const CASES = [
   // The server passes a notified park through unchanged and `_job_on_pull` still holds the PR for it.
   { name: 'a provider park the owner was already told about', state: 'reviewing', execution: 'parked_notified', item: { state: 'reviewing' }, job: 'running', meaning: AT_WORK },
   // The server overrides the run to needs_you; nothing will wake these, so the move is the owner's.
-  { name: 'interrupted: nothing is left that will wake it', state: 'needs_you', execution: 'interrupted', item: { state: 'reviewing' }, job: 'stalled', meaning: OWNER, known: HALTED_RUN_DISAGREEMENT },
-  { name: 'its last turn failed', state: 'needs_you', execution: 'failed', item: { state: 'reviewing' }, job: 'stalled', meaning: OWNER, known: HALTED_RUN_DISAGREEMENT },
+  { name: 'interrupted: nothing is left that will wake it', state: 'needs_you', execution: 'interrupted', item: { state: 'reviewing' }, job: 'stalled', meaning: OWNER },
+  { name: 'its last turn failed', state: 'needs_you', execution: 'failed', item: { state: 'reviewing' }, job: 'stalled', meaning: OWNER },
   { name: 'stopped by the owner: it asks nothing of them', state: 'needs_you', execution: 'stopped', item: { state: 'reviewing' }, job: 'stalled', meaning: IDLE },
   { name: 'waiting on an open owner card', state: 'needs_you', execution: 'awaiting_owner', item: { state: 'reviewing' }, job: 'needs_answer', meaning: OWNER },
   // The run says needs_you, yet its items and conversation are unchanged and the server still holds the PR.
@@ -50,8 +49,7 @@ const CASES = [
   // GitHub did not confirm, or the review ended with something to decide.
   { name: 'the merge outcome is unconfirmed', state: 'needs_you', execution: 'completed', item: { state: 'merge_unknown' }, job: null, meaning: OWNER },
   { name: 'the ready-for-review outcome is unconfirmed', state: 'needs_you', execution: 'completed', item: { state: 'ready_unknown' }, job: null, meaning: OWNER },
-  { name: 'the ready-for-review attempt can no longer be attributed', state: 'needs_you', execution: 'completed', item: { state: 'ready_unattributable' }, job: null, meaning: OWNER,
-    known: 'collaboration.js OWNER_ITEM_STATES and review-frame.js WORKING_ITEMS lack ready_unattributable (the platform _OWNER_ITEMS has it): frameState reads idle, pr-facts reads a running job so the PR standing reads Agent working' },
+  { name: 'the ready-for-review attempt can no longer be attributed', state: 'needs_you', execution: 'completed', item: { state: 'ready_unattributable' }, job: null, meaning: OWNER },
   { name: 'the verdict outcome is unconfirmed', state: 'needs_you', execution: 'completed', item: { state: 'verdict_unknown', ...verdict('unknown') }, job: null, meaning: OWNER, roles: REVIEWER },
   { name: 'a proposed verdict waits for the owner to send it', state: 'needs_you', execution: 'completed', item: { state: 'verdict_pending', ...verdict('proposed') }, job: null, meaning: OWNER, roles: REVIEWER },
   { name: 'the review found problems', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', summary: 'P1' }, job: null, meaning: OWNER },
@@ -59,23 +57,20 @@ const CASES = [
   { name: 'a repair push GitHub did not confirm', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', repair_attempts: [{ id: 'a', state: 'push_unknown', head_sha: HEAD }] }, job: null, meaning: OWNER },
   { name: 'a public review comment GitHub did not confirm', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', public_review: { state: 'unknown' } }, job: null, meaning: OWNER, roles: REVIEWER },
   { name: 'a public review comment that certainly did not go out', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', public_review: { state: 'not_dispatched' } }, job: null, meaning: OWNER, roles: REVIEWER },
-  { name: 'a public review comment being sent', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', public_review: { state: 'posting' } }, job: null, meaning: AT_WORK, roles: REVIEWER,
-    known: 'review-frame.js frameState reads the saved needs_you as the owner\'s move (amber) while pr-facts reads the comment as sending (Sending to GitHub, at work)' },
-  { name: 'a verdict refused before it reached GitHub', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('not_dispatched') }, job: null, meaning: OWNER, roles: REVIEWER,
-    known: 'the platform verdict_overlay says a refused verdict always needs the owner and frameState agrees, but pr-facts resultOf sets it aside, so the PR standing reads Kept private (idle)' },
+  { name: 'a public review comment being sent', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', public_review: { state: 'posting' } }, job: null, meaning: AT_WORK, roles: REVIEWER },
+  { name: 'a verdict refused before it reached GitHub', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('not_dispatched') }, job: null, meaning: OWNER, roles: REVIEWER },
   // What the owner already did about the findings.
-  { name: 'a clean review of their PR is waiting for a verdict', state: 'complete', execution: 'completed', item: { state: 'all_clear' }, job: null, meaning: OWNER, roles: REVIEWER,
-    known: 'frameState keeps a finished review chip-only (idle); the PR standing is reviewer.result_ready (amber) until a verdict is sent or kept private' },
+  // A clean review has no verdict to send: it stands as a private review of this version, and both screens read it as nothing to do
+  // (pr-facts.test.mjs "a clean private review of their PR is settled"). An earlier version of this table expected the owner's move.
+  { name: 'a clean review of their PR is a private review, nothing waits on the owner', state: 'complete', execution: 'completed', item: { state: 'all_clear' }, job: null, meaning: IDLE, roles: REVIEWER },
   { name: 'a clean review of your own PR', state: 'complete', execution: 'completed', item: { state: 'all_clear' }, job: null, meaning: IDLE, roles: ['author'] },
   { name: 'an approval GitHub confirmed', state: 'complete', execution: 'completed', item: { state: 'all_clear', ...verdict('posted') }, job: null, meaning: IDLE, roles: REVIEWER },
   { name: 'changes requested: the PR\'s author holds the move', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('posted', 'REQUEST_CHANGES') }, job: null, meaning: IDLE, roles: REVIEWER },
-  { name: 'a comment verdict GitHub confirmed on findings', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('posted', 'COMMENT') }, job: null, meaning: IDLE, roles: REVIEWER,
-    known: 'collaboration.js reviewItemProgress only hands over for REQUEST_CHANGES or an agent-posted review without a verdict, so frameState keeps the owner\'s move (amber) after a posted COMMENT verdict; the PR standing is reviewer.reviewed (idle)' },
+  { name: 'a comment verdict GitHub confirmed on findings', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('posted', 'COMMENT') }, job: null, meaning: IDLE, roles: REVIEWER },
   { name: 'a verdict the owner threw away', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', ...verdict('discarded') }, job: null, meaning: IDLE, roles: REVIEWER },
   { name: 'a public review comment GitHub confirmed', state: 'needs_you', execution: 'completed', item: { state: 'needs_you', public_review: { state: 'posted' } }, job: null, meaning: IDLE, roles: REVIEWER },
   // Settled on GitHub.
-  { name: 'a merge waiting in GitHub\'s queue', state: 'queued', execution: 'completed', item: { state: 'queued' }, job: null, meaning: IDLE,
-    known: 'pr-facts.js ITEM_OUTBOX reads queued as a merge still sending (standing: at work) while collaboration.js and the platform _SETTLED_ITEMS settle it (frameState: idle)' },
+  { name: 'a merge waiting in GitHub\'s queue', state: 'queued', execution: 'completed', item: { state: 'queued' }, job: null, meaning: IDLE },
   { name: 'merged', state: 'complete', execution: 'completed', item: { state: 'merged' }, job: null, meaning: IDLE },
   { name: 'a finished review whose conversation failed afterwards', state: 'complete', execution: 'failed', item: { state: 'merged' }, job: null, meaning: IDLE },
 ]

@@ -5,8 +5,10 @@
 // every PR is read, in bounded batches. A PR that could not be read is shown as
 // unknown, never classified from older saved data.
 import { fetchChangeProbe, pullSignature, readExactPulls, validPullRef } from './api.js'
+import { reviewOfPull, reviewReading } from './collaboration.js'
 import { STATES } from './pr-machine.js'
 import { standingFor } from './pr-standing.js'
+import { isOwnPull } from './pull-view.js'
 
 const BATCH = 25
 // Batches asked for together: GitHub is not asked for dozens of heavy reads at once.
@@ -81,6 +83,19 @@ export const isDraftWord = (pr, chip) => !!pr?.isDraft && chip?.label === 'Draft
 // What a row shows of a decision: its bucket and its one chip.
 const standingRow = decision => ({ bucket: bucketOf(decision), chips: [decisionChip(decision)] })
 
+// A review that did not finish (it named an obstacle and decided nothing) leaves its PR on a resting state: still "To review", or
+// waiting on reviewers. That is true of the PR, and not what this list is about: it lists agent work. The review's own result is the
+// same one every screen reads (review-reading.js): Not finished, and the owner's move, like an agent that stopped. A PR that is
+// something more urgent (a draft to send, an unconfirmed push, merged) keeps that.
+const OBSTACLE_OVER = new Set(['reviewer.to_review', 'reviewer.draft', 'author.draft', 'author.waiting_review'])
+function notFinishedRow(decision, live, { runs, login, ignored }) {
+  if (!OBSTACLE_OVER.has(decision.state)) return null
+  const review = reviewOfPull(runs, live)
+  if (!review || review.item.head_sha !== live.headRefOid) return null
+  const reading = reviewReading(review.run, review.item, { own: isOwnPull(live, login), ignored })
+  return reading.state === 'NOT_FINISHED' ? { bucket: 'stalled', chips: [chip('Not finished', TONE.you)] } : null
+}
+
 // Where one review's PR stands. `live` is that PR as GitHub returns it now
 // (PR_FIELDS); without it the PR is unknown. `runs` are all review runs and
 // `chats` the live Respond-to-feedback conversations and `responses` the answers they saved.
@@ -89,7 +104,7 @@ export function classifyReview(entry, { login = '', ignored = null, live = null,
   if (!live) return { bucket: 'unknown', confirm: false, chips: [chip('Couldn’t read', 'quiet')] }
   const decision = standingFor({ pr: live, login, runs, ignored, chats, responses })
   const item = entry.item.title || !live.title ? entry.item : { ...entry.item, title: live.title }
-  return { ...standingRow(decision), confirm: ['to_confirm', 'unconfirmed'].includes(decision.state), decision, pull: live, item }
+  return { ...(notFinishedRow(decision, live, { runs, login, ignored }) || standingRow(decision)), confirm: ['to_confirm', 'unconfirmed'].includes(decision.state), decision, pull: live, item }
 }
 
 // Respond conversations on a PR that has no review of its own are agent runs too: the PR's frame shows them, so the Agent runs

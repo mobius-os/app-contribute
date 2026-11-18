@@ -31,7 +31,13 @@
 //     has not approved, however long they looked: a plain comment never lifts a change request on GitHub, and
 //     a PR that needs an approval does not get one from it. Anyone who commented on this version can be
 //     asked to approve; the comment itself is feedback to answer until you reply (that is pr-facts.js).
+//   - GitHub drops a review request when its reviewer reviews, so a request listed again beside your review of this version
+//     means the author asked you again: it is your turn, whatever your review said (`reviewRequested`, set by the lists that read it).
 //   - One agent job per PR at a time.
+//   - A PR GitHub's merge queue holds (`queued`) is in the merge queue: nobody's step but GitHub's, and Merge is off, because
+//     pressing it again would only be refused after the owner's confirmation was spent.
+//   - Your own approval of an older commit counts for this version when the fact reader proved the work the same, like anyone's.
+//     A review you kept private never lifts a change request of yours that stands on GitHub.
 //   - A draft that deals with the open findings (a prepared fix, a ready answer built on them, a verdict
 //     drafted from them) owns them while it waits or is on its way: no agent job starts and the findings are
 //     not set aside until you send it or throw it away. The app marks such a draft `covers`.
@@ -80,7 +86,9 @@ function derive(facts) {
     // Who a re-review request can still ask: an older review of theirs that they have not looked past.
     rereview: [...new Set([...changesOlder, ...approvedOlder])].filter(name => !lookedAgain.includes(name) && !commentedOnly.includes(name)),
     mine: facts.myReview || null,
-    mineAtHead: !!facts.myReview && facts.myReview.commit === facts.head,
+    // Your own approval counts for this version when it is of this commit or, proved by the fact reader, of the same work.
+    mineAtHead: !!facts.myReview && (facts.myReview.commit === facts.head || (facts.myReview.state === 'APPROVED' && facts.myReview.sameWork === true)),
+    mineCarried: !!facts.myReview && facts.myReview.commit !== facts.head && facts.myReview.state === 'APPROVED' && facts.myReview.sameWork === true,
     result,
     earlier: facts.earlier && facts.earlier.head !== facts.head ? facts.earlier : null,
     openFindings: result?.outcome === 'findings' && !result.setAside,
@@ -125,6 +133,7 @@ export const STATES = {
   merged: { turn: 'none', label: 'Merged', headline: 'Merged' },
   closed: { turn: 'none', label: 'Closed', headline: 'Closed' },
   unknown: { turn: 'you', label: 'Couldn’t read', headline: 'Couldn’t read this PR from GitHub. Try again', next: 'retry' },
+  in_merge_queue: { turn: 'other', label: 'In merge queue', headline: 'In the merge queue. GitHub merges it when the queue reaches it', waitsOn: 'GitHub' },
   unconfirmed: { turn: 'you', label: 'Not confirmed', headline: 'GitHub didn’t confirm what was sent. Check GitHub before trying again', next: 'check_github' },
   sending: { turn: 'agent', label: 'Sending', headline: 'Sending to GitHub…' },
   to_confirm: { turn: 'you', label: 'Draft to send', headline: 'A draft is ready. Read it, then send it or throw it away', next: 'send_draft' },
@@ -151,9 +160,12 @@ export const STATES = {
   'reviewer.result_ready': { turn: 'you', label: 'Review ready', headline: 'Their PR · your review is ready. Send a verdict or keep it private', next: 'draft_verdict' },
   'reviewer.waiting_author': { turn: 'other', label: 'Waiting on {author}', headline: 'Their PR · you asked for changes. Waiting on {author}' },
   'reviewer.re_review': { turn: 'you', label: 'New commits · review again', headline: 'Their PR · new commits since your review. Review again', next: 'review' },
+  // GitHub drops a request when its reviewer reviews, so one still listed beside a review of this version was made again.
+  'reviewer.re_requested': { turn: 'you', label: 'Asked to review again', headline: 'Their PR · you reviewed this version and were asked to review it again. Review again', next: 'review' },
   'reviewer.reviewed': { turn: 'none', label: 'Reviewed', headline: 'Their PR · you reviewed this version' },
   'reviewer.kept_private': { turn: 'none', label: 'Kept private', headline: 'Their PR · you kept your review of this version private' },
-  'reviewer.mergeable': { turn: 'you', label: 'Ready to merge', headline: 'Their PR · approved at this version, {green}. Merge it', next: 'merge' },
+  // Someone else's PR is theirs to land: nothing waits on you (it stays out of Needs you), though Merge stays in the menu.
+  'reviewer.mergeable': { turn: 'none', label: 'Ready to merge', headline: 'Their PR · approved at this version, {green}. Landing it is up to them' },
 }
 
 // A drafted repair is a fix an agent prepared: the same state as any draft, in the words of a push.
@@ -161,11 +173,17 @@ export const STATES = {
 const FIX_WAITING = { label: 'Fix to push', headline: 'A fix is ready. Read it, then push it or don’t' }
 // An approval that only carries over says so: "at this version" would be untrue of it.
 const CARRIED_APPROVAL = { headline: 'Your PR · approved by {who}, {green}. The lines you added and removed are the same as when they approved. Merge it' }
+// Your own approval that only carries over says so too: "you reviewed this version" would be untrue of it.
+const CARRIED_OWN = {
+  'reviewer.reviewed': { headline: 'Their PR · your approval still holds: the change is the same as when you approved' },
+  'reviewer.mergeable': { headline: 'Their PR · your approval still holds, {green}. The change is the same as when you approved. Landing it is up to them' },
+}
 // Nobody has reviewed it and no review was requested: waiting would be untrue. Assigning someone asks nobody.
 const NOBODY_ASKED = { label: 'Nobody asked yet', headline: 'Your PR · nobody has been asked to review it on GitHub yet. Use Request review' }
 function wordsOf(key, d) {
   if (key === 'author.waiting_review' && d.nobodyAsked) return { ...STATES[key], ...NOBODY_ASKED }
   if (key === 'to_confirm' && d.outbox?.kind === 'repair') return { ...STATES[key], ...FIX_WAITING }
+  if (d.mineCarried && CARRIED_OWN[key]) return { ...STATES[key], ...CARRIED_OWN[key] }
   return key === 'author.approved' && d.carriedOnly ? { ...STATES[key], ...CARRIED_APPROVAL } : STATES[key]
 }
 
@@ -173,6 +191,7 @@ function wordsOf(key, d) {
 function stateOf(facts, d) {
   if (facts.lifecycle === 'merged' || facts.lifecycle === 'closed') return facts.lifecycle
   if (facts.lifecycle === 'unknown' || facts.readComplete === false) return 'unknown'
+  if (facts.queued === true) return 'in_merge_queue'
   const outboxState = { unconfirmed: 'unconfirmed', sending: 'sending', drafted: 'to_confirm' }[d.outbox?.state]
   if (outboxState) return outboxState
   if (facts.job) return { running: 'working', needs_answer: 'needs_answer', stalled: 'stalled' }[facts.job.state] || 'working'
@@ -196,12 +215,17 @@ function approvedStanding(facts) {
   return mayWrite(facts.permission) ? 'author.approved' : 'author.approved_no_rights'
 }
 
-// Your verdict on this version comes first, then a finished review of this version
+// A request to review again comes first (the fact reader's `reviewRequested`: GitHub lists you among the requested reviewers
+// of someone else's PR). Then your verdict on this version, then a finished review of this version
 // (a re-review that is done is no longer "new commits"), then an older review of yours, posted on
-// GitHub (`mine`) or kept private (`earlier`).
+// GitHub (`mine`) or kept private (`earlier`). A review you kept private does not lift the change request you made on GitHub:
+// that request is of an older version and still stands, so the PR waits for your re-review whatever the private review found.
 function reviewerStanding(facts, d) {
+  // A draft stays its author's to finish, as it does before a first review (reviewer.draft).
+  if (d.mineAtHead && facts.reviewRequested === true && facts.lifecycle !== 'draft') return 'reviewer.re_requested'
   if (d.mineAtHead && d.mine.state === 'CHANGES_REQUESTED') return 'reviewer.waiting_author'
   if (d.mineAtHead) return notReadyToMerge(facts, d) ? 'reviewer.reviewed' : 'reviewer.mergeable'
+  if (d.result?.setAside && d.mine?.state === 'CHANGES_REQUESTED') return 'reviewer.re_review'
   if (d.result) return d.result.setAside ? 'reviewer.kept_private' : 'reviewer.result_ready'
   if (d.mine || d.earlier) return 'reviewer.re_review'
   return facts.lifecycle === 'draft' ? 'reviewer.draft' : 'reviewer.to_review'
@@ -249,7 +273,9 @@ export function notReadyToMerge(facts, d = derive(facts)) {
 // platform refuse in their own words when the tap reaches them.
 const agentStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
 const takeOverStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), MAINTAINER.includes(facts.permission) ? '' : 'Only maintainers can take over someone else’s PR.', jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
-const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), nothingInFlight(d), jobIdle(facts))
+// GitHub's merge queue already holds the PR: pressing Merge again would only be refused, after the owner's confirmation was spent.
+const inMergeQueue = facts => (facts.queued === true ? 'This pull request is already in the merge queue.' : '')
+const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), inMergeQueue(facts), nothingInFlight(d), jobIdle(facts))
 const statusStops = facts => firstReason(readable(facts), stillOpen(facts), jobIdle(facts))
 // The two Ask actions need someone to name: anyone who reviewed or commented, except who already approved this version.
 const nobodyToAsk = d => (d.approvedAtHead.length ? 'Everyone who reviewed it has already approved this version.' : 'Nobody has reviewed this PR yet.')
@@ -322,7 +348,7 @@ export function decide(facts) {
     const title = typeof action.title === 'function' ? action.title(d, facts) : action.title
     return { id: action.id, by: action.by, title, detail: action.detail || '', enabled: !reason, reason, highlighted: action.id === state.next && !reason }
   })
-  const waitingOn = state.turn !== 'other' ? '' : facts.role === 'reviewer' ? facts.author || 'the author' : headlineWho(key, d).join(', ') || 'reviewers'
+  const waitingOn = state.turn !== 'other' ? '' : state.waitsOn || (facts.role === 'reviewer' ? facts.author || 'the author' : headlineWho(key, d).join(', ') || 'reviewers')
   const label = state.label.replace('{author}', facts.author || 'the author')
   return { role: facts.role, state: key, turn: state.turn, label, headline: headlineFor(key, facts, d), next: state.next || '', jobKind: facts.job?.kind || '', coveredBy: d.coveredBy, nobodyAsked: !!d.nobodyAsked, waitingOn, actions,
     approvedBy: d.approvedAtHead, carriedFrom: d.carried, changesFrom: [...d.changesAtHead, ...d.changesOlder], lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview, askable: d.askable }

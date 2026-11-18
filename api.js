@@ -268,11 +268,13 @@ export async function fetchRepoFile(token, { repo, ref, path }) {
 // Callers leave records stale on null — the refresh is best-effort polish,
 // and GitHub returns null nodes (not errors) for anything inaccessible.
 // The one PR shape every live list shares: lists, incoming reviews and the
-// Desk home all read these fields. collaboration.js re-exports it.
+// Desk home all read these fields. collaboration.js re-exports it. The two merge queue fields say whether
+// its base branch merges through a queue at all and whether GitHub's queue holds the PR now (the PR machine's "In merge queue"): the
+// same two fields the platform reads.
 export const PR_FIELDS = `id number title url state headRefOid headRefName baseRefName baseRefOid baseRef { target { oid } } isDraft
   additions deletions changedFiles createdAt updatedAt
   author { login } assignees(first:100) { nodes { login } }
-  repository { nameWithOwner viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
+  repository { nameWithOwner viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed defaultBranchRef { name } }
   headRepository { nameWithOwner viewerPermission isArchived }
   labels(first:20) { nodes { name color } totalCount }
   comments(last:10) { totalCount nodes { createdAt author { login __typename } } }
@@ -281,7 +283,7 @@ export const PR_FIELDS = `id number title url state headRefOid headRefName baseR
   commits(last:1) { totalCount nodes { commit { statusCheckRollup { state contexts {
     totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
   } } } } }
-  reviewDecision mergeable
+  reviewDecision mergeable isMergeQueueEnabled mergeQueueEntry { id }
   latestOpinionatedReviews(first:30, writersOnly:true) { pageInfo { hasNextPage } nodes { state author { login __typename } commit { oid } } }
   latestReviews(first:30) { pageInfo { hasNextPage endCursor } nodes { ${REVIEW_FIELDS} } }
   viewerLatestReview { state commit { oid } }
@@ -342,11 +344,13 @@ export async function readExactPulls(token, refs, name = 'ContributeReviewPulls'
 }
 
 // One GitHub search of open PRs, with the fields every list shares.
-const pullSearch = (alias, search, first) => `${alias}: search(query: ${JSON.stringify(search)}, type: ISSUE, first: ${first}) { nodes { ... on PullRequest { ${PR_FIELDS} } } }`
+const pullSearch = (alias, search, first) => `${alias}: search(query: ${JSON.stringify(search)}, type: ISSUE, first: ${first}) { pageInfo { hasNextPage } nodes { ... on PullRequest { ${PR_FIELDS} } } }`
 
 // The open PRs that ask for the viewer's review, each flagged, then the ones `search` finds beside them. The
 // searches are read at once and answer as one. Null when either did not answer: callers keep the list they
-// had rather than treat a failed read as "nothing asks for your review".
+// had rather than treat a failed read as "nothing asks for your review". The list is the whole answer a caller
+// uses; what GitHub says about each search stopping at one page rides on it as `pageInfo` ({ requested, [alias] },
+// each GitHub's own { hasNextPage }), not enumerable, so the list stays what it always was to every caller.
 async function readViewerPulls(token, name, alias, search, first) {
   const data = await fetchLiveStates(token, `query ${name} {
     rateLimit { remaining }
@@ -358,7 +362,17 @@ async function readViewerPulls(token, name, alias, search, first) {
   const requested = valid(data.requested.nodes)
   const requestedUrls = new Set(requested.map(item => item.url))
   const others = valid(data[alias].nodes).filter(item => !requestedUrls.has(item.url))
-  return [...requested.map(item => ({ ...item, reviewRequested: true })), ...others]
+  const rows = [...requested.map(item => ({ ...item, reviewRequested: true })), ...others]
+  return Object.defineProperty(rows, 'pageInfo', { value: { requested: data.requested.pageInfo || null, [alias]: data[alias].pageInfo || null } })
+}
+
+// Which of the two searches GitHub says it stopped short of, as the Desk's note names it: 'requests' (the review requests), 'involved' (the PRs
+// that involve the owner), '' when neither has more, and null when the read carries no answer (an older read, or none): the Desk then reads
+// a full page as "there may be more" (desk.js incomingCutOf). A page of exactly 50 with nothing after it is not cut.
+export function searchCutOf(pageInfo) {
+  if (!pageInfo?.requested && !pageInfo?.involved) return null
+  if (pageInfo.requested?.hasNextPage === true) return 'requests'
+  return pageInfo.involved?.hasNextPage === true ? 'involved' : ''
 }
 
 // Open pull requests that involve the viewer (the source of "On GitHub" projects),

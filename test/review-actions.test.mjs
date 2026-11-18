@@ -97,11 +97,13 @@ test('findings can be posted on someone else\'s PR, never on your own: there you
 })
 
 test('only findings with nothing of theirs on GitHub can be posted', () => {
-  assert.equal(postableFindings({ state: 'needs_you' }), true)
-  assert.equal(postableFindings({ public_review: { state: 'not_dispatched' } }), true, 'an attempt that certainly did not go out can be made again')
-  assert.equal(postableFindings({ public_review: { state: 'posted', url: 'https://github.com/o/r/pull/1#pullrequestreview-1' } }), false)
-  assert.equal(postableFindings({ public_review: { state: 'unknown' } }), false, 'an attempt that may have gone out is never repeated')
-  assert.equal(postableFindings(null), true)
+  // The platform refuses a saved item that has no finished result (a state of findings or clear, and words), so the fixtures have them.
+  const found = extra => ({ state: 'needs_you', summary: 'P1 found', ...extra })
+  assert.equal(postableFindings(found()), true)
+  assert.equal(postableFindings(found({ public_review: { state: 'not_dispatched' } })), true, 'an attempt that certainly did not go out can be made again')
+  assert.equal(postableFindings(found({ public_review: { state: 'posted', url: 'https://github.com/o/r/pull/1#pullrequestreview-1' } })), false)
+  assert.equal(postableFindings(found({ public_review: { state: 'unknown' } })), false, 'an attempt that may have gone out is never repeated')
+  assert.equal(postableFindings(null), false, 'no review, nothing to post')
 })
 
 test('Stop ends the whole run, so a batch says how many PRs it stops', () => {

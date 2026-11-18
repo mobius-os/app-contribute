@@ -65,15 +65,17 @@ async function rendered(t) {
   return renderer
 }
 
-test('a run belongs to the exact repository, PR, code and target branch, bound to the live branch tip', () => {
+test('a run belongs to the exact repository, PR and code, and says whether it saw the target branch at its live tip', () => {
   const item = reviewItem({ repo: 'OWNER/PROJECT' })
   const reviewed = { id: 'exact-run', items: [item] }
   assert.deepEqual(reviewForPull([reviewed], pull()), { run: reviewed, item, exactBase: true })
   for (const [field, value] of [
-    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)], ['base_ref', 'release'],
+    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)],
   ]) {
     assert.equal(reviewForPull([{ items: [reviewItem({ [field]: value })] }], pull()), null, field)
   }
+  // The target branch is not part of the code's identity (GitHub retargets a PR): the review is found, never as bound to the live tip.
+  assert.equal(reviewForPull([{ items: [reviewItem({ base_ref: 'release' })] }], pull())?.exactBase, false, 'base_ref')
   assert.equal(reviewForPull([], pull()), null)
 })
 

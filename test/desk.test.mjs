@@ -70,7 +70,7 @@ test('every PR waits on you under the step of its one shared decision: merge, fi
   assert.equal(step(pr(4, { mergeable: 'CONFLICTING' })), 'fix', 'a merge conflict')
   assert.equal(step(pr(5, opinion('CHANGES_REQUESTED'))), 'fix', 'a change request at this version')
   const theirs = (extra = {}) => pr(6, { author: { login: 'teammate' }, viewerLatestReview: { state: 'APPROVED', commit: { oid: HEAD } }, ...opinion('APPROVED', 'owner'), ...extra })
-  assert.equal(step(theirs()), 'merge', 'a PR you reviewed that is ready to merge is a Merge too')
+  assert.equal(decide(theirs()).turn, 'none', 'a PR of someone else that is ready to merge waits on nobody here: landing it is theirs')
   assert.equal(step(theirs({ headRefOid: 'b'.repeat(40) })), 'again', 'new commits since your review')
 })
 
@@ -236,12 +236,13 @@ test('the Needs you badge is the sum of the chips next to it, whatever the page 
   assert.equal(counts.drafts, 1)
 })
 
-test('a reviewed PR that is ready to merge counts under Merge, never under Review again', () => {
+test('a reviewed PR of someone else that is ready to merge is not in Needs you; new commits still bring it back for Review again', () => {
   const entries = [theirs(5), theirs(6, moved)]
-  assert.deepEqual(entries.map(entry => entry.bucket), ['waiting', 'waiting'], 'the Agent runs page lists both as waiting on you')
+  assert.deepEqual(entries.map(entry => entry.bucket), ['done', 'waiting'], 'ready to merge is finished here, new commits wait on you')
+  assert.equal(entries[0].chips[0].label, 'Ready to merge', 'the Agent runs page still says so')
   const counts = deskCounts({ reviewEntries: entries, login: 'owner' })
-  assert.deepEqual([counts.merge, counts.again], [1, 1])
-  assert.equal(needsCount(counts), 2)
+  assert.deepEqual([counts.merge, counts.again], [0, 1])
+  assert.equal(needsCount(counts), 1)
 })
 
 test('each PR counts once: a request, a card or an own PR already listed is not counted again for its review run', () => {
