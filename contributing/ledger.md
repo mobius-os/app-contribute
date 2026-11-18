@@ -103,7 +103,7 @@ onto it), or `diverged` (it does not; `detail` says why). Mention `adopted`
 backend changes that need a restart, and tell the owner when a change stays
 `diverged`.
 
-**Other JSON writes use CAS** — issue and comment records, status changes, and
+**Other JSON writes use CAS** — issue and comment records, field changes, and
 `chat_ids` unions — because a record has several writers (you, the publication
 endpoints, the scheduled refresh job, the app's Dismiss button) and an
 unconditional PUT silently erases one.
@@ -153,16 +153,68 @@ Refreshing a record keeps its id and public identity (PR URL/number). Do not
 create a second record merely because upstream moved.
 
 `type` ∈ `pr | issue | issue_comment | discussion_comment`; `status` ∈ `prepared
-| submitting | draft | open | merged | closed | commented | abandoned`; `number`,
-`url`, `branch` are optional until they exist. `submitting` = the approve endpoint
-claimed the record and the action is in flight; `commented` = terminal for
-comment actions. A record stuck in `submitting` is reconciled by the platform's
-lost-response recovery, never by searching GitHub and inventing a new record.
+| submitting | draft | open | landing | merged | closed | commented | abandoned |
+superseded`; `number`, `url`, `branch` are optional until they exist.
+`submitting` = the approve endpoint claimed the record and the action is in
+flight; `commented` = terminal for comment actions; `superseded` = replaced by
+other work, with `superseded_by` naming the record that replaced it (the card
+follows it to the current version). `landing` is the platform's own word while it lands a stack
+that already exists: the pull request is open, nothing new starts a landing, and
+the lifecycle engine never writes or replaces that word. A record stuck in
+`submitting` is reconciled by the platform's lost-response recovery, never by
+searching GitHub and inventing a new record.
 Legacy `submission_mode: "mobius-bot"` records carry extra `relay_*` fields:
 [legacy-bot.md](legacy-bot.md).
+
+**The `lifecycle` field** is optional. Contribute's lifecycle engine stores it
+beside `status` on a `pr | issue` record: `{"v": 1, "regions": {"publication":
+{"state", "since", "deadline"}, "update": …, "followup": …}, "attention":
+{"flags": […]}, "history": […]}`. It says what one status word cannot: a public
+PR with an update waiting, an update whose PR merged or closed first
+(`update.state` `STRANDED_UPDATE`), a merge into a branch other than the
+default, a send whose answer was lost. A record without it (everything written
+before it, and everything while the engine is not the writer) is read from its
+`status` and fields, so never require it. The `status` word is derived from the
+regions, and only the engine path writes it: staging, review, send, the
+scheduled job and the app's own buttons. Do not change `status` or `lifecycle`
+of a record that exists, by hand; the two hand-written creations above are the
+exceptions, and the engine adopts the status they seed.
+
+| Publication state (and update state) | `status` |
+|---|---|
+| `PREPARED`, `NOT_CONFIRMED` | `prepared` |
+| `SENDING`, `UNCERTAIN` | `submitting` (`UNCERTAIN` also accepts `prepared`) |
+| `DRAFT` | `draft` |
+| `OPEN`, `QUEUED` | `open` |
+| `MERGED`, `MERGED_ELSEWHERE`, `ORPHANED` | `merged` |
+| `CLOSED`, `CLOSED_QUIET` | `closed` |
+| `ABANDONED` | `abandoned` |
+| `SUPERSEDED` | `superseded` |
+| a public PR with `PREPARED_UPDATE` or `UPDATE_NOT_CONFIRMED` | `prepared` |
+| a public PR with `SENDING_UPDATE` (`UPDATE_UNCERTAIN` also accepts `prepared`) | `submitting` |
+
+Send claims a record by its `status` word, so an update waiting on a public PR
+reads `prepared` there: `prepared` does not mean private. A `pr_update` record
+with a PR `url` and `number` is public; read `lifecycle` (or `plan.action`)
+instead of the word to tell the two apart.
+
+**Fields the scheduled job writes.** All optional, and the job's own: read them,
+never hand-write them.
+
+| Field | Meaning |
+|---|---|
+| `github_head_sha`, `github_base_ref` | GitHub's own head commit and base branch of the PR as the job last read them. They are never the reviewed version: `plan.head_sha`, `quality_review.reviewed_head_sha` and `last_submit_push_sha` stay exactly as sent. After a merge into another branch, `github_base_ref` is that branch. |
+| `merged_announced`, `closed_announced` | `false` means the owner merged this PR into the default branch, or closed it, in the app and the job has not yet told them once and closed out the follow-up grant; the job sets `true` after it has. A record finished any other way (a merge into another branch included) has neither key and owes nothing. |
+| `stranded_announced` | `false` means the owner merged or closed the PR in the app while an update to it was waiting, so the update is stranded, and the job has not yet asked them (an `owner_request`) and told them once that the update could not be sent; the job sets `true` after it has. A record whose update the job itself stranded never has the key. Written in engine mode only. |
+| `stranded_reminded_at` | The ISO time of the one reminder about a stranded update. Cleared when the update is no longer stranded. |
+| `attention` with `type: "owner_request"` | A region of the `lifecycle` waits on the owner: a send or an update that could not be confirmed, a merge into another branch that never reached the default branch, or an update that can no longer go out. Its `key` is `owner_request:<region>:<state>:<since>` and it carries `title`, `message`, `url`, `detected_at` and `announced_at`. It stands on a merged or closed record, where every other attention is emptied, and it goes once the region it names has left that state. It holds the one attention slot as `human_required` does; what it displaced waits in `waiting_attention`. Written in engine mode only. |
 
 `quality_review.state` ∈ `reviewing | changes_needed | all_clear`, written
 only through the review call above. Its `reviewed_head_sha` must exactly equal
 the record's current `plan.head_sha`; publication endpoints enforce this.
 
-The scheduled refresh job only tracks `pr | issue` records in `draft | open`.
+The scheduled refresh job tracks `pr | issue` records in `draft | open | landing`.
+With `lifecycle_writer` set to `"engine"` in the app's `settings.json` it also
+follows a PR closed less than 30 days ago (it may be reopened), a merge into a
+branch other than the default one until that branch reaches it, and a PR with a
+prepared update that has not gone out.
