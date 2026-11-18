@@ -87,13 +87,14 @@ test('the shared decision, not GitHub\'s review decision, says what waits: pendi
   assert.deepEqual(rows([pr(6), pr(7, { isDraft: true, commits: rollup(1, 2) }), pr(8, { latestOpinionatedReviews: null })]), [])
 })
 
-test('authored pulls keep only the owner PRs that are not review requests', () => {
+test('authored pulls keep the owner PRs, even one GitHub also lists as a review request (a team of theirs was asked)', () => {
   const incoming = [
     pr(1, { reviewRequested: true }),
     pr(2, { author: { login: 'Owner' } }),
     pr(3, { author: { login: 'teammate' } }),
+    pr(4, { reviewRequested: true, author: { login: 'teammate' } }),
   ]
-  assert.deepEqual(authoredPulls(incoming, 'owner').map(item => item.number), [2])
+  assert.deepEqual(authoredPulls(incoming, 'owner').map(item => item.number), [1, 2])
   assert.deepEqual(authoredPulls(incoming, ''), [])
 })
 

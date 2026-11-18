@@ -6,6 +6,7 @@ import {
 } from './source-map.js'
 import { groupRecords, timeAgo } from './domain.js'
 import { NAMES } from './names.js'
+import { canOpenForReview } from './ready-offer.js'
 import {
   contributionScopeHash,
   hasAttentionSignal,
@@ -398,9 +399,9 @@ export function buildContributionRun({
       }))
       continue
     }
-    const personalDrafts = active.filter(record => (
-      record?.status === 'draft' && record?.submission_mode !== 'mobius-bot'
-    ))
+    // Only a draft the platform would open for review is offered: for any other the button ends in a refusal (ready-offer.js). A draft that
+    // is not offered is an ordinary draft on GitHub, as one sent from Möbius's own account always was.
+    const personalDrafts = active.filter(record => record?.status === 'draft' && canOpenForReview(record))
     if (personalDrafts.length > 0) {
       decisions.push(decision('mark_ready', unit, byRepo, {
         record: personalDrafts[0],

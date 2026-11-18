@@ -49,7 +49,8 @@ export function projectCyclePhase(runtime) {
 // cycle's message can at worst queue behind the current one.
 export const BUSY_PHASES = ['starting', 'running', 'waiting', 'scheduled', 'stopping']
 
-export function useProjectCycle(projectKey, deliver) {
+// `covered` is true while a PR page covers the screen that shows the project (the caller reads it from useCovered, ui/useReviewList.js).
+export function useProjectCycle(projectKey, deliver, covered = false) {
   const hub = useSyncHub()
   const [cycle, setCycle] = useState({ phase: 'restoring', chatId: '', history: [], error: '' })
   const alive = useRef(true)
@@ -97,10 +98,14 @@ export function useProjectCycle(projectKey, deliver) {
   // The conversation is durable; this mounted view only observes it: every five
   // seconds while it is shown and not complete, and once more when shown again
   // (the sync hub owns the timer, so a hidden view reads nothing).
+  // A PR page that covers the project stops it too, and the page closing reads once more (the hub does that for a frame shown again).
+  const wasCovered = useRef(covered)
   useEffect(() => {
     if (!cycle.chatId || !hub) return undefined
-    return hub.every(() => refresh(cycle.chatId), cycle.phase === 'complete' ? null : 5000)
-  }, [hub, cycle.chatId, cycle.phase, refresh])
+    if (wasCovered.current && !covered) void refresh(cycle.chatId)
+    wasCovered.current = covered
+    return hub.every(() => refresh(cycle.chatId), cycle.phase === 'complete' || covered ? null : 5000)
+  }, [hub, cycle.chatId, cycle.phase, refresh, covered])
   // No conversation holds the cycle: its first request never reached Möbius
   // (the usual case), or the owner deleted the conversation it created.
   const NEVER_REACHED = 'This start isn’t in any conversation. Start it again.'

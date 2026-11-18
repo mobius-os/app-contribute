@@ -12,6 +12,7 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
+import { followLineOf } from '../follow-note.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   contributionTitle,
@@ -249,7 +250,7 @@ const PROGRESS_TEXT = {
 // A row that is being sent or opened says so with the moving light; a finished or refused one stands still.
 const progressWords = (mode, state) => (state === 'working' || state === 'checking' ? <Shine>{PROGRESS_TEXT[mode][state]}</Shine> : PROGRESS_TEXT[mode]?.[state])
 
-function ExactActionList({
+export function ExactActionList({
   items,
   mode,
   publicationPreference,
@@ -257,6 +258,7 @@ function ExactActionList({
   stage,
   onSelect,
   progress = {},
+  followLine = null,
 }) {
   return (
     <ol className="co-run-approval-list">
@@ -275,11 +277,13 @@ function ExactActionList({
           ))
           .map(record => {
             const meta = stackMeta(record)
+            const follow = followLine?.(record)
             return (
               <li key={record.id}>
                 <span>
                   <strong>{contributionTitle(record)}</strong>
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
+                  {follow ? <small>{follow}</small> : null}
                 </span>
                 <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
                   || progressWords(mode, progress[record.id])
@@ -307,6 +311,7 @@ function ExactBatchAction({
   onSend,
   onSendStack,
   onMarkReady,
+  followAtSend = null,
   onSelect,
 }) {
   const task = useProjectTask()
@@ -325,6 +330,8 @@ function ExactBatchAction({
   // its results; each handled item changes the live set, which must not close it.
   const confirming = !!approval && (approval.locked || approval.fingerprint === fingerprint)
   const [progress, setProgress] = useState({})
+  // What the platform said about following each PR it opened (the send's result, `followed`), by record.
+  const [followed, setFollowed] = useState({})
   const [finished, setFinished] = useState(false)
   const admitted = useRef(false)
   const currentRecords = useRef(records)
@@ -366,6 +373,11 @@ function ExactBatchAction({
   }, [approval, records, mode])
 
   if (count < 1 && !approval?.locked) return null
+
+  // Whether a new PR will be followed, said where the owner confirms the send, and once it is sent what the platform did (follow-note.js).
+  // A legacy draft sent from Möbius's own account never carries the request, so it says nothing.
+  const followLine = record => (mode === 'send' && contributionPath(record, publicationPreference, githubState) !== 'mobius'
+    ? followLineOf(record, { before: followAtSend, state: progress[record.id], followed: followed[record.id] }) : '')
 
   // Open the exact confirmation with the stage chosen for this send (the setting unless the arrow picked the other).
   function openConfirm(nextStage = stage) {
@@ -414,6 +426,8 @@ function ExactBatchAction({
     } catch { outcome = { uncertain: true } }
     const values = records.map(record => [record.id, outcomeFor(record, outcome)])
     setProgress(old => ({ ...old, ...Object.fromEntries(values) }))
+    // A stack's members are never followed and its result carries no word of it; a single send's result does.
+    if (outcome?.followed && item?.unit?.type !== 'stack') setFollowed(old => ({ ...old, [runPrimaryRecord(item).id]: outcome.followed }))
     return !values.some(([, value]) => value?.error)
   }
 
@@ -446,7 +460,7 @@ function ExactBatchAction({
   function closeResults() {
     if (checking || busy) return
     admitted.current = false
-    setApproval(null); setFinished(false); setProgress({}); setNote(''); setPickedStage(null)
+    setApproval(null); setFinished(false); setProgress({}); setFollowed({}); setNote(''); setPickedStage(null)
     task?.close()
   }
 
@@ -498,6 +512,7 @@ function ExactBatchAction({
         githubState={githubState}
         stage={stage}
         progress={progress}
+        followLine={followLine}
         onSelect={busy ? undefined : onSelect}
       />
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
@@ -855,6 +870,7 @@ export function ContributionRun({
   onSend,
   onSendStack,
   onMarkReady,
+  followAtSend = null,
   onFeedback,
   onReview,
   onDismiss,
@@ -1021,6 +1037,7 @@ export function ContributionRun({
         newPrStage={newPrStage}
         onSend={onSend}
         onSendStack={onSendStack}
+        followAtSend={followAtSend}
         onSelect={selectRunItem}
       />
 

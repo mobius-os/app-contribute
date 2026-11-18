@@ -5,6 +5,7 @@ import { localChangeSummary, projectCycleIdentity } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
+import { useCovered } from './useReviewList.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
 import { DateLabel } from './PullRequestDetail.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
@@ -61,7 +62,7 @@ function CycleNotice({ cycle, label, waiting, workflow }) {
 
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
-  const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
+  const workflow = useProjectCycle(projectCycleIdentity(project), onStart, useCovered())
   const { cycle } = workflow
   const [error, setError] = useState('')
   const [follow, setFollow] = useState(false)

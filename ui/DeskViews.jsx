@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, projectNeedsRows, waitingOnOthers } from '../desk.js'
+import { authoredPulls, chainPulls, deskStanding, feedbackPull, mergedRecently, newSince, incomingCutWords, projectNeedsRows, requestsWaiting, runsCutWords, waitingOnOthers } from '../desk.js'
 import { conversationCount, prKey, reviewForPull } from '../collaboration.js'
 import { savedFindings } from '../address-feedback.js'
+import { findingsAnswered } from '../pr-facts.js'
 import { frameState, reviewForRecord } from '../review-frame.js'
 import { ReviewFrame } from './ReviewFrame.jsx'
 import { chipOf, frameOf } from '../pr-standing.js'
@@ -19,6 +20,8 @@ import { Envelope, EmptyView } from './Envelope.jsx'
 import { AgentRunsView, ReviewRow } from './ReviewsView.jsx'
 import { WaitingOnOthers } from './WaitingOnOthers.jsx'
 import { NAMES } from '../names.js'
+import { runRowWords } from '../project-run-copy.js'
+import { Shine } from './Shine.jsx'
 
 const matches = (query, ...parts) => !query.trim()
   || parts.filter(Boolean).join(' ').toLowerCase().includes(query.trim().toLowerCase())
@@ -94,11 +97,53 @@ function DeskAttentionRow({ item, pr, decision, login, onSelect, action = null }
   )
 }
 
+// A project's agent run that stopped, failed, asks you or never started: one row under To look at; it opens the project, where the run's own controls are.
+// A stopped, failed or unsent run carries a quiet Dismiss beside it, which records on the project's cycle record that nothing more is wanted of it.
+function DeskRunRow({ project, run, onOpenProject, onDismissRun }) {
+  const words = runRowWords(run.state)
+  const [state, setState] = useState({ busy: false, failed: false })
+  const since = Number.isFinite(run.since) ? new Date(run.since * 1000).toISOString() : ''
+  async function dismiss() {
+    setState({ busy: true, failed: false })
+    const done = await onDismissRun(run.key, run.k).catch(() => false)
+    setState({ busy: false, failed: !done })
+  }
+  const action = words.dismiss && onDismissRun
+    ? <button type="button" className="co-btn co-btn-quiet co-desk-row-action" title={words.dismiss.hint} disabled={state.busy} aria-busy={state.busy || undefined}
+      aria-label={`${words.dismiss.label}: ${words.title}, ${project.name}`} onClick={dismiss}>{words.dismiss.label}</button>
+    : null
+  return <DeskRow
+    icon={<Icon name="cycle" size={16} className="co-desk-attention-icon" />}
+    title={words.title}
+    facts={<span><DotLine parts={[project.name, since ? <TimeAgo prefix={`${words.since} `} value={since} short /> : null]} /></span>}
+    pills={[<StatusPill key="state" chip={{ label: words.label, tone: 'owner' }} />]}
+    reason={state.failed ? words.dismiss.failed : words.reason}
+    action={action}
+    onOpen={() => onOpenProject?.(project.key)} />
+}
+
+// The note a cut list of review runs wears (desk.js runsCutWords), with the way to read older finished ones.
+function RunsCut({ cut, view }) {
+  const words = runsCutWords(cut, view)
+  if (!words) return null
+  return <div className="co-pr-note" role="status">
+    <p>{words.text}</p>
+    {cut.error ? <p role="alert">{cut.error}</p> : null}
+    {words.action ? <button type="button" className="co-btn" disabled={cut.busy} aria-busy={cut.busy} onClick={cut.onMore}>{cut.busy ? <Shine>Reading older reviews…</Shine> : words.action}</button> : null}
+  </div>
+}
+
+// The owner's PRs come from one page of GitHub's search: say so when it was full (desk.js incomingCutWords).
+function IncomingCut({ cut, view }) {
+  const text = incomingCutWords(cut, view)
+  return text ? <p className="co-pr-note" role="status">{text}</p> : null
+}
+
 // Rows per project and view. In Needs you each row is tagged with the step (desk.js NEEDS_CHIPS) that counts it:
 // the rows are desk.js needsRows, the same list the chips and the rail count.
-function projectRows(view, project, { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries, records, capabilities, onOpenPull, onOpenRecord }) {
+function projectRows(view, project, { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, projectRuns, reviewEntries, records, capabilities, onOpenPull, onOpenRecord, onOpenProject, onDismissRun }) {
   const rows = []
-  const facts = { runs, chats, responses, ignored }
+  const facts = { runs, chats, responses, ignored, projectRuns }
   // The search finds a project by its name too: a name match keeps all of its rows.
   const keep = (...parts) => matches(query, project.name, ...parts)
   const pullRow = (pr, step, extra = {}) => ({ chip: step, el: <DeskPullRow key={`pr:${pr.number}`} project={project} pr={pr} lastLooked={lastLooked} facts={facts} onOpenPull={onOpenPull} login={login} records={records} capabilities={capabilities} {...extra} /> })
@@ -107,7 +152,9 @@ function projectRows(view, project, { login, decisionsFor, lastLooked, query, ru
   // Your own agent review of your own PR found problems at its current version:
   // the row offers the fix itself, and opens the PR straight into it.
   const fixAction = (target, pr, decision) => {
-    if (!pr || !savedFindings(reviewForPull(runs, pr), ignored)) return null
+    const review = pr ? reviewForPull(runs, pr) : null
+    // Findings a posted reply has answered are not listed again (pr-facts.js findingsAnswered).
+    if (!pr || !savedFindings(review, ignored, { answered: findingsAnswered(responses, pr, review) })) return null
     // The machine decides whether Respond may start; a draft that already deals with the findings turns it off.
     if (!actionOf(decision, 'respond')?.enabled) return null
     return { label: NAMES.fixFindings, run: () => onOpenPull(project, target, 'review', 'respond') }
@@ -130,11 +177,12 @@ function projectRows(view, project, { login, decisionsFor, lastLooked, query, ru
   // [what the search looks in, the row] for one row of Needs you.
   const needsEntry = row => {
     if (row.item) return [[row.item.label, String(row.item.record?.number || '')], decisionRow(row.item)]
+    if (row.run) return [[project.name, runRowWords(row.run.state).title], { chip: row.step, el: <DeskRunRow key={`project-run:${row.run.key}:${row.run.state}`} project={project} run={row.run} onOpenProject={onOpenProject} onDismissRun={onDismissRun} /> }]
     if (row.entry) return [[row.entry.item.title, String(row.entry.item.number)], { chip: row.step, el: <ReviewRow key={`run:${row.entry.id}`} entry={row.entry} project={project} login={login} onOpenPull={onOpenPull} /> }]
     return [[row.pr.title, String(row.pr.number), row.pr.author?.login], pullRow(row.pr, row.step, { request: row.step === 'review' })]
   }
   if (view === 'requests') {
-    (project.reviewRequests || []).filter(pr => keep(pr.title, String(pr.number), pr.author?.login)).forEach(pr => rows.push(pullRow(pr, 'review', { request: true })))
+    requestsWaiting(project.reviewRequests, login, facts).filter(pr => keep(pr.title, String(pr.number), pr.author?.login)).forEach(pr => rows.push(pullRow(pr, 'review', { request: true })))
   }
   if (view === 'work') {
     all.filter(item => keep(item.label, String(item.record?.number || ''))).forEach(item => rows.push(decisionRow(item)))
@@ -202,10 +250,10 @@ function waitingRows(projects, { login, runs, chats, responses, ignored, query, 
 }
 
 // The selected side view: one card per app, in the projects list's own order.
-export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, reviews = null, counts = {}, needsFilter = '', capabilities = null, onOpenProject, onOpenPull, onOpenRecord }) {
+export function DeskView({ view, projects, records, login, decisionsFor, lastLooked, query, runs = [], chats = [], responses = [], ignored = null, projectRuns = [], runsCut = { cut: '' }, incomingCut = '', reviews = null, counts = {}, needsFilter = '', capabilities = null, onOpenProject, onOpenPull, onOpenRecord, onDismissRun }) {
   const [mineFilter, setMineFilter] = useState('open')
-  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, reviewEntries: reviews?.entries || [], records, capabilities, onOpenPull, onOpenRecord }
-  if (view === 'runs') return <AgentRunsView reviews={reviews} projects={projects} query={query} login={login} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} />
+  const context = { login, decisionsFor, lastLooked, query, runs, chats, responses, ignored, projectRuns, reviewEntries: reviews?.entries || [], records, capabilities, onOpenPull, onOpenRecord, onOpenProject, onDismissRun }
+  if (view === 'runs') return <><AgentRunsView reviews={reviews} projects={projects} query={query} login={login} renderWork={project => projectRows('work', project, context).map(row => row.el)} onOpenProject={onOpenProject} onOpenPull={onOpenPull} /><RunsCut cut={runsCut} view={view} /></>
   const shownView = view === 'mine' && mineFilter === 'merged' ? 'merged' : view
   const envelopes = viewEnvelopes(shownView, projects, { records, query, lastLooked, needsFilter: view === 'needs' ? needsFilter : '', context, onOpenProject })
   const filter = view === 'mine' ? <MineFilter value={mineFilter} counts={counts} onChange={setMineFilter} /> : null
@@ -216,7 +264,7 @@ export function DeskView({ view, projects, records, login, decisionsFor, lastLoo
     // A search that only the quiet block answers is no empty screen.
     if (query.trim() && waitingRowsNow.length) return <>{filter}{waiting}</>
     const empty = view === 'needs' && needsFilter ? EMPTY.filtered : EMPTY[shownView] || EMPTY.needs
-    return <>{filter}<EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} />{waiting}</>
+    return <>{filter}<RunsCut cut={runsCut} view={view} /><IncomingCut cut={incomingCut} view={view} /><EmptyView icon={empty.icon} title={query.trim() ? 'Nothing matches your search' : empty.title} hint={query.trim() ? 'Try a PR number, a title word or a name.' : empty.hint} />{waiting}</>
   }
-  return <>{filter}<div className="co-desk-envelopes">{envelopes}</div>{waiting}</>
+  return <>{filter}<RunsCut cut={runsCut} view={view} /><IncomingCut cut={incomingCut} view={view} /><div className="co-desk-envelopes">{envelopes}</div>{waiting}</>
 }

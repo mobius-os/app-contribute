@@ -1,6 +1,6 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Twenty-nine scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Thirty-one scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
@@ -26,6 +26,7 @@
 // runRequestReviewListChecks (the whole app: your own PRs offer Request review in the PR list, on one row or over the ticked ones),
 // runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent),
 // runTapBoxChecks (the whole app: every compact control takes a full 44px tap, and no tap box covers another control's face).
+// runLifecycleViewsChecks (the whole app: your own PR in the merge queue, a review that did not finish, a cut list of review runs and a project run that stopped show on the Desk).
 // Run one with WORKSPACE_BROWSER_ONLY=runDeskFrameChecks (and one viewport with WORKSPACE_BROWSER_VIEWPORT=desktop), for example while
 // runWorkspaceChecks is red, so the Desk check can still show green.
 // Actual app components, native Chromium DOM, and no live app/backend. The
@@ -68,8 +69,10 @@ import { organizePrivateWorkAction } from './review.js'
 import { batchHandle } from './chat-blocks.js'
 import { CSS } from './theme.js'
 import { NAMES } from './names.js'
-import { COPY_REPLIES } from './respond-result.js'
+import { COPY_REPLIES, TAKE_BACK } from './respond-result.js'
 import { stageWords } from './publication-stage.js'
+import { followAtSend } from './follow-note.js'
+import { saveCycleState } from './storage.js'
 import { saveDeskCopy } from './desk-copy.js'
 import { listCopyOf, saveListCopy } from './repository-list-copy.js'
 import { createSyncHub } from './refresh.js'
@@ -182,7 +185,7 @@ window.fetch = async (url, options = {}) => {
   if (window.fullAppFixture) {
     if (call.url === '/api/github/status') return response({ connected: window.fullAppConnected, login: window.fullAppConnected ? 'reconnected-owner' : '',
       ...(window.fullAppBinding ? { frozen_publication_binding: { record_fields: ['plan'] } } : {}) })
-    if (call.url === '/api/github/source-status') return response({ apps: [], platform: null })
+    if (call.url === '/api/github/source-status') return response({ apps: window.fixtureApps || [], platform: null })
     // The whole app also reads the saved review runs (a plain read) whenever it syncs; this page has none. The Desk scenarios keep their own runs.
     if (!window.fullAppDesk && call.url.split('?')[0] === '/api/github/contributions/fixture-app/review-runs' && call.method === 'GET') return response({ runs: [] })
     if (call.url.includes('/review-status')) {
@@ -308,8 +311,10 @@ window.fetch = async (url, options = {}) => {
       if (window.holdRunsRead) { window.holdRunsRead = false; await new Promise(resolve => { window.releaseRunsRead = resolve }) }
       // A newer Möbius answers the short list when asked: runs and items without their documents, the findings cut at 240 characters.
       // An older one ignores the option and answers in full.
-      if (window.summaryRuns && call.url.includes('view=summary')) return response({ view: 'summary', runs: snapshot.map(shortRun), respond_chats: structuredClone(respondChats) })
-      return response({ runs: snapshot, respond_chats: structuredClone(respondChats) })
+      // A Möbius that pages the list says whether older finished runs are left out (window.runsHasMore); one that does not says nothing.
+      const paging = window.runsHasMore === undefined ? {} : { has_more: window.runsHasMore, next_cursor: 'older-runs' }
+      if (window.summaryRuns && call.url.includes('view=summary')) return response({ view: 'summary', runs: snapshot.map(shortRun), respond_chats: structuredClone(respondChats), ...paging })
+      return response({ runs: snapshot, respond_chats: structuredClone(respondChats), ...paging })
     }
     if (call.method !== 'POST') return forbidden('unexpected review method')(call.method)
     if (window.failReview) return new Response(JSON.stringify({detail:'Fixture review error'}), {status:503})
@@ -531,7 +536,7 @@ function Fixture() {
         {({controls,progress})=><ContributionRun run={runFor(project)} controls={controls} projectProgress={progress}
         edits={localChangeSentence(project).edits ? <ProjectEdits key={'fixture-'+refreshKey} project={project} run={runFor(project)} loadProjectDiff={loadProjectDiff} onRefresh={retryAll} /> : null}
         editsCount={localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
-        githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }}
+        githubState="connected" publicationPreference="github" reviewStatus={{ byId: {} }} followAtSend={record => followAtSend(record, { autopilotDefault: true, available: true })}
         selectedId={navigation.selectedId} onSelect={navigation.onSelect} onBack={navigation.onBack} onSend={send} onRestore={restore}
         renderPublicWork={view => <PullRequests refreshKey={refreshKey} appId="fixture-app" token="fixture-only" project={project} scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal}
           conn={conn} runs={deskRuns.runs} respondChats={deskRuns.respondChats} runsError={deskRuns.error} onRunsChanged={deskRuns.refresh} onRunPatched={deskRuns.patch} records={records.filter(record => record.repo === project.canonical_repo)} focusPull={focusPull} focusRun={focusRun} onFocusRelease={releaseFocus} onRecord={record => calls.opened.push('record:' + record.id)} />}
@@ -2207,9 +2212,14 @@ window.runPullIntentChecks = async () => {
 
 // The whole app on a fresh page: a review the owner starts from a PR's own page
 // must show on that PR's Desk row without pressing Sync with GitHub.
-async function mountDeskApp({ pullPatch = {}, records = [], followed = null } = {}) {
+async function mountDeskApp({ pullPatch = {}, records = [], followed = null, own = false } = {}) {
   root.render(null)
   await frame(); await frame()
+  // GitHub lists a PR you wrote among your own PRs and never among the PRs that ask for your review (a PR waiting on its reviewers is no
+  // Needs you row). "own" serves PR 7 that way, with the branch name GitHub always gives (the list of your PRs groups by it); a later mount
+  // without "own" serves it as a request again.
+  if (own) { window.githubRequests = []; window.githubInvolved = [pulls[0]]; window.ownServed = true; pulls[0].headRefName = pulls[0].headRefName || 'fix/own-change' }
+  else if (window.ownServed) { delete window.githubRequests; delete window.githubInvolved; window.ownServed = false }
   window.fullAppFixture = true; window.fullAppConnected = true; window.fullAppDesk = true
   window.deliverFollowed = !!followed
   values.set('followed-repositories.json', followed || ['owner/project'])
@@ -2225,6 +2235,12 @@ async function mountDeskApp({ pullPatch = {}, records = [], followed = null } = 
   Object.assign(pulls[0], { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
     latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] }, ...pullPatch })
   root.render(<ContributeApp appId="fixture-app" token="fixture-only" />)
+}
+// The Desk's view a button names ("My PRs", "Agent runs"): the rail on a wide screen, the segmented bar on a narrow one.
+const openDeskView = async name => {
+  const button = () => [...document.querySelectorAll('.co-rail-item, .co-desk-seg button')].find(node => node.getClientRects().length > 0 && text(node).startsWith(name))
+  await until(button, 'No ' + name + ' view button')
+  await click(button())
 }
 // A popup menu must stay on the screen whichever button opens it: on a phone a row's Actions button sits well
 // in from the left edge, and a menu lined up with its right edge ran off the screen.
@@ -2545,7 +2561,9 @@ window.runPullReadingChecks = async () => {
       '<a class="co-md-image" href="' + rawPicture('screenshots/forged.png') + '">forged tile</a>', '<picture><source srcset="https://evil.example/s.png">' + forgedPicture + '</picture>',
       '<span style="background:url(https://evil.example/b.png)">styled</span>', '<style>p{background:url(https://evil.example/c.png)}</style>', '<input type="image" src="https://evil.example/f.png">']
     window.commentBody = [...Array.from({ length: 16 }, (_, index) => 'Line ' + (index + 1) + ' of a long comment.'), '![after screen](' + rawPicture('screenshots/later.png') + ')', ...forgedMarkup].join('\n\n')
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [escalation] })
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' } }, records: [escalation] })
+    // An own PR waiting on its reviewers is no Needs you row: it is listed under My PRs.
+    await openDeskView('My PRs')
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
     // Where the header and the rail start on a list: a PR page must not move them.
     const leftOf = selector => Math.round(query(selector).getBoundingClientRect().left)
@@ -2735,7 +2753,9 @@ async function checksTabChecks() {
   window.checkJob = { id: 13, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run unit tests', conclusion: 'failure' }] }
   window.checkAnnotations = [{ path: 'src/ui/Drawer.test.jsx', start_line: 88, annotation_level: 'failure', message: 'expected the ring to be hidden' }]
   window.failedCheck = false
-  await mountDeskApp()
+  // The same own PR as the checks above: it stays yours from one mount to the next, so it is read as yours, under My PRs.
+  await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' } } })
+  await openDeskView('My PRs')
   await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
   await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
   await until(() => query('.co-pull-page .co-pr-detail') && !query('.co-pr-detail .co-skel'), 'The PR page did not open')
@@ -2822,8 +2842,7 @@ window.runDeskListChecks = async () => {
   const rows = () => [...document.querySelectorAll('.co-desk-envelopes .co-desk-item')]
   const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
   const chips = () => [...document.querySelectorAll('.co-filter-line button')].map(node => text(node.querySelector('b')) + ' ' + text(node.querySelector('span')))
-  const visible = node => node.getClientRects().length > 0
-  const openView = async name => click([...document.querySelectorAll('.co-rail-item, .co-desk-seg button')].find(node => visible(node) && text(node).startsWith(name)), 'No ' + name + ' view button')
+  const openView = openDeskView
   const tabs = () => [...document.querySelectorAll('.co-pr-filters button')].map(node => (node.getAttribute('aria-pressed') === 'true' ? '>' : '') + text(node))
   const NOTE = 'The follow-up agent stopped: a reviewer raised a product trade-off that needs your decision, and the way it is settled changes what the next PR in this stack has to do, so it should not be guessed. '
   try {
@@ -2942,6 +2961,8 @@ window.runRequestReviewChecks = async () => {
   const sheetButton = label => [...(query('.co-review-window')?.querySelectorAll('button') || [])].find(node => text(node) === label)
   const sideways = () => document.documentElement.scrollWidth <= window.innerWidth
   const openPage = async () => {
+    // An own PR waiting on its reviewers is no Needs you row: it is listed under My PRs.
+    await openDeskView('My PRs')
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-desk-back') && query('.co-pr-detail-actions'), 'The PR page did not open')
@@ -2954,7 +2975,7 @@ window.runRequestReviewChecks = async () => {
     window.fixtureAssignees = ['reconnected-owner', 'teammate', 'second-reviewer', 'new-colleague', 'a-reviewer-with-the-longest-login-1234']
     // 0. A Möbius whose platform cannot ask for the review yet offers no button: the page is as it always was, and Assign stays.
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
     // A resting state draws no next-step panel: the state badge beside the title carries the machine's label.
     ensure(text(query('.co-gh-pr-sub .co-gh-badge')).includes('Nobody asked yet'), 'The page still said it waits on reviewers: ' + text(query('.co-gh-pr-sub')))
@@ -2964,7 +2985,7 @@ window.runRequestReviewChecks = async () => {
     await captureShot('request-review-page-before')
     // 1. Nobody was asked: the button is there, and Ask for re-review has no one to name.
     window.fixtureCapabilities = { request_review_now: true, request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' }, reviewRequests: { totalCount: 0, nodes: [] } } })
     await openPage()
     const toolbar = query('.co-pr-detail-actions')
     const labels = [...toolbar.querySelectorAll('button, a')].map(node => text(node) || node.getAttribute('aria-label') || '')
@@ -3005,7 +3026,7 @@ window.runRequestReviewChecks = async () => {
     checks.push({ name: 'asking sends one review request naming only the people ticked, and says they were asked', status: 'pass' })
     await click(button('Done'))
     // 4. The Review tab lists who was asked, newest first, one badge each; an assignee is not among them.
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' }, assignees: { nodes: [{ login: 'assigned-only' }] },
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' }, assignees: { nodes: [{ login: 'assigned-only' }] },
       reviewRequests: { totalCount: 2, nodes: [{ requestedReviewer: { __typename: 'User', login: 'teammate' } }, { requestedReviewer: { __typename: 'User', login: 'new-colleague' } }] },
       reviews: { totalCount: 2, nodes: [{ state: 'COMMENTED', submittedAt: '2026-11-09T09:00:00Z', author: { login: 'teammate' } },
         { state: 'APPROVED', submittedAt: '2026-11-09T10:00:00Z', author: { login: 'second-reviewer' } }] } } })
@@ -3260,6 +3281,7 @@ window.runReviewHelperWaitChecks = async () => {
     await mountDeskApp()
     await until(() => deskFrame('Contribution 7'), 'The Desk did not list the review request')
     ensure(deskFrame('Contribution 7') === 'reviewing', 'The Desk row of a review waiting on its helper did not wear the moving frame: ' + deskFrame('Contribution 7'))
+    await captureShot('desk-review-at-work')
     await openPull()
     ensure(query('.co-frame[data-frame="reviewing"]') && !query('.co-tab-dot.is-waiting'), 'The PR page did not frame a review waiting on its helper as at work')
     ensure(text(query('.co-next-hint')) === 'An agent is working on it', 'The PR page said: ' + text(query('.co-next-hint')))
@@ -3270,8 +3292,10 @@ window.runReviewHelperWaitChecks = async () => {
     reviewRuns[0].execution_state = 'interrupted'
     shownAgain()
     await until(() => deskFrame('Contribution 7') === 'verdict', 'The Desk row of an interrupted review did not hold the amber frame: ' + deskFrame('Contribution 7'))
+    await captureShot('desk-review-stalled')
     await openPull()
     ensure(text(query('.co-next-hint')) === 'The agent stopped before it finished. Run it again', 'The PR page said: ' + text(query('.co-next-hint')))
+    await captureShot('pr-page-review-stalled')
     checks.push({ name: 'a review the platform reports interrupted is shown as stopped', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
@@ -3297,22 +3321,39 @@ window.runRespondAnswerChecks = async () => {
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-desk-back') && query('.co-next-hint'), 'The PR page did not open')
     ensure(text(query('.co-next-hint')).startsWith('The agent has a question for you'), 'The panel said: ' + text(query('.co-next-hint')))
-    ensure(text(query('.co-next-pointer')) === 'Answer it in the Review tab.', 'The panel did not say where to answer: ' + text(query('.co-next-pointer')))
-    ensure(!button('Answer the agent') && !query('.co-decision-bar'), 'A button for the question is still offered')
-    checks.push({ name: 'a question has no button on the PR page, only a pointer to the Review tab', status: 'pass' })
+    // The conversation is known, so the panel opens it straight: Answer in chat is its one filled button and there is no pointer to the Review tab,
+    // nor a button for the machine's own action (#186: a question is answered in its conversation, never through a detour).
+    // On a phone the same button sits in the bar at the foot of the page instead (only one of the two is on screen).
+    const panelAnswer = () => [...document.querySelectorAll('.co-next-step .co-btn-primary, .co-decision-bar button')].find(node => text(node) === NAMES.answerInChat && node.getClientRects().length > 0)
+    const tabAnswer = () => [...(query('.co-pr-detail-body')?.querySelectorAll('button') || [])].find(node => text(node) === NAMES.answerInChat)
+    ensure(panelAnswer() && !query('.co-next-pointer'), 'The panel did not offer Answer in chat in place of a pointer: ' + text(query('.co-next-step')))
+    ensure(!button('Answer the agent') && [...document.querySelectorAll('.co-decision-bar button')].every(node => text(node) === NAMES.answerInChat), 'A button for the question other than Answer in chat is offered')
+    checks.push({ name: 'a question has no Answer the agent button on the PR page: its panel opens the conversation with Answer in chat', status: 'pass' })
     // The Desk opens a PR whose frame is not idle on its Review tab.
-    await until(() => button('Answer in chat'), 'The Review tab did not offer Answer in chat: ' + reviewBody())
-    // From another tab the pointer is the way back: it opens the Review tab (on a phone that tab can be past the strip's edge).
-    await click([...document.querySelectorAll('.co-detail-tabs button')].find(node => text(node).startsWith('Comments')))
-    await until(() => !button('Answer in chat') && query('.co-next-pointer'), 'The pointer was not on screen from the Comments tab')
-    await click(query('.co-next-pointer'))
-    await until(() => button('Answer in chat'), 'The pointer did not open the Review tab: ' + reviewBody())
-    checks.push({ name: 'the question pointer opens the Review tab from another tab', status: 'pass' })
-    ensure(reviewBody().includes('Waiting for your answer') && !reviewBody().includes('No review yet'), 'The Review tab said: ' + reviewBody())
-    ensure(query('.co-gh-chat-link'), 'The PR header has no link to the Respond conversation')
+    await until(tabAnswer, 'The Review tab did not offer Answer in chat: ' + reviewBody())
+    // From another tab the panel still answers: it opens the conversation itself and leaves the owner on that tab.
     const sent = []
     Object.defineProperty(window, 'parent', { configurable: true, value: { postMessage(message, target) { sent.push([message, target]) } } })
-    await click(button('Answer in chat'))
+    await click([...document.querySelectorAll('.co-detail-tabs button')].find(node => text(node).startsWith('Comments')))
+    await until(() => !tabAnswer() && panelAnswer(), 'The panel did not keep Answer in chat on screen from the Comments tab')
+    await click(panelAnswer())
+    ensure(sent.length === 1 && sent[0][0].type === 'moebius:open-chat' && sent[0][0].chatId === 'respond-chat-fixture' && !tabAnswer(), 'The panel\'s Answer in chat sent: ' + JSON.stringify(sent))
+    sent.length = 0
+    checks.push({ name: 'the panel opens the question\'s conversation from another tab', status: 'pass' })
+    // Where the conversation is not known the panel keeps the pointer: it opens the Review tab (on a phone that tab can be past the strip's edge).
+    respondChats[0].chat_id = ''
+    shownAgain()
+    await until(() => !panelAnswer() && query('.co-next-pointer'), 'The panel kept Answer in chat for a conversation it does not know')
+    ensure(text(query('.co-next-pointer')) === 'Answer it in the Review tab.', 'The panel did not say where to answer: ' + text(query('.co-next-pointer')))
+    await click(query('.co-next-pointer'))
+    await until(() => reviewBody().includes('Waiting for your answer'), 'The pointer did not open the Review tab: ' + reviewBody())
+    checks.push({ name: 'the question pointer opens the Review tab where the conversation is not known', status: 'pass' })
+    respondChats[0].chat_id = 'respond-chat-fixture'
+    shownAgain()
+    await until(() => tabAnswer(), 'The Review tab did not offer Answer in chat again: ' + reviewBody())
+    ensure(reviewBody().includes('Waiting for your answer') && !reviewBody().includes('No review yet'), 'The Review tab said: ' + reviewBody())
+    ensure(query('.co-gh-chat-link'), 'The PR header has no link to the Respond conversation')
+    await click(tabAnswer())
     ensure(sent.length === 1 && sent[0][0].type === 'moebius:open-chat' && sent[0][0].chatId === 'respond-chat-fixture' && sent[0][1] === '*', 'Answer in chat sent: ' + JSON.stringify(sent))
     checks.push({ name: 'the Review tab answers a Respond chat that asks you through its own conversation', status: 'pass' })
     // The same chat at work: nothing to answer, but the tab still says an agent is on it.
@@ -3476,11 +3517,18 @@ window.runRespondResultChecks = async () => {
     values.set(DECISION_KEY, { ...values.get(DECISION_KEY), at: new Date(Date.now() - 40000).toISOString() })
     shownAgain()
     await until(() => reviewBody().includes('Not started yet') && button(NAMES.sendAgain), 'The card never offered Send again: ' + reviewBody())
-    ensure(reviewBody().includes('The chat has not started yet. Send it again, or open the chat.'), 'The stalled card said: ' + reviewBody())
+    // The app wires Take back Post, so the card names it in its sentence and offers it as a button beside Send again.
+    ensure(reviewBody().includes('The chat has not started yet. Send it again, take Post back, or open the chat.') && button(TAKE_BACK), 'The stalled card said: ' + reviewBody())
+    await captureShot('respond-not-started-take-back-post')
     checks.push({ name: 'after 30 s with nothing started, Send again is offered', status: 'pass' })
-    // The helper at work and done.
+    // The helper at work, stopped part-way (the card says where and the way out is another Post), and done.
     await answer({ state: 'posting' }, values.get(DECISION_KEY))
     await until(() => reviewBody().includes('Posting'), 'The card did not show posting: ' + reviewBody())
+    await answer({ state: 'failed', error: { step: 'reply 1', message: 'GitHub refused the reply.' } }, values.get(DECISION_KEY))
+    await until(() => reviewBody().includes('Posting stopped'), 'The card did not show that posting stopped: ' + reviewBody())
+    await captureShot('respond-posting-stopped')
+    await answer({ state: 'posting' }, values.get(DECISION_KEY))
+    await until(() => reviewBody().includes('Posting'), 'The card did not show posting again: ' + reviewBody())
     const pullReads = () => calls.requests.filter(call => call.url === '/api/github/graphql' && call.body?.query.includes('ContributePullRequests')).length
     const readsBefore = pullReads()
     await answer({ state: 'posted', receipts: { push: null, replies: [{ index: 0, url: 'https://example.test/c/1', at: '2026-11-06T09:40:00Z' }], description: null, rerequest: { at: '2026-11-06T09:40:05Z', reviewers: ['teammate'] } } }, values.get(DECISION_KEY))
@@ -3511,10 +3559,11 @@ window.runRespondResultChecks = async () => {
   }
 }
 
-// A picture of this moment when a capture run asks for one (window.workspaceShot is a CDP binding); otherwise nothing.
+// A picture of this moment when a capture run asks for one (window.workspaceShot is a CDP binding); otherwise nothing. A run may ask for
+// named pictures only (WORKSPACE_BROWSER_SHOTS_ONLY=a,b): the others cost no time, so a scenario that waits on the clock runs as it does unwatched.
 // It waits up to 1.5 s for finite animations (a window fading in) to end first; a spinner never ends, so it is not waited for.
 async function captureShot(name, focus) {
-  if (!window.workspaceShot) return
+  if (!window.workspaceShot || (window.workspaceShotOnly.length && !window.workspaceShotOnly.includes(name))) return
   // The page may be scrolled past what the picture is about: bring the node to the top, below the sticky header (a phone has two bars).
   // Only the page's own scroller moves: scrollIntoView would also move the rows inside a clipped group card.
   if (focus) {
@@ -3682,6 +3731,8 @@ window.runAskApprovalChecks = async () => {
   const button = label => [...document.querySelectorAll('button')].find(node => text(node) === label)
   const sideways = () => document.documentElement.scrollWidth <= window.innerWidth
   const openPage = async () => {
+    // An own PR waiting on its reviewers is no Needs you row: it is listed under My PRs.
+    await openDeskView('My PRs')
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-desk-back') && query('.co-next-hint'), 'The PR page did not open')
@@ -3691,7 +3742,7 @@ window.runAskApprovalChecks = async () => {
     respondChats.length = 0
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true }
     // 1. Looked again, not approved.
-    await mountDeskApp({ pullPatch: OWN_LOOKED_AGAIN })
+    await mountDeskApp({ own: true, pullPatch: OWN_LOOKED_AGAIN })
     await openPage()
     ensure(pill() === 'Looked again · not approved', 'The pill said: ' + pill())
     ensure(hint().startsWith('Your PR · teammate looked again and left a comment, but GitHub still holds their change request'), 'The panel said: ' + hint())
@@ -3729,7 +3780,7 @@ window.runAskApprovalChecks = async () => {
     ensure(longLogin.length === 38 || longLogin.length === 39, 'The long login fixture is ' + longLogin.length)
     await click(button('Done'))
     const longReviewer = { login: longLogin, __typename: 'User' }
-    await mountDeskApp({ pullPatch: { ...OWN_LOOKED_AGAIN,
+    await mountDeskApp({ own: true, pullPatch: { ...OWN_LOOKED_AGAIN,
       latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: longReviewer, commit: { oid: OLD_HEAD } }] },
       latestReviews: { nodes: [{ state: 'COMMENTED', author: longReviewer, commit: { oid: HEAD } }] } } })
     await openPage()
@@ -3746,7 +3797,7 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'the longest GitHub login wraps in the page, the menu and the sheet without pushing the screen sideways', status: 'pass' })
     // Ask for re-review lists only people GitHub takes a request for (a writer whose request or approval stands), not someone who only commented.
     const commenter = { login: 'kim', __typename: 'User' }
-    await mountDeskApp({ pullPatch: { ...OWN_LOOKED_AGAIN, latestReviews: { nodes: [{ state: 'COMMENTED', author: reviewer, commit: { oid: HEAD } }, { state: 'COMMENTED', author: commenter, commit: { oid: HEAD } }] } } })
+    await mountDeskApp({ own: true, pullPatch: { ...OWN_LOOKED_AGAIN, latestReviews: { nodes: [{ state: 'COMMENTED', author: reviewer, commit: { oid: HEAD } }, { state: 'COMMENTED', author: commenter, commit: { oid: HEAD } }] } } })
     await openPage()
     await click(query('[aria-label="Choose an action for PR 7"]'))
     await until(() => menuItems().length, 'The Actions menu did not open for the re-review ask')
@@ -3760,7 +3811,7 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'Ask for re-review lists the person GitHub holds a request for, not someone who only commented', status: 'pass' })
     // 2. An approval of an older commit whose work is the same carries over.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', ['one', 'two'], commit === HEAD ? '@@ -40,0 +41,2 @@' : '@@ -3,0 +3,2 @@')] })
-    await mountDeskApp({ pullPatch: OWN_APPROVED_BEFORE })
+    await mountDeskApp({ own: true, pullPatch: OWN_APPROVED_BEFORE })
     await openPage()
     await until(() => pill() === 'Ready to merge', 'The approval did not carry over: ' + pill() + ' / ' + hint())
     ensure(hint().includes('approved by teammate') && hint().includes('The lines you added and removed are the same as when they approved'), 'The panel said: ' + hint())
@@ -3776,16 +3827,16 @@ window.runAskApprovalChecks = async () => {
     checks.push({ name: 'an approval of an older commit whose own work is the same carries over: Ready to merge, and the merge sheet says why', status: 'pass' })
     // 3. The work changed: the approval is old, and one comparison that cannot be read is treated the same.
     window.compareAnswers = commit => ({ files: [ownFile('a.js', commit === HEAD ? ['one', 'CHANGED'] : ['one', 'two'])] })
-    await mountDeskApp({ pullPatch: approvedAt('e'.repeat(40)) })
+    await mountDeskApp({ own: true, pullPatch: approvedAt('e'.repeat(40)) })
     await openPage()
     await until(() => pill() === 'Approval is old', 'A changed PR did not read as an old approval: ' + pill())
     window.compareAnswers = () => ({ message: 'Not Found' })
-    await mountDeskApp({ pullPatch: approvedAt('f'.repeat(40)) })
+    await mountDeskApp({ own: true, pullPatch: approvedAt('f'.repeat(40)) })
     await openPage()
     await until(() => pill() === 'Approval is old', 'An unreadable comparison did not read as an old approval: ' + pill())
     checks.push({ name: 'when the work changed, or the comparison cannot be read, the approval stays old', status: 'pass' })
     // 4. Somebody else commented on this version without approving: that comment outranks the old approval (it needs their approval too).
-    await mountDeskApp({ pullPatch: { ...approvedAt('e'.repeat(40)), latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'second-reviewer', __typename: 'User' }, commit: { oid: HEAD } }] } } })
+    await mountDeskApp({ own: true, pullPatch: { ...approvedAt('e'.repeat(40)), latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'second-reviewer', __typename: 'User' }, commit: { oid: HEAD } }] } } })
     await openPage()
     await until(() => pill() === 'Commented · not approved', 'A comment on this version did not outrank the old approval: ' + pill())
     ensure(hint().includes('second-reviewer left a comment'), 'The panel said: ' + hint())
@@ -3800,13 +3851,13 @@ window.runAskApprovalChecks = async () => {
     const menuItem = title => menuItems().find(node => text(node.querySelector('strong')) === title)
     const mergeOptions = () => menuItem('Merge')?.parentElement.querySelector('.co-agent-menu-side')
     const openMenu = async () => { await click(query('[aria-label="Choose an action for PR 7"]')); await until(() => menuItems().length, 'The Actions menu did not open') }
-    await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
+    await mountDeskApp({ own: true, pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
     ensure(menuItem('Merge') && !mergeOptions(), 'The menu offered Merge options… without the shell’s sheet: ' + menuItems().map(node => text(node.querySelector('strong'))).join(', '))
     await captureShot('merge-menu-app-sheet')
     window.fixtureCapabilities = { request_rereview_now: true, ask_approval_now: true, merge_now: true, pr_machine: true, owner_confirm: true }
-    await mountDeskApp({ pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
+    await mountDeskApp({ own: true, pullPatch: { ...OWN_APPROVED_BEFORE, repository: landable } })
     await openPage()
     await openMenu()
     ensure(mergeOptions()?.getAttribute('aria-label') === 'Merge options… Choose how it lands.' && !menuItem('Merge options…'), 'Merge options… is not a second choice on the Merge row: ' + menuItems().map(node => text(node.querySelector('strong')) || node.getAttribute('aria-label')).join(', '))
@@ -3886,6 +3937,8 @@ window.runFollowChecks = async () => {
     window.deskRecords = [record]
   }
   const openPage = async () => {
+    // An own PR waiting on its reviewers is no Needs you row: it is listed under My PRs.
+    await openDeskView('My PRs')
     await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
     await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
     await until(() => query('.co-desk-back') && query('.co-pr-detail-actions'), 'The PR page did not open')
@@ -3910,14 +3963,14 @@ window.runFollowChecks = async () => {
     window.fixtureLiveState = 'OPEN'
     // 1. A Möbius that cannot follow after Send: the menu and the page are as they were.
     window.fixtureCapabilities = { merge_now: true, pr_machine: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
     await openPage()
     await openMenu()
     ensure(titles().includes('Finish it for me') && !titles().includes('Follow this PR') && !query('.co-follow-line'), 'Without follow_after_send the menu offered: ' + titles().join(', '))
     checks.push({ name: 'without follow_after_send the menu keeps Finish it for me and nothing of following shows', status: 'pass' })
     // 2. A Möbius that can: Follow this PR takes its place.
     window.fixtureCapabilities = { merge_now: true, pr_machine: true, owner_confirm: true, follow_after_send: true, follow_ask_mode: true }
-    await mountDeskApp({ pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' } }, records: [sent] })
     await openPage()
     await openMenu('Follow this PR')
     ensure(titles().includes('Follow this PR') && !titles().includes('Finish it for me'), 'The menu offered: ' + titles().join(', '))
@@ -4046,9 +4099,13 @@ window.runReviewRequestChecks = async () => {
     Date.now = () => realNow() + 6 * 60000
     shownAgain()
     await until(() => askRows().length === 1 && text(askRows()[0]).includes('Contribution 8'), 'Showing the frame again did not read the requests once the cooldown was over')
-    // The PR you approved is no request any more. It is ready to merge, so it is one row under Merge, with its own title (it was "Pull request #7").
+    // The PR you approved is no request any more. It is someone else's PR, approved at this version: landing it is up to them (pr-machine.js
+    // reviewer.mergeable, nobody's turn), so it is no row of Needs you at all and the one number counts Contribution 8 alone. It was one row under Merge.
     const back = rows().filter(node => text(node).includes('Contribution 7'))
-    ensure(back.length === 1 && !text(back[0]).includes('Asks for your review') && text(back[0]).includes('Ready to merge'), 'The reviewed PR came back as a request after the next read: ' + back.map(node => text(node)).join(' | '))
+    ensure(back.length === 0 && rows().length === 1, 'The reviewed PR came back as a row after the next read: ' + rows().map(node => text(node)).join(' | '))
+    const needsBadge = text(query('.co-rail-views .co-rail-count.is-you') || query('.co-desk-seg button[aria-pressed=true] b'))
+    ensure(needsBadge === '1', 'Needs you counted ' + needsBadge + ', not the one request that is left')
+    await captureShot('needs-you-approved-pr-of-someone-else')
     checks.push({ name: 'the frame shown again reads the requests once the five-minute cooldown is over', status: 'pass' })
     // A read that fails is not "nothing asks for your review".
     window.failIncoming = true
@@ -4649,6 +4706,82 @@ window.runShortRunsChecks = async () => {
   }
 }
 
+// The whole app: three states the lifecycle machine added show on the Desk. Your own PR in the merge queue is a My PRs row that says so; a review that
+// did not finish says "Not finished" and is the owner's move; a list of review runs that is cut says so, with the way to read the older ones.
+window.runLifecycleViewsChecks = async () => {
+  const checks = []
+  const rows = () => [...document.querySelectorAll('.co-desk-envelopes .co-desk-item')]
+  const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
+  const notFinished = { id: 'review-not-finished', chat_id: 'review-chat-fixture', mode: 'review', state: 'needs_you', execution_state: 'completed', can_stop: false,
+    created_at: new Date(Date.now() - 3600e3).toISOString(),
+    items: [{ repo: 'owner/project', number: 7, head_sha: HEAD, base_ref: 'main', base_sha: BASE, state: 'needs_you', title: 'Contribution 7', summary: 'The review could not read the whole change.', blocked: { reason: 'The change is too large to read.' } }] }
+  try {
+    reviewRuns.length = 0
+    await mountDeskApp({ own: true, pullPatch: { author: { login: 'reconnected-owner' }, mergeQueueEntry: { id: 'queue-entry' } } })
+    await openDeskView('My PRs')
+    await until(() => rowOf('Contribution 7'), 'My PRs did not list the PR in the merge queue')
+    ensure(text(rowOf('Contribution 7').querySelector('.co-row-pills')) === 'In merge queue', 'The row said: ' + text(rowOf('Contribution 7')))
+    await captureShot('desk-my-prs-in-merge-queue')
+    checks.push({ name: 'your own PR in the merge queue is a My PRs row that says In merge queue', status: 'pass' })
+    reviewRuns.push(notFinished)
+    // PR 7 is someone else's again, and out of the queue.
+    const theirs = { author: { login: 'owner' }, mergeQueueEntry: null }
+    await mountDeskApp({ pullPatch: theirs })
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the review request')
+    await openDeskView('Agent runs')
+    await until(() => rowOf('Contribution 7'), 'Agent runs did not list the review that did not finish')
+    ensure(text(rowOf('Contribution 7')).includes('Not finished'), 'The review said: ' + text(rowOf('Contribution 7')))
+    await captureShot('agent-runs-not-finished')
+    checks.push({ name: 'a review that did not finish says Not finished in Agent runs', status: 'pass' })
+    reviewRuns.length = 0
+    reviewRuns.push({ ...notFinished, state: 'complete', items: [{ ...notFinished.items[0], state: 'all_clear', blocked: undefined }] })
+    window.runsHasMore = true
+    await mountDeskApp({ pullPatch: theirs })
+    await openDeskView('Agent runs')
+    await until(() => text(query('main')).includes('Older finished reviews are not shown here'), 'Agent runs did not say its list is cut: ' + text(query('main')).slice(0, 400))
+    ensure([...document.querySelectorAll('button')].some(node => text(node) === 'Show older reviews'), 'The cut list offered no way to read the older reviews')
+    await captureShot('agent-runs-cut-list')
+    checks.push({ name: 'a cut list of review runs says so in Agent runs and offers Show older reviews', status: 'pass' })
+    // An installed project whose agent run stopped is a row of Needs you under To look at, and opens its project.
+    reviewRuns.length = 0
+    window.runsHasMore = undefined
+    window.fixtureApps = [projects[0]]
+    await saveCycleState({ chat_id: 'run-chat-stopped', started_at: '2026-11-18T09:00:00Z', k: 1, scope: 'contribute-cycle:fixture', title: 'Fix the flaky test' }, 'repo:owner/project')
+    window.mobius.chat.status = async id => ({ running: false, status: 'stopped', updated_at: '2026-11-18T09:30:00Z' })
+    await mountDeskApp({ pullPatch: theirs, followed: [] })
+    await until(() => text(query('main')).includes('The agent’s run stopped'), 'Needs you did not list the stopped project run: ' + text(query('main')).slice(0, 400))
+    await captureShot('desk-needs-you-project-run-stopped')
+    checks.push({ name: 'a project run that stopped is a Needs you row', status: 'pass' })
+    // Dismiss is a quiet button beside the row; it records the dismissal on the project's cycle record and the row leaves, also after the app is opened again.
+    const stoppedRow = () => rowOf('The agent’s run stopped')
+    const dismiss = stoppedRow().querySelector('.co-desk-row-action')
+    ensure(dismiss && text(dismiss) === 'Dismiss' && dismiss.classList.contains('co-btn-quiet'), 'The stopped run had no quiet Dismiss beside it: ' + text(stoppedRow()))
+    dismiss.click()
+    await until(() => !stoppedRow(), 'Dismiss did not take the stopped run out of Needs you: ' + text(query('main')).slice(0, 400))
+    await mountDeskApp({ pullPatch: theirs, followed: [] })
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the review request again')
+    ensure(!stoppedRow(), 'The dismissed run came back when the app was opened again')
+    checks.push({ name: 'Dismiss takes a stopped project run out of Needs you for good', status: 'pass' })
+    // A run the platform says the owner stopped (its run status is "stopped") is dismissed from the start; one that was cut off (interrupted) is not.
+    await saveCycleState({ chat_id: 'run-chat-stopped', started_at: '2026-11-18T09:00:00Z', k: 1, scope: 'contribute-cycle:fixture', title: 'Fix the flaky test' }, 'repo:owner/project')
+    window.mobius.chat.status = async id => ({ running: false, status: 'stopped', run_status: 'stopped', updated_at: '2026-11-18T09:30:00Z' })
+    await mountDeskApp({ pullPatch: theirs, followed: [] })
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the review request')
+    ensure(!stoppedRow(), 'A run the owner stopped was a Needs you row')
+    window.mobius.chat.status = async id => ({ running: false, status: 'stopped', run_status: 'interrupted', updated_at: '2026-11-18T09:30:00Z' })
+    await mountDeskApp({ pullPatch: theirs, followed: [] })
+    await until(() => stoppedRow(), 'A run that was cut off was no Needs you row: ' + text(query('main')).slice(0, 400))
+    checks.push({ name: 'a run the owner stopped is not a Needs you row, one that was cut off still is', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 4000), forbidden: calls.forbidden }
+  } finally {
+    window.runsHasMore = undefined
+    window.fixtureApps = undefined
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -4902,7 +5035,7 @@ async function main() {
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; connect-src \'none\'">' +
       '<style>:root{--bg:#fff;--surface:#f5f5f5;--surface-2:#eee;--text:#222;--muted:#666;--border:#ddd;--accent:#2454cc;--accent-dim:#eef;--font:Arial;--green:#059669;--green-text:#046c4e;--danger:#ef4444;--danger-text:#c42341;--warning:#8f5a00;--warning-text:#8f5a00}html,body,#root{height:100%;margin:0}</style>' +
-      '</head><body><div id="root"></div><script>' + output[0].code.replace(/<\/script/gi, '<\\/script') + '</script></body></html>')
+      '</head><body><div id="root"></div><script>window.workspaceShotOnly = ' + JSON.stringify((process.env.WORKSPACE_BROWSER_SHOTS_ONLY || '').split(',').filter(Boolean)) + ';\n' + output[0].code.replace(/<\/script/gi, '<\\/script') + '</script></body></html>')
     browser = spawn(await chromiumPath(), ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions',
       '--no-first-run', '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
@@ -4912,7 +5045,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks', 'runLifecycleViewsChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

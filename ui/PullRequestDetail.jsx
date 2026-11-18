@@ -302,8 +302,11 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   const [openCommit, setOpenCommit] = useState(null)
   const returnFocus = useRef('')
   const [versionStale, setVersionStale] = useState(cacheStore?.stale === true)
+  // The snapshot this page began with. A PR that moved while the page is open is given a snapshot of its new version (useRepositoryList.js
+  // detailKey), and the tabs read before it moved must not be copied into it: the next page of that version reads GitHub again.
+  const bornWith = useRef(cacheStore)
   useEffect(() => {
-    if (!cacheStore) return
+    if (!cacheStore || cacheStore !== bornWith.current) return
     // Incomplete reads are aborted on close and must be retried, not cached
     // as a permanent loader. This snapshot belongs to the project/PR version.
     cacheStore.entries = Object.fromEntries(Object.entries(cache).filter(([,value]) => !value.loading))
