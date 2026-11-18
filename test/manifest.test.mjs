@@ -74,6 +74,20 @@ test('install manifest ships the GitHub connection-attempt controller', () => {
   assert.ok(manifest.source_files.includes('github-connection.js'))
 })
 
+// Every agent Contribute starts, and every review run the platform opens in
+// its name, prepares upstream work outside the app's folder (platform and app
+// sources, git checkouts, gh, /api/github/*). A confined room reaches none of
+// it, so the declaration must stay admin, which takes no allow_tools.
+test('its agents declare full (admin) access with an owner-facing reason', () => {
+  assert.equal(manifest.embeds_agent, true)
+  assert.deepEqual(Object.keys(manifest.agent).sort(), ['reason', 'scope'])
+  assert.equal(manifest.agent.scope, 'admin')
+  assert.equal(manifest.agent.allow_tools, undefined)
+  const reason = manifest.agent.reason.trim()
+  assert.ok(reason.length >= 1 && reason.length <= 80, `reason is ${reason.length} characters`)
+  assert.equal(manifest.agent_role, undefined, 'the retired agent_role shape is a manifest error')
+})
+
 test('GitHub data and credential management are separately reviewable grants', () => {
   assert.equal(manifest.permissions.github_access, true)
   assert.equal(manifest.permissions.github_connect, true)
