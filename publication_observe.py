@@ -41,6 +41,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from lifecycle_record import UNCONFIRMED_SUBMIT_CODES, UNSETTLED_SUBMIT_STAGES, facts_of
+
 
 STATE_FILE = "publication-observe.json"
 SCHEMA = 1
@@ -55,12 +57,9 @@ REQUEST_TIMEOUT = 45
 FINAL = frozenset(("settled", "changed", "not_eligible"))
 OUTCOMES = FINAL | {"pending", "unavailable"}
 
-# domain.js uncertainPublication; keep the two in step.
-UNSETTLED_STAGES = frozenset(("push_pending", "push_ambiguous"))
-UNCONFIRMED_CODES = frozenset((
-    "publication_unconfirmed", "update_unconfirmed", "create_unconfirmed",
-    "push_ambiguous",
-))
+# domain.js uncertainPublication; keep the two in step. The lists are lifecycle_record's own, not a copy.
+UNSETTLED_STAGES = frozenset(UNSETTLED_SUBMIT_STAGES)
+UNCONFIRMED_CODES = frozenset(UNCONFIRMED_SUBMIT_CODES)
 
 Call = Callable[..., tuple[bytes, Any]]
 
@@ -71,14 +70,11 @@ def uncertain(record: dict[str, Any]) -> bool:
         return False
     if record.get("status") == "submitting":
         return True
-    # A known error after the branch push (stage ``pushed`` with an error) is
-    # possibly public too: restaging clears the error, so it is this attempt's.
-    return record.get("status") == "prepared" and (
-        record.get("last_submit_stage") in UNSETTLED_STAGES
-        or record.get("last_submit_error_code") in UNCONFIRMED_CODES
-        or (record.get("last_submit_stage") == "pushed"
-            and bool(record.get("last_submit_error")))
-    )
+    # A known error after the branch push (stage ``pushed`` with an error) is possibly public too, but
+    # only when that push is the version the plan sends now: the platform keeps ``pushed`` and the old
+    # push sha across a restage, so a refusal of the new version is not a lost send. That rule is
+    # lifecycle_record's (the same as domain.js ``lastSendUnconfirmed``), so the two cannot drift.
+    return record.get("status") == "prepared" and facts_of(record)["unconfirmed"]
 
 
 def _route_missing(exc: urllib.error.HTTPError) -> bool:

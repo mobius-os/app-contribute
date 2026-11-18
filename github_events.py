@@ -56,8 +56,8 @@ def review_events(node: Any, ignore_urls: set[str] | None = None) -> list[dict[s
   """Every timestamped comment and review on a PR or issue node.
 
   ``ignore_urls`` holds the exact URLs of replies the platform posted itself,
-  so the agent's own replies never re-trigger a round. Other comments written
-  under the owner's GitHub identity still count.
+  so the agent's own replies never re-trigger a round, and of what the signed-in
+  owner wrote by hand (``own_event_urls``): your own words are not feedback.
   """
   if not isinstance(node, dict):
     return []
@@ -72,6 +72,24 @@ def review_events(node: Any, ignore_urls: set[str] | None = None) -> list[dict[s
     if at and review.get("url") not in ignored:
       events.append(_event(review, "review", at))
   return events
+
+
+def own_event_urls(node: Any, login: Any) -> set[str]:
+  """The URLs of the comments and reviews the signed-in owner wrote on this thread.
+
+  The job learns the login from the batched read it already makes (``viewer``), so this
+  costs no request. GitHub logins compare without case.
+
+  This reverses an earlier rule, which ignored only the exact replies Möbius posted
+  (``autopilot.ignored_event_urls``) and let the owner's other comments count: most "new
+  activity" notices were then about the owner's own words. The known cost: a comment the owner
+  writes on a followed pull request to steer the agent no longer wakes it. job.sh's
+  ``_owner_words`` is the one place that applies the rule.
+  """
+  if not isinstance(login, str) or not login.strip():
+    return set()
+  mine = login.strip().lower()
+  return {e["url"] for e in review_events(node) if e["url"] and e["author"].lower() == mine}
 
 
 def latest_events(
@@ -105,6 +123,30 @@ def trusted_changes_request(
     if e["kind"] == "review" and e["trusted"] and e.get("state") == "CHANGES_REQUESTED"
   ]
   return max(requests, key=lambda e: e["at"]) if requests else None
+
+
+# The review states that are a reviewer's opinion: a plain comment never lifts or lowers one, and a pending review is not one yet.
+_OPINIONS = frozenset(("APPROVED", "CHANGES_REQUESTED", "DISMISSED"))
+
+
+def standing_changes_request(
+  node: Any, ignore_urls: set[str] | None = None,
+) -> dict[str, Any] | None:
+  """The newest CHANGES_REQUESTED review by a trusted author whose request still stands, if any.
+
+  Where GitHub's ``reviewDecision`` is null (a repository with no review rule on the branch) it says
+  nothing about requests, so the reviews the read carries decide: a trusted reviewer's newest opinion
+  (an approval or a dismissal after it lifts it, a comment does not) that is CHANGES_REQUESTED stands.
+  """
+  newest: dict[str, dict[str, Any]] = {}
+  for event in review_events(node, ignore_urls):
+    if event["kind"] != "review" or not event["trusted"] or event.get("state") not in _OPINIONS:
+      continue
+    who = event["author"].lower()
+    if who not in newest or event["at"] > newest[who]["at"]:
+      newest[who] = event
+  standing = [event for event in newest.values() if event["state"] == "CHANGES_REQUESTED"]
+  return max(standing, key=lambda event: event["at"]) if standing else None
 
 
 # Attention types raised from a GitHub author's comment or review. A pending

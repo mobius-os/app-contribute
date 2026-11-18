@@ -73,7 +73,10 @@ class JobEndpoints:
       }]},
     }
     self.version = 1
+    self.state_dir = None  # a folder that outlives a pass (the job's own job-state); None: a fresh one per pass
     self.version_available = True
+    self.settings = None  # the app's settings.json; None answers 404, as an app that never saved one
+    self.viewer = None  # the signed-in GitHub login the batched read returns
     self.send_results = []
     self.respond_results = []
     self.sent = []
@@ -103,6 +106,10 @@ class JobEndpoints:
         "name": "fixture-record.json", "type": "file", "size": 100,
         "modified_at": "2026-01-01T00:00:00Z",
       }]})
+    if method == "GET" and path == "/api/storage/apps/80/settings.json":
+      if self.settings is None:
+        raise _http_error(404)
+      return FakeResponse(self.settings)
     if path == "/api/storage/apps/80/contributions/fixture-record.json":
       if method == "GET":
         self.record_reads += 1
@@ -145,7 +152,10 @@ class JobEndpoints:
 
   def gh(self, args, **kwargs):
     if args[:3] == ["gh", "api", "graphql"]:
-      return subprocess.CompletedProcess(args, 0, json.dumps({"data": {"r0": self.fetched_node(args[-1])}}), "")
+      data = {"r0": self.fetched_node(args[-1])}
+      if self.viewer:
+        data["viewer"] = {"login": self.viewer}
+      return subprocess.CompletedProcess(args, 0, json.dumps({"data": data}), "")
     if len(args) == 3 and args[:2] == ["gh", "api"]:
       return self.rest_event(args)
     self.unexpected.append(args)
@@ -194,10 +204,10 @@ class JobEndpoints:
   def run(self):
     # No shell, live token, gh process, or real urlopen is ever used. Each pass
     # loses process memory, so retries can succeed only from durable records.
-    with tempfile.TemporaryDirectory() as state, patch.dict(os.environ, {
+    with tempfile.TemporaryDirectory() as fresh, patch.dict(os.environ, {
       "API_BASE_URL": "https://fixture.invalid", "APP_TOKEN": "fixture-token",
       "APP_ID": "80", "SCRIPT_DIR": os.path.abspath(os.path.dirname(JOB)),
-      "APP_JOB_STATE_DIR": state,
+      "APP_JOB_STATE_DIR": self.state_dir or fresh,
     }), patch("urllib.request.urlopen", self.urlopen), patch("subprocess.run", self.gh), \
         patch.object(sys, "path", list(sys.path)), redirect_stderr(self.errors):
       try:

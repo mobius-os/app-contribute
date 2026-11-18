@@ -919,6 +919,33 @@ def landing_patch(
     return patch
 
 
+def _same_hint(stored: Any, found: dict[str, Any]) -> bool:
+    """The hint on the record already says this: only when it was looked at and which main differ."""
+    if not isinstance(stored, dict):
+        return False
+    skipped = ("detected_at", "main_sha")
+    keys = (set(stored) | set(found)) - set(skipped)
+    return all(stored.get(key) == found.get(key) for key in keys)
+
+
+def _same_attention(record: dict[str, Any], found: dict[str, Any]) -> bool:
+    """The record already carries this very attention (same key) and still needs it."""
+    stored = record.get("attention")
+    return bool(
+        record.get("needs_attention") and isinstance(stored, dict)
+        and stored.get("key") == (found.get("attention") or {}).get("key")
+    )
+
+
+def _needs_target_read(record: dict[str, Any], engine: bool) -> bool:
+    """Whether the update's target PR is read here. Engine mode reads it in the job's batched
+    GraphQL call instead; it is read here only to clear an old `review_target_settled` note."""
+    if not engine:
+        return True
+    attention = record.get("attention")
+    return isinstance(attention, dict) and attention.get("type") == "review_target_settled"
+
+
 def reconcile_record(
     github: GitHub,
     local: LocalMain,
@@ -926,6 +953,7 @@ def reconcile_record(
     name: str,
     record: dict[str, Any],
     now: str,
+    engine: bool = False,
 ) -> dict[str, Any] | None:
     repo = repo_slug(record)
     info = github.repo_info(repo)
@@ -939,7 +967,7 @@ def reconcile_record(
     )
     plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
     target_pull = None
-    if plan.get("action") == "pr_update":
+    if plan.get("action") == "pr_update" and _needs_target_read(record, engine):
         try:
             number = int(record.get("number") or 0)
         except (TypeError, ValueError):
@@ -968,15 +996,21 @@ def reconcile_record(
     patch: dict[str, Any] = {
         "reconciliation_probe": {**probe, "checked_at": now},
     }
+    # In engine mode the Update region says a settled target (STRANDED_UPDATE), so no
+    # `review_target_settled` note is added. A note or hint the record already carries is not
+    # written again just because main moved: only the probe is.
+    settled = None if engine else settled_update_attention(record, target_pull, now)
     if landing:
         patch.update(landing_patch(record, landing, repo, main_sha, now))
-    elif settled := settled_update_attention(record, target_pull, now):
-        patch.update(settled)
+    elif settled:
+        if not _same_attention(record, settled):
+            patch.update(settled)
     elif hint:
-        hint["detected_at"] = now
-        hint["main_sha"] = main_sha
-        patch["reconciliation_hint"] = hint
-        patch["updated_at"] = now
+        if not _same_hint(record.get("reconciliation_hint"), hint):
+            hint["detected_at"] = now
+            hint["main_sha"] = main_sha
+            patch["reconciliation_hint"] = hint
+            patch["updated_at"] = now
     elif (
         plan.get("action") == "pr_update"
         and isinstance(record.get("attention"), dict)
@@ -993,6 +1027,7 @@ def run(
     github: GitHub,
     dry_run: bool = False,
     records: list[tuple[str, dict[str, Any], str | None]] | None = None,
+    engine: bool = False,
 ) -> dict[str, int]:
     """Reconcile due prepared records from ``records`` or a fresh ledger scan."""
     counts = {
@@ -1029,7 +1064,7 @@ def run(
     local = LocalMain(repo_paths)
 
     for name, record, etag in prepared:
-        patch = reconcile_record(github, local, storage, name, record, now)
+        patch = reconcile_record(github, local, storage, name, record, now, engine)
         if not patch:
             continue
         counts["checked"] += 1
