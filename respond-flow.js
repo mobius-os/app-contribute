@@ -34,10 +34,11 @@ function blocker(result, pr, chat) {
   return ''
 }
 
-// The answers whose Post was taken back, in this session, by answer: the chat may still hold the message that Post sent, and the platform drops a
-// repeated message id as a duplicate, so the next Post of that answer is given an id of its own (as Send again is, below).
-const takenBack = new Map()
-const postCid = result => (takenBack.has(result.id) ? `respond-post-${result.id}-${takenBack.get(result.id)}` : `respond-post-${result.id}`)
+// Which Post a message belongs to. The chat may still hold the message an earlier Post sent (one the owner took back, perhaps consumed after it),
+// and the platform drops a repeated message id as a duplicate, so every Post is named: the name is stored with the approval, so a reloaded app and
+// every other open frame read the same one, and an approval that was taken back leaves none behind. Twelve random hex digits;
+// `getRandomValues` works in every context, which `randomUUID` does not.
+const newAttempt = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(16).padStart(2, '0')).join('')
 
 // A refusal that says the chat did not take the message at all (a status, or a deleted conversation), as against a lost connection.
 const refused = delivery => Boolean(delivery.status || delivery.gone)
@@ -57,9 +58,13 @@ export async function approveResponse({ slug, digest, pr, chat = null, token, st
   // A cancel writes and sends nothing.
   const stopped = await askOwner('respond_post', {}, { repo: result.repo, number: result.number, result_id: result.id, digest: result.digest, chat_id: result.chat_id })
   if (stopped) return { ok: false, error: stopped.error || '' }
-  const written = await writeDecision(slug, { result_id: result.id, digest: result.digest, decision: 'approved', at: now() }, storage)
+  // A Post pressed again while its approval stands (a double press, another frame) is the same Post: the same name, so the same message id, and the
+  // platform drops the second message. After Take back Post nothing stands, and the next Post is a new one.
+  const standing = await readFreshDecision(slug, storage)
+  const attempt = (decisionOf({ result, decision: standing }) === 'approved' && standing.attempt) || newAttempt()
+  const written = await writeDecision(slug, { result_id: result.id, digest: result.digest, decision: 'approved', at: now(), attempt }, storage)
   if (!written.ok) return written
-  const delivery = await deliver(token, { scope: respondScope(result.repo, result.number), cid: again ? `respond-retry-${result.id}-${Date.now()}` : postCid(result), title: `Respond to feedback on #${result.number}`,
+  const delivery = await deliver(token, { scope: respondScope(result.repo, result.number), cid: again ? `respond-retry-${result.id}-${Date.now()}` : `respond-post-${result.id}-${attempt}`, title: `Respond to feedback on #${result.number}`,
     scopeLabel: `Respond to feedback on ${result.repo} #${result.number}`, draft: postMessage(result), chatId: result.chat_id, applyModel: false })
   if (delivery.ok) return { ok: true }
   // The chat definitely did not take it: nothing may stay approved. If it may have, the approval stays so Send again can finish it.
@@ -84,10 +89,6 @@ export async function withdrawResponse({ slug, digest, storage, clock = Date.now
   if (!current.ok) return current
   const entry = { slug, result: current.result, decision: await readFreshDecision(slug, storage) }
   const options = { now: Math.floor(now / 1000) }
-  if (canWithdraw(entry, options)) {
-    const taken = await withdrawDecision(slug, storage)
-    if (taken.ok) takenBack.set(current.result.id, (takenBack.get(current.result.id) || 0) + 1)
-    return taken
-  }
+  if (canWithdraw(entry, options)) return withdrawDecision(slug, storage)
   return { ok: false, error: WITHDRAW_REFUSED[respondStateAt(entry, options)] || 'There is nothing to take back.' }
 }

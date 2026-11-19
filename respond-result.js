@@ -33,6 +33,7 @@ const VERSION = 1
 const SHA = /^[0-9a-f]{40}$/
 const RESULT_ID = /^r-[0-9a-f]{12}$/
 const DIGEST = /^[0-9a-f]{64}$/
+const ATTEMPT = /^[0-9a-f]{12}$/
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 const STATES = new Set(['ready', 'posting', 'posted', 'failed'])
@@ -126,11 +127,12 @@ export function normalizeResult(raw) {
     tip_sha: tip, points, replies, description, rerequest, tests, screenshots, commits, files, digest, receipts, error: failure, ...stamp }
 }
 
-// What the owner decided: only Post (approved) and Discard are ever written.
+// What the owner decided: only Post (approved) and Discard are ever written. `attempt` names the Post an approval belongs to (respond-flow.js);
+// an approval written before it existed has none.
 export function normalizeDecision(raw) {
   if (!raw || typeof raw !== 'object' || raw.version !== VERSION) return null
   if (!RESULT_ID.test(raw.result_id) || !DIGEST.test(raw.digest) || !['approved', 'discarded'].includes(raw.decision)) return null
-  return { result_id: raw.result_id, digest: raw.digest, decision: raw.decision, at: typeof raw.at === 'string' ? raw.at : '' }
+  return { result_id: raw.result_id, digest: raw.digest, decision: raw.decision, at: typeof raw.at === 'string' ? raw.at : '', ...(ATTEMPT.test(raw.attempt) ? { attempt: raw.attempt } : {}) }
 }
 
 const samePr = (result, pr) => result.repo.toLowerCase() === pr?.repository?.nameWithOwner?.toLowerCase() && result.number === pr?.number

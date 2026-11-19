@@ -3503,7 +3503,7 @@ window.runRespondResultChecks = async () => {
     ensure(values.get(DECISION_KEY).result_id === 'r-3f9a1c2b04d5' && values.get(DECISION_KEY).digest === 'd'.repeat(64), 'The approval named another answer: ' + JSON.stringify(values.get(DECISION_KEY)))
     await until(() => calls.messages.length === 1, 'Post sent the chat nothing')
     const sent = calls.messages[0]
-    ensure(sent.chatId === 'respond-chat-fixture' && sent.cid === 'respond-post-r-3f9a1c2b04d5', 'The message went to ' + sent.chatId + ' as ' + sent.cid)
+    ensure(sent.chatId === 'respond-chat-fixture' && sent.cid === 'respond-post-r-3f9a1c2b04d5-' + values.get(DECISION_KEY).attempt && /^[0-9a-f]{12}$/.test(values.get(DECISION_KEY).attempt), 'The message went to ' + sent.chatId + ' as ' + sent.cid)
     ensure(sent.content.includes('python3 /data/apps/contribute/respond_result.py post --pr owner/project#7 --id r-3f9a1c2b04d5'), 'The message did not name the command: ' + sent.content)
     await settle()
     ensure(button(NAMES.postAnswer)?.disabled || !button(NAMES.postAnswer), 'Post could be pressed again before the refreshed answer arrived: ' + reviewBody())

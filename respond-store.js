@@ -87,8 +87,8 @@ async function writeDurably(path, value, what, storage) {
 }
 
 // The owner's decision: the helper reads it from disk before it posts anything.
-export const writeDecision = (slug, { result_id: resultId, digest, decision, at }, storage = storageOf()) =>
-  writeDurably(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at }, 'decision', storage)
+export const writeDecision = (slug, { result_id: resultId, digest, decision, at, attempt }, storage = storageOf()) =>
+  writeDurably(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at, ...(attempt ? { attempt } : {}) }, 'decision', storage)
 
 // The whole saved review of a ticked item, where its brief tells the agent to read it (address-feedback.js). Nothing to write when none is ticked.
 export function writeFindings(items, storage = storageOf()) {

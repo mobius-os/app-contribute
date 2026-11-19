@@ -162,8 +162,14 @@ keeps its digest). `receipts.screenshots` appears only for a result that has scr
 ## The decision (`respond-decisions/<slug>.json`, written by the app)
 
 ```json
-{ "version": 1, "result_id": "r-3f9a1c2b04d5", "digest": "<64 hex>", "decision": "approved", "at": "2026-11-06T09:30:00Z" }
+{ "version": 1, "result_id": "r-3f9a1c2b04d5", "digest": "<64 hex>", "decision": "approved", "at": "2026-11-06T09:30:00Z", "attempt": "9c41e07b2d6a" }
 ```
+
+`attempt` (12 hex digits, written with an approval only, absent from one an older version wrote) names the Post the approval belongs to:
+the id of the message that tells the chat to run `post` is `respond-post-<result id>-<attempt>`. It is stored here, not kept by the page, so
+every open frame and a reopened app read the same one. Pressing Post again while the approval stands reuses it (one Post, one message; the
+platform drops a repeated id), and an approval taken back leaves nothing behind, so the next Post gets a new one: the chat may still hold the
+first message, and a repeated id would be dropped as a duplicate, so the new Post would start no work. The helper ignores it.
 
 `decision` is `approved` (Post pressed) or `discarded` (Discard pressed). A decision counts only
 for the `result_id` and `digest` it names; any other result ignores it. Discard is offered for a
@@ -319,7 +325,7 @@ Exit codes: 0 done, 2 bad input, 3 refused, 4 failed part-way.
 * **Post** re-reads the result, checks its digest is the one on screen and the PR head is still
   `pr.head_sha`, has Möbius confirm it on its own sheet (the gate), writes the decision (`approved`),
   then sends the chat (`chat_id`) this message
-  with the stable id `respond-post-<result id>`; if the platform definitely refuses it, the
+  with the id `respond-post-<result id>-<attempt>` (the decision's `attempt`, see above); if the platform definitely refuses it, the
   decision is removed again:
 
   ```
