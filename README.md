@@ -437,14 +437,16 @@ clears when none stands any more; and an escalation (`human_required`) or an
 later blockers wait behind it. When a PR merges or closes, both attention slots
 are emptied (an `owner_request` for a region that still waits on you stays), and
 a one-time sweep does the same for finished PRs that still carried an
-attention, without a notification. The job also saves GitHub's own head and
-base of the PR as `github_head_sha` and `github_base_ref`, but never rewrites
-the version you reviewed and approved. It and the Discard flow both write with
-`If-Match` (compare-and-swap) when the runtime returns a version, so concurrent
-writers — the agent, the cron refresh, the Discard button — avoid silently
-overwriting each other. On older runtimes that don't return a version, Discard
-re-reads and re-checks the record before writing, while the cron refresh falls
-back to a plain best-effort write.
+attention, without a notification (in engine mode it also stores their
+lifecycle, and once the setting changes from shadow to engine it visits the
+records it swept in shadow mode once more for that). The job also saves
+GitHub's own head and base of the PR as `github_head_sha` and `github_base_ref`,
+but never rewrites the version you reviewed and approved. It and the Discard
+flow both write with `If-Match` (compare-and-swap) when the runtime returns a
+version, so concurrent writers — the agent, the cron refresh, the Discard
+button — avoid silently overwriting each other. On older runtimes that don't
+return a version, Discard re-reads and re-checks the record before writing,
+while the cron refresh falls back to a plain best-effort write.
 
 ## The lifecycle state machine
 

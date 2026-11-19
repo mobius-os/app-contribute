@@ -1,6 +1,7 @@
 """The one-time sweep of attention left on finished PRs, in both modes."""
 import copy
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -19,7 +20,11 @@ LEFT = {
 
 
 class BackfillEndpoints(EngineEndpoints):
+  down = False  # the sweep's batched GitHub read fails
+
   def gh(self, args, **kwargs):
+    if args[:3] == ["gh", "api", "graphql"] and "b0: resource(" in args[-1] and self.down:
+      return subprocess.CompletedProcess(args, 1, "", "gh: could not reach GitHub")
     if args[:3] == ["gh", "api", "graphql"] and "b0: resource(" in args[-1]:
       return subprocess.CompletedProcess(args, 0, json.dumps({"data": {"b0": self.fetched_node(args[-1])}}), "")
     return super().gh(args, **kwargs)
@@ -121,6 +126,184 @@ class SweepTest(unittest.TestCase):
     self.assertEqual(job.record["title"], "Concurrent title")
 
 
+def marker(state):
+  with open(os.path.join(state, lifecycle_backfill.STATE_FILE), encoding="utf-8") as handle:
+    return json.load(handle)
+
+
+def swept_in_shadow(state, **more):
+  """A finished record whose sweep ran, and finished, in shadow mode (the writer has not been flipped yet)."""
+  job = finished(engine=False, **more)
+  job.state_dir = state
+  job.parents = []
+  job.run()
+  return job
+
+
+def to_engine(job):
+  job.settings = {"lifecycle_writer": "engine"}
+  return job
+
+
+class EngineHalfTest(unittest.TestCase):
+  def test_a_sweep_finished_in_shadow_mode_stores_the_lifecycle_once_the_writer_is_engine(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state)
+      job.node.update(baseRefName="stack-parent", repository={"defaultBranchRef": {"name": "main"}})
+      self.assertNotIn("lifecycle", job.record)
+      self.assertFalse(job.record["needs_attention"])
+      self.assertTrue(marker(state)["complete"])
+      to_engine(job).run()
+      self.assertEqual(publication(job), "MERGED_ELSEWHERE")  # what GitHub shows, not the seeded "merged"
+      self.assertEqual(job.record["status"], "merged")
+      self.assertEqual(job.record["github_base_ref"], "stack-parent")
+      self.assertTrue(job.record["merged_announced"])
+      self.assertEqual(job.sent, [])
+      self.assertEqual(job.connected, [])
+      self.assertTrue(marker(state)["engine"]["complete"])
+      puts = len(job.puts)
+      job.run()
+      job.run()
+      self.assertEqual(len(job.puts), puts)
+      self.assertEqual(job.sent, [])
+
+  def test_the_engine_half_gives_what_a_fresh_engine_sweep_gives(self):
+    with tempfile.TemporaryDirectory() as state:
+      later = swept_in_shadow(state, autopilot={"enabled": True, "state": "idle"})
+      to_engine(later).run()
+    fresh = finished(autopilot={"enabled": True, "state": "idle"})
+    fresh.run()
+    self.assertEqual(later.cleaned, fresh.cleaned)  # the grant left on is closed out, once, in both
+    self.assertEqual(len(later.cleaned), 1)
+    for key in ("status", "needs_attention", "attention", "waiting_attention", "outside_activity"):
+      self.assertEqual(later.record.get(key), fresh.record.get(key), key)
+    states = lambda job: {name: slot["state"] for name, slot in job.record["lifecycle"]["regions"].items()}
+    self.assertEqual(states(later), states(fresh))
+    self.assertEqual(later.record["lifecycle"]["attention"], fresh.record["lifecycle"]["attention"])
+
+  def test_a_closed_pull_request_that_was_reopened_is_found_by_the_engine_half(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state, status="closed")
+      job.node["state"] = "OPEN"
+      to_engine(job).run()
+      self.assertEqual(job.record["status"], "open")
+      self.assertEqual(publication(job), "OPEN")
+      self.assertEqual(job.sent, [])
+
+  def test_a_failed_github_read_leaves_the_engine_half_to_the_next_pass(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state)
+      job.node.update(baseRefName="stack-parent", repository={"defaultBranchRef": {"name": "main"}})
+      before = copy.deepcopy(job.record)
+      puts = len(job.puts)
+      to_engine(job).down = True
+      job.run()
+      self.assertEqual(job.record, before)  # nothing was stored from the seeded state
+      self.assertEqual(len(job.puts), puts)
+      engine = marker(state)["engine"]
+      self.assertEqual((engine["done"], engine["complete"]), ({}, False))
+      self.assertEqual(engine["failed"]["fixture-record.json"], {"passes": 1, "why": "GitHub not read"})
+      self.assertEqual(job.sent, [])
+      job.down = False
+      job.run()
+      self.assertEqual(publication(job), "MERGED_ELSEWHERE")  # the correction was not lost
+      self.assertEqual(job.record["github_base_ref"], "stack-parent")
+      self.assertEqual(job.sent, [])
+      self.assertTrue(marker(state)["engine"]["complete"])
+
+  def test_a_record_whose_github_read_keeps_failing_is_given_up_on_with_the_error_kept(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state)
+      puts = len(job.puts)
+      to_engine(job).down = True
+      for passes in range(1, lifecycle_backfill.FAILED_PASSES):
+        job.run()
+        self.assertFalse(marker(state)["engine"]["complete"], passes)
+      job.run()
+      self.assertEqual(len(job.puts), puts, "its slots were emptied in shadow mode: nothing is left to write")
+      engine = marker(state)["engine"]
+      self.assertIn("fixture-record.json", engine["done"])
+      self.assertEqual(engine["failed"]["fixture-record.json"], {"passes": lifecycle_backfill.FAILED_PASSES, "why": "GitHub not read"})
+      self.assertTrue(engine["complete"])
+      self.assertNotIn("lifecycle", job.record)
+      sweeps = lambda: sum("b0: resource(" in query for query in job.queries)
+      reads = sweeps()
+      job.down = False
+      job.run()  # given up on: the sweep does not read it again
+      self.assertEqual((sweeps(), len(job.puts)), (reads, puts))
+
+  def test_an_engine_first_sweep_through_a_long_outage_still_clears_the_leftover_it_gives_up_on(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = finished()
+      job.state_dir, job.down = state, True
+      before = copy.deepcopy(job.record)
+      for passes in range(1, lifecycle_backfill.FAILED_PASSES):
+        job.run()
+        self.assertEqual(job.record, before, "still flagged: GitHub may answer on the next pass (pass %d)" % passes)
+        self.assertFalse(marker(state)["complete"])
+      job.run()
+      self.assertFalse(job.record["needs_attention"])
+      self.assertIsNone(job.record["attention"])
+      self.assertEqual(job.record["waiting_attention"], [])
+      self.assertIsNone(job.record["outside_activity"])
+      self.assertNotIn("lifecycle", job.record, "nothing is stored from the seeded state")
+      self.assertEqual((job.record["status"], job.record["updated_at"]), (before["status"], before["updated_at"]))
+      self.assertEqual(marker(state)["engine"]["failed"]["fixture-record.json"], {"passes": lifecycle_backfill.FAILED_PASSES, "why": "GitHub not read"})
+      self.assertTrue(marker(state)["engine"]["complete"])
+      self.assertEqual((job.sent, job.cleaned, job.connected), ([], [], []))
+      puts = len(job.puts)
+      job.down = False
+      job.run()
+      self.assertEqual(len(job.puts), puts, "given up on: it is not read again")
+
+  def test_shadow_mode_still_clears_a_record_when_github_cannot_be_read(self):
+    job = finished(engine=False)
+    job.down = True
+    job.run()
+    self.assertFalse(job.record["needs_attention"])
+    self.assertEqual(job.record["waiting_attention"], [])
+
+  def test_a_marker_written_before_the_engine_half_counts_as_shadow_only(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state)
+      with open(os.path.join(state, lifecycle_backfill.STATE_FILE), encoding="utf-8") as handle:
+        written = json.load(handle)
+      self.assertNotIn("engine", written)  # shadow mode writes the marker exactly as it always did
+      legacy = {"schema": 1, "done": written["done"], "complete": True, "failed": {}}
+      with open(os.path.join(state, lifecycle_backfill.STATE_FILE), "w", encoding="utf-8") as handle:
+        json.dump(legacy, handle)
+      to_engine(job).run()
+      self.assertEqual(publication(job), "MERGED")
+      self.assertEqual(marker(state)["engine"]["done"].keys(), legacy["done"].keys())
+
+  def test_shadow_then_engine_then_shadow_again_redoes_and_undoes_nothing(self):
+    with tempfile.TemporaryDirectory() as state:
+      job = swept_in_shadow(state)
+      to_engine(job).run()
+      self.assertEqual(publication(job), "MERGED")  # the engine half was done
+      stored, written, done = copy.deepcopy(job.record), len(job.puts), marker(state)
+      job.settings = None
+      job.run()
+      job.run()
+      self.assertEqual(job.record, stored)
+      self.assertEqual(len(job.puts), written)
+      self.assertEqual(marker(state), done)
+      self.assertEqual(job.sent, [])
+
+  def test_a_marker_that_already_says_engine_was_done_changes_nothing_in_shadow_mode(self):
+    with tempfile.TemporaryDirectory() as state:
+      store = FakeStore(3)
+      names = sorted(store.records)
+      engine_done = {"schema": 1, "done": dict.fromkeys(names, 1), "complete": True, "failed": {},
+                     "engine": {"done": dict.fromkeys(names, 1), "complete": True, "failed": {}}}
+      with open(os.path.join(state, lifecycle_backfill.STATE_FILE), "w", encoding="utf-8") as handle:
+        json.dump(engine_done, handle)
+      backfill = lifecycle_backfill.Backfill(store.call, "80", state, False, 1_000_000, "2026-01-01T00:00:00Z")
+      backfill.run(names)
+      self.assertEqual(store.writes, [])
+      self.assertEqual(marker(state), engine_done)
+
+
 class FakeStore:
   """Storage double for the bound: many finished records with leftovers."""
 
@@ -155,6 +338,44 @@ class BoundTest(unittest.TestCase):
       writes = len(store.writes)
       sweep().run(sorted(store.records))
       self.assertEqual(len(store.writes), writes)
+
+  def test_a_backlog_swept_in_shadow_mode_is_visited_again_in_bounded_passes_and_then_never_again(self):
+    count = lifecycle_backfill.LIMIT + 5
+    store = FakeStore(count)
+    names = sorted(store.records)
+    with tempfile.TemporaryDirectory() as state:
+      def sweep(engine, leftovers):
+        backfill = lifecycle_backfill.Backfill(store.call, "80", state, engine, 1_000_000, "2026-01-01T00:00:00Z")
+        backfill.run(leftovers)
+        return backfill
+
+      for leftovers in (names, names, names):
+        sweep(False, leftovers)  # shadow mode finishes the sweep
+      self.assertFalse(any("lifecycle" in record for record in store.records.values()))
+      self.assertEqual(len(sweep(True, []).cleared), lifecycle_backfill.LIMIT)  # nothing is left over any more
+      self.assertEqual(sum("lifecycle" in record for record in store.records.values()), lifecycle_backfill.LIMIT)
+      self.assertEqual(len(sweep(True, []).cleared), 5)
+      self.assertEqual(sum("lifecycle" in record for record in store.records.values()), count)
+      self.assertTrue(sweep(True, []).state["engine"]["complete"])
+      writes = len(store.writes)
+      sweep(True, [])
+      sweep(False, [])
+      self.assertEqual(len(store.writes), writes)
+
+  def test_a_record_the_engine_half_cannot_write_is_given_up_on_without_touching_the_shadow_marker(self):
+    store = FailingStore(2, [])
+    names = sorted(store.records)
+    with tempfile.TemporaryDirectory() as state:
+      lifecycle_backfill.Backfill(store.call, "80", state, False, 1_000_000, "t").run(names)
+      done = copy.deepcopy(marker(state)["done"])
+      store.broken = {"r01.json"}
+      for _pass in range(lifecycle_backfill.FAILED_PASSES):
+        lifecycle_backfill.Backfill(store.call, "80", state, True, 1_000_000, "t").run([])
+      engine = marker(state)["engine"]
+      self.assertEqual(sorted(engine["done"]), names)
+      self.assertEqual(engine["failed"]["r01.json"]["passes"], lifecycle_backfill.FAILED_PASSES)
+      self.assertEqual(marker(state)["done"], done)
+      self.assertTrue(engine["complete"])
 
 
 class FailingStore(FakeStore):

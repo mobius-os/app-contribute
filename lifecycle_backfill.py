@@ -6,14 +6,31 @@ Once, in bounded batches, each such record is read, its leftover slots are empti
 mode, its seeded lifecycle is stored. It sends NO notification and takes no other action than the
 follow-up close-out a leftover grant needs (the engine's PR_FINISHED rule: grant off, chat hidden).
 
+The sweep is one-time per mode. Everyone starts in shadow mode, so it usually finishes there, before
+`lifecycle_writer` is set to "engine"; the engine half (the seeded lifecycle and what GitHub shows,
+for example a merge into a side branch) is then still owed. The marker keeps it apart: `engine` holds
+the same three parts as the marker itself (`done`, `complete`, `failed`) for the records whose engine
+half is done. In engine mode a record done only in shadow mode is visited once more, in the same
+bounded batches, and gets what a fresh engine sweep would have given it; a marker written before
+there was an `engine` part counts as shadow only. In shadow mode nothing about the engine half is
+read, redone or undone.
+
 Its one batched GitHub read asks the state and base branch of those PRs, so a closed PR that was
 reopened or a merge into a side branch is found; what it shows is applied as an inferred
 move. State lives in the runner's per-app `APP_JOB_STATE_DIR`: a marker with the records done and
-whether the sweep is over. Losing it repeats a sweep that finds nothing left to clear.
+whether the sweep is over. Losing it repeats a sweep that finds nothing left to clear, and forgets
+which records only shadow mode swept. Their engine half is then not done: the ordinary engine passes
+re-read only pull requests closed less than 30 days ago, merges into another branch and records with a
+deadline that has come due, so a merged or older closed record is not corrected by them.
 
 No record can hold the sweep up: one whose read or write fails (no storage version, a permanent
 refusal) is tried on `FAILED_PASSES` passes, then marked done with the error kept in the marker and
-skipped, so it neither starves the records behind it nor costs a read every pass.
+skipped, so it neither starves the records behind it nor costs a read every pass. In engine mode the
+GitHub read is the point of the visit, so a record GitHub gave no answer for (the batched call failed, or
+the pull request came back empty) counts as a failed pass too and is not stored from its seeded state.
+Shadow mode needs no read to clear a record, so it clears it anyway; so does the pass that gives up on
+one, which empties its leftover slots as shadow mode would and stores nothing else. An outage of
+`FAILED_PASSES` passes or more gives up on the records a batch (`LIMIT`) at a time.
 """
 from __future__ import annotations
 
@@ -68,6 +85,16 @@ class Backfill:
     # What the sweep wrote, with the version the write returned: the job keeps these records in this
     # pass (their terminal cleanup and app connection must not wait a pass) instead of the stale ones.
     self.refreshed: dict[str, tuple[dict, str | None]] = {}
+
+  def _half(self) -> dict:
+    """What this mode has done: the marker itself in shadow mode, its `engine` part in engine mode."""
+    if not self._engine:
+      return self.state
+    part = self.state.get("engine")
+    if not (isinstance(part, dict) and isinstance(part.get("done"), dict)):
+      part = self.state["engine"] = {"done": {}, "complete": False, "failed": {}}
+    part.setdefault("failed", {})
+    return part
 
   def _load(self) -> dict:
     empty = {"schema": SCHEMA, "done": {}, "complete": False, "failed": {}}
@@ -145,11 +172,12 @@ class Backfill:
     return {key: value for key, value in found.items() if key in ("github_head_sha", "github_base_ref")}
 
   def run(self, names: list[str]) -> None:
-    if self.state.get("complete"):
+    half = self._half()
+    if half.get("complete"):
       return
-    todo = [name for name in names if name not in self.state["done"]][:LIMIT]
+    todo = self._owed(names)[:LIMIT]
     if not todo:
-      self.state["complete"] = True
+      self.state["complete"] = half["complete"] = True  # nothing owed: the sweep is over in this mode
       self._save()
       return
     found = [(name, *self._read(name)) for name in todo]
@@ -159,26 +187,60 @@ class Backfill:
     aliases = {name: "b%d" % index for index, (name, _record) in enumerate(watch)}
     for name, record, etag in found:
       self._one(name, record, etag, data.get(aliases.get(name)))
-    self.state["complete"] = all(name in self.state["done"] for name in names)
+    self.state["complete"] = self.state["complete"] or all(name in self.state["done"] for name in names)
+    if self._engine:
+      half["complete"] = self.state["complete"] and all(name in half["done"] for name in self.state["done"])
     self._save()
     if self._shadow is not None:
       self._shadow.save()
 
+  def _owed(self, names: list[str]) -> list[str]:
+    """The records this pass still owes a visit: the leftovers not yet swept (until the sweep is over)
+    and, in engine mode, the records only swept in shadow mode."""
+    fresh = [] if self.state["complete"] else [name for name in names if name not in self.state["done"]]
+    if not self._engine:
+      return fresh
+    again = [name for name in self.state["done"] if name not in self._half()["done"]]
+    return sorted(set(fresh + again))
+
+  def _mark(self, name: str) -> None:
+    """The record is done in this mode; a record done in engine mode is done in shadow mode too."""
+    self.state["done"].setdefault(name, self._now)
+    if self._engine:
+      self._half()["done"][name] = self._now
+
   def _failed(self, name: str, why: str) -> None:
     """This pass did not settle the record. After FAILED_PASSES of them it is marked done, the error
     kept in the marker, so it cannot hold up the records behind it (the first LIMIT undone names)."""
-    failed = self.state.setdefault("failed", {})
+    failed = self._half().setdefault("failed", {})
     count = int((failed.get(name) or {}).get("passes") or 0) + 1
     failed[name] = {"passes": count, "why": why}
     if count >= FAILED_PASSES:
-      self.state["done"][name] = self._now
+      self._mark(name)
+
+  def _unread(self, name: str, record: dict, etag: str | None) -> None:
+    """GitHub gave no answer, and what GitHub shows is what the engine half stores: the record is tried again next pass. The pass
+    that gives up on it empties its leftover slots as shadow mode would, and stores nothing else, so an outage does not leave a
+    stale flag for ever."""
+    passes = int((self._half()["failed"].get(name) or {}).get("passes") or 0) + 1
+    if passes >= FAILED_PASSES and has_attention_leftover(record):
+      cleared = {**record, **lifecycle_job.emptied_attention(record, {})}
+      ok, version = self._write(name, cleared, etag)
+      if not ok:
+        return self._failed(name, "write refused" if etag else "no storage version")
+      self.refreshed[name] = (cleared, version)
+      self.cleared.append(name)
+    self._failed(name, "GitHub not read")
 
   def _one(self, name: str, record: dict | None, etag: str | None, node: Any) -> None:
     if record is None:
       return self._failed(name, "unreadable")
-    if record.get("status") not in FINISHED_STATUSES or not has_attention_leftover(record):
-      self.state["done"][name] = self._now  # someone else already settled it
+    shadow_done = self._engine and name in self.state["done"]  # its slots were emptied in shadow mode
+    if record.get("status") not in FINISHED_STATUSES or not (has_attention_leftover(record) or shadow_done):
+      self._mark(name)  # someone else already settled it
       return
+    if self._engine and node is None and isinstance(record.get("url"), str):
+      return self._unread(name, record, etag)
     patch, close_out = self._patch(record, node)
     written = {**record, **patch}
     if patch:
@@ -192,5 +254,5 @@ class Backfill:
       self.refreshed[name] = (written, version)
     if close_out:
       self._close_out(record)
-    self.state["done"][name] = self._now
+    self._mark(name)
     self.cleared.append(name)
