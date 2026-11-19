@@ -19,6 +19,9 @@ REGION = "respond"
 
 # THE TABLE, both directions: the helper's `state` word and the region states it can be in. The app's table (RESPOND_WORDS in
 # respond-lifecycle.js) is the full one, with the owner's decision beside it; test/respond-lifecycle.cases.json pins the two together.
+# A stopped answer the owner discarded keeps the helper's word `failed` and the app reads that word with the decision `discarded` as
+# DISCARDED (respondStateOf), so this table never names it: the helper never stamps a discarded answer, and `post` refuses it
+# (respond_result.py approval_problem).
 STATE_WORDS = {
   "READY": "ready", "APPROVED": "ready", "NOT_STARTED": "ready", "DISCARDED": "ready", "OUT_OF_DATE": "ready",
   "POSTING": "posting", "FAILED": "failed", "POSTED": "posted",

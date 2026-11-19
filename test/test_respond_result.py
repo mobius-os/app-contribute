@@ -996,6 +996,75 @@ class PostTests(RespondWorld):
       ("repos/owner/repo/pulls/7/requested_reviewers", True),
     ])
 
+  def test_post_refuses_a_stopped_answer_the_owner_discarded_and_changes_nothing(self):
+    shas, _, result = self.approved_result()
+    self.fake(reject_at=2)
+    self.assertRefused(self.post(result["id"]), 4, "Post stopped at the replies step: reply 2 of 2")
+    stopped = self.saved_result()
+    self.assertEqual((stopped["state"], [r["index"] for r in stopped["receipts"]["replies"]]), ("failed", [0]))
+    self.decide(result, decision="discarded")  # the owner pressed Discard on the stopped answer
+    self.assertFalse(json.loads(self.cli("show", "--pr", PULL).out)["approved"])
+    before, writes = self.snapshot(), len(self.gh_writes())
+    for run in range(2):  # a later Try again, or the chat that was already told to post
+      self.assertRefused(self.post(result["id"]), 3, "discarded, not approved")
+    self.assertEqual(self.snapshot(), before, "a refusal changes nothing, on disk or on GitHub")
+    self.assertEqual(len(self.gh_writes()), writes)
+    self.assertEqual(self.saved_result(), stopped, "the helper’s file keeps its receipts and its stopped state")
+    self.assertEqual(self.remote_branch(), shas[1], "what the first run pushed stays; nothing is pushed again")
+
+  def test_post_stops_before_its_next_step_when_the_owner_discards_it_while_it_runs(self):
+    shas, _, result = self.approved_result()
+    push = respond.Posting.push
+
+    def push_then_discard(posting):
+      push(posting)
+      self.decide(result, decision="discarded")  # the owner presses Discard while the post runs
+
+    with mock.patch.object(respond.Posting, "push", push_then_discard):
+      outcome = self.post(result["id"])
+    self.assertRefused(outcome, 4, "Post stopped at the replies step: The owner's decision for this result is discarded, not approved")
+    self.assertIn("the steps still to do were not posted", outcome.err)
+    stopped = self.saved_result()
+    self.assertEqual((stopped["state"], stopped["error"]["step"]), ("failed", "replies"), "not left as posting")
+    self.assertEqual(stopped["receipts"]["push"]["sha"], shas[1], "what already went out stays on record")
+    self.assertEqual((stopped["receipts"]["replies"], stopped["receipts"]["description"], stopped["receipts"]["rerequest"]), ([], None, None))
+    self.assertEqual(self.gh_writes(), [], "no reply, description or re-review was sent")
+    self.assertEqual(self.remote_branch(), shas[1])
+    self.assertRefused(self.post(result["id"]), 3, "discarded, not approved")  # and a later run is refused up front
+    self.assertEqual(self.gh_writes(), [])
+
+  def test_post_stops_before_the_next_reply_when_the_owner_discards_it_after_a_reply(self):
+    shas, _, result = self.approved_result()
+    persist = respond.Posting.persist
+
+    def persist_then_discard(posting):
+      persist(posting)
+      if len(posting.result["receipts"]["replies"]) == 1:
+        self.decide(result, decision="discarded")  # Discard is pressed just after reply 1 went out
+
+    with mock.patch.object(respond.Posting, "persist", persist_then_discard):
+      outcome = self.post(result["id"])
+    self.assertRefused(outcome, 4, "Post stopped at the replies step: The owner's decision for this result is discarded, not approved")
+    stopped = self.saved_result()
+    self.assertEqual((stopped["state"], stopped["error"]["step"]), ("failed", "replies"), "not left as posting")
+    self.assertEqual([r["index"] for r in stopped["receipts"]["replies"]], [0], "reply 1 keeps its receipt")
+    self.assertIsNone(stopped["receipts"]["sending"], "reply 2 was never started")
+    self.assertEqual((stopped["receipts"]["description"], stopped["receipts"]["rerequest"]), (None, None))
+    self.assertEqual([call["path"] for call in self.gh_writes()], ["repos/owner/repo/issues/7/comments"], "only reply 1 was sent")
+
+  def test_post_stops_before_its_next_step_when_the_decision_is_taken_away_while_it_runs(self):
+    _, _, result = self.approved_result()
+    push = respond.Posting.push
+
+    def push_then_remove(posting):
+      push(posting)
+      self.decision_path.unlink()
+
+    with mock.patch.object(respond.Posting, "push", push_then_remove):
+      self.assertRefused(self.post(result["id"]), 4, "Post stopped at the replies step: The owner has not approved this result")
+    self.assertEqual(self.saved_result()["state"], "failed")
+    self.assertEqual(self.gh_writes(), [])
+
   def test_post_failing_at_the_description_keeps_the_replies_and_finishes_later(self):
     _, _, result = self.approved_result()
     self.fake(fail_at=3)

@@ -166,7 +166,11 @@ keeps its digest). `receipts.screenshots` appears only for a result that has scr
 ```
 
 `decision` is `approved` (Post pressed) or `discarded` (Discard pressed). A decision counts only
-for the `result_id` and `digest` it names; any other result ignores it. Asking for another pass
+for the `result_id` and `digest` it names; any other result ignores it. Discard is offered for a
+`ready`, out-of-date or `failed` result, never while it is `posting` or once it is `posted`; on a
+`failed` one it takes the answer off the PR and leaves what already went out on GitHub. `post` refuses it
+from then on (the decision is not `approved`), and a `post` still running reads the decision again before each
+step and before each reply and stops there, so only a step or reply already being sent can still arrive. Asking for another pass
 needs no decision: the new result replaces the old one when it is saved.
 
 ## The helper: `python3 /data/apps/contribute/respond_result.py`
@@ -252,7 +256,10 @@ gate, above) and, when that is refused, exits 3 before touching anything. Then, 
    stopped and never repeats a step. The PR is read again (open, same head branch, same base,
    head still `pr.head_sha` or the tip) right before every step after the first and before every
    reply, so a PR that moved, was retargeted or was closed part-way stops what is left; what
-   already went out stays in the receipts;
+   already went out stays in the receipts. The decision file is read again right before every step as
+   well, and before each reply of the replies step: one that is no longer `approved` for this result (a Discard
+   pressed while it posts) stops what is still to do, with `state` `failed` and the step it stopped at named.
+   A step or reply already being sent may still arrive;
 7. sets `state` to `posted`.
 
 An interruption that Python can see (Ctrl-C, an exit) in the middle of a step sets `state` to `failed` with
@@ -276,7 +283,7 @@ Exit codes: 0 done, 2 bad input, 3 refused, 4 failed part-way.
   minutes after Post; every 30 s otherwise) and pairs each result with its decision.
 * **Status** of a result on its PR: `ready` (fresh: the PR head still equals `pr.head_sha`),
   `stale` (the head moved), `approved` (approved, not yet `posting`), `posting`, `posted`,
-  `failed`, or none (discarded). For the first 30 s after the decision's `at`, `approved` is "the
+  `failed`, or none (discarded, which a `failed` answer can be too). For the first 30 s after the decision's `at`, `approved` is "the
   chat is starting": the card says **Sent to the chat** with a spinner and offers no Send again
   (both real posts had the message at the chat in 2 s and the first step done by 8.6 s). After
   that it says **Not started yet** and offers Send again, and **Take back Post** where the
@@ -289,9 +296,12 @@ Exit codes: 0 done, 2 bad input, 3 refused, 4 failed part-way.
   PR logic reads it as a draft waiting for the owner instead of "sending". `POSTING` has 3 minutes measured from
   the helper's last progress (the stamp, or for a post with no stamp, its last receipt or the owner's press): after that it is
   `FAILED`. The saved answer then reads `failed` with the receipts of what went out untouched, Try again asks the
-  owner for a fresh confirmation, and the helper skips every step that has a receipt.
+  owner for a fresh confirmation, and the helper skips every step that has a receipt. Discard (the table's
+  `FAILED` + `DISCARD` row) ends it as `DISCARDED`: the stored `state` stays `failed` and the decision says
+  `discarded`, which `respondStateOf` reads as `DISCARDED`; nothing it holds (the Not confirmed fact, its
+  Needs you row) outlives it, and a Try again from a card that was still open is refused.
 * **PR logic** (unchanged): `ready` and `approved` supply the existing "draft" fact, `posting` the
-  "sending" fact, `failed` the "unconfirmed" fact. `stale` and none supply nothing, so the PR
+  "sending" fact, `failed` the "unconfirmed" fact. `stale` and none (discarded, a stopped answer too) supply nothing, so the PR
   reads "Feedback to answer" again.
 * **Review tab card**: points with their ending, the replies word for word, the description (with its
   screenshots shown, each read from `respond-screenshots/` and only shown when its SHA-256 is the one in the
@@ -322,7 +332,13 @@ Exit codes: 0 done, 2 bad input, 3 refused, 4 failed part-way.
   It posts only what was shown and approved, and checks the approval and the PR head itself.
   Do not push, comment, reply or edit anything on GitHub by hand. If it refuses, say why and stop.
   ```
-* **Discard** writes the decision `discarded`. **Respond again** sends the new brief into the same
+* **Discard** writes the decision `discarded`. On a stopped answer whose receipts show a step that went out
+  (screenshots, push, replies, description, re-review) the card first asks, naming those steps: what already went out
+  stays on GitHub, and Discard drops only what was not sent yet and takes the answer off the pull request in
+  Contribute. It asks as well when `receipts.sending` names a reply that may be on GitHub without a receipt (the
+  question names which), and when the app itself took the post as stopped after 3 minutes (the chat may still be
+  sending one step and stops before the next). Only a stop the helper reported, with nothing receipted and no
+  `sending` note, is discarded at once. **Respond again** sends the new brief into the same
   chat (the platform returns an existing chat for the PR's scope without sending a new job, so the
   app delivers it as a message, like project work); the old result stays until the new one replaces it.
   The window names that chat's agent, read from the app's own chat list for the scope. The started

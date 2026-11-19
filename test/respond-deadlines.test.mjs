@@ -110,9 +110,12 @@ test('a post that went quiet but whose PR moved for another reason is still refu
   assert.deepEqual(delivered, [])
 })
 
-test('Discard is still refused for a post that is not ready, as before', async () => {
-  const storage = fakeStorage(posting())
-  assert.match((await discardResponse({ slug: SLUG, digest: example().digest, storage })).error, /being posted/)
+test('Discard is still refused for a post that is running, and is allowed for one that went quiet', async () => {
+  const nowS = Math.floor(Date.now() / 1000)
+  const running = fakeStorage(posting({ lifecycle: { v: 1, regions: { respond: { state: 'POSTING', since: nowS - 5, deadline: nowS + 175 } }, history: [] } }))
+  assert.match((await discardResponse({ slug: SLUG, digest: example().digest, storage: running })).error, /being posted/)
+  const quiet = fakeStorage(posting()) // its last step is long past the 3 minutes: it reads as stopped
+  assert.deepEqual(await discardResponse({ slug: SLUG, digest: example().digest, storage: quiet }), { ok: true })
 })
 
 test('Take back Post removes the approval once the chat did not start, and says why when it cannot', async () => {

@@ -6,7 +6,7 @@
 import { allowed, newVector, waitingOn } from './lifecycle-engine.js'
 import { LIFECYCLE_TABLES as TABLES } from './lifecycle-tables.js'
 import { catchUp } from './lifecycle-catch-up.js'
-import { POSTING_SILENCE_MINUTES, decisionOf } from './respond-result.js'
+import { POSTING_SILENCE_MINUTES, STALLED_STEP, decisionOf } from './respond-result.js'
 
 const REGION = 'respond'
 
@@ -29,7 +29,9 @@ const SAME_WORDS = { NOT_STARTED: 'APPROVED' }
 
 const matches = (words, found) => Object.entries(words).every(([key, value]) => found[key] === value)
 
-export const respondStateOf = found => RESPOND_WORDS.find(row => matches(row.words, found))?.region ?? null
+// A failed answer the owner discarded is DISCARDED too: the discard stands in for the helper's stopped word (its receipts stay as they were).
+const discarded = found => found.state === 'failed' && found.decision === 'discarded'
+export const respondStateOf = found => RESPOND_WORDS.find(row => matches(row.words, discarded(found) ? { ...found, state: 'ready' } : found))?.region ?? null
 
 // The words to store for a state (NONE has no file at all).
 export const wordsOfRespond = region => RESPOND_WORDS.find(row => row.region === (SAME_WORDS[region] || region))?.words ?? null
@@ -84,7 +86,7 @@ export function respondVectorOf(entry, { pr = null, now = nowSeconds() } = {}) {
 
 export const respondStateAt = (entry, options) => respondVectorOf(entry, options).vector.regions[REGION].state
 
-const stalled = () => ({ step: 'posting', message: `Nothing new went out for ${POSTING_SILENCE_MINUTES} minutes, so the post is taken as stopped.` })
+const stalled = () => ({ step: STALLED_STEP, message: `Nothing new went out for ${POSTING_SILENCE_MINUTES} minutes, so the post is taken as stopped.` })
 
 // The answer as a screen should read it after the lazy tick. No PR is given here, so `lifecycle` never says OUT_OF_DATE: a screen that
 // has the PR reads that with respondVectorOf(entry, { pr }). A post that made no progress for its whole deadline is FAILED:

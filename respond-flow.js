@@ -1,10 +1,10 @@
 // What Post, Discard and Take back Post do. None posts anything: Post writes the owner's approval and tells the chat to run the helper, which
-// checks the approval itself; Discard writes the decision that takes the answer off the PR; Take back Post removes an approval the chat never acted on. Post does nothing at all until the host
+// checks the approval itself; Discard writes the decision that takes the answer off the PR (a stopped one too: what went out stays); Take back Post removes an approval the chat never acted on. Post does nothing at all until the host
 // confirms it on its own sheet (respond-result.js, THE GATE): an approval the agent could have written itself is not the owner's press.
 import { respondScope } from './address-feedback.js'
 import { clearDecision, readFreshDecision, readFreshResult, withdrawDecision, writeDecision } from './respond-store.js'
 import { canWithdraw, respondStateAt } from './respond-lifecycle.js'
-import { postMessage, postOffReason } from './respond-result.js'
+import { decisionOf, postMessage, postOffReason } from './respond-result.js'
 import { askOwner, ownerConfirmOffered } from './owner-grant.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { NAMES } from './names.js'
@@ -51,6 +51,8 @@ export async function approveResponse({ slug, digest, pr, chat = null, token, st
   const { result } = current
   const reason = blocker(result, pr, chat)
   if (reason) return { ok: false, error: reason }
+  // A stopped answer the owner discarded is gone: a card still open elsewhere cannot bring it back with Try again.
+  if (result.state === 'failed' && decisionOf({ result, decision: await readFreshDecision(slug, storage) }) === 'discarded') return { ok: false, error: 'This answer was discarded.' }
   // The owner's press, proven on the shell's own sheet and bound to this answer and this chat; the helper spends it before it posts.
   // A cancel writes and sends nothing.
   const stopped = await askOwner('respond_post', {}, { repo: result.repo, number: result.number, result_id: result.id, digest: result.digest, chat_id: result.chat_id })
@@ -68,7 +70,8 @@ export async function approveResponse({ slug, digest, pr, chat = null, token, st
 export async function discardResponse({ slug, digest, storage, now = here }) {
   const current = await currentAnswer(slug, digest, storage)
   if (!current.ok) return current
-  if (current.result.state !== 'ready') return { ok: false, error: 'This answer is being posted, so it cannot be discarded.' }
+  // A stopped post can be discarded: what it already sent stays on GitHub, and the helper never posts a discarded answer.
+  if (!['ready', 'failed'].includes(current.result.state)) return { ok: false, error: 'This answer is being posted, so it cannot be discarded.' }
   return writeDecision(slug, { result_id: current.result.id, digest: current.result.digest, decision: 'discarded', at: now() }, storage)
 }
 

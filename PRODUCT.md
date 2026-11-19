@@ -216,7 +216,16 @@ the owner, leads with the repositories the owner works with (what is going on, t
   to send** while the answer waits, **Sending** while it posts and **Not confirmed** if it
   stops part-way, or if no step went out for 3 minutes (the card then says **Posting stopped**;
   a retry skips what already went out, and a reply that may have gone out
-  is only looked for, never sent again). Right after Post the card says
+  is only looked for, never sent again). **Discard** is there beside **Try again**. It asks
+  first when a step already went out (that stays on GitHub), when a reply was being sent and
+  may be on GitHub already, or when the app itself took the post as stopped after 3 minutes
+  (the chat may still be sending one step); it says that Discard drops only what was not sent
+  yet and takes the answer off the pull request in Contribute, which then reads as it would
+  with no answer. A stop the chat reported with no step recorded as sent is discarded at
+  once. A discarded answer is not posted again by Try again, and a chat that is still posting
+  reads the decision before each step and before each reply and stops there: a step or reply
+  it is already sending may still arrive, and the next one is not started. Right after Post
+  the card says
   **Sent to the chat** with a spinner, and **Send again** appears only if the chat has not
   started after 30 seconds (at once if the message to the chat failed). After those 30 seconds
   **Take back Post** also works: it removes the approval so the answer is ready again, and

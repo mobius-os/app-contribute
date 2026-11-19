@@ -963,6 +963,14 @@ class Posting:
       raise CommandError(f"could not confirm the PR on GitHub before this step ({error})") from error
     require_same_pull(self.result, facts, "the steps still to do were not posted")
 
+  def recheck_approval(self) -> None:
+    """The owner's decision is read again before every step and before every reply, as the PR is before a public one: a Discard
+    pressed while the post runs stops what is still to do. A step or reply already being sent may still arrive, and what went out
+    stays in the receipts."""
+    problem = approval_problem(self.result, read_decision(self.store, self.pull))
+    if problem:
+      raise CommandError(f"{problem.rstrip('.')}, so the steps still to do were not posted")
+
   def published_reply(self, index: int, since: str) -> str | None:
     """The link of the comment a reply that may have reached GitHub became, or None when none
     of the owner's comments says exactly that since the attempt began."""
@@ -1041,6 +1049,7 @@ class Posting:
     for index, reply in enumerate(replies):
       if any(receipt["index"] == index for receipt in receipts["replies"]):
         continue
+      self.recheck_approval()  # a Discard stops before the next reply, not only before the next stage
       self.recheck()
       path = (f"repos/{repo}/issues/{number}/comments" if reply["reply_to"] is None
               else f"repos/{repo}/pulls/{number}/comments/{reply['reply_to']}/replies")
@@ -1106,6 +1115,7 @@ class Posting:
              ("description", self.update_description), ("rerequest", self.request_review))
     for name, step in steps:
       try:
+        self.recheck_approval()
         step()
       except Exception as error:
         raise self.fail(name, error) from error

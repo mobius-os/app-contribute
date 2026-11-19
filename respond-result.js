@@ -85,14 +85,16 @@ function readScreenshot(shot) {
 const stamped = value => (value && typeof value === 'object' && typeof value.at === 'string' ? value : null)
 
 // What the helper recorded as done. Anything unreadable counts as not done, so the card never claims a step went out.
-function readReceipts(raw) {
+function readReceipts(raw, replyCount) {
   if (!raw || typeof raw !== 'object') return null
   const push = raw.push && typeof raw.push === 'object' && SHA.test(raw.push.sha) && typeof raw.push.at === 'string' ? { sha: raw.push.sha, at: raw.push.at } : null
   const replies = (Array.isArray(raw.replies) ? raw.replies : []).filter(item => item && Number.isInteger(item.index) && typeof item.url === 'string' && typeof item.at === 'string')
     .map(item => ({ index: item.index, url: item.url, at: item.at }))
   const rerequest = stamped(raw.rerequest)
   const screenshots = stamped(raw.screenshots) && typeof raw.screenshots.commit === 'string' ? { commit: raw.screenshots.commit, at: raw.screenshots.at } : null
-  return { push, replies, screenshots, description: stamped(raw.description) ? { at: raw.description.at } : null, rerequest: rerequest ? { at: rerequest.at, reviewers: Array.isArray(rerequest.reviewers) ? rerequest.reviewers.filter(login => typeof login === 'string') : [] } : null }
+  // The reply that was being sent when the post stopped, and may be on GitHub without a receipt. Only present when the helper wrote one.
+  const sending = stamped(raw.sending) && Number.isInteger(raw.sending.index) && raw.sending.index >= 0 && raw.sending.index < replyCount ? { index: raw.sending.index, at: raw.sending.at } : null
+  return { push, replies, screenshots, description: stamped(raw.description) ? { at: raw.description.at } : null, rerequest: rerequest ? { at: rerequest.at, reviewers: Array.isArray(rerequest.reviewers) ? rerequest.reviewers.filter(login => typeof login === 'string') : [] } : null, ...(sending ? { sending } : {}) }
 }
 
 function readEach(raw, read, max) {
@@ -113,7 +115,7 @@ export function normalizeResult(raw) {
   const replies = readEach(raw.replies, readReply, 12)
   const commits = readEach(raw.commits, readCommit, 60)
   const files = readEach(raw.files, readFile, 300)
-  const receipts = readReceipts(raw.receipts)
+  const receipts = readReceipts(raw.receipts, replies ? replies.length : 0)
   const screenshots = raw.screenshots === undefined ? [] : readEach(raw.screenshots, readScreenshot, 8)
   if (!screenshots || !rerequest || !rerequest.every(login => LOGIN.test(login)) || !points || !replies || !commits || !files || !receipts) return null
   const failure = error && typeof error === 'object' && typeof error.step === 'string' && typeof error.message === 'string' ? { step: error.step, message: error.message } : null
@@ -142,17 +144,21 @@ export const decisionOf = entry => (entry.decision && entry.decision.result_id =
 // Where a response stands on its PR:
 //   ready (fresh, nothing decided), approved (Post pressed, the chat has not started), stale (the PR moved after the answer),
 //   posting, failed (stopped part-way), posted (the PR is where the post left it), or null (discarded, or history).
+// A failed answer the owner discarded is gone from the PR like a ready one; what it already put on GitHub stays there.
 export function responseStatus(entry, pr) {
   const result = entry?.result
   if (!result) return null
   const decision = decisionOf(entry)
   if (result.state === 'posted') return pr?.headRefOid === result.tip_sha || pr?.headRefOid === result.pr.head_sha ? 'posted' : null
+  if (result.state === 'failed' && decision === 'discarded') return null
   if (result.state === 'posting' || result.state === 'failed') return result.state
   if (decision === 'discarded') return null
   if (pr?.headRefOid !== result.pr.head_sha) return 'stale'
   return decision === 'approved' ? 'approved' : 'ready'
 }
 
+// The step the app names when it is the one that took a post as stopped (respond-lifecycle.js), as against a stop the helper reported.
+export const STALLED_STEP = 'posting'
 // How long a post may go without a step going out before it is taken as stopped: the deadline of the POSTING state, in minutes.
 export const POSTING_SILENCE_MINUTES = TABLES.regions.respond.states.POSTING.deadline.seconds / 60
 
@@ -233,6 +239,42 @@ export function stepDone(result, key) {
   const receipts = result.receipts
   if (key === 'replies') return result.replies.length > 0 && receipts.replies.length >= result.replies.length
   return Boolean(receipts[key])
+}
+
+// What a stopped post already put on GitHub, in words, from the helper's receipts only: a step with no receipt is never claimed.
+function wentOut(result) {
+  const { receipts, replies } = result
+  const posted = receipts.replies.length
+  return [
+    receipts.screenshots ? `${plural(result.screenshots.length, 'screenshot', 'screenshots')} uploaded` : null,
+    receipts.push ? `${plural(result.commits.length, 'commit', 'commits')} pushed to the PR’s branch` : null,
+    posted ? `${posted === replies.length ? plural(posted, 'reply', 'replies') : `${posted} of ${replies.length} replies`} posted` : null,
+    receipts.description ? 'the description updated' : null,
+    receipts.rerequest ? 'a new review asked for' : null,
+  ].filter(Boolean)
+}
+
+// The reply that was being sent when the post stopped and has no receipt: it may be on GitHub already (the helper clears the note when
+// GitHub refused the write), or null.
+const unconfirmedReply = result => {
+  const { sending, replies } = result.receipts
+  return sending && !replies.some(reply => reply.index === sending.index) ? `Reply ${sending.index + 1} of ${result.replies.length}` : null
+}
+
+// The question Discard asks of a stopped answer, or null when it can act at once: only a stop the helper itself reported, with no step
+// recorded as sent and none left unconfirmed. It asks when something went out (a receipt), when a step may be on GitHub without one, and when the app took
+// the post as stopped after 3 minutes without a step (the helper may still be sending one, and stops before the next). Discard undoes nothing.
+export function discardQuestion(result) {
+  const out = wentOut(result)
+  const unconfirmed = unconfirmedReply(result)
+  const running = result.error?.step === STALLED_STEP
+  if (!out.length && !unconfirmed && !running) return null
+  const said = [
+    out.length ? `What already went out stays on GitHub: ${names(out)}.` : null,
+    unconfirmed ? `${unconfirmed} was being sent when it stopped and may already be on GitHub; if it is, it stays there.` : null,
+    running ? 'The chat may still be sending one step; it stops before the next.' : null,
+  ].filter(Boolean)
+  return { title: 'Discard this answer?', text: `${said.join(' ')} Discard drops only what was not sent yet and takes this answer off the pull request in Contribute.` }
 }
 
 // Every reply with what it answers, for the owner to post by hand where Post is off: the review thread (a reply) or the PR's own conversation.

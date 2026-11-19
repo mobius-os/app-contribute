@@ -843,7 +843,12 @@ description and asks for the re-review, recording each step so a second run repe
 nothing. Two deadlines keep an answer from waiting for ever. `post` stamps each step in
 the result's optional `lifecycle` key, and a post with no step for 3 minutes reads as
 stopped (**Posting stopped**, its receipts kept): **Try again** asks again and skips every
-step that already went out. An approved answer whose chat has not started after 30 seconds
+step that already went out, and **Discard** drops the stopped answer. Discard asks first
+when something went out, may have gone out or may still be going out, naming it (it stays
+on GitHub), and acts at once on a stop the chat reported with no step recorded as sent.
+`post` reads the decision again before each step and each reply, so a discarded answer
+stops there; a step or reply already being sent may still arrive, the next is not started.
+An approved answer whose chat has not started after 30 seconds
 reads as a draft to send again, and **Take back Post** then removes the approval so the
 answer is ready again; nothing is posted. The files, rules, exit codes and the app side are
 in `respond-result.md`.
