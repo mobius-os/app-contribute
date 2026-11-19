@@ -1,6 +1,6 @@
 // Run: MOBIUS_FRONTEND_NODE_MODULES=/data/platform/frontend/node_modules \
 //      node test/workspace-browser.mjs
-// Thirty-one scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
+// Thirty-two scenarios, each on a fresh page: runWorkspaceChecks (the project fixture),
 // runPopupFitChecks (the project fixture: its Actions menus stay on a phone screen),
 // runBulkReviewWindowChecks (the review window over 30 selected PRs keeps Start and Cancel on screen and scrolls the PR list in the head),
 // runProjectScreenChecks (the project fixture: the project screen has no status row, whatever GitHub has for the project),
@@ -27,6 +27,7 @@
 // runRepositoryPickerChecks (the whole app: the Add repository form opens where it can be filled in and sent),
 // runTapBoxChecks (the whole app: every compact control takes a full 44px tap, and no tap box covers another control's face).
 // runLifecycleViewsChecks (the whole app: your own PR in the merge queue, a review that did not finish, a cut list of review runs and a project run that stopped show on the Desk).
+// runHeldRecordChecks (the whole app: an update whose PR merged first and a merge that never landed are Needs you rows, each opens on its exits, and Discard is one checked write).
 // Run one with WORKSPACE_BROWSER_ONLY=runDeskFrameChecks (and one viewport with WORKSPACE_BROWSER_VIEWPORT=desktop), for example while
 // runWorkspaceChecks is red, so the Desk check can still show green.
 // Actual app components, native Chromium DOM, and no live app/backend. The
@@ -4816,6 +4817,58 @@ window.runLifecycleViewsChecks = async () => {
   }
 }
 
+// A finished PR that still waits on the owner is a Needs you row, not an accepted contribution: its row opens the record on its card with the
+// exits its state allows, and an exit is one checked write that takes the row out again (the records here are neutral fixtures).
+window.runHeldRecordChecks = async () => {
+  const checks = []
+  const rows = () => [...document.querySelectorAll('.co-desk-envelopes .co-desk-item')]
+  const rowOf = title => rows().find(node => text(node.querySelector('.co-desk-row-title')).includes(title))
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const iso = seconds => new Date(seconds * 1000).toISOString()
+  const vector = (publication, update) => ({ v: 1, history: [], attention: { flags: [] }, regions: {
+    publication: { state: publication, since: nowSeconds - 3600, deadline: null },
+    update: { state: update, since: nowSeconds - 3600, deadline: update === 'STRANDED_UPDATE' ? nowSeconds + 6 * 86400 : null },
+    followup: { state: 'CLOSED_OUT', since: nowSeconds - 3600, deadline: null } } })
+  const held = (id, number, title, publication, update, attention) => ({ id, type: 'pr', status: 'merged', repo: 'owner/project', number, title, summary: title, chat_id: 'fixture-chat',
+    url: 'https://github.com/owner/project/pull/' + number, plan: { action: update === 'NONE' ? 'pr' : 'pr_update', repo: 'owner/project', title },
+    created_at: iso(nowSeconds - 5 * 86400), updated_at: iso(nowSeconds - 3600), needs_attention: true,
+    attention: { type: 'owner_request', detected_at: iso(nowSeconds - 3600), announced_at: iso(nowSeconds - 3500), ...attention }, lifecycle: vector(publication, update) })
+  const stranded = held('held-stranded', 40, 'Retry the failed sync', 'MERGED', 'STRANDED_UPDATE', { key: 'owner_request:update:STRANDED_UPDATE:' + (nowSeconds - 3600), title: 'The update can no longer go out', message: 'The pull request finished before the update was sent. Open it to choose what to do with the prepared changes.' })
+  const orphaned = held('held-orphaned', 41, 'Land the share sheet', 'ORPHANED', 'NONE', { key: 'owner_request:publication:ORPHANED:' + (nowSeconds - 3600), title: 'Merged into a branch that never landed', message: 'The change was merged into another branch that did not reach the default branch. Open it to decide what to do.' })
+  try {
+    reviewRuns.length = 0
+    window.deskRecords = [stranded, orphaned]
+    for (const record of window.deskRecords) values.set('contributions/' + record.id + '.json', structuredClone(record))
+    await mountDeskApp()
+    await openDeskView('Needs you')
+    await until(() => rowOf('Retry the failed sync') && rowOf('Land the share sheet'), 'Needs you did not list the two held records: ' + text(query('main')).slice(0, 500))
+    ensure(text(rowOf('Retry the failed sync')).includes('Update not sent') && text(rowOf('Land the share sheet')).includes('Merged elsewhere'), 'The rows said: ' + rows().map(text).join(' | '))
+    await captureShot('desk-needs-you-held-records')
+    checks.push({ name: 'a stranded update and a merge that never landed are Needs you rows, each saying why', status: 'pass' })
+    await click(rowOf('Retry the failed sync').querySelector('.co-desk-row-main, button'))
+    await until(() => button('Already in the merge') && button('Keep as new work') && button('Discard'), 'The record did not offer its exits: ' + text(query('main')).slice(0, 600))
+    ensure(!button('Land it again'), 'A stranded update offered the exit of a merge that never landed')
+    await captureShot('held-record-exits')
+    checks.push({ name: 'the stranded update opens on its card with Already in the merge, Keep as new work and Discard', status: 'pass' })
+    await click(button('Discard'))
+    await until(() => button('Keep'), 'Discard asked nothing first')
+    await click([...document.querySelectorAll('[role="alertdialog"] button')].find(node => text(node) === 'Discard'))
+    await until(() => values.get('contributions/held-stranded.json')?.update_outcome, 'Discard wrote nothing')
+    const saved = values.get('contributions/held-stranded.json')
+    ensure(saved.update_outcome.exit === 'DISCARD_UPDATE' && saved.status === 'merged' && saved.lifecycle.regions.update.state === 'NONE' && saved.needs_attention === false, 'The record was saved as ' + JSON.stringify(saved))
+    await click(button('Back to repositories'))
+    await openDeskView('Needs you')
+    await until(() => !rowOf('Retry the failed sync') && rowOf('Land the share sheet'), 'The settled record stayed in Needs you, or the other one left: ' + rows().map(text).join(' | '))
+    checks.push({ name: 'Discard is one checked write: the outcome and the lifecycle are saved and the row leaves Needs you, the other stays', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 4000), forbidden: calls.forbidden }
+  } finally {
+    window.deskRecords = undefined
+  }
+}
+
 // A fake clock for the sync scenario: the app's timers and Date.now run on it, so a minute of waiting
 // costs a few milliseconds. Animation frames stay real, so the harness helpers keep working.
 function installClock() {
@@ -5079,7 +5132,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks', 'runLifecycleViewsChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks', 'runLifecycleViewsChecks', 'runHeldRecordChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

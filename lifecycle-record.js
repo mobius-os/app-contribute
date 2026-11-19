@@ -90,6 +90,17 @@ export const updateWaiting = (record, now) => regionsOf(record, now)?.update ===
 // The PR merged or closed before the update went out; the owner chooses what happens to it.
 export const strandedUpdate = (record, now) => regionsOf(record, now)?.update === 'STRANDED_UPDATE'
 
+// A finished PR whose lifecycle still waits on the owner. Its status word says merged or closed, so a reader of the word alone files it as done,
+// while a region says it is not settled: an update that can no longer go out (`stranded_update`), or a merge into another branch that never
+// reached the default branch (`orphaned`). `kind` is the decision kind run.js lists it under. Null for a record that is not held. The owner's
+// ways out are lifecycle-write.js `settleExits`.
+const HELD = [['update', 'STRANDED_UPDATE', 'stranded_update'], ['publication', 'ORPHANED', 'orphaned']]
+export function ownerHeld(record, now) {
+  const found = regionsOf(record, now)
+  const held = found && HELD.find(([region, state]) => found.vector.regions[region]?.state === state)
+  return held ? { kind: held[2], region: held[0], state: held[1] } : null
+}
+
 // Whether the record's own state lets it be sent now: a private record waiting to be sent, or
 // a public PR with an update waiting; no attention flag, no refusal or send error saved on it.
 // An unconfirmed send is neither (its regions are UNCERTAIN, never PREPARED). Callers add the

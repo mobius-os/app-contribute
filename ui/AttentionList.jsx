@@ -19,6 +19,9 @@ const ATTENTION_REASONS = {
 const KIND_REASONS = {
   ready_attention: { key: 'ready', label: 'Not marked ready', tone: 'blocker', action: 'Review' },
   route_attention: { key: 'route', label: 'Choose where to send', tone: 'blocker', action: 'Choose' },
+  // A finished PR whose lifecycle still waits on you (lifecycle-record.js ownerHeld): the row opens the record, where you settle it.
+  stranded_update: { key: 'held', label: 'Update not sent', tone: 'blocker', action: 'Choose' },
+  orphaned: { key: 'held', label: 'Merged elsewhere', tone: 'blocker', action: 'Choose' },
   // A prepared draft waiting for you to open it (to send, or to mark ready for review).
   publish: { key: 'decision', label: NAMES.readyToOpen, tone: 'blocker', action: 'Open' },
   mark_ready: { key: 'decision', label: NAMES.readyToOpen, tone: 'blocker', action: 'Open' },

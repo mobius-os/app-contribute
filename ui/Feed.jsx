@@ -758,6 +758,7 @@ export function FocusedItem({
   onReview,
   onDismiss,
   onRestore,
+  onSettle,
   onSetAutopilot,
   onWithdraw,
   onMarkReady,
@@ -843,6 +844,7 @@ export function FocusedItem({
         onDismiss={onDismiss}
         onRestore={onRestore}
         onWithdraw={onWithdraw}
+        onSettle={onSettle}
       />
       <ContributionCard
         rec={record}
@@ -875,6 +877,7 @@ export function ContributionRun({
   onReview,
   onDismiss,
   onRestore,
+  onSettle,
   onSetAutopilot,
   onWithdraw,
   onRefresh,
@@ -983,6 +986,7 @@ export function ContributionRun({
             onReview={onReview}
             onDismiss={onDismiss}
             onRestore={onRestore}
+            onSettle={onSettle}
             onSetAutopilot={onSetAutopilot}
             onWithdraw={onWithdraw}
             onMarkReady={onMarkReady}

@@ -1,5 +1,5 @@
 import { repositoryName } from './collaboration.js'
-import { discardRecord } from './lifecycle-write.js'
+import { discardRecord, settleRecord } from './lifecycle-write.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { stackMeta } from './stack.js'
 
@@ -889,6 +889,11 @@ export async function abandonPrepared({ appId, token, rec }) {
     return next && { ...next, updated_at: new Date().toISOString() }
   } })
 }
+
+// Settle a finished PR that waits on the owner (an update that can no longer go out, a merge that never landed): the owner's exit and what it
+// derives (lifecycle-write.js `settleRecord`) go into the record as the file holds it now, in one checked write. A record that no longer
+// holds that state, or an exit it does not accept, comes back as a conflict carrying the record.
+export const settleHeld = ({ rec, exit, successor = '' }) => casWriteRecord({ rec, change: current => settleRecord(current, exit, { successor }) })
 
 // Restore = the reverse: CAS-flip an `abandoned` record back to `prepared` so it
 // returns to Ready for review (the plan, diff blob, and branch are untouched by

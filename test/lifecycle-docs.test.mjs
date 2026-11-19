@@ -32,11 +32,21 @@ test('ledger.md maps every publication and update state to its status word', () 
 })
 
 test('card-asks.md gives the three exits of a stranded update, and no fourth', () => {
-  const section = read('card-asks.md').split('## A stranded update')[1]
+  const section = read('card-asks.md').split('## A stranded update')[1]?.split('\n## ')[0]
   assert.ok(section, 'the section exists')
   const exits = [...section.matchAll(/^\| `([A-Z_]+)` \|/gm)].map(match => match[1])
   assert.deepEqual(exits, ['COVERED_BY_MERGE', 'PRESERVE_AS_NEW', 'DISCARD_UPDATE'])
   const table = TABLES.regions.update.transitions.filter(row => row.from === 'STRANDED_UPDATE').map(row => row.event)
   for (const exit of exits) assert.ok(table.includes(exit), `${exit} is an event the tables accept from STRANDED_UPDATE`)
   assert.match(section.replace(/\s+/g, ' '), /never approval to send/)
+})
+
+test('card-asks.md says how every exit a card or an agent can take is recorded, and gives the merge that never landed its own exit', () => {
+  const asks = read('card-asks.md')
+  const section = asks.split('## A merge that never landed')[1]
+  assert.ok(section, 'the section exists')
+  assert.deepEqual([...section.matchAll(/^\| `([A-Z_]+)` \|/gm)].map(match => match[1]), ['OWNER_RELANDS'])
+  assert.ok(TABLES.regions.publication.transitions.some(row => row.from === 'ORPHANED' && row.event === 'OWNER_RELANDS'))
+  for (const exit of ['COVERED_BY_MERGE', 'PRESERVE_AS_NEW', 'DISCARD_UPDATE', 'OWNER_RELANDS']) assert.match(asks, new RegExp(`settle_exit\\.py <[a-z-]*record-id> ${exit}`), `${exit} names the operation that records it`)
+  assert.match(asks.replace(/\s+/g, ' '), /only the checked writer records an exit/)
 })

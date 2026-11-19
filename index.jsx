@@ -41,7 +41,7 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, dismissProjectRun, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, settleSetting, updateAppSettings } from './storage.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, dismissProjectRun, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, settleHeld, settleSetting, updateAppSettings } from './storage.js'
 import { SYNC_POLICY, createSyncHub, onShownAgain } from './refresh.js'
 import { settledPulls, slimReviewRow } from './desk-copy.js'
 import { useDeskCopySave, useSavedDeskCopy } from './ui/useDeskCopy.js'
@@ -1769,6 +1769,24 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
+  // Settle = the owner's exit from a finished PR that waits on them (an update that can no longer go out, a merge that never landed): one checked
+  // write of the exit and what it derives (storage.js settleHeld). The record leaves Needs you in place; the other outcomes are onDismiss's.
+  const onSettle = useCallback(async (rec, exit) => {
+    const outcome = await settleHeld({ rec, exit })
+    if (outcome.ok) {
+      applyRecordUpdates({ ...outcome.ok, path: rec.path })
+      window.mobius?.signal?.('contribution_settled', { id: rec.id, exit })
+    } else if (outcome.conflict) {
+      applyRecordUpdates({ ...outcome.conflict, path: rec.path })
+    } else if (outcome.gone) {
+      replaceFeed(recordsRef.current.filter((item) => item.id !== rec.id))
+    } else if (outcome.conflict === null) {
+      const fresh = await loadFreshContributionRecord(rec.id)
+      if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+    }
+    return outcome
+  }, [applyRecordUpdates, replaceFeed])
+
   // Restore = CAS flip an archived record back to `prepared`. Mirrors onDismiss:
   // on success it moves from Dismissed back to the current Run in place; on a
   // conflict/gone the feed reloads so the card reflects reality.
@@ -2161,7 +2179,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
               followAtSend={record => followAtSend(record, { autopilotDefault, available: conn.autopilotAvailable === true })}
-              onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
+              onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore} onSettle={onSettle}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
               onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}

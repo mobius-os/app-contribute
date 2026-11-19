@@ -268,8 +268,9 @@ several writers each set in their own way. It enforces these rules in plain word
   It waits to see whether that branch lands, and if it never does the owner is asked what to do.
   A PR closed without merging is watched for 30 days in case it is reopened.
 - **An update never hides a public PR.** Dropping an update drops only the update: the PR stays
-  listed and followed. An update whose PR merged or closed first is never sent; it says so and asks
-  what to do with the changes (the merge already covers them, keep them as new work, or drop them).
+  listed and followed. An update whose PR merged or closed first is never sent; it says so, stays in
+  Needs you, and asks what to do with the changes (the merge already covers them, keep them as new work,
+  or drop them). A merge that never reached the default branch stays there too, until it is landed again.
 - **One notice per event.** A merge, a close, a reopen and an update that could not go out are each
   told once, and a stranded update gets one reminder after a week, not one every week. A merge into
   the default branch or a close that the owner made in the app is told once by the background job,

@@ -27,7 +27,8 @@ import {
   needsHuman,
 } from '../autopilot.js'
 import { needsSourceRefresh, reviewIncomplete as recordReviewIncomplete, sendNeedsAttention } from '../send-readiness.js'
-import { discardKeepsPull } from '../lifecycle-write.js'
+import { discardKeepsPull, settleExits } from '../lifecycle-write.js'
+import { ownerHeld } from '../lifecycle-record.js'
 import { clearReconciliationHint, lifecycleWriterOf, loadAppSettings } from '../storage.js'
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
@@ -846,6 +847,82 @@ function RestoreAction({ rec, onRestore }) {
   )
 }
 
+// A finished PR that still waits on you (lifecycle-record.js ownerHeld) offers the exits its state accepts. The two that only end the wait are one
+// checked write here; the two that hand the work to a new record open the source chat with the exact operation, because the agent stages that record
+// and then records the exit with settle_exit.py (contributing/card-asks.md).
+const SETTLE_COMMAND = 'python3 /data/apps/contribute/settle_exit.py'
+const HELD_EXITS = {
+  COVERED_BY_MERGE: { label: 'Already in the merge' },
+  PRESERVE_AS_NEW: { label: 'Keep as new work', ask: rec => `Keep the update that could not be sent for contribution ${rec.id} ("${rec.title || 'untitled'}") as new work: rebuild only the change that is still wanted on the repository's fresh default branch, stage it as a new record, review it and print its card. Then record the exit on the stranded record with:\n\n${SETTLE_COMMAND} ${rec.id} PRESERVE_AS_NEW --successor <the new record id>` },
+  DISCARD_UPDATE: { label: NAMES.discard, confirm: { title: `${NAMES.discard} this update?`, text: 'Only the update is dropped. The pull request stays on GitHub exactly as it is.' } },
+  OWNER_RELANDS: { label: 'Land it again', ask: rec => `Land contribution ${rec.id} ("${rec.title || 'untitled'}") again as new work: it was merged into a branch that never reached the default branch. Rebuild it on the repository's fresh default branch, stage it as a new record, review it and print its card. Then record the exit on this record with:\n\n${SETTLE_COMMAND} ${rec.id} OWNER_RELANDS --successor <the new record id>` },
+}
+
+function HeldAction({ rec, onSettle, onFeedback }) {
+  const [busy, setBusy] = useState('')
+  const [confirming, setConfirming] = useState('')
+  const [note, setNote] = useState(null)
+  const exits = settleExits(rec)
+  if (!exits.length) return null
+
+  async function settle(exit) {
+    setBusy(exit)
+    setNote(null)
+    try {
+      const outcome = (await onSettle(rec, exit)) || {}
+      if (outcome.conflict !== undefined) setNote('This contribution just changed under you — the feed has been refreshed.')
+      else if (outcome.gone) setNote('This record no longer exists — the feed has been refreshed.')
+      else if (outcome.error) setNote(outcome.error === 'offline' ? 'You are offline — this needs a connection; try again once you are back online.' : 'Could not save this: ' + outcome.error)
+    } finally {
+      setBusy('')
+      setConfirming('')
+    }
+  }
+
+  function ask(exit) {
+    const outcome = (typeof onFeedback === 'function' && onFeedback(rec, { draft: HELD_EXITS[exit].ask(rec) })) || {}
+    setNote(outcome.ok ? null : outcome.reason === 'missing-chat'
+      ? 'This older record no longer has a source chat to start from.'
+      : 'Open Contribute from inside Möbius to return to the source chat.')
+  }
+
+  const pick = exit => (HELD_EXITS[exit].ask ? ask(exit) : HELD_EXITS[exit].confirm ? setConfirming(exit) : settle(exit))
+  const sure = HELD_EXITS[confirming]?.confirm
+  return (
+    <div className="co-action-block">
+      {sure ? (
+        <ConfirmWindow
+          label="Confirm discard"
+          eyebrow={recordWhere(rec)}
+          title={sure.title}
+          text={sure.text}
+          keep="Keep"
+          confirm={NAMES.discard}
+          working="Discarding…"
+          busy={Boolean(busy)}
+          onKeep={() => setConfirming('')}
+          onConfirm={() => settle(confirming)}
+        />
+      ) : null}
+      <div className="co-review-actions" role="group" aria-label="Choose what happens next">
+        {exits.map(exit => (
+          <button
+            key={exit}
+            type="button"
+            className={exit === 'DISCARD_UPDATE' ? 'co-btn co-btn-danger co-secondary-action co-history-action' : 'co-btn'}
+            disabled={Boolean(busy)}
+            aria-busy={busy === exit || undefined}
+            onClick={() => pick(exit)}
+          >
+            {busy === exit ? <Shine>Saving…</Shine> : HELD_EXITS[exit].label}
+          </button>
+        ))}
+      </div>
+      {note && <p className="co-review-error" role="status" aria-live="polite">{note}</p>}
+    </div>
+  )
+}
+
 function PublicationConnectionAction({ rec }) {
   const handoff = publicationHandoff(rec)
   const connection = rec.publication_connection
@@ -1005,6 +1082,7 @@ export function ContributionDecision({
   onDismiss,
   onRestore,
   onWithdraw,
+  onSettle,
 }) {
   const status = rec?.status || 'prepared'
   const isPr = rec?.plan?.action === 'pr' || rec?.type === 'pr'
@@ -1017,10 +1095,11 @@ export function ContributionDecision({
     typeof rec?.relay_contribution_id === 'string' &&
     typeof onWithdraw === 'function'
   const hasConnection = status === 'merged' && !!publicationHandoff(rec)
+  const hasHeld = typeof onSettle === 'function' && ownerHeld(rec) !== null
   const quality = qualityReviewFor(rec)
   const reviewInProgress = quality.state === 'reviewing' || quality.state === 'queued'
   const hasDecision = hasAttention || hasSubmitAlert ||
-    hasPreparedAction || hasRestore || hasWithdraw || hasConnection
+    hasPreparedAction || hasRestore || hasWithdraw || hasConnection || hasHeld
   if (!hasDecision) return null
 
   const title = hasSubmitAlert || hasAttention
@@ -1049,6 +1128,7 @@ export function ContributionDecision({
         />
       ) : null}
       {hasRestore ? <RestoreAction rec={rec} onRestore={onRestore} /> : null}
+      {hasHeld ? <HeldAction rec={rec} onSettle={onSettle} onFeedback={onFeedback} /> : null}
       {!isPr && status === 'prepared' && typeof onFeedback !== 'function' ? (
         <p className="co-review-note">Open the source conversation to continue this request.</p>
       ) : null}

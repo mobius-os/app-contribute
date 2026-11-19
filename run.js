@@ -7,6 +7,7 @@ import {
 import { groupRecords, timeAgo } from './domain.js'
 import { NAMES } from './names.js'
 import { canOpenForReview } from './ready-offer.js'
+import { ownerHeld } from './lifecycle-record.js'
 import {
   contributionScopeHash,
   hasAttentionSignal,
@@ -239,6 +240,16 @@ function projectRows(projects) {
   })
 }
 
+// Why a held record waits on the owner, in the job's own words when it has asked (its `owner_request`), else the table's.
+const HELD_FALLBACK = {
+  stranded_update: 'The pull request finished before the update was sent. Choose what to do with the prepared changes.',
+  orphaned: 'The change was merged into a branch that did not reach the default branch. Choose what to do.',
+}
+function heldReason(record, held) {
+  const asked = record?.attention?.type === 'owner_request' && record.attention.message
+  return `${asked || HELD_FALLBACK[held.kind]} · ${recordRepo(record)}`
+}
+
 function awaitingAppConnection(record) {
   if (record?.status !== 'merged') return false
   if (record?.plan?.after_merge?.action !== 'connect_app') return false
@@ -251,6 +262,7 @@ function settledRecords(records) {
       'prepared', 'submitting', 'landing', 'draft', 'open', 'abandoned',
     ].includes(record?.status))
     .filter(record => !awaitingAppConnection(record))
+    .filter(record => !ownerHeld(record))
     .sort((left, right) => String(right?.updated_at || right?.created_at || '').localeCompare(
       String(left?.updated_at || left?.created_at || ''),
     ))
@@ -484,6 +496,18 @@ export function buildContributionRun({
       record,
       label: contributionTitle(record),
       detail: `Finishing the local publication link · ${recordRepo(record)}`,
+    }))
+  }
+
+  // A finished PR that still waits on the owner is a decision, not an accepted contribution: its status word says merged or closed, a region of its
+  // lifecycle says an update can no longer go out or a merge never landed (lifecycle-record.js ownerHeld). It stays here until the owner settles it.
+  for (const record of prRecords) {
+    const held = ownerHeld(record)
+    if (!held) continue
+    decisions.push(decision(held.kind, { type: 'record', id: record.id, record, records: [record] }, byRepo, {
+      record,
+      label: contributionTitle(record),
+      detail: heldReason(record, held),
     }))
   }
 

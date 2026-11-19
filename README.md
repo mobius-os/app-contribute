@@ -328,6 +328,9 @@ the service token. Record shape:
   "stranded_announced": false,
   // When the one reminder about an update that can no longer go out was sent.
   "stranded_reminded_at": "2026-07-20T09:00:00Z",
+  // How you settled that update (written by the record's buttons or settle_exit.py,
+  // never by hand): the exit, when, and the record that took the change over.
+  "update_outcome": { "exit": "PRESERVE_AS_NEW", "at": "2026-07-21T09:00:00Z", "successor": "<record id>" },
   // Display-only MIRROR of the autopilot state (see below). The real grant +
   // claim live in a platform DB row; this block is written by the platform for
   // the app/cron to render and must never be treated as authorization.
@@ -414,7 +417,11 @@ for that branch to reach the default branch, asks you once if it never does
 (`owner_request`, "Merged into a branch that never landed"), and looks at such
 a record at most once a day after that. An update that was prepared for a PR
 that merged or closed first is a stranded update: you hear once, get one
-reminder, and choose what to do with it. In both modes, a merge into the default
+reminder, and choose what to do with it. It waits in Needs you (**Update not sent**,
+and **Merged elsewhere** for a merge that never landed) until you settle it from its
+card: **Already in the merge** and **Discard** are one checked write there, **Keep as
+new work** and **Land it again** open the source chat, where the agent stages the new
+record and records the exit with `settle_exit.py` (`contributing/card-asks.md`). In both modes, a merge into the default
 branch or a close that you made in this app is told once by the job
 (`merged_announced` and `closed_announced`), which also closes out a follow-up
 grant that was left on. If an update was waiting when you did that, the job

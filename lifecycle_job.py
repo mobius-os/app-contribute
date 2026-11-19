@@ -294,7 +294,7 @@ def _requests(record: dict, effects: list, vector: dict, now_iso: str) -> list:
   return found
 
 
-def _settled_request(record: dict, vector: dict) -> bool:
+def settled_request(record: dict, vector: dict) -> bool:
   """A standing owner request whose region no longer waits: the owner (or GitHub) moved it."""
   attention = record.get("attention")
   if not (isinstance(attention, dict) and attention.get("type") == OWNER_REQUEST):
@@ -370,7 +370,7 @@ def plan_record(record: dict, node: Any, now: int, now_iso: str, attention: dict
   requests = _requests(record, effects, vector, now_iso)
   if requests:
     patch.update(_request_patch(record, patch, requests[-1][0]))
-  elif "attention" not in patch and _settled_request(record, vector):
+  elif "attention" not in patch and settled_request(record, vector):
     patch.update(needs_attention=False, attention=None)
   actions = actions_of(record, node, effects, requests)
   patch.update(_reminded(record, vector, effects, now_iso))
