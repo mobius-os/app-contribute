@@ -68,8 +68,14 @@ export function baseIsDefaultOf(pr) {
   return typeof defaultBranch === 'string' && defaultBranch && typeof pr.baseRefName === 'string' && pr.baseRefName ? pr.baseRefName === defaultBranch : null
 }
 
-// A merged stack member lands in its parent's branch, not in the default one, whatever the read says; any other PR is as the read says (`known`).
-const baseDefaultOf = (record, known) => (record.plan?.stack && typeof record.plan.stack === 'object' ? false : typeof known === 'boolean' ? known : null)
+// Where the merge landed is what the PR's own target says (`known`), for a stack layer as for any PR: the first layer is merged into the default
+// branch, and so is a layer GitHub retargeted there once its parent landed. Only where the read did not say does the record's own place stand in:
+// a layer above the first is taken to be in its parent's branch; anything else reads as an unknown, which the tables read as the default branch.
+function baseDefaultOf(record, known) {
+  if (typeof known === 'boolean') return known
+  const stack = record.plan?.stack
+  return stack && typeof stack === 'object' && Number(stack.position) !== 1 ? false : null
+}
 
 // Engine: the event the receipt confirms, offered to the record's lifecycle as the owner's. A state that does not accept it (a PR
 // already merged, a record not yet sent) changes nothing. The effects it raises (the follow-up grant closed out, one notification)

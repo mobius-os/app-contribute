@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import { PR_FIELDS } from '../api.js'
 import { RECEIPTS, baseIsDefaultOf, emptiedAttention, recordAfterReceipt, writePullReceipt } from '../pull-receipt.js'
+import { jobPasses, mergedNode, publicationOf } from './job-probe.mjs'
 
 const NOW = 1763460000
 const ISO = new Date(NOW * 1000).toISOString()
@@ -202,7 +203,48 @@ test('in engine mode, an in-app Merge into a side branch is merged elsewhere and
   assert.deepEqual([home.lifecycle.regions.publication.state, home.merged_announced], ['MERGED', false])
   assert.equal(after(PR, 'merged', { ...ENGINE, baseRef: 'main' }).lifecycle.regions.publication.state, 'MERGED', 'an unknown default branch keeps today\u2019s behaviour')
   const member = { ...PR, plan: { repo: 'o/r', stack: { parent: 'p' } } }
-  assert.equal(after(member, 'merged', { ...ENGINE, baseRef: 'parent', baseIsDefault: true }).lifecycle.regions.publication.state, 'MERGED_ELSEWHERE', 'a stack member is never in the default branch')
+  assert.equal(after(member, 'merged', { ...ENGINE, baseRef: 'parent', baseIsDefault: false }).lifecycle.regions.publication.state, 'MERGED_ELSEWHERE', 'a stack layer whose PR targets its parent\u2019s branch landed there')
+  assert.equal(after(member, 'merged', { ...ENGINE, baseRef: 'parent' }).lifecycle.regions.publication.state, 'MERGED_ELSEWHERE', 'a layer above the first, where the read did not say, is taken to be in its parent\u2019s branch')
+})
+
+// ---- The PR's own target decides, for a stack layer as for any PR: the first layer, and a layer GitHub retargeted to the default branch
+// after its parent landed, are merged into the default branch. Each is read back by the job's own planner, the way a later pass reads it.
+const layer = (position, base) => ({ ...PR, plan: { repo: 'o/r', action: 'pr', stack: { id: 's', name: 'S', position, total: 3, base_branch: base } } })
+const DAY_S = 86400
+
+test('a stack\u2019s first layer merged into the default branch is shipped: merged, owed its one notice, and never orphaned by the job', () => {
+  const root = { ...layer(1, 'main'), autopilot: { enabled: true, state: 'idle' } }
+  for (const engine of [false, true]) {
+    const next = after(root, 'merged', { engine, baseRef: 'main', baseIsDefault: true })
+    assert.equal(next.merged_announced, false, `engine ${engine}: the merged notice and the grant close-out are owed`)
+    assert.equal('github_base_ref' in next, false, `engine ${engine}: no other branch to watch`)
+    assert.equal(next.status, 'merged')
+  }
+  const stored = after(root, 'merged', { ...ENGINE, baseRef: 'main', baseIsDefault: true })
+  assert.equal(publicationOf(stored), 'MERGED')
+  const [first, later] = jobPasses(stored, [{ node: mergedNode('main'), now: NOW }, { node: mergedNode('main'), now: NOW + 15 * DAY_S }])
+  assert.deepEqual(first.actions.map(action => action.do), ['cleanup', 'notify'], 'the job tells it once and closes the follow-up out')
+  assert.equal(first.actions.at(-1).title, 'Contribution merged \u{1F389}')
+  assert.deepEqual([publicationOf(later.record), later.record.status, later.actions], ['MERGED', 'merged', []], 'fifteen days on it is still merged: no question about a branch that never landed')
+  assert.equal(later.record.attention ?? null, null)
+})
+
+test('a layer GitHub retargeted to the default branch once its parent landed is shipped when it merges, whatever its position', () => {
+  const child = layer(2, 'feature-parent')
+  const next = after(child, 'merged', { ...ENGINE, baseRef: 'main', baseIsDefault: true })
+  assert.equal(publicationOf(next), 'MERGED')
+  assert.equal(next.merged_announced, false)
+  const [first, later] = jobPasses(next, [{ node: mergedNode('main'), now: NOW }, { node: mergedNode('main'), now: NOW + 15 * DAY_S }])
+  assert.equal(first.actions.at(-1).title, 'Contribution merged \u{1F389}')
+  assert.deepEqual([publicationOf(later.record), later.record.attention ?? null], ['MERGED', null])
+})
+
+test('a layer merged into its parent\u2019s branch is merged elsewhere and the job waits for that branch, as before', () => {
+  const child = layer(2, 'feature-parent')
+  const next = after(child, 'merged', { ...ENGINE, baseRef: 'feature-parent', baseIsDefault: false })
+  assert.deepEqual([publicationOf(next), next.github_base_ref, 'merged_announced' in next], ['MERGED_ELSEWHERE', 'feature-parent', false])
+  const [pass] = jobPasses(next, [{ node: mergedNode('feature-parent'), now: NOW + DAY_S }])
+  assert.deepEqual([publicationOf(pass.record), pass.actions], ['MERGED_ELSEWHERE', []], 'one day on: still waiting, nothing said twice')
 })
 
 test('in shadow mode, the word is written as before, but a merge into a side branch owes no notice (the job\u2019s "ships to everyone" would be untrue)', () => {
