@@ -239,6 +239,14 @@ only for the core and the one mode it is working in.
 - This app declares `permissions.github_access: true` in its manifest. That
   permission is what lets its app-scoped token reach the read-only GitHub
   status + GraphQL endpoints; the platform enforces it server-side.
+- Its agents declare `agent.scope: "admin"` (full access, as every app agent
+  had before Möbius let apps confine them). Every agent Contribute starts, and
+  every review run started from it (the platform opens those review chats in
+  Contribute's name, with their reviewer helpers), edits the platform and app
+  sources, works in git checkouts outside the app's folder, uses `gh` and calls
+  the `/api/github/*` contribution and review-run routes. A confined room
+  (Tools, Read or Edit) can reach none of these, so a narrower scope would
+  break every agent feature. Older Möbius releases ignore the `agent` key.
 
 ## How it stores data
 

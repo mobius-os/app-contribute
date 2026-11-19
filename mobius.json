@@ -10,6 +10,10 @@
   "entry": "index.jsx",
   "offline_capable": true,
   "embeds_agent": true,
+  "agent": {
+    "scope": "admin",
+    "reason": "Prepares, reviews and fixes your code changes and their GitHub pull requests."
+  },
   "owner_confirm": true,
   "capabilities": {
     "chat.blocks.passive": {
