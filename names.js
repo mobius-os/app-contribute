@@ -102,7 +102,7 @@ export const NAMES = Object.freeze({
   showFullMessage: 'Show the full message',
   seeChanges: 'See changes',
   viewOnGitHub: 'View on GitHub',
-  settings: 'Contribute settings',
+  settings: 'Settings',
 
   // The app's list of followed repositories. Say repository, not project or app: "Projects" is the Möbius shell's own word for something else.
   repositories: 'Repositories',

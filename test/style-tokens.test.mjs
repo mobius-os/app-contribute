@@ -37,7 +37,7 @@ test('the token sheet holds six radii and its type sizes, with one compact set f
   // The Window Rule (DESIGN.md): the one big radius is a window over the page, 24px, and 20px on a phone.
   assert.deepEqual(radii, [6, 8, 10, 12, 999, 24, 20])
   const phone = phoneSet(theme)
-  assert.deepEqual(sizesIn(theme.replace(phone, '')), { meta: 14, body: 16, section: 22, title: 28, chip: 14, entry: 16, reading: 13, code: 12 })
+  assert.deepEqual(sizesIn(theme.replace(phone, '')), { meta: 14, body: 16, section: 22, title: 28, chip: 14, entry: 16, reading: 13, code: 12, fine: 12 })
   assert.deepEqual(sizesIn(phone), { meta: 13, body: 15, section: 20, title: 22, chip: 12 })
 })
 

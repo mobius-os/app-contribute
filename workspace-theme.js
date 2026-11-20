@@ -933,7 +933,8 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 /* ---- The Desk home: side rail, views, one card per app ---- */
 .co-desk { display:grid; grid-template-columns:248px minmax(0,1fr); gap:28px; align-items:start; }
 .co-desk-pane { min-width:0; }
-.co-rail { position:sticky; top:8px; display:flex; flex-direction:column; gap:2px; max-height:calc(100vh - 16px); overflow-y:auto; scrollbar-width:none; padding:2px; }
+/* The rail is as tall as the room under the header, so the foot row (Settings) sits at the bottom of the side list; 230px is the header and its sync line with the page's own padding. */
+.co-rail { position:sticky; top:8px; display:flex; flex-direction:column; gap:2px; min-height:calc(100dvh - 230px); max-height:calc(100vh - 16px); overflow-y:auto; scrollbar-width:none; padding:2px; }
 .co-rail::-webkit-scrollbar { display:none; }
 .co-rail-item { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--co-control-height); padding:6px 10px; border:0; border-radius:var(--co-radius-control); background:none; color:var(--text); font:500 var(--co-text-body) var(--font); text-align:left; cursor:pointer; }
 .co-rail-item:hover { background:var(--surface-2); }
@@ -949,11 +950,13 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rail-projects { margin-top:22px; padding-top:6px; border-top:1px solid var(--border); }
 .co-rail-head { margin:0; padding:14px 10px 6px; color:var(--muted); font:700 var(--co-text-meta) var(--font); letter-spacing:.05em; text-transform:uppercase; }
 .co-rail-add { margin-top:6px; }
+
 .co-rail-add .co-repository-trigger { width:100%; justify-content:flex-start; padding-inline:10px; }
 /* The rail scrolls, so it clips whatever floats out of it: its form and its note open in flow under the row, at the rail's width. */
 .co-rail-add .co-repository-picker form,.co-rail-add .co-repository-note { position:static; width:auto; margin-top:6px; box-sizing:border-box; }
 .co-rail-add .co-repository-picker form { padding:12px; }
 .co-rail-add .co-repository-picker form > div { flex-direction:column; align-items:stretch; }
+.co-rail-foot { margin-top:auto; padding-top:8px; border-top:1px solid var(--border); } /* the Settings row: the .co-rail-item.is-settings class is only a marker, it carries no style of its own */
 .co-desk-quiet-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0 0 12px; color:var(--muted); font-size:var(--co-text-meta); }
 .co-rail-quiet > summary { display:flex; align-items:center; gap:8px; min-height:38px; padding:6px 10px; border-radius:var(--co-radius-control); color:var(--muted); font:500 var(--co-text-meta) var(--font); cursor:pointer; list-style:none; }
 .co-rail-quiet > summary::-webkit-details-marker { display:none; }
@@ -1263,6 +1266,7 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 @media(max-width:980px) {
   .co-desk { display:block; }
   .co-rail { display:none; }
+  .co-btn.co-toolbar-settings { display:inline-flex; }
   .co-desk-chips { display:block; }
   /* The lit segment already names the view, so the heading only stays for screen readers. */
   .co-view-heading { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; } /* the .co-visually-hidden recipe, on a phone only */

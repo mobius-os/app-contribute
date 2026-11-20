@@ -3,7 +3,7 @@
  *  so a PR is recognisable here and on github.com in both shell themes. */
 import { Icon } from './Icons.jsx'
 import { checkSummary, isBotAuthor } from '../collaboration.js'
-import { timeAgo } from '../domain.js'
+import { compactTimeAgo, onDate, timeAgo } from '../domain.js'
 
 // Labels and state pills are filled with their GitHub colour, 30% less intense:
 // 70% of the colour mixed into the page surface, then black or white text,
@@ -57,9 +57,9 @@ export const SYNC_NOTE_ID = 'co-sync-note'
 export function SyncNote({ note, id = SYNC_NOTE_ID }) {
   if (!note?.at && !note?.failed && !note?.updating) return null
   // The app opened from its last-known copy and is reading what moved: one quiet line, and how old the copy is.
-  if (note.updating) return <span id={id} className="co-sync-note">Updating…{note.at ? <span className="co-sync-last"><TimeAgo prefix=" · last synced " value={note.at} /></span> : null}</span>
+  if (note.updating) return <span id={id} className="co-sync-note">Updating…{note.at ? <span className="co-sync-last"><TimeAgo compact prefix=" · last synced " value={note.at} /></span> : null}</span>
   // After a failure the last good time follows on a wide header; a phone keeps only the failure, so the note never grows past the button.
-  return <span id={id} className="co-sync-note">{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo prefix={note.failed ? ' · Last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
+  return <span id={id} className={'co-sync-note' + (note.failed ? ' is-failed' : '')}>{note.failed ? 'Couldn’t sync' : null}{note.at ? <span className={note.failed ? 'co-sync-last' : undefined}><TimeAgo compact prefix={note.failed ? ' · last synced ' : 'Last synced '} value={note.at} /></span> : null}</span>
 }
 
 // Labels in a list are the same filled pills as on the PR page, "area: " dropped,
@@ -150,11 +150,12 @@ function shortAgo(value) {
   return ago.endsWith(' ago') ? ago.slice(0, -4) : null
 }
 
-/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. With `short`, a phone reads "3h" in its place:
+/** GitHub's relative time: "3 hours ago", "yesterday", "last week", then a date. With `compact`, the sync note's "3m ago" (domain.js compactTimeAgo). With `short`, a phone reads "3h" in its place:
  *  both are in the page and CSS shows one (the long one stays readable to a screen reader, as single-line-overflow's own markup does). */
-export function TimeAgo({ value, prefix = '', short = false }) {
+export function TimeAgo({ value, prefix = '', short = false, compact = false }) {
   const time = Date.parse(value)
   if (!Number.isFinite(time)) return null
+  if (compact) return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>{prefix}{compactTimeAgo(value)}</time>
   const seconds = Math.max(0, (Date.now() - time) / 1000)
   const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
   const text = seconds < 60 ? 'just now'
@@ -162,7 +163,7 @@ export function TimeAgo({ value, prefix = '', short = false }) {
       : seconds < 86400 ? relative.format(-Math.round(seconds / 3600), 'hour')
         : seconds < 7 * 86400 ? relative.format(-Math.round(seconds / 86400), 'day')
           : seconds < 30 * 86400 ? relative.format(-Math.round(seconds / (7 * 86400)), 'week')
-            : `on ${new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(seconds > 300 * 86400 ? { year: 'numeric' } : {}) })}`
+            : onDate(time, seconds)
   const brief = short ? shortAgo(value) : null
   return <time dateTime={value} title={new Date(time).toLocaleString(undefined, { hourCycle: 'h23' })}>
     {brief ? <><span className="co-time-long">{prefix}{text}</span><span className="co-time-short" aria-hidden="true">{brief}</span></> : <>{prefix}{text}</>}

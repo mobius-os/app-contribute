@@ -79,7 +79,7 @@ import {
   updateContributionStack,
   withdrawMobiusContribution,
 } from './api.js'
-import { ConnectionSettings } from './ui/ConnectionCard.jsx'
+import { SettingsButton, SettingsWindow } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
@@ -377,6 +377,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const [ignoredReviews, setIgnoredReviews] = useState({})
   // A setting that could not be saved (offline, an older Möbius): the control goes back to what it showed and this says so.
   const [settingsError, setSettingsError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [deskView, setDeskView] = useState('needs')
   const [lastLooked, setLastLooked] = useState('')
   // The PR page the desk pane shows, over whatever view or project is behind
@@ -689,6 +690,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return status
   }, [token])
 
+  // Opening Settings reads the GitHub account again, as the panel it replaces did.
+  const openSettings = useCallback(() => { setSettingsOpen(true); void refreshConnection() }, [refreshConnection])
   const refreshConnectionRef = useRef(null)
   refreshConnectionRef.current = refreshConnection
 
@@ -2123,21 +2126,20 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     <ScreenshotLoaderContext.Provider value={loadScreenshot}>
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
+      {settingsOpen ? <SettingsWindow onClose={() => setSettingsOpen(false)}
+        appId={appId} conn={conn} token={token} onChanged={refreshConnection}
+        autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
+        newPrStage={newPrStage} onChangeNewPrStage={onChangeNewPrStage}
+        reviewAgent={reviewAgent} onChangeReviewAgent={onChangeReviewAgent} /> : null}
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed || refreshNote?.updating ? SYNC_NOTE_ID : undefined}>
-            <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.sync}</span>
-              <span className="co-label-short">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
+            <Icon name={refreshingAll ? 'refresh' : 'github'} size={28} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
+            <span className="co-sync-copy"><span className="co-sync-label">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
               <SyncNote note={refreshNote} />
             </span>
           </button>
-          <ConnectionSettings
-            appId={appId} conn={conn} token={token} onChanged={refreshConnection}
-            autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
-            newPrStage={newPrStage} onChangeNewPrStage={onChangeNewPrStage}
-            reviewAgent={reviewAgent} onChangeReviewAgent={onChangeReviewAgent}
-          />
+          <SettingsButton conn={conn} onOpen={openSettings} className={'co-btn co-toolbar-settings' + (selectionFocus || (sourceLoading && !sourceSnapshot && !sourceProjects.length) ? ' is-always' : '')}><Icon name="settings" size={20} /><span>{NAMES.settings}</span></SettingsButton>
         </Header>
         <div className="co-sync-result-slot" role="status" aria-live="polite">
           {syncResult ? <p key={syncResult.id} className="co-sync-result"><Icon name="check" size={16} className="co-sync-result-check" /><span><Words text={syncResult.text} /></span></p> : null}
@@ -2152,6 +2154,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           renderRepositoryControls={project => (project.canonical_repo && conn.state === 'connected' ? <AlwaysLoad key={project.key} repo={project.canonical_repo} pinned={pinned.has(project.canonical_repo.toLowerCase())} onChange={setPinned} /> : null)}
           conn={conn} loading={sourceLoading} error={sourceError}
           checks={upstreamChecks} attention={projectAttention}
+          railFoot={<SettingsButton conn={conn} onOpen={openSettings} className="co-rail-item is-settings"><Icon name="settings" size={15} /><span className="co-rail-label">{NAMES.settings}</span></SettingsButton>}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))

@@ -99,9 +99,10 @@ export function addressItems(pr, { activity = [], threads = [], findings = null 
 export const respondScope = (repo, number) => `contribute-address:${String(repo).toLowerCase()}#${number}`
 
 // What the window starts. It always carries a cid, so the platform's "the PR already has its conversation" answer becomes one more
-// message into that conversation (a plain start would only reopen it, without the job). A second pass keeps the conversation's agent.
-export function respondAction({ pr, items, appId, cid, agent = null, answered = false }) {
-  return { ...addressBrief({ pr, items, appId }), cid, ...(agent?.model && !answered ? { agent } : {}), ...(answered ? { applyModel: false } : {}) }
+// message into that conversation (a plain start would only reopen it, without the job). The agent is sent only when the owner
+// chose one: a second pass otherwise keeps the conversation's own, and a chosen model is applied to that same conversation first.
+export function respondAction({ pr, items, appId, cid, agent = null }) {
+  return { ...addressBrief({ pr, items, appId }), cid, ...(agent?.model ? { agent } : {}) }
 }
 
 // The instruction the agent conversation starts from. Its scope key keeps the

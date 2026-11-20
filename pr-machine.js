@@ -15,13 +15,14 @@
 //     An approval of an older commit still counts when the fact reader proved the PR's own
 //     change the same (`sameWork`, see same-work.js): a merge of the base is a new commit, not new work.
 //     That words the PR's standing and its highlighted next step (notReadyToMerge); it does not switch your own
-//     Merge off, and GitHub's merge rules refuse what cannot land. The agent's own unattended merge has no tap
-//     behind it, so the platform still asks it (not_ready_to_merge).
+//     Merge off, and GitHub's merge rules refuse what cannot land. The one exception is rights: an account GitHub
+//     says can only read or triage the repository gets Merge stopped, with that reason. The agent's own unattended
+//     merge has no tap behind it, so the platform still asks it (not_ready_to_merge).
 //   - Four things stop an action of yours: the PR cannot be read, it is closed or merged, an agent is already
 //     working on it, or something sent to GitHub is not confirmed. Not every action is stopped by all four: an Ask
 //     stops for the first two (and for a list of people not read whole), Open for review, Back to draft and Close for
-//     the first three only (an unconfirmed send does not stop them), Merge for all four, and an agent job also while a
-//     draft owns the findings. The table below says which. An action tied to a thing waits for that thing
+//     the first three only (an unconfirmed send does not stop them), Merge for all four and for an account that only
+//     reads, and an agent job also while a draft owns the findings. The table below says which. An action tied to a thing waits for that thing
 //     (a draft to send, a person to ask, a result to set aside). Asking works for anyone who reviewed or commented
 //     and has not approved this version; the sheet ticks the people each ask is meant for (Ask for re-review lists only
 //     the people GitHub takes a review request for: those its writers-only opinions named). Request review is the one ask
@@ -269,13 +270,17 @@ export function notReadyToMerge(facts, d = derive(facts)) {
 }
 
 // What stops one of your actions whatever the PR's review standing is: the PR cannot be read, it is closed or merged, an agent
-// is working on it, or something sent to GitHub is not confirmed. The rest (approvals, checks, rights) GitHub and the
-// platform refuse in their own words when the tap reaches them.
+// is working on it, or something sent to GitHub is not confirmed. The rest (approvals, checks) GitHub and the
+// platform refuse in their own words when the tap reaches them; Merge alone also stops for a known lack of write access (mergeStops).
 const agentStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
 const takeOverStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), MAINTAINER.includes(facts.permission) ? '' : 'Only maintainers can take over someone else’s PR.', jobIdle(facts), nothingInFlight(d), draftOwnsFindings(d))
 // GitHub's merge queue already holds the PR: pressing Merge again would only be refused, after the owner's confirmation was spent.
 const inMergeQueue = facts => (facts.queued === true ? 'This pull request is already in the merge queue.' : '')
-const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), inMergeQueue(facts), nothingInFlight(d), jobIdle(facts))
+// GitHub tells us up front when an account cannot merge here, so Merge stops with that reason instead of spending the owner's
+// confirmation on a refusal. Only a known permission below Write stops it; an unknown one is left to the platform.
+const lacksMergeRights = facts => (['READ', 'TRIAGE'].includes(facts.permission)
+  ? `Merging needs write access to this repository. Your account has ${facts.permission.toLowerCase()} access.` : '')
+const mergeStops = (facts, d) => firstReason(readable(facts), stillOpen(facts), inMergeQueue(facts), lacksMergeRights(facts), nothingInFlight(d), jobIdle(facts))
 const statusStops = facts => firstReason(readable(facts), stillOpen(facts), jobIdle(facts))
 // The two Ask actions need someone to name: anyone who reviewed or commented, except who already approved this version.
 const nobodyToAsk = d => (d.approvedAtHead.length ? 'Everyone who reviewed it has already approved this version.' : 'Nobody has reviewed this PR yet.')

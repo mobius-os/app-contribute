@@ -358,7 +358,8 @@ test('the sync note keeps the last successful time visible beside a failed retry
   assert.match(guard, /Last synced /)
   const theme = readFileSync(new URL('../theme.js', import.meta.url), 'utf8')
   assert.match(theme, /\.co-sync-copy \{ display:flex; flex-direction:column/)
-  assert.doesNotMatch(theme, /\.co-toolbar \.co-label-long, \.co-sync-note \{ display: none; \}/)
+  assert.match(guard, /<TimeAgo compact prefix=\{note\.failed \? ' · last synced ' : 'Last synced '\}/, 'the time is the short form, under the one word Sync')
+  assert.match(theme, /\.co-toolbar-refresh \.co-sync-note \{ font-size: var\(--co-text-fine\);/)
 })
 
 test('list labels are filled pills like the PR page, two at most, and a bot says bot', async t => {
@@ -480,10 +481,11 @@ test('on a phone the four views are one segmented bar with every segment on scre
 test('the phone keeps Sync and Settings labelled, a sticky review footer and decision bar, and an unsqueezed group header', () => {
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const theme = read('theme.js'), work = read('workspace-theme.js'), app = read('index.jsx')
-  assert.match(app, /<span className="co-label-short">\{refreshingAll \? <Shine>Syncing…<\/Shine> : NAMES\.syncShort\}<\/span>/)
-  assert.equal(NAMES.syncShort, 'Sync', 'the phone keeps the short word; the full name is Sync with GitHub')
-  assert.match(theme, /\.co-toolbar \.co-label-short \{ display: inline; \}/)
-  assert.doesNotMatch(work, /\.co-header \.co-settings > summary > span \{ display:none; \}/, 'Settings keeps its word on a phone')
+  assert.match(app, /<span className="co-sync-label">\{refreshingAll \? <Shine>Syncing…<\/Shine> : NAMES\.syncShort\}<\/span>/)
+  assert.equal(NAMES.syncShort, 'Sync', 'the header says only Sync; the accessible name and other sentences keep Sync with GitHub')
+  assert.match(theme, /\.co-sync-label, \.co-sync-note:not\(\.is-failed\) \{ position: absolute;/, 'on a phone Sync is the mark alone, its word and note stay for a reader; only a failure is spelled out')
+  assert.match(theme, /\.co-btn\.co-toolbar-settings \{[^}]*display: none/, 'the header has no Settings where the rail has one')
+  assert.match(work, /\.co-rail \{ display:none; \}\n  \.co-btn\.co-toolbar-settings \{ display:inline-flex; \}/, 'below 980px the rail is gone and the header takes Settings, with its word')
   assert.match(work, /\.co-rw-foot \{ position:sticky; bottom:0;/, 'the review window\'s button stays on screen at every width: the card scrolls, its footer does not (finding 3)')
   assert.match(work, /\.co-decision-bar \{ display:flex; position:sticky; bottom:0;/)
   assert.match(work, /\.co-envelope-head \.co-project-icon,\.co-envelope-head \.co-source-tag,\.co-envelope-head \.co-rail-count \{ flex:none; \}/)

@@ -196,6 +196,7 @@ export function SourceMap({
   renderActivity,
   renderRepositoryControls = null,
   addProject = null,
+  railFoot = null,
   onProjectOpenChange,
   checks = {},
   attention = {},
@@ -346,7 +347,7 @@ export function SourceMap({
   return (
     <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Repository details">
       <div className="co-desk">
-      <DeskRail view={desk.view} counts={desk.counts} projects={projects} attention={attention} selectedKey={selected} onView={openView} onOpenProject={openProjectFromRail} addProject={addProject?.(true)} />
+      <DeskRail view={desk.view} counts={desk.counts} projects={projects} attention={attention} selectedKey={selected} onView={openView} onOpenProject={openProjectFromRail} addProject={addProject?.(true)} foot={railFoot} />
       <div className="co-desk-pane">
       {desk.pull ? (
         <div className="co-pull-page">

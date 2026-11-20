@@ -88,7 +88,7 @@ test('the app\'s repository list and its settings take their own names, not the 
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const rail = read('ui/Desk.jsx'), picker = read('ui/RepositoryPicker.jsx')
   assert.equal(NAMES.repositories, 'Repositories')
-  assert.equal(NAMES.settings, 'Contribute settings')
+  assert.equal(NAMES.settings, 'Settings', 'you are already in Contribute: the app calls it plain Settings')
   assert.match(rail, /\{NAMES\.repositories\}<\/h2>/)
   assert.match(rail, /<span>\{NAMES\.moreRepositories\}<\/span>/)
   assert.match(picker, /<span>\{NAMES\.addRepository\}<\/span>/)

@@ -68,17 +68,16 @@ test('the default row carries its own effort track, and choosing a level keeps t
   assert.match(source, /choice\?\.model === model\.id && !matchesDefault/)
 })
 
-test('a conversation’s saved agent is named like the picker names it: model label and effort', async t => {
+test('a second pass can pick another model of the conversation’s provider; the other provider’s models say why they cannot be picked', async t => {
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
-  const { conversationAgent } = await renderModule(`
-    import { conversationAgent } from './ui/AgentModelSettings.jsx'
-    export { conversationAgent }
+  const { modelRowNote } = await renderModule(`
+    import { modelRowNote } from './ui/AgentModelSettings.jsx'
+    export { modelRowNote }
   `)
-  const registry = { providers: { claude: [{ id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', effort_levels: null }] } }
-  assert.deepEqual(conversationAgent({ provider: 'claude', model: 'claude-sonnet-5-5', effort: 'xhigh' }, registry), { provider: 'claude', title: 'Sonnet 5.5', detail: 'Extra high' })
-  assert.deepEqual(conversationAgent({ provider: 'claude', model: 'claude-gone', effort: 'odd' }, registry), { provider: 'claude', title: 'claude-gone', detail: '' },
-    'a model the registry no longer lists keeps its id, and an unknown effort is left out')
-  assert.deepEqual(conversationAgent({ provider: 'codex', model: null }, null), { provider: 'codex', title: 'Default model', detail: 'OpenAI Codex' },
-    'no saved model is the chat default of its provider')
-  assert.equal(conversationAgent(undefined, registry), null, 'no conversation, no name')
+  const status = { claude: { name: 'Claude Code' }, codex: { name: 'OpenAI Codex' } }
+  assert.equal(modelRowNote({ provider: 'claude', configured: true, status, onlyProvider: 'claude' }), 'Claude Code')
+  assert.equal(modelRowNote({ provider: 'codex', configured: true, status, onlyProvider: 'claude' }), 'Codex can’t continue this Claude conversation')
+  assert.equal(modelRowNote({ provider: 'claude', configured: true, status, onlyProvider: 'codex' }), 'Claude can’t continue this Codex conversation')
+  assert.equal(modelRowNote({ provider: 'codex', configured: false, status }), 'OpenAI Codex · Not connected', 'a launch with no conversation limits nothing')
 })
+

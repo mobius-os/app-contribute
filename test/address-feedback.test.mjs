@@ -74,10 +74,11 @@ test('the action the window starts carries a cid, so a second pass reaches the P
   assert.equal(first.title, 'Respond to feedback on #120')
   assert.deepEqual(first.agent, agent)
   assert.notEqual(first.applyModel, false)
-  const again = respondAction({ pr, items, cid: 'respond-2', agent, answered: true })
-  assert.equal(again.agent, undefined, 'the conversation already has its agent')
-  assert.equal(again.applyModel, false)
-  assert.equal(respondAction({ pr, items, cid: 'respond-3' }).agent, undefined)
+  const again = respondAction({ pr, items, cid: 'respond-2', agent })
+  assert.deepEqual(again.agent, agent, 'a model chosen for a second pass is applied to the PR’s conversation')
+  assert.equal(again.applyModel, undefined)
+  assert.equal(respondAction({ pr, items, cid: 'respond-3' }).agent, undefined, 'choosing nothing keeps the conversation’s own agent')
+  assert.equal(respondAction({ pr, items, cid: 'respond-4', agent: { provider: '', model: '', effort: '' } }).agent, undefined, 'the Default row sends nothing')
 })
 
 test('the checklist renders as real controls', async t => {
