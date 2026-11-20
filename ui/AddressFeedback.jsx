@@ -62,7 +62,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       // The agent reads the whole saved review from a file, so it is written before the brief that names it goes out.
       const saved = await writeFindings(state.items)
       if (!saved.ok) { setError(saved.error); return }
-      const result = await onStart(respondAction({ pr, items: state.items, appId, cid, agent }))
+      const result = await onStart(respondAction({ pr, items: state.items, appId, cid, agent, chatId: response?.result?.chat_id }))
       if (result?.ok) setStarted(result)
       else setError(result?.error || 'Could not start the agent. Try again.')
     } catch { setError('Could not start the agent. Try again.') }
@@ -92,7 +92,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       {ticked ? <p className="co-rw-note">{coverageLine(state.items)}</p> : null}
       <p className="co-rw-note co-rw-callout"><b>It does not review the PR again.</b> It answers only what is ticked, fixes it in a private copy and runs the tests.</p>
       <p className="co-rw-note co-rw-callout"><b>Then:</b> the answers, changed files and commits appear in this PR’s Review tab. Nothing is pushed or posted{ownerGrant ? <> until you press <b>{NAMES.postAnswer}</b></> : ''}.</p>
-      {response ? <><p className="co-rw-note co-rw-callout">This replaces the answer that is waiting.</p><ConversationAgent token={token} scope={respondScope(pr.repository.nameWithOwner, pr.number)} choice={agent} onChange={pickAgent} /></>
+      {response ? <><p className="co-rw-note co-rw-callout">This replaces the answer that is waiting.</p><ConversationAgent token={token} scope={respondScope(pr.repository.nameWithOwner, pr.number)} chatId={response.result?.chat_id} choice={agent} onChange={pickAgent} /></>
         : <AgentModelSettings token={token} choice={agent} defaultChoice={ownDefault || defaultChoice} explicitDefault={!!ownDefault}
           defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={pickAgent} />}
     </div>

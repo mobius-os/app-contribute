@@ -242,17 +242,20 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
 const AGENT_KEPT = 'Same agent as the first answer, so it builds on that work'
 
 /** The agent a second pass runs on. The PR's conversation keeps its agent unless the owner picks another model of the same
- *  provider (it cannot change provider once it has run). `scope` is the conversation's app-chat scope. Until the conversation
+ *  provider (it cannot change provider once it has run). `scope` is the conversation's app-chat scope and `chatId` the exact conversation to read in it. Until the conversation
  *  is read, or when it cannot be, the window names it without a choice. */
-export function ConversationAgent({ token, scope, choice, onChange }) {
+export function ConversationAgent({ token, scope, chatId = null, choice, onChange }) {
   const [chat, setChat] = useState(null)
   useEffect(() => {
     let alive = true
     readJson(token, `/api/app-chats?scope=${encodeURIComponent(scope)}`)
-      .then(chats => { if (alive) setChat(chats?.[0]?.provider ? chats[0] : null) })
+      .then(chats => {
+        const found = chatId ? chats?.find(row => String(row.id) === String(chatId)) : chats?.[0]
+        if (alive) setChat(found?.provider ? found : null)
+      })
       .catch(() => {})
     return () => { alive = false }
-  }, [token, scope])
+  }, [token, scope, chatId])
   if (!chat) return <section className="co-agent-picker" aria-label="Agent">
     <div className="co-agent-trigger co-agent-kept">
       <span className="co-agent-trigger-label">Agent</span>

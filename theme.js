@@ -1421,14 +1421,12 @@ export const CSS = `
   .co-title { font-size: var(--co-text-body); }
   .co-toolbar { gap: 3px; }
   .co-toolbar-check { width: 32px; padding: 0; justify-content: center; }
-  /* Settings keeps its word on a phone. Sync is the GitHub mark alone there: its word and the last-sync time stay for screen readers,
-     and only a failed sync is spelled out beside the mark. */
+  /* Sync keeps its word on a phone, so the mark is not the only hint that it syncs. The last-sync time stays for screen readers,
+     and only a failed sync is spelled out beside the word. */
   .co-sync-last { display: none; }
-  .co-btn.co-toolbar-refresh { position: relative; min-width: 44px; min-height: 44px; padding: 0; gap: 0; justify-content: center; }
+  .co-btn.co-toolbar-refresh { min-height: 44px; padding-inline: 6px 8px; gap: 6px; }
   .co-toolbar-refresh > .co-icon { width: 24px; height: 24px; }
-  .co-sync-label, .co-sync-note:not(.is-failed) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-  .co-btn.co-toolbar-refresh:has(.co-sync-note.is-failed) { gap: 6px; padding-inline: 8px; color: var(--danger-text, var(--danger)); }
-  .co-sync-note.is-failed { color: inherit; }
+  .co-sync-note:not(.is-failed) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .co-project-control { max-width: 108px; padding-inline: 8px; }
   .co-project-control > span { overflow: hidden; text-overflow: ellipsis; }
   .co-project-control b { display: none; }

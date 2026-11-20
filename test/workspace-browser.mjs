@@ -3745,7 +3745,7 @@ window.runRespondAgainChecks = async () => {
     const sent = calls.messages[0]
     ensure(sent.chatId === 'respond-chat-fixture' && /^respond-/.test(sent.cid), 'The message went to ' + sent.chatId + ' as ' + sent.cid)
     ensure(sent.content.includes('respond_result.py save --pr owner/project#7') && !/approval card/.test(sent.content), 'The brief was: ' + sent.content.slice(0, 400))
-    ensure(calls.appChatStarts.length === 1 && calls.appChatStarts[0].scope === 'contribute-address:owner/project#7', 'The start used another scope: ' + JSON.stringify(calls.appChatStarts))
+    ensure(calls.appChatStarts.length === 0, 'Respond again was bound to the conversation the picker read, so it never starts the scope again: ' + JSON.stringify(calls.appChatStarts))
     const patch = calls.requests.find(call => call.method === 'PATCH' && call.url.startsWith('/api/app-chats/'))
     ensure(patch?.url === '/api/app-chats/respond-chat-fixture' && patch.body.provider === 'codex' && patch.body.model === 'other-fixture-model', 'The chosen model was not applied to the PR’s conversation: ' + JSON.stringify(patch))
     ensure(calls.requests.indexOf(patch) < calls.requests.findIndex(call => call.method === 'POST' && /\/messages$/.test(call.url)), 'The model was applied after the message went')
