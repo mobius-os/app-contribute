@@ -4,11 +4,13 @@
 import { needsCount } from './desk.js'
 import { projectHasSharedUpdates } from './source-map.js'
 import { prKey } from './collaboration.js'
+import { sameLogin } from './domain.js'
 
 // The facts a Sync is compared by, read from what the app shows right now.
-export function syncFacts({ incoming = [], counts = {}, projects = [], checks = {} } = {}) {
+export function syncFacts({ incoming = [], counts = {}, projects = [], checks = {}, login = '' } = {}) {
   return {
-    requests: new Set(incoming.filter(pr => pr.reviewRequested).map(prKey)),
+    // A PR of your own that GitHub also lists as a review request (a team of yours was asked) is no request to you.
+    requests: new Set(incoming.filter(pr => pr.reviewRequested && !sameLogin(pr.author?.login, login)).map(prKey)),
     needs: needsCount(counts),
     behind: new Set(projects.filter(project => projectHasSharedUpdates(project) || checks[project.key]?.newCommits > 0).map(project => project.name)),
   }

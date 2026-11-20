@@ -208,7 +208,7 @@ test('a post that stopped part-way says where, keeps what went out, and can be t
   assert.match(texts(html), /Stopped at replies: GitHub refused the comment\. The ticked steps went out and a second try skips them\. A reply that may have reached GitHub is only looked for on a second try, never sent again\./)
   assert.doesNotMatch(texts(html), /\.\./, 'a message that already ends in a full stop gets no second one')
   assert.deepEqual(steps(html).map(([state]) => state), ['done', 'todo', 'todo', 'todo'], 'only the push went out')
-  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, NAMES.tryAgain, NAMES.openChat, NAMES.discard].includes(label)), [NAMES.tryAgain, NAMES.openChat])
+  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, NAMES.tryAgain, NAMES.openChat, NAMES.discard].includes(label)), [NAMES.tryAgain, NAMES.openChat, NAMES.discard])
 })
 
 test('a reply that may still reach GitHub is said so in plain words and offers only a look again, never a second send', async t => {
@@ -218,7 +218,7 @@ test('a reply that may still reach GitHub is said so in plain words and offers o
   if (!html) return
   assert.ok(texts(html).includes(`Stopped at replies: ${message}. The ticked steps went out`), 'the helper’s own words reach the owner')
   assert.match(texts(html), /only looked for on a second try, never sent again/)
-  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, NAMES.tryAgain, NAMES.openChat, NAMES.discard].includes(label)), [NAMES.tryAgain, NAMES.openChat])
+  assert.deepEqual(buttons(html).filter(label => [NAMES.postAnswer, NAMES.tryAgain, NAMES.openChat, NAMES.discard].includes(label)), [NAMES.tryAgain, NAMES.openChat, NAMES.discard])
 })
 
 test('a posted answer is a quiet summary with links to what went out', async t => {

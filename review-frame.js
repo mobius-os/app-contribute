@@ -1,6 +1,6 @@
 // The comet frame around a PR under review: pure geometry and state mapping,
 // so it is testable without a DOM. ui/ReviewFrame.jsx draws it.
-import { ignoredNote, reviewItemProgress, reviewRunHalted } from './collaboration.js'
+import { reviewReading, reviewRunHalted, reviewsOfPr } from './collaboration.js'
 
 export const COMET_SPEED = 160 // pixels per second: a slow, steady lap
 export const COMET_LAYERS = 36
@@ -34,13 +34,18 @@ export const cometSeconds = perimeter => perimeter / COMET_SPEED
 // agent works, holds amber while the review waits on the owner, else absent.
 // Finished reviews stay as the chip alone: nothing records which results the
 // owner has already seen, and a ring on every old review would never go away.
-// `own` is whether the owner wrote the PR (see reviewItemProgress).
+// `own` is whether the owner wrote the PR (see reviewReading). The same reading gives the PR page its
+// frame: a review that stalled (nothing will wake it) is the owner's move on both, and one that did not
+// finish is no move at all, the PR is simply still to review.
 export function frameState(status, ctx) {
   if (!status) return 'idle'
   const { run, item } = status
-  const progress = reviewItemProgress(run, item, ctx)
-  if (progress.halted || progress.settled) return 'idle'
-  if (progress.turn === 'owner' && (item.state !== 'failed' || progress.waiting)) return 'verdict'
+  const reading = reviewReading(run, item, ctx)
+  if (reading.state === 'STALLED') return 'verdict'
+  if (reading.halted || reading.settled || reading.state === 'NOT_FINISHED') return 'idle'
+  // A comment on its way to GitHub is something sent, not the owner's decision: the PR page says "Sending" and travels the frame too.
+  if (item.public_review?.state === 'posting') return 'reviewing'
+  if (reading.turn === 'owner' && (item.state !== 'failed' || reading.waiting)) return 'verdict'
   return WORKING_ITEMS.has(item.state) ? 'reviewing' : 'idle'
 }
 
@@ -53,12 +58,10 @@ export const hasActiveReview = runs => reviewRepositoriesAtWork(runs).size > 0
 
 // A saved record names its PR by repository and number; the newest review of
 // that PR (at any version) is what its desk row should reflect while it runs.
+// A record does not know the PR's current code, so this is the PR lookup's newest review (collaboration.js reviewsOfPr).
 export function reviewForRecord(runs, record) {
   const repo = String(record?.plan?.repo || record?.repo || '').toLowerCase()
   const number = Number(record?.number)
   if (!repo || !number) return null
-  const matches = (runs || []).flatMap(run => (run.items || [])
-    .filter(item => item.repo?.toLowerCase() === repo && item.number === number)
-    .map(item => ({ run, item })))
-  return matches.sort((a, b) => Date.parse(b.run.created_at || '') - Date.parse(a.run.created_at || ''))[0] || null
+  return reviewsOfPr(runs, repo, number)[0] || null
 }

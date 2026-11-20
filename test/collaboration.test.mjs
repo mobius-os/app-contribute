@@ -263,7 +263,8 @@ test('a minimized core run attaches to its PR row by repository, number, head an
   assert.equal(reviewForPull([run], pull(7)).exactBase, true)
   assert.equal(reviewForPull([run], pull(7, { headRefOid: 'c'.repeat(40) })), null)
   assert.equal(reviewForPull([run], pull(8)), null)
-  assert.equal(reviewForPull([minimized({}, { base_ref: 'release' })], pull(7)), null)
+  // GitHub retargets a PR without changing its code: the review of that code is still found, and says it did not see this branch.
+  assert.equal(reviewForPull([minimized({}, { base_ref: 'release' })], pull(7))?.exactBase, false)
 })
 
 test('a minimized core run is never observed; a details_in_owning_chat refusal stops polling and is not an error', async t => {

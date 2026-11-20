@@ -161,17 +161,29 @@ export function upsertRecord(records, update) {
 // code, or a known error raised after the branch push (stage `pushed` with an
 // error, for example a failed PR create, which the platform answers with a
 // truthful 409). Restaging clears the error, so a `pushed` stage with an
-// error always belongs to the current attempt. Its signed receipt keeps it
-// locked; only a read-only observation settles it, and its saved error is
-// never a refusal (mobius #2084).
+// error belongs to the current attempt, but only when that push is the
+// version the plan sends now: the platform keeps `pushed` and the old push
+// sha across a restage, so a refusal of the new version must not read as a
+// lost send (the `pushed` journal of the first send is not evidence about
+// it). Its signed receipt keeps it locked; only a read-only observation
+// settles it, and its saved error is never a refusal (mobius #2084).
 const UNSETTLED_SUBMIT_STAGES = new Set(['push_pending', 'push_ambiguous'])
 export const UNCONFIRMED_SUBMIT_CODES = new Set(['publication_unconfirmed', 'update_unconfirmed', 'create_unconfirmed', 'push_ambiguous'])
+const sha = value => String(value ?? '').trim().toLowerCase()
+// A push sha that is absent, or a plan with no head, cannot say the push was
+// of another version: only a present, different sha clears the doubt.
+const pushedCurrentVersion = record => !sha(record.last_submit_push_sha) || !sha(record.plan?.head_sha)
+  || sha(record.last_submit_push_sha) === sha(record.plan.head_sha)
+// The last send's outcome is not known, whatever the status word says. The
+// one rule behind `uncertainPublication` and the lifecycle reader's facts
+// (lifecycle_record.py `_unconfirmed` is its Python twin).
+export const lastSendUnconfirmed = record => UNSETTLED_SUBMIT_STAGES.has(record?.last_submit_stage)
+  || UNCONFIRMED_SUBMIT_CODES.has(record?.last_submit_error_code)
+  || (record?.last_submit_stage === 'pushed' && Boolean(record.last_submit_error) && pushedCurrentVersion(record))
 export function uncertainPublication(record) {
   if (record?.type !== 'pr' || record.submission_mode === 'mobius-bot') return false
   if (record.status === 'submitting') return true
-  return record.status === 'prepared' && (UNSETTLED_SUBMIT_STAGES.has(record.last_submit_stage)
-    || UNCONFIRMED_SUBMIT_CODES.has(record.last_submit_error_code)
-    || record.last_submit_stage === 'pushed' && Boolean(record.last_submit_error))
+  return record.status === 'prepared' && lastSendUnconfirmed(record)
 }
 
 // The exact record version an observation answers: its last write, reviewed

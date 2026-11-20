@@ -109,11 +109,13 @@ test('Post writes the approval first, then sends the chat the one message, bound
   const out = await approveResponse({ ...view(), slug: SLUG, token: 't', storage, deliver, now: () => '2026-11-06T09:30:00Z' })
   assert.deepEqual(out, { ok: true })
   assert.deepEqual(approvedBefore, ['approved'], 'the helper needs the approval on disk before the chat is told to run it')
-  assert.deepEqual(storage.files[`respond-decisions/${SLUG}.json`], { version: 1, result_id: example().id, digest: example().digest, decision: 'approved', at: '2026-11-06T09:30:00Z' })
+  const { attempt, ...approval } = storage.files[`respond-decisions/${SLUG}.json`]
+  assert.deepEqual(approval, { version: 1, result_id: example().id, digest: example().digest, decision: 'approved', at: '2026-11-06T09:30:00Z' })
+  assert.match(attempt, /^[0-9a-f]{12}$/, 'the approval names the Post it belongs to')
   assert.equal(delivered.length, 1)
   const { request } = delivered[0]
   assert.equal(request.chatId, 'respond-chat-1')
-  assert.equal(request.cid, `respond-post-${example().id}`, 'a second press is a duplicate, not a second message')
+  assert.equal(request.cid, `respond-post-${example().id}-${attempt}`, 'the message id names the answer and its Post: a second press of the same Post is a duplicate, not a second message')
   assert.equal(request.scope, 'contribute-address:owner/repo#7')
   assert.equal(request.title, 'Respond to feedback on #7')
   assert.equal(request.applyModel, false)

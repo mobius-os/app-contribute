@@ -1,0 +1,496 @@
+{
+ "histories": 117,
+ "note": "Distinct event shapes of real pull-request histories, with how many histories had each shape. No identifying data.",
+ "shapes": [
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 39,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 16,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 15,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "merged": false
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 13,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 7,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "merged": false
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 6,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "MARKED_DRAFT"
+    },
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 4,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 4,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "CLOSED",
+   "events": [
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "CLOSED",
+   "histories": 3,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 3,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "CLOSED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "MARKED_DRAFT"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "CLOSED",
+   "histories": 1,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {
+      "base_is_default": false
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "reached": "after"
+     },
+     "type": "ROUTE_RESOLVED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "is_draft": true
+     },
+     "type": "REOPENED"
+    },
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_DRAFT"
+    },
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "OPEN"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "MARKED_DRAFT"
+    },
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "merged": false
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "MERGED",
+   "events": [
+    {
+     "data": {},
+     "type": "MARKED_READY"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "merged": false
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "merged": false
+     },
+     "type": "QUEUE_LEFT"
+    },
+    {
+     "data": {},
+     "type": "QUEUE_ENTERED"
+    },
+    {
+     "data": {
+      "base_is_default": true
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "merged": true
+     },
+     "type": "QUEUE_LEFT"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "DRAFT"
+  },
+  {
+   "ends": "ORPHANED",
+   "events": [
+    {
+     "data": {
+      "base_is_default": false
+     },
+     "type": "MERGED"
+    },
+    {
+     "data": {},
+     "type": "CLOSED"
+    },
+    {
+     "data": {
+      "reached": "before"
+     },
+     "type": "ROUTE_RESOLVED"
+    }
+   ],
+   "github": "MERGED",
+   "histories": 1,
+   "initial": "OPEN"
+  }
+ ]
+}

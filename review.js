@@ -13,34 +13,22 @@ function stableApprovalValue(value) {
   ]))
 }
 
-// Public approval belongs to the exact durable action the owner saw, not just
-// to a record id. Keep the projection narrower than transient UI state, but
-// include every fact that can change the target, code, public text, or action.
+// Public approval belongs to the exact durable action the owner saw: the target, the reviewed
+// code, the public text and the review. These are the platform's approval fields
+// (github_contributions.py `PUBLICATION_APPROVAL_FIELDS`), plus `revision`, which the app has
+// always bound and its test pins. Pure noise (when it was written, the summary, the pushed sha,
+// the readying fields, the relay id) never makes an approval stale. `status`, `needs_attention`,
+// `attention` and `last_submit_error` stay although the platform does not bind them: it does not
+// refuse a claim on needs_attention, so between approval and Send this check is the only guard.
+const APPROVAL_FIELDS = ['id', 'type', 'repo', 'branch', 'title', 'url', 'number', 'head_repository',
+  'publication_stage', 'submission_mode', 'plan', 'quality_review', 'revision',
+  'status', 'attention', 'last_submit_error']
+
 export function contributionApprovalFingerprint(record) {
   if (!record || typeof record !== 'object') return ''
   return JSON.stringify(stableApprovalValue({
-    id: record.id,
-    type: record.type,
-    status: record.status,
-    revision: record.revision,
-    updated_at: record.updated_at,
-    repo: record.repo,
-    title: record.title,
-    summary: record.summary,
-    url: record.url,
-    number: record.number,
-    branch: record.branch,
-    head_repository: record.head_repository,
-    submission_mode: record.submission_mode,
-    relay_contribution_id: record.relay_contribution_id,
-    last_submit_push_sha: record.last_submit_push_sha,
-    last_submit_error: record.last_submit_error,
+    ...Object.fromEntries(APPROVAL_FIELDS.map(key => [key, record[key] ?? null])),
     needs_attention: record.needs_attention === true,
-    attention: record.attention || null,
-    readying: record.readying || null,
-    last_ready_error_code: record.last_ready_error_code,
-    plan: record.plan || null,
-    quality_review: record.quality_review || null,
   }))
 }
 

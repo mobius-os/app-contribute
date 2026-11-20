@@ -9,6 +9,10 @@ export const RepositoryListsContext = createContext(null)
 const standalone = createRepositoryLists()
 export const useRepositoryLists = () => useContext(RepositoryListsContext) || standalone
 
+// The key a PR page's snapshot is kept under: the PR and the version of it that was read. `updatedAt` is in it because anything that happens on GitHub
+// moves it (a comment, a review, a label), so a page opened after that reads GitHub again and never shows the tabs of an earlier visit.
+export const detailKey = pr => `${prKey(pr)}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}:${pr.updatedAt || ''}`
+
 // A repository's list on its screen: the rows and paging it holds now (from the last visit, a background read or this
 // screen's own), kept up to date in place. A list confirmed current within a minute (the probe's cadence) is not read
 // again when the screen opens. `held` says which PR the screen is on and which it has ticked (repository-lists.js hold);
@@ -25,7 +29,7 @@ export function useRepositoryList({ repo, token, connected, refreshKey, publicRe
   // The PR pages' snapshots belong to the list, and a first-page read clears them: the page of a PR shows what GitHub says now.
   const [detailRevision, setDetailRevision] = useState(0)
   const detailSnapshot = pr => {
-    const key = `${prKey(pr)}:${pr.headRefOid}:${pr.baseRefOid}:${pr.baseRefName}`
+    const key = detailKey(pr)
     if (!list.details.has(key)) list.details.set(key, { entries: {}, stale: false })
     return list.details.get(key)
   }

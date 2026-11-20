@@ -1,0 +1,496 @@
+{
+ "note": "Shared by test/respond-lifecycle.test.mjs and test/test_respond_lifecycle.py: the words table both sides keep (respond-lifecycle.js RESPOND_WORDS, respond_lifecycle.py STATE_WORDS), how the words read, and the stamp the helper writes for a sequence of moves, which the app then reads at later times. A move is [kind, now, the state word the helper sets after it]. Reads of a stamp are [now, the region the app reads].",
+ "words": [
+  {
+   "region": "POSTED",
+   "words": {
+    "state": "posted"
+   }
+  },
+  {
+   "region": "POSTING",
+   "words": {
+    "state": "posting"
+   }
+  },
+  {
+   "region": "FAILED",
+   "words": {
+    "state": "failed"
+   }
+  },
+  {
+   "region": "DISCARDED",
+   "words": {
+    "state": "ready",
+    "decision": "discarded"
+   }
+  },
+  {
+   "region": "OUT_OF_DATE",
+   "words": {
+    "state": "ready",
+    "moved": true
+   }
+  },
+  {
+   "region": "APPROVED",
+   "words": {
+    "state": "ready",
+    "decision": "approved"
+   }
+  },
+  {
+   "region": "READY",
+   "words": {
+    "state": "ready"
+   }
+  }
+ ],
+ "reads": [
+  {
+   "name": "a saved answer nobody has decided on",
+   "found": {
+    "state": "ready",
+    "decision": null,
+    "moved": false
+   },
+   "region": "READY"
+  },
+  {
+   "name": "Post pressed, the chat not started",
+   "found": {
+    "state": "ready",
+    "decision": "approved",
+    "moved": false
+   },
+   "region": "APPROVED"
+  },
+  {
+   "name": "the owner discarded it",
+   "found": {
+    "state": "ready",
+    "decision": "discarded",
+    "moved": false
+   },
+   "region": "DISCARDED"
+  },
+  {
+   "name": "the PR moved before anything was approved",
+   "found": {
+    "state": "ready",
+    "decision": null,
+    "moved": true
+   },
+   "region": "OUT_OF_DATE"
+  },
+  {
+   "name": "the PR moved after Post, before the chat started",
+   "found": {
+    "state": "ready",
+    "decision": "approved",
+    "moved": true
+   },
+   "region": "OUT_OF_DATE"
+  },
+  {
+   "name": "a discard wins over a moved PR",
+   "found": {
+    "state": "ready",
+    "decision": "discarded",
+    "moved": true
+   },
+   "region": "DISCARDED"
+  },
+  {
+   "name": "a post that is running ignores the PR head (its own push moves it)",
+   "found": {
+    "state": "posting",
+    "decision": "approved",
+    "moved": true
+   },
+   "region": "POSTING"
+  },
+  {
+   "name": "a post that stopped part-way",
+   "found": {
+    "state": "failed",
+    "decision": "approved",
+    "moved": true
+   },
+   "region": "FAILED"
+  },
+  {
+   "name": "a posted answer",
+   "found": {
+    "state": "posted",
+    "decision": "approved",
+    "moved": true
+   },
+   "region": "POSTED"
+  }
+ ],
+ "stamps": [
+  {
+   "name": "a ready answer starts posting and completes one step",
+   "result": {
+    "state": "ready"
+   },
+   "moves": [
+    [
+     "BEGIN",
+     100,
+     "posting"
+    ],
+    [
+     "PROGRESS",
+     150,
+     "posting"
+    ]
+   ],
+   "vector": {
+    "v": 1,
+    "regions": {
+     "respond": {
+      "state": "POSTING",
+      "since": 100,
+      "deadline": 330
+     }
+    },
+    "history": [
+     {
+      "at": 100,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "READY"
+     },
+     {
+      "at": 100,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     },
+     {
+      "at": 150,
+      "type": "PROGRESS",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "POSTING"
+     }
+    ]
+   },
+   "reads": [
+    {
+     "now": 329,
+     "region": "POSTING"
+    },
+    {
+     "now": 330,
+     "region": "FAILED"
+    },
+    {
+     "now": 100000,
+     "region": "FAILED"
+    }
+   ]
+  },
+  {
+   "name": "a post that went quiet and is resumed starts again",
+   "result": {
+    "state": "ready"
+   },
+   "moves": [
+    [
+     "BEGIN",
+     100,
+     "posting"
+    ],
+    [
+     "BEGIN",
+     1000,
+     "posting"
+    ]
+   ],
+   "vector": {
+    "v": 1,
+    "regions": {
+     "respond": {
+      "state": "POSTING",
+      "since": 1000,
+      "deadline": 1180
+     }
+    },
+    "history": [
+     {
+      "at": 100,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "READY"
+     },
+     {
+      "at": 100,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     },
+     {
+      "at": 1000,
+      "type": "TIMEOUT",
+      "source": "clock",
+      "region": "respond",
+      "to": "FAILED",
+      "from": "POSTING"
+     },
+     {
+      "at": 1000,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "FAILED"
+     },
+     {
+      "at": 1000,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     }
+    ]
+   },
+   "reads": [
+    {
+     "now": 1179,
+     "region": "POSTING"
+    },
+    {
+     "now": 1180,
+     "region": "FAILED"
+    }
+   ]
+  },
+  {
+   "name": "a post that stopped part-way and is tried again",
+   "result": {
+    "state": "ready"
+   },
+   "moves": [
+    [
+     "BEGIN",
+     100,
+     "posting"
+    ],
+    [
+     "POST_FAILED",
+     200,
+     "failed"
+    ],
+    [
+     "BEGIN",
+     300,
+     "posting"
+    ]
+   ],
+   "vector": {
+    "v": 1,
+    "regions": {
+     "respond": {
+      "state": "POSTING",
+      "since": 300,
+      "deadline": 480
+     }
+    },
+    "history": [
+     {
+      "at": 100,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "READY"
+     },
+     {
+      "at": 100,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     },
+     {
+      "at": 200,
+      "type": "POST_FAILED",
+      "source": "agent",
+      "region": "respond",
+      "to": "FAILED",
+      "from": "POSTING"
+     },
+     {
+      "at": 300,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "FAILED"
+     },
+     {
+      "at": 300,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     }
+    ]
+   },
+   "reads": [
+    {
+     "now": 479,
+     "region": "POSTING"
+    },
+    {
+     "now": 480,
+     "region": "FAILED"
+    }
+   ]
+  },
+  {
+   "name": "a post that stopped part-way",
+   "result": {
+    "state": "ready"
+   },
+   "moves": [
+    [
+     "BEGIN",
+     100,
+     "posting"
+    ],
+    [
+     "POST_FAILED",
+     200,
+     "failed"
+    ]
+   ],
+   "vector": {
+    "v": 1,
+    "regions": {
+     "respond": {
+      "state": "FAILED",
+      "since": 200,
+      "deadline": null
+     }
+    },
+    "history": [
+     {
+      "at": 100,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "READY"
+     },
+     {
+      "at": 100,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     },
+     {
+      "at": 200,
+      "type": "POST_FAILED",
+      "source": "agent",
+      "region": "respond",
+      "to": "FAILED",
+      "from": "POSTING"
+     }
+    ]
+   },
+   "reads": [
+    {
+     "now": 200,
+     "region": "FAILED"
+    },
+    {
+     "now": 100000,
+     "region": "FAILED"
+    }
+   ]
+  },
+  {
+   "name": "a post that finished",
+   "result": {
+    "state": "ready"
+   },
+   "moves": [
+    [
+     "BEGIN",
+     100,
+     "posting"
+    ],
+    [
+     "POST_OK",
+     120,
+     "posted"
+    ]
+   ],
+   "vector": {
+    "v": 1,
+    "regions": {
+     "respond": {
+      "state": "POSTED",
+      "since": 120,
+      "deadline": null
+     }
+    },
+    "history": [
+     {
+      "at": 100,
+      "type": "APPROVE",
+      "source": "owner",
+      "region": "respond",
+      "to": "APPROVED",
+      "from": "READY"
+     },
+     {
+      "at": 100,
+      "type": "CHAT_STARTED",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTING",
+      "from": "APPROVED"
+     },
+     {
+      "at": 120,
+      "type": "POST_OK",
+      "source": "agent",
+      "region": "respond",
+      "to": "POSTED",
+      "from": "POSTING"
+     }
+    ]
+   },
+   "reads": [
+    {
+     "now": 120,
+     "region": "POSTED"
+    },
+    {
+     "now": 100000,
+     "region": "POSTED"
+    }
+   ]
+  }
+ ]
+}

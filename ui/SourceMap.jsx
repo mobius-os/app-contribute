@@ -9,6 +9,7 @@ import { Icon } from './Icons.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
 import { TimeAgo } from './GithubParts.jsx'
 import { TaskContext } from './TaskPane.jsx'
+import { CoveredContext } from './useReviewList.js'
 import { DESK_VIEWS, deskViewKey, splitProjects } from '../desk.js'
 import { NAMES } from '../names.js'
 import { DeskChips, DeskCounts, DeskFind, DeskRail } from './Desk.jsx'
@@ -88,17 +89,19 @@ function ProjectDetail({
 
 const PROJECT_TAGS = { platform: 'Platform', app: 'App' }
 
-function attentionLine(reviewRequests, needs) {
+// `asked` is how many of the project's review requests are the owner's move (desk.js requestsWaiting); each is a Needs you row, so `needs` already
+// counts them and the line says that one number. Without it (a caller that does not know) the line names the requests besides.
+function attentionLine(reviewRequests, needs, asked = null) {
   const parts = []
-  if (reviewRequests) parts.push(`${reviewRequests} ${reviewRequests === 1 ? 'PR waits' : 'PRs wait'} for your review.`)
+  if (reviewRequests && asked === null) parts.push(`${reviewRequests} ${reviewRequests === 1 ? 'PR waits' : 'PRs wait'} for your review.`)
   if (needs) parts.push(`${needs} ${needs === 1 ? 'thing needs' : 'things need'} you.`)
   return parts.join(' ')
 }
 
-export function ProjectRow({ project, selected, onSelect, check = null, needs = 0, quiet = false }) {
+export function ProjectRow({ project, selected, onSelect, check = null, needs = 0, asked = null, quiet = false }) {
   const facts = projectBoardFacts(project)
   const reviewRequests = project.reviewRequests?.length || 0
-  const attention = attentionLine(reviewRequests, needs)
+  const attention = attentionLine(reviewRequests, needs, asked)
   const tag = PROJECT_TAGS[project.kind]
   const newCommits = check?.newCommits || 0
   const shared = newCommits > 0 ? `${newCommits} new ${newCommits === 1 ? 'commit' : 'commits'} on GitHub since the last check.` : facts.shared
@@ -147,12 +150,12 @@ export function ProjectRow({ project, selected, onSelect, check = null, needs = 
   )
 }
 
-function ProjectGroup({ label, counted = false, projects, selectedKey, onSelect, checks = {}, attention = {}, quiet = false }) {
+function ProjectGroup({ label, counted = false, projects, selectedKey, onSelect, checks = {}, attention = {}, asked = null, quiet = false }) {
   if (!projects.length) return null
   return (
     <div className="co-source-group">
       {label ? <h3 className={'co-source-group-label' + (counted ? ' is-counted' : '')}><span>{label}</span>{counted ? <b>{projects.length}</b> : null}</h3> : null}
-      {projects.map((project) => <ProjectRow key={project.key} project={project} selected={project.key === selectedKey} onSelect={onSelect} check={checks[project.key]} needs={attention[project.key] || 0} quiet={quiet} />)}
+      {projects.map((project) => <ProjectRow key={project.key} project={project} selected={project.key === selectedKey} onSelect={onSelect} check={checks[project.key]} needs={attention[project.key] || 0} asked={asked ? asked[project.key] ?? 0 : null} quiet={quiet} />)}
     </div>
   )
 }
@@ -225,6 +228,7 @@ export function SourceMap({
   const handledFocusRef = useRef('')
   const [selectedWorkId, setSelectedWorkId] = useState('')
   const workTriggerRef = useRef(null)
+  const pageOpen = !!desk.pull
   const [navigationError, setNavigationError] = useState('')
   const pageScroller = () => document.querySelector('.co-page')
 
@@ -239,6 +243,8 @@ export function SourceMap({
     setSelectedWorkId(itemId)
   }
   const activityNavigation = { selectedId: selectedWorkId, onSelect: openWork, onBack: closeWork }
+  // What a PR page covers stays mounted, only hidden, but a docked window opened from it lives in a layer outside it and would stay over the page.
+  useEffect(() => { if (pageOpen && selectedWorkId) closeWork() }, [pageOpen])
 
   function showProject(key) {
     listScrollRef.current = pageScroller()?.scrollTop || 0
@@ -333,7 +339,7 @@ export function SourceMap({
     void openProject(project.key)
     if (item?.id) openWork(item.id)
   }
-  const externalQuestions = external.reduce((count, project) => count + (project.reviewRequests?.length || 0), 0)
+  const externalQuestions = external.reduce((count, project) => count + (desk.asked?.[project.key] ?? project.reviewRequests?.length ?? 0), 0)
   if (loading && !snapshot && !projects.length) return <LoadingState />
   const currentView = DESK_VIEWS.find(item => item.key === desk.view)
   const viewLabel = currentView?.heading || currentView?.label || NAMES.repositories
@@ -347,8 +353,10 @@ export function SourceMap({
           <button type="button" className="co-desk-back" onClick={desk.onClosePull}><Icon name="left" size={16} />Back to {selectedProject ? selectedProject.name : viewLabel}</button>
           <PullPageTask>{desk.renderPull()}</PullPageTask>
         </div>
-      ) : (
-      <>
+      ) : null}
+      {/* What the PR page covers stays mounted, only hidden: Back returns to the tab, the filter, the search and the selection as they were. */}
+      <CoveredContext.Provider value={pageOpen}>
+      <div className="co-desk-under" style={{ display: pageOpen ? 'none' : 'contents' }}>
       {selectedProject ? <h2 className="co-visually-hidden">Repository detail</h2> : (
         <>
         <DeskChips view={desk.view} counts={desk.counts} onView={openView} />
@@ -385,7 +393,7 @@ export function SourceMap({
             <DeskFind view={desk.view} projects={orderedProjects} onView={openView}>
               <SearchField label="Find a PR, person or repository" value={deskQuery} onChange={setDeskQuery} />
             </DeskFind>
-            <DeskView view={desk.view} projects={orderedProjects} records={desk.records} login={desk.login} decisionsFor={desk.decisionsFor} lastLooked={desk.lastLooked} query={deskQuery} runs={desk.runs} chats={desk.respondChats} responses={desk.responses} ignored={desk.ignored} reviews={desk.reviews} counts={desk.counts} needsFilter={needsFilter} capabilities={desk.capabilities} onOpenProject={openProject} onOpenPull={desk.onOpenPull} onOpenRecord={openRecordFromDesk} />
+            <DeskView view={desk.view} projects={orderedProjects} records={desk.records} login={desk.login} decisionsFor={desk.decisionsFor} lastLooked={desk.lastLooked} query={deskQuery} runs={desk.runs} chats={desk.respondChats} responses={desk.responses} ignored={desk.ignored} projectRuns={desk.projectRuns} runsCut={desk.runsCut} incomingCut={desk.incomingCut} reviews={desk.reviews} counts={desk.counts} needsFilter={needsFilter} capabilities={desk.capabilities} onOpenProject={openProject} onOpenPull={desk.onOpenPull} onOpenRecord={openRecordFromDesk} onDismissRun={desk.onDismissRun} />
           </>
         ) : (
         <>
@@ -411,6 +419,7 @@ export function SourceMap({
                 onSelect={openProject}
                 checks={checks}
                 attention={attention}
+                asked={desk.asked || null}
               />
               <OtherRepositories projects={other} onSelect={openProject} checks={checks} searching={!!query.trim() || !workedWith.length} />
               <ProjectGroup
@@ -441,8 +450,8 @@ export function SourceMap({
           />
         </div>
       )}
-      </>
-      )}
+      </div>
+      </CoveredContext.Provider>
       </div>
       </div>
     </section>

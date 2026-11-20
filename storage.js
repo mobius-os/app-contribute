@@ -1,4 +1,5 @@
 import { repositoryName } from './collaboration.js'
+import { discardRecord, settleRecord } from './lifecycle-write.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
 import { stackMeta } from './stack.js'
 
@@ -468,6 +469,8 @@ function normalizeCycle(raw) {
     ...(raw.model_applied === true ? { model_applied: true } : {}), ...(raw.attempted === true ? { attempted: true } : {}),
     ...(raw.closed === true ? { closed: true } : {}) }
 }
+// The owner dismissed the project's current run (dismissProjectRun); a new cycle is written as a new record, so it never carries this over.
+const dismissedOf = raw => (raw?.dismissed === true ? { dismissed: true } : {})
 // Older records counted cycles as `seq`.
 const cycleNumber = raw => Number.isSafeInteger(raw?.k) && raw.k >= 0 ? raw.k : Number.isSafeInteger(raw?.seq) && raw.seq >= 0 ? raw.seq : 0
 
@@ -484,6 +487,7 @@ export function normalizeCycleState(raw) {
     ...(Array.isArray(raw.history) ? { history: raw.history.map(item => normalizeCycleState({ ...item, history: undefined, cycle: undefined })).filter(Boolean) } : {}),
     ...(cycleNumber(raw) ? { k: cycleNumber(raw) } : {}),
     ...(normalizeCycle(raw.cycle) ? { cycle: normalizeCycle(raw.cycle) } : {}),
+    ...dismissedOf(raw),
   }
 }
 
@@ -493,7 +497,7 @@ function normalizeProjectRecord(raw) {
   const current = normalizeCycleState(raw)
   if (current) return current
   const cycle = normalizeCycle(raw?.cycle)
-  return cycle ? { chat_id: '', k: cycleNumber(raw) || cycle.k, cycle, history: normalizeCycleState({ chat_id: '-', history: raw.history })?.history || [] } : null
+  return cycle ? { chat_id: '', k: cycleNumber(raw) || cycle.k, cycle, history: normalizeCycleState({ chat_id: '-', history: raw.history })?.history || [], ...dismissedOf(raw) } : null
 }
 
 async function cycleKey(projectKey) {
@@ -659,6 +663,23 @@ export async function updateCurrentCycle(projectKey, k, cid, facts = {}) {
   } catch { return false }
 }
 
+// The owner dismisses a project's run that stopped, failed or never started (the run region's DISMISS rows): one checked write that marks
+// the record, so the Needs you row leaves and does not come back for that run. A start nobody confirmed is closed in the same write: dismissing
+// it is giving it up, and the project must stop offering to send it again. `k` is the cycle the row was read from; a newer run is a new
+// record and is left alone. True only when the write was confirmed online.
+export async function dismissProjectRun(projectKey, k) {
+  const storage = window.mobius?.storage
+  if (!storage?.getWithVersion || !storage?.durableWrite) return false
+  try {
+    const key = await cycleKey(projectKey)
+    const { value, version, offline } = await storage.getWithVersion(key)
+    if (offline || !version || !value || cycleNumber(value) !== k) return false
+    const unsent = value.cycle && !value.cycle.delivered && !value.cycle.closed
+    const receipt = await storage.durableWrite(key, { ...value, dismissed: true, ...(unsent ? { cycle: { ...value.cycle, closed: true } } : {}) }, { ifMatch: version })
+    return receipt?.durability === 'synced'
+  } catch { return false }
+}
+
 const SETTINGS_FILE = 'settings.json'
 const DEFAULT_APP_SETTINGS = Object.freeze({
   autopilot_default: true,
@@ -687,11 +708,15 @@ export async function loadAppSettings() {
   try {
     const raw = await window.mobius.storage.get(SETTINGS_FILE)
     if (raw && typeof raw === 'object' && RETIRED_SETTINGS.some(key => key in raw)) await clearRetiredSettings()
-    return normalizeAppSettings(raw)
+    return rememberRead(normalizeAppSettings(raw))
   } catch {
-    return normalizeAppSettings(null)
+    return rememberRead(normalizeAppSettings(null))
   }
 }
+
+// Who computes the stored `status` word: the engine, or
+// today's code beside the engine's notes (the default, "shadow").
+export const lifecycleWriterOf = settings => (settings?.lifecycle_writer === 'engine' ? 'engine' : 'shadow')
 
 // Remove the retired keys with a versioned compare-and-set on the copy read
 // at that moment, never a blind write: a settings save that lands in between
@@ -713,13 +738,67 @@ async function clearRetiredSettings(attempts = 3) {
   }
 }
 
-export async function saveAppSettings(settings) {
-  try {
-    await window.mobius.storage.set(SETTINGS_FILE, settings || {})
-    return true
-  } catch {
-    return false
+// The settings the app last read, and that copy with every change a save has made since. A save is a change to what the caller read, so it is
+// replayed on what the file holds when it is written, never laid over it: two saves built from one read keep each other's changes. A value
+// that equals what was read, or what a save already wrote, is not a change of this save: a caller that builds from its own earlier save does
+// not re-apply that change over a newer value another writer stored.
+let loadedSettings = null
+let writtenSettings = null
+const rememberRead = settings => { writtenSettings = loadedSettings = settings; return settings }
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right)
+const changedKeys = next => Object.keys({ ...loadedSettings, ...writtenSettings, ...next })
+  .filter(key => !same(next[key], loadedSettings[key]) && !same(next[key], writtenSettings[key]))
+function replayChanges(current, next, keys) {
+  const kept = { ...current }
+  for (const key of keys) {
+    if (key in next) kept[key] = next[key]
+    else delete kept[key]
   }
+  return kept
+}
+
+// Change the settings file with a checked write, the pattern the records use: read
+// the file and its version, apply `change`, write with If-Match, and on a 412 (a
+// save from another view or the job landed in between) read again and apply the
+// change to what is there now. Bounded; never a blind write. False when it could not
+// be saved (offline, no versioned storage, or the file kept changing).
+export async function updateAppSettings(change, attempts = 3) {
+  const storage = window.mobius?.storage
+  const readVersioned = versionedReader(storage)
+  if (!readVersioned || typeof storage?.durableWrite !== 'function') return false
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const { value, version, offline } = await readVersioned(SETTINGS_FILE, 'json')
+      if (offline) return false
+      const next = change(normalizeAppSettings(value))
+      await storage.durableWrite(SETTINGS_FILE, next, version ? { ifMatch: version } : { ifNoneMatch: true })
+      return true
+    } catch (error) {
+      if (error?.code !== 'conflict' && error?.status !== 412) return false
+    }
+  }
+  return false
+}
+
+// Save the settings the caller built from `loadAppSettings()`. Only what the caller changed
+// is written, onto the file as it is now, so a save from another view is kept. Without a
+// read of its own first (nothing to compare with) the whole object is the change. A saved change
+// moves the comparison base, so the next save does not write it again.
+export async function saveAppSettings(settings) {
+  const next = settings || {}
+  if (!loadedSettings) return updateAppSettings(() => next)
+  const keys = changedKeys(next)
+  const saved = await updateAppSettings(current => replayChanges(current, next, keys))
+  if (saved) writtenSettings = replayChanges(writtenSettings, next, keys)
+  return saved
+}
+
+// A control shows the new value the moment it is pressed. When the save did not happen (offline, an older runtime, a file that kept
+// changing) it goes back to what it showed, unless a later pick has already replaced it, so a toggle never looks saved when it is not.
+// `set` takes an updater, as React's setters do. Returns whether it was saved.
+export function settleSetting(saved, set, shown, before) {
+  if (!saved) set(now => (now === shown ? before : now))
+  return saved
 }
 
 // The staged full diff sits beside its record as raw text. null = absent
@@ -734,18 +813,20 @@ export async function loadFullDiff(rec) {
 }
 
 // Archive and restore are the SAME guarded status flip in opposite directions, so
-// they share one CAS engine. The runtime's durableWrite({ifMatch}) and
+// they share one CAS engine, and so does every other checked change to one record
+// (`change` returns the record to write, or null when the record no longer allows
+// it). The runtime's durableWrite({ifMatch}) and
 // getWithVersion pairing is the same guarded path useDocument uses, so it
 // keeps the mirror and subscribers coherent. A 412 means someone else (the
 // agent claiming it, another tab) won the race: re-read once and retry only if
-// the record is still in the expected `from` status. There is intentionally no
+// the record still allows the change. There is intentionally no
 // blind-write fallback: losing concurrency safety must never be an availability
 // strategy.
 //
 // Outcomes: {ok: rec} flipped | {conflict: rec|null} changed under us |
 // {gone: true} record vanished | {error: string} ('offline' when the
 // network verdict says so).
-async function casFlipStatus({ rec, from, to }) {
+export async function casWriteRecord({ rec, change }) {
   const path = rec.path || RECORD_PREFIX + rec.id + '.json'
   const s = window.mobius && window.mobius.storage
   // The versioned read is the other half of durableWrite({ifMatch}): without a
@@ -760,6 +841,8 @@ async function casFlipStatus({ rec, from, to }) {
     let version = null
     try {
       const loaded = await readVersioned(path, 'json')
+      // A copy the runtime gave because the server could not be reached is never the record to change.
+      if (loaded.offline) return { error: 'offline' }
       current = loaded.value
       version = loaded.version
     } catch (err) {
@@ -767,20 +850,16 @@ async function casFlipStatus({ rec, from, to }) {
       return { error: String((err && err.message) || err) }
     }
     if (!current || typeof current !== 'object') return { gone: true }
-    if (current.status !== from) return { conflict: current }
+    const next = change(current)
+    if (!next) return { conflict: current }
     if (!version) {
       return { error: 'Safe storage updates are unavailable.' }
-    }
-    const next = {
-      ...current,
-      status: to,
-      updated_at: new Date().toISOString(),
     }
     try {
       await s.durableWrite(path, next, { ifMatch: version })
       return { ok: next }
     } catch (err) {
-      if (err && err.code === 'conflict') continue // durableWrite's 412
+      if (err && (err.code === 'conflict' || err.status === 412)) continue // durableWrite's 412
       if (window.mobius && window.mobius.online === false) return { error: 'offline' }
       return { error: String((err && err.message) || err) }
     }
@@ -790,14 +869,44 @@ async function casFlipStatus({ rec, from, to }) {
   return { conflict: null }
 }
 
-// Move to History = CAS-flip a still-`prepared` record to `abandoned`.
+const flipStatus = (from, to) => current => (current.status === from
+  ? { ...current, status: to, updated_at: new Date().toISOString() } : null)
+
+const casFlipStatus = ({ rec, from, to }) => casWriteRecord({ rec, change: flipStatus(from, to) })
+
+// Discard a prepared record. Who computes the stored status word follows the
+// `lifecycle_writer` setting. Shadow, the default: the
+// record is flipped to `abandoned`, exactly as before, so a prepared UPDATE
+// still stops tracking its live PR. Engine: the engine decides. An update on a
+// public PR is dropped and the PR returns to its public status with its url and
+// number kept (DISCARD_UPDATE); work never sent is abandoned (DISCARD). Either
+// way the `lifecycle` field and the status word it derives are stored in this one write.
 export async function abandonPrepared({ appId, token, rec }) {
-  return casFlipStatus({ appId, token, rec, from: 'prepared', to: 'abandoned' })
+  const engine = lifecycleWriterOf(await loadAppSettings()) === 'engine'
+  if (!engine) return casFlipStatus({ appId, token, rec, from: 'prepared', to: 'abandoned' })
+  return casWriteRecord({ rec, change: current => {
+    const next = discardRecord(current)
+    return next && { ...next, updated_at: new Date().toISOString() }
+  } })
 }
+
+// Settle a finished PR that waits on the owner (an update that can no longer go out, a merge that never landed): the owner's exit and what it
+// derives (lifecycle-write.js `settleRecord`) go into the record as the file holds it now, in one checked write. A record that no longer
+// holds that state, or an exit it does not accept, comes back as a conflict carrying the record.
+export const settleHeld = ({ rec, exit, successor = '' }) => casWriteRecord({ rec, change: current => settleRecord(current, exit, { successor }) })
 
 // Restore = the reverse: CAS-flip an `abandoned` record back to `prepared` so it
 // returns to Ready for review (the plan, diff blob, and branch are untouched by
 // the archive, so a restored record is fully reviewable/sendable again).
 export async function restoreAbandoned({ appId, token, rec }) {
   return casFlipStatus({ appId, token, rec, from: 'abandoned', to: 'prepared' })
+}
+
+// Dismiss the "Looks already landed" hint on its own: a checked write of the
+// hint and nothing else, so the status, the plan and the PR stay as they were.
+// The job writes the hint (`null` is how it clears one), so a dismissal lasts
+// until the job finds a reason to raise it again.
+export async function clearReconciliationHint({ rec }) {
+  return casWriteRecord({ rec, change: current => (current.reconciliation_hint
+    ? { ...current, reconciliation_hint: null, updated_at: new Date().toISOString() } : null) })
 }

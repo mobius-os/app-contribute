@@ -53,12 +53,20 @@ const countable = (pull, node) => node?.state === 'APPROVED' && !!node.commit?.o
   && node.author?.login?.toLowerCase() !== pull.author?.login?.toLowerCase()
 const atHead = (pull, node) => node.commit.oid === pull.headRefOid
 
-// Only an open PR the viewer can merge, with no countable approval of this exact version, is in question; its
-// countable approvals of older commits are what gets compared.
+// The viewer's own latest review, when it is an approval of an older commit: the machine decides whether their own review
+// still stands for this version from it (`viewerLatestReview` is a node of its own, not one of the opinions above).
+const ownOlderApproval = pull => {
+  const own = pull.viewerLatestReview
+  return own?.state === 'APPROVED' && own.commit?.oid && !atHead(pull, own) ? [own] : []
+}
+
+// Only an open PR the viewer can merge is in question. Its countable approvals of older commits are compared when no countable
+// approval of this exact version exists; the viewer's own older approval is compared either way, since their own standing does
+// not depend on whether someone else approved.
 function approvalsToCompare(pull) {
   if (pull.state !== 'OPEN' || !baseTipOf(pull) || !pull.repository?.nameWithOwner || !mayWrite(pull.repository.viewerPermission)) return []
   const approvals = pull.latestOpinionatedReviews.nodes.filter(node => countable(pull, node))
-  return approvals.some(node => atHead(pull, node)) ? [] : approvals
+  return [...(approvals.some(node => atHead(pull, node)) ? [] : approvals), ...ownOlderApproval(pull)]
 }
 
 const lookupKey = (pull, commit) => `${pull.repository.nameWithOwner}|${baseTipOf(pull)}|${commit}|${pull.headRefOid}`.toLowerCase()

@@ -188,7 +188,8 @@ test('a finished review that found problems offers what to do about them, never 
 
 test('an ignored finding says so for this version, quietly, and can be taken back', async t => {
   const found = status('needs_you', { summary: 'Three problems.' }, { state: 'needs_you', execution_state: 'completed' })
-  const ignored = { [`team/repo#9@${'a'.repeat(40)}`]: { reason: 'Not a problem', at: '2026-11-04T10:00:00Z' } }
+  // The note is made on this review, so it is not older than the run it sets aside.
+  const ignored = { [`team/repo#9@${'a'.repeat(40)}`]: { reason: 'Not a problem', at: new Date().toISOString() } }
   const html = await render(t, 'ReviewTab', { pr, status: found, own: true, ignored, onStart: () => {}, onFix: () => {}, onIgnore: () => {}, onUndoIgnore: () => {} })
   if (!html) return
   assert.match(html, /<h4>Set aside<\/h4>/)

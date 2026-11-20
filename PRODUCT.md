@@ -145,7 +145,7 @@ action shows feedback when used. Sync with GitHub asks GitHub read-only whether 
 repository moved past the compared commit; a quiet project reads "Up to date at
 the last check" until a fresh check says more. The agent review window states
 its steps, what GitHub will see and which model runs it before anything starts.
-A project opens straight on its tabs, with no status row above them: All PRs, Prepared PRs (while there are some), Review requests, Agent runs and Local changes (while files differ); blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
+A project opens straight on its tabs, with no status row above them: All PRs, Prepared PRs (while there are some), Review requests (only the requests that are your move), Agent runs and Local changes (while files differ); blockers and feedback across projects live in the Needs you destination; the projects list tags Platform and App projects, says what waits on
 the owner, leads with the repositories the owner works with (what is going on, then those contributed to before, latest first) and folds the other installed ones into Other repositories.
 
 ## Act where you are looking (owner direction, 2026-11-04)
@@ -199,8 +199,8 @@ the owner, leads with the repositories the owner works with (what is going on, t
   until they fix it or set it aside.
 - **The Review tab answers instead of asking for a conversation.** A finished
   review that found problems offers **Fix these findings** (Respond to feedback with
-  the saved findings ticked), **Set aside…** (one reason, for this exact version,
-  kept in Contribute, nothing posted, with Undo), **Review again** and **Ask the
+  the saved findings ticked), **Set aside…** (one reason, for this review only: a later
+  review of the same version is judged afresh; kept in Contribute, nothing posted, with Undo), **Review again** and **Ask the
   reviewer something** as a plain button. "Answer in review conversation" is
   only for a conversation that really asked something, and "Stop review" only
   while work is in progress.
@@ -214,10 +214,22 @@ the owner, leads with the repositories the owner works with (what is going on, t
   disabled with that reason on the card, and the answer, **Copy replies** (every reply with the
   thread it answers), Reply in chat and Discard keep working. The PR reads **Draft
   to send** while the answer waits, **Sending** while it posts and **Not confirmed** if it
-  stops part-way (a retry skips what already went out, and a reply that may have gone out
-  is only looked for, never sent again). Right after Post the card says
+  stops part-way, or if no step went out for 3 minutes (the card then says **Posting stopped**;
+  a retry skips what already went out, and a reply that may have gone out
+  is only looked for, never sent again). **Discard** is there beside **Try again**. It asks
+  first when a step already went out (that stays on GitHub), when a reply was being sent and
+  may be on GitHub already, or when the app itself took the post as stopped after 3 minutes
+  (the chat may still be sending one step); it says that Discard drops only what was not sent
+  yet and takes the answer off the pull request in Contribute, which then reads as it would
+  with no answer. A stop the chat reported with no step recorded as sent is discarded at
+  once. A discarded answer is not posted again by Try again, and a chat that is still posting
+  reads the decision before each step and before each reply and stops there: a step or reply
+  it is already sending may still arrive, and the next one is not started. Right after Post
+  the card says
   **Sent to the chat** with a spinner, and **Send again** appears only if the chat has not
-  started after 30 seconds (at once if the message to the chat failed). When the PR moves after the
+  started after 30 seconds (at once if the message to the chat failed). After those 30 seconds
+  **Take back Post** also works: it removes the approval so the answer is ready again, and
+  nothing is posted. When the PR moves after the
   answer, the card says it is out of date and offers **Respond again** or **Discard**, and
   while the chat waits on a card of its own, its box asks first and Post says why it is off.
   **Respond again** names the agent the PR's conversation keeps (model and effort; a second
@@ -226,7 +238,8 @@ the owner, leads with the repositories the owner works with (what is going on, t
   the next read.
 - **Agent runs** (side menu) lists the reviews the owner started and the saved agent
   work, by project, in three tabs: **Waiting on you** (the owner's move first, then an
-  agent that stopped, then a PR GitHub did not answer for), **Running** and
+  agent that stopped or a review that hit an obstacle and says so, then a PR GitHub did not
+  answer for), **Running** and
   **Finished** (only what is over). It opens on the first tab with rows, and a review
   row opens its PR on its Review tab. Every PR is read live, in batches of
   25, when the list changes and again on every Sync with GitHub, so a closed PR is
@@ -234,8 +247,38 @@ the owner, leads with the repositories the owner works with (what is going on, t
   too, though on the owner's own PR it is only an older version), a stale finding
   is never counted as waiting on the owner, and a PR GitHub did not return reads
   **Couldn’t read** with Try again instead of being classified from older saved
-  data. The rail shows how many agents are running; a run that waits on the owner
-  counts in Needs you.
+  data. When the platform's list of review runs is cut, the page says so and offers the older
+  reviews. The rail shows how many agents are running; a review that waits on the owner counts
+  in Needs you, and so does a project's agent run that stopped, failed, asked a question or
+  never started (a stopped, failed or unsent one can be dismissed when nothing more is wanted of it).
+
+## Nothing waits for ever (owner direction, 2026-11-18)
+
+Where a contribution stands is one state machine with written tables, not a status word that
+several writers each set in their own way. It enforces these rules in plain words:
+
+- **No state without an exit.** Every state that is not an end has a way out and says whose move
+  it is: yours, GitHub's, the platform's or an agent's. A state nobody can leave is a defect: a run
+  that stopped or failed, for example, ends when the owner dismisses it or starts the work again.
+- **Nothing waits on a machine without a deadline.** A send nobody confirmed, a post that stopped,
+  an approved answer whose chat never started and a project run whose start was never confirmed each
+  have a time after which they move on and say so: they ask the owner or read as stopped, and never
+  read as "working" for ever. The platform keeps the same rule for a review that stalls.
+- **"Merged" means on the default branch.** A merge into another branch is not announced as shipped.
+  It waits to see whether that branch lands, and if it never does the owner is asked what to do.
+  A PR closed without merging is watched for 30 days in case it is reopened.
+- **An update never hides a public PR.** Dropping an update drops only the update: the PR stays
+  listed and followed. An update whose PR merged or closed first is never sent; it says so, stays in
+  Needs you, and asks what to do with the changes (the merge already covers them, keep them as new work,
+  or drop them). A merge that never reached the default branch stays there too, until it is landed again.
+- **One notice per event.** A merge, a close, a reopen and an update that could not go out are each
+  told once, and a stranded update gets one reminder after a week, not one every week. A merge into
+  the default branch or a close that the owner made in the app is told once by the background job,
+  never twice.
+
+The machine writes the status itself only once the owner switches that on; until then it runs beside
+the older logic and only takes notes. The rules that need no status word (deadlines on a post and a
+run, one Needs you count, the attention rules) hold either way.
 
 ## The PR machine: one decision for every screen and the server (owner direction, 2026-11-04)
 
@@ -266,7 +309,10 @@ checked over every case and every combination of the facts that matter):
    stale with its version), no agent job running, and no review GitHub itself still
    requires (a branch rule: "GitHub still needs a review"). GitHub asking for no review
    is not an approval. Ready to merge
-   words the PR's standing and its highlighted next step; it does not switch your own Merge off
+   words the PR's standing and, on your own PR, its highlighted next step. Someone else's PR that you
+   reviewed and that is approved at this version has no next step: its headline ends "Landing it is up
+   to them", nothing waits on you, it is not a Needs you row, and Merge stays in the Actions menu
+   (new commits still bring it back for Review again). Ready to merge does not switch your own Merge off
    (owner direction, 2026-11-09: skip the formalities), and GitHub's merge rules still refuse what cannot
    land. The agent's own unattended merge has no tap behind it, so the platform still asks the full
    rule before it merges. The Merge sheet names who approved and who still holds a change request. An approval
@@ -283,6 +329,9 @@ checked over every case and every combination of the facts that matter):
    That includes a clean private review of their PR: at its own version it reads as done
    (nothing to send, nothing to set aside); once they push, the PR is back to re-review.
    Your own PR is never nagged about an older clean check.
+   GitHub drops a review request once its reviewer reviews, so a request listed again beside your
+   review of this version means the author asked you again: it is your turn, whatever your review
+   said, and the PR reads *Asked to review again* (a draft stays its author's).
    A reviewer who only commented has not approved. With a change request still standing, GitHub lifts it
    only on their approval or a dismissal, so the PR reads *Looked again · not approved*; with none, it
    reads *Commented · not approved*. Either way the next step is Ask for approval, one note on the PR
@@ -307,6 +356,8 @@ checked over every case and every combination of the facts that matter):
    them until you send it or throw it away). The Ask actions stop only for the first two, and
    for a list of people that was not read whole; Open for review, Back to draft and Close are
    not stopped by an unconfirmed send; only the agent's jobs wait for a draft that owns the findings.
+   Merge alone is also stopped while GitHub's merge queue already holds the PR: it reads *In merge
+   queue*, waits on GitHub, and a repository whose branch has a queue offers no choice of how to land.
    Nothing else dims one: Respond to feedback, Review, Finish it, Merge, Close, Open for review and Back
    to draft stay on whatever the reviews say (Open for review on an open PR, or Back to draft on
    a draft, is a confirmed no-op). The Actions menu leaves out a row that would change nothing: it
@@ -357,9 +408,9 @@ own sheet; Pause and Resume are not, because they only use a permission the owne
 row reads **Following** with how it pushes (or Paused), the same window then offers the other way, Pause or Resume,
 and the PR page shows one quiet **Following** line under its facts with what the agent last did and Pause or Resume.
 
-**States.** Shared: Merged · Closed · Couldn’t read · Not confirmed · Sending · Draft to
+**States.** Shared: Merged · Closed · Couldn’t read · In merge queue · Not confirmed · Sending · Draft to
 send · Agent working · Agent asks you · Agent stopped. Your PR: Draft · Ready to open ·
-Findings · Checks or conflicts · Feedback to answer · Waiting on re-review · Looked again,
+Findings · Checks or conflicts · Feedback to answer · Fixes pushed · Looked again,
 not approved · Commented, not approved · Approval is old · Waiting on reviewers (reads *Nobody asked yet* while GitHub holds no review request: an assignee is not one) · Approved (checks pending or unknown) · Ready to merge. Their
 PR: Draft · To review · Review ready · Waiting on the author · New commits · review
-again · Reviewed · Kept private · Ready to merge.
+again · Asked to review again · Reviewed · Kept private · Ready to merge.

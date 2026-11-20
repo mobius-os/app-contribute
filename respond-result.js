@@ -4,12 +4,16 @@
 // The app reads strictly: a file that breaks a rule is not a response at all, never half shown. The helper
 // has already enforced the same rules, so a file that fails here was edited or is from another version.
 import { NAMES } from './names.js'
+import { stateOf } from './lifecycle-record.js'
+import { LIFECYCLE_TABLES as TABLES } from './lifecycle-tables.js'
 
 // THE GATE on Post. The responding agent shares the app's storage, so it can write an approval itself: a matching approval file does
 // not show the owner pressed Post. Post is therefore offered only when this Möbius confirms it on its own sheet (owner-grant.js,
 // ownerConfirmOffered): approveResponse asks that sheet for a grant bound to this answer, and respond_result.py spends it before it posts.
 // Until the host offers it (or when its capabilities cannot be read) Post is off.
 export const COPY_REPLIES = 'Copy replies'
+// The quiet button of an approved answer whose chat never started: it removes the approval, so nothing is posted and Post is offered again.
+export const TAKE_BACK = 'Take back Post'
 // Why Post is off, naming only the controls the card has in that state: the chat button is Reply in chat until Post was
 // pressed once, and Open chat after (Send again, Try again); Copy replies is named only when there are replies to copy.
 export function postOffReason(status = 'ready', hasReplies = true) {
@@ -29,6 +33,7 @@ const VERSION = 1
 const SHA = /^[0-9a-f]{40}$/
 const RESULT_ID = /^r-[0-9a-f]{12}$/
 const DIGEST = /^[0-9a-f]{64}$/
+const ATTEMPT = /^[0-9a-f]{12}$/
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 const STATES = new Set(['ready', 'posting', 'posted', 'failed'])
@@ -81,14 +86,16 @@ function readScreenshot(shot) {
 const stamped = value => (value && typeof value === 'object' && typeof value.at === 'string' ? value : null)
 
 // What the helper recorded as done. Anything unreadable counts as not done, so the card never claims a step went out.
-function readReceipts(raw) {
+function readReceipts(raw, replyCount) {
   if (!raw || typeof raw !== 'object') return null
   const push = raw.push && typeof raw.push === 'object' && SHA.test(raw.push.sha) && typeof raw.push.at === 'string' ? { sha: raw.push.sha, at: raw.push.at } : null
   const replies = (Array.isArray(raw.replies) ? raw.replies : []).filter(item => item && Number.isInteger(item.index) && typeof item.url === 'string' && typeof item.at === 'string')
     .map(item => ({ index: item.index, url: item.url, at: item.at }))
   const rerequest = stamped(raw.rerequest)
   const screenshots = stamped(raw.screenshots) && typeof raw.screenshots.commit === 'string' ? { commit: raw.screenshots.commit, at: raw.screenshots.at } : null
-  return { push, replies, screenshots, description: stamped(raw.description) ? { at: raw.description.at } : null, rerequest: rerequest ? { at: rerequest.at, reviewers: Array.isArray(rerequest.reviewers) ? rerequest.reviewers.filter(login => typeof login === 'string') : [] } : null }
+  // The reply that was being sent when the post stopped, and may be on GitHub without a receipt. Only present when the helper wrote one.
+  const sending = stamped(raw.sending) && Number.isInteger(raw.sending.index) && raw.sending.index >= 0 && raw.sending.index < replyCount ? { index: raw.sending.index, at: raw.sending.at } : null
+  return { push, replies, screenshots, description: stamped(raw.description) ? { at: raw.description.at } : null, rerequest: rerequest ? { at: rerequest.at, reviewers: Array.isArray(rerequest.reviewers) ? rerequest.reviewers.filter(login => typeof login === 'string') : [] } : null, ...(sending ? { sending } : {}) }
 }
 
 function readEach(raw, read, max) {
@@ -109,20 +116,23 @@ export function normalizeResult(raw) {
   const replies = readEach(raw.replies, readReply, 12)
   const commits = readEach(raw.commits, readCommit, 60)
   const files = readEach(raw.files, readFile, 300)
-  const receipts = readReceipts(raw.receipts)
+  const receipts = readReceipts(raw.receipts, replies ? replies.length : 0)
   const screenshots = raw.screenshots === undefined ? [] : readEach(raw.screenshots, readScreenshot, 8)
   if (!screenshots || !rerequest || !rerequest.every(login => LOGIN.test(login)) || !points || !replies || !commits || !files || !receipts) return null
   const failure = error && typeof error === 'object' && typeof error.step === 'string' && typeof error.message === 'string' ? { step: error.step, message: error.message } : null
   if (error !== null && !failure) return null
+  // The helper's own stamp of the post (respond_lifecycle.py), kept as written: respond-lifecycle.js decides whether it is usable.
+  const stamp = raw.lifecycle && typeof raw.lifecycle === 'object' && !Array.isArray(raw.lifecycle) ? { lifecycle: raw.lifecycle } : {}
   return { version: VERSION, id, repo, number, chat_id: chatId, created_at: createdAt, state, pr: { head_sha: pr.head_sha, head_ref: pr.head_ref, base_ref: pr.base_ref, head_repo: pr.head_repo },
-    tip_sha: tip, points, replies, description, rerequest, tests, screenshots, commits, files, digest, receipts, error: failure }
+    tip_sha: tip, points, replies, description, rerequest, tests, screenshots, commits, files, digest, receipts, error: failure, ...stamp }
 }
 
-// What the owner decided: only Post (approved) and Discard are ever written.
+// What the owner decided: only Post (approved) and Discard are ever written. `attempt` names the Post an approval belongs to (respond-flow.js);
+// an approval written before it existed has none.
 export function normalizeDecision(raw) {
   if (!raw || typeof raw !== 'object' || raw.version !== VERSION) return null
   if (!RESULT_ID.test(raw.result_id) || !DIGEST.test(raw.digest) || !['approved', 'discarded'].includes(raw.decision)) return null
-  return { result_id: raw.result_id, digest: raw.digest, decision: raw.decision, at: typeof raw.at === 'string' ? raw.at : '' }
+  return { result_id: raw.result_id, digest: raw.digest, decision: raw.decision, at: typeof raw.at === 'string' ? raw.at : '', ...(ATTEMPT.test(raw.attempt) ? { attempt: raw.attempt } : {}) }
 }
 
 const samePr = (result, pr) => result.repo.toLowerCase() === pr?.repository?.nameWithOwner?.toLowerCase() && result.number === pr?.number
@@ -131,25 +141,32 @@ const samePr = (result, pr) => result.repo.toLowerCase() === pr?.repository?.nam
 export const responseFor = (responses, pr) => (responses || []).find(entry => entry?.result && samePr(entry.result, pr)) || null
 
 // The owner's decision, counted only for the exact answer it names: another result, or the same result changed since, ignores it.
-const decisionOf = entry => (entry.decision && entry.decision.result_id === entry.result.id && entry.decision.digest === entry.result.digest ? entry.decision.decision : null)
+export const decisionOf = entry => (entry.decision && entry.decision.result_id === entry.result.id && entry.decision.digest === entry.result.digest ? entry.decision.decision : null)
 
 // Where a response stands on its PR:
 //   ready (fresh, nothing decided), approved (Post pressed, the chat has not started), stale (the PR moved after the answer),
 //   posting, failed (stopped part-way), posted (the PR is where the post left it), or null (discarded, or history).
+// A failed answer the owner discarded is gone from the PR like a ready one; what it already put on GitHub stays there.
 export function responseStatus(entry, pr) {
   const result = entry?.result
   if (!result) return null
   const decision = decisionOf(entry)
   if (result.state === 'posted') return pr?.headRefOid === result.tip_sha || pr?.headRefOid === result.pr.head_sha ? 'posted' : null
+  if (result.state === 'failed' && decision === 'discarded') return null
   if (result.state === 'posting' || result.state === 'failed') return result.state
   if (decision === 'discarded') return null
   if (pr?.headRefOid !== result.pr.head_sha) return 'stale'
   return decision === 'approved' ? 'approved' : 'ready'
 }
 
+// The step the app names when it is the one that took a post as stopped (respond-lifecycle.js), as against a stop the helper reported.
+export const STALLED_STEP = 'posting'
+// How long a post may go without a step going out before it is taken as stopped: the deadline of the POSTING state, in minutes.
+export const POSTING_SILENCE_MINUTES = TABLES.regions.respond.states.POSTING.deadline.seconds / 60
+
 // The seconds after Post. Both real posts had the message at the chat in 2 s, the first step done by 8.6 s and everything posted by 13 s.
-// The chat gets this long to start before the card offers Send again.
-export const RESEND_AFTER_MS = 30000
+// The chat gets this long to start before the card offers Send again: the deadline of the APPROVED state, read from the tables.
+export const RESEND_AFTER_MS = TABLES.regions.respond.states.APPROVED.deadline.seconds * 1000
 // After Post an answer is read closely for this long, then on the idle cadence: a chat that never starts is not read fast for ever.
 export const WATCH_MS = 300000
 // A clock a few seconds behind the one that pressed Post is normal; further off, the time is not trusted.
@@ -187,9 +204,16 @@ export const pointsAnswering = (view, run, item) => (['ready', 'posted'].include
 // that stopped part-way still reads as not confirmed.
 const OUTBOX_STATES = { ready: 'drafted', approved: 'sending', posting: 'sending', failed: 'unconfirmed' }
 
+// An approved answer whose chat never started is not "sending" for ever: the loader (respond-store.js) puts the region in `lifecycle`,
+// and NOT_STARTED (30 seconds, lifecycle_tables.py) is the owner's move again, like a draft. An entry with no `lifecycle` (one not
+// loaded from the store) reads as it always did.
+const OUTBOX_NOT_STARTED = { approved: 'drafted' }
+
 // `review` is the PR's newest saved review ({ run, item }): the answer covers its findings when it took them on.
 export function responseOutbox(entry, pr, review = null) {
-  const state = OUTBOX_STATES[responseStatus(entry, pr)]
+  const status = responseStatus(entry, pr)
+  const waiting = stateOf(entry?.lifecycle, 'respond') === 'NOT_STARTED' ? OUTBOX_NOT_STARTED[status] : null
+  const state = waiting || OUTBOX_STATES[status]
   return state ? { kind: 'answer', head: pr.headRefOid, state, covers: answeredPoints(entry.result, review?.run, review?.item) > 0 } : null
 }
 
@@ -217,6 +241,42 @@ export function stepDone(result, key) {
   const receipts = result.receipts
   if (key === 'replies') return result.replies.length > 0 && receipts.replies.length >= result.replies.length
   return Boolean(receipts[key])
+}
+
+// What a stopped post already put on GitHub, in words, from the helper's receipts only: a step with no receipt is never claimed.
+function wentOut(result) {
+  const { receipts, replies } = result
+  const posted = receipts.replies.length
+  return [
+    receipts.screenshots ? `${plural(result.screenshots.length, 'screenshot', 'screenshots')} uploaded` : null,
+    receipts.push ? `${plural(result.commits.length, 'commit', 'commits')} pushed to the PR’s branch` : null,
+    posted ? `${posted === replies.length ? plural(posted, 'reply', 'replies') : `${posted} of ${replies.length} replies`} posted` : null,
+    receipts.description ? 'the description updated' : null,
+    receipts.rerequest ? 'a new review asked for' : null,
+  ].filter(Boolean)
+}
+
+// The reply that was being sent when the post stopped and has no receipt: it may be on GitHub already (the helper clears the note when
+// GitHub refused the write), or null.
+const unconfirmedReply = result => {
+  const { sending, replies } = result.receipts
+  return sending && !replies.some(reply => reply.index === sending.index) ? `Reply ${sending.index + 1} of ${result.replies.length}` : null
+}
+
+// The question Discard asks of a stopped answer, or null when it can act at once: only a stop the helper itself reported, with no step
+// recorded as sent and none left unconfirmed. It asks when something went out (a receipt), when a step may be on GitHub without one, and when the app took
+// the post as stopped after 3 minutes without a step (the helper may still be sending one, and stops before the next). Discard undoes nothing.
+export function discardQuestion(result) {
+  const out = wentOut(result)
+  const unconfirmed = unconfirmedReply(result)
+  const running = result.error?.step === STALLED_STEP
+  if (!out.length && !unconfirmed && !running) return null
+  const said = [
+    out.length ? `What already went out stays on GitHub: ${names(out)}.` : null,
+    unconfirmed ? `${unconfirmed} was being sent when it stopped and may already be on GitHub; if it is, it stays there.` : null,
+    running ? 'The chat may still be sending one step; it stops before the next.' : null,
+  ].filter(Boolean)
+  return { title: 'Discard this answer?', text: `${said.join(' ')} Discard drops only what was not sent yet and takes this answer off the pull request in Contribute.` }
 }
 
 // Every reply with what it answers, for the owner to post by hand where Post is off: the review thread (a reply) or the PR's own conversation.

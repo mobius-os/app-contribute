@@ -3,12 +3,13 @@ import { ReviewFrame } from './ReviewFrame.jsx'
 import { MarkdownView, isPngDataUrl } from './MarkdownView.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { openAgentConversation } from './BatchAction.jsx'
+import { ConfirmWindow } from './ConfirmWindow.jsx'
 import { Icon } from './Icons.jsx'
 import { RunTag } from './RunTag.jsx'
 import { copyToClipboard } from './clipboard.js'
 import { NAMES } from '../names.js'
 import { reviewDate } from '../review-copy.js'
-import { COPY_REPLIES, SCREENSHOT_FOLDER, changesFrontEnd, chatStarting, planSteps, postOffReason, repliesText, stepDone } from '../respond-result.js'
+import { COPY_REPLIES, POSTING_SILENCE_MINUTES, SCREENSHOT_FOLDER, TAKE_BACK, changesFrontEnd, chatStarting, discardQuestion, planSteps, postOffReason, repliesText, stepDone } from '../respond-result.js'
 import { screenshotCountText } from '../domain.js'
 import { useScreenshots } from './useScreenshots.js'
 import { Shine } from './Shine.jsx'
@@ -34,15 +35,15 @@ const filesData = result => ({
   totals: { files: result.files.length, additions: sum(result.files, 'added'), deletions: sum(result.files, 'removed') },
 })
 
-function statusLine({ status, result }, pr, starting) {
+function statusLine({ status, result }, pr, starting, canTakeBack) {
   // "Nov 6, 09:30": when the answer was written names the version it was built on; empty when the time does not read.
   const answered = reviewDate(result.created_at, true)
   const builtOn = answered ? `the version of ${answered}` : short(result.pr.head_sha)
   switch (status) {
     case 'ready': return `${plural(result.points.length, 'point', 'points')} answered · built on ${builtOn}`
     case 'stale': return `The PR changed after this answer (${short(result.pr.head_sha)} → ${short(pr.headRefOid)}). Nothing was posted.`
-    case 'approved': return starting ? STARTING.line : 'The chat has not started yet. Send it again, or open the chat.'
-    case 'posting': return 'The chat is posting this now. Each step is ticked as it is done. If nothing changes for a few minutes, open the chat and ask it to continue.'
+    case 'approved': return starting ? STARTING.line : `The chat has not started yet. Send it again, ${canTakeBack ? `take ${NAMES.postAnswer} back, ` : ''}or open the chat.`
+    case 'posting': return `The chat is posting this now. Each step is ticked as it is done. If no step goes out for ${POSTING_SILENCE_MINUTES} minutes, it shows as stopped and you can try again.`
     case 'failed': return `Stopped at ${result.error?.step || 'a step'}: ${sentence(result.error?.message || 'unknown error')} The ticked steps went out and a second try skips them. A reply that may have reached GitHub is only looked for on a second try, never sent again.`
     default: return 'Everything below went out.'
   }
@@ -145,9 +146,13 @@ function CopyReplies({ result }) {
 // Why Post, Send again and Try again are off, or ''. Möbius's own confirmation (the gate) comes before anything about the chat or the screenshots.
 const postBlocker = ({ status, result }, chat, ownerGrant, unseen) => (ownerGrant ? (status === 'ready' ? holdReason(chat) || imagesReason(unseen) : '') : postOffReason(status, result.replies.length > 0))
 
-function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onPost, onDiscard, onRespondAgain }) {
+function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onPost, onDiscard, onRespondAgain, onWithdraw }) {
   const { status, result } = view
+  const [asking, setAsking] = useState(false)
   const blocked = postBlocker(view, chat, ownerGrant, unseen)
+  // A stopped answer that already put something on GitHub asks first, and says that Discard leaves it there; one that sent nothing is
+  // discarded at once, like a ready one.
+  const question = status === 'failed' ? discardQuestion(result) : null
   // Offered exactly when the card says Post is off (the reason names it).
   const copy = ownerGrant ? null : <CopyReplies key="copy" result={result} />
   const chatButton = label => <button key={label} type="button" className="co-btn" onClick={() => openAgentConversation(result.chat_id)}>{label}</button>
@@ -155,8 +160,12 @@ function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onP
   const buttons = {
     ready: [<button key="post" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(false)}>{busy ? <Shine>Working…</Shine> : NAMES.postAnswer}</button>, copy, chatButton(NAMES.replyInChat),
       <button key="discard" type="button" className="co-btn co-btn-quiet" disabled={busy} onClick={onDiscard}>{NAMES.discard}</button>],
-    approved: starting ? [copy, chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.sendAgain}</button>, copy, chatButton(NAMES.openChat)],
-    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.tryAgain}</button>, copy, chatButton(NAMES.openChat)],
+    // The chat did not start: the owner sends it again, or takes Post back (nothing was posted, the answer is ready again). Taking it back
+    // publishes nothing, so it does not wait for the host's confirmation; it is there when the caller can do it.
+    approved: starting ? [copy, chatButton(NAMES.openChat)] : [<button key="again" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.sendAgain}</button>, copy, chatButton(NAMES.openChat),
+      onWithdraw ? <button key="withdraw" type="button" className="co-btn co-btn-quiet" disabled={busy} onClick={onWithdraw}>{TAKE_BACK}</button> : null],
+    failed: [<button key="retry" type="button" className="co-btn co-btn-primary" disabled={busy || !!blocked} onClick={() => onPost(true)}>{busy ? <Shine>Working…</Shine> : NAMES.tryAgain}</button>, copy, chatButton(NAMES.openChat),
+      <button key="discard" type="button" className="co-btn co-btn-quiet" disabled={busy} onClick={question ? () => setAsking(true) : onDiscard}>{NAMES.discard}</button>],
     posting: [chatButton(NAMES.openChat)],
     // A second pass is offered only when the PR logic still allows one.
     stale: [onRespondAgain ? <button key="again" type="button" className="co-btn co-btn-primary" disabled={busy} onClick={onRespondAgain}>{NAMES.respondAgain}</button> : null,
@@ -165,12 +174,14 @@ function Actions({ view, chat, unseen, busy, readOnly, ownerGrant, starting, onP
   return <>
     {['ready', 'approved', 'failed'].includes(status) && blocked ? <p className="co-review-note" role="status">{blocked}</p> : null}
     <div className="co-review-actions">{buttons}</div>
+    {asking && question ? <ConfirmWindow label="Confirm discarding the answer" eyebrow={`${result.repo} #${result.number}`} title={question.title} text={question.text} keep="Keep" confirm={NAMES.discard} working="Discarding…"
+      busy={busy} onKeep={() => setAsking(false)} onConfirm={() => { setAsking(false); onDiscard() }} /> : null}
   </>
 }
 
 // `ownerGrant`: Möbius confirms Post on its own sheet (respond-result.js, THE GATE; owner-grant.js). Off unless the caller says it is on.
 // `now` is the time the card judges "just sent" by (the tests set it).
-export function ResponseCard({ pr, response: view, chat = null, busy = false, error = '', readOnly = false, ownerGrant = false, now = Date.now(), onPost, onDiscard, onRespondAgain }) {
+export function ResponseCard({ pr, response: view, chat = null, busy = false, error = '', readOnly = false, ownerGrant = false, now = Date.now(), onPost, onDiscard, onRespondAgain, onWithdraw }) {
   const { status, result } = view
   const screenshots = useScreenshots(responseShots(result), true)
   // While the chat holds the PR (it works, or waits on a card of its own) its box above is the one that asks for you.
@@ -186,13 +197,13 @@ export function ResponseCard({ pr, response: view, chat = null, busy = false, er
         <h4>{status === 'posting' && !starting ? <Shine>{HEADINGS.posting}</Shine> : starting ? STARTING.heading : HEADINGS[status]}</h4>
         <span className="co-review-version">{short(result.pr.head_sha)}{status === 'posted' && result.tip_sha ? ` → ${short(result.tip_sha)}` : ''}</span>
       </div>
-      <p className="co-review-note">{statusLine(view, pr, starting)}</p>
+      <p className="co-review-note">{statusLine(view, pr, starting, Boolean(onWithdraw) && !readOnly)}</p>
       {status === 'ready' ? <p className="co-response-fresh">The PR has not changed since this answer.</p> : null}
       {status === 'posted' ? null : <Points points={result.points} />}
       {status === 'posted' ? null : <Details result={result} open={['ready', 'approved', 'stale'].includes(status)} images={screenshots.images} />}
       {status === 'stale' ? null : <Steps result={result} status={status} />}
       {error ? <p role="alert" className="co-run-error">{error}</p> : null}
-      <Actions view={view} chat={chat} unseen={unseenScreenshots(result, screenshots.images).length} busy={busy} readOnly={readOnly} ownerGrant={ownerGrant} starting={starting} onPost={onPost} onDiscard={onDiscard} onRespondAgain={onRespondAgain} />
+      <Actions view={view} chat={chat} unseen={unseenScreenshots(result, screenshots.images).length} busy={busy} readOnly={readOnly} ownerGrant={ownerGrant} starting={starting} onPost={onPost} onDiscard={onDiscard} onRespondAgain={onRespondAgain} onWithdraw={onWithdraw} />
     </div>
   </ReviewFrame>
 }

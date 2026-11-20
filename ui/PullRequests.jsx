@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { awaitsGithub, earlierReviewForPull, loadReviewPeople, pullAction, requestReviewMany, mergePull, offersDraft, reviewIntent, settleDraftDefault, collaborationRequest, liveSelection, conversationCount, matchingPulls, mayAssign, prKey, reviewForPull, reviewItemProgress, reviewRunRequest, reviewRunTitle, runDetailsElsewhere, notOursToObserve, assignPulls, TAKEOVER_SCOPE } from '../collaboration.js'
 import { invalidatedSelection, isOpenPull, isOwnPull, pullsInView } from '../pull-view.js'
 import { chipOf, frameOf, standingFor } from '../pr-standing.js'
-import { respondChatOf } from '../pr-facts.js'
+import { findingsAnswered, respondChatOf } from '../pr-facts.js'
 import { ReviewFrame } from './ReviewFrame.jsx'
 import { pullConversations, recordsForPull } from '../provenance.js'
 import { RunDetail, savedVersion } from './RunDetail.jsx'
@@ -13,13 +13,14 @@ import { useFocusLease } from './useFocusLease.js'
 import { useCapabilities } from './useCapabilities.js'
 import { useRepositoryList } from './useRepositoryList.js'
 import { Icon } from './Icons.jsx'
+import { requestsWaiting } from '../desk.js'
 import { ActionsMenu } from './ActionsMenu.jsx'
 import { ReviewDialog } from './ReviewDialog.jsx'
 import { AddressFeedbackWindow } from './AddressFeedback.jsx'
 import { wholeSavedFindings } from '../address-feedback.js'
 import { responseView } from '../respond-result.js'
 import { askOwner, ownerConfirmOffered } from '../owner-grant.js'
-import { approveResponse, discardResponse } from '../respond-flow.js'
+import { approveResponse, discardResponse, withdrawResponse } from '../respond-flow.js'
 import { ReviewConfirmation } from './ReviewConfirmation.jsx'
 import { ActionConfirm } from './ActionConfirm.jsx'
 import { IgnoreReview } from './IgnoreReview.jsx'
@@ -180,7 +181,7 @@ const runAnchor = run => run.items?.length === 1 ? `${run.items[0].repo.toLowerC
 // `onRunsChanged` asks the hub to read it again, so every screen shows the change.
 // `onReviewPosted(repo, number)` tells it the owner's review of a PR reached GitHub,
 // so the row leaves Review requests without waiting for the next read.
-export function PullRequests({ appId, token, project, conn, capabilities: knownCapabilities = null, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null }) {
+export function PullRequests({ appId, token, project, conn, capabilities: knownCapabilities = null, onChanged, onReviewPosted, runs = NO_LIST, respondChats = NO_LIST, responses = NO_LIST, runsError = '', onRunsChanged, onResponsesChanged, onRunPatched, records = [], onRecord, refreshKey, focusPull, focusRun, onFocusRelease, scope = 'all', onScope, onTotal, presentation = 'list', onOpenPage = null, onStartAgent = null, onRespondStarted = null, onOpenForReview = null, ignoredReviews = null, onIgnoreReview = null, onUndoIgnore = null, defaultAgent = null, onSetAutopilot = null, onReceipt = null }) {
   const repo = project?.canonical_repo || ''
   const publicRevision = records.filter(record => record.url).map(record => `${record.id}:${record.status}:${record.number}:${record.last_updated_pr_at || ''}`).sort().join('|')
   const task = useProjectTask()
@@ -376,9 +377,14 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   // A run link's lease is held while that run's detail is open.
   const runLinkedHere = focusRun?.runId && focusRun.repo?.toLowerCase() === repo.toLowerCase() ? focusRun.nonce : ''
   useFocusLease({ nonce: runLinkedHere, held: runDetailOpen, connected, release: onFocusRelease })
-  const requestedKeys = new Set((project?.reviewRequests || []).map(prKey))
+  // A PR of your own that GitHub lists beside the requests (a team of yours was asked) is no request to you.
+  const requestedKeys = new Set((project?.reviewRequests || []).filter(pr => !isOwnPull(pr, conn.login)).map(prKey))
+  // The Review requests tab lists what its badge counts: the requests that are your move (desk.js requestsWaiting, one list for both). A request the
+  // repository's list has not read yet is shown from the review requests' own read, so a counted PR is never missing from the tab.
+  const asked = requestsWaiting(project?.reviewRequests, conn.login, { runs, chats: respondChats, responses, ignored: ignoredReviews })
+  const askedKeys = new Set(asked.map(prKey))
   const scoped = scope === 'requests'
-    ? pulls.filter(pr => requestedKeys.has(prKey(pr)) || prKey(pr) === focusKey)
+    ? [...pulls.filter(pr => askedKeys.has(prKey(pr)) || prKey(pr) === focusKey), ...asked.filter(pr => !pulls.some(item => prKey(item) === prKey(pr)))]
     : matchingPulls(pulls, filter, conn.login)
   const visible = scope === 'mine' ? [] : scoped.filter(pr => !query.trim() || `${pr.number} ${pr.title} ${pr.author?.login || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   // The All PRs tab shows this count; a chat link to a PR always lands on All PRs.
@@ -406,7 +412,9 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   const relevantRuns = [...linkedRun, ...runs].filter(run => !repo || run.items?.some(item => item.repo.toLowerCase() === repo.toLowerCase()))
   const statusFor = pr => reviewForPull(relevantRuns, pr)
   // Where each PR stands and what may happen next: the PR machine's decision.
-  const standingOf = pr => standingFor({ pr, login: conn.login, runs: relevantRuns, chats: respondChats, responses, ignored: ignoredReviews })
+  // The lists the Desk reads say which PRs GitHub lists as asking for your review; this screen's own reads do not, so a request that was made again
+  // after your review of this version is marked here too (`requestedKeys`, above), and the row, the page and the Desk say the same.
+  const standingOf = pr => standingFor({ pr: requestedKeys.has(prKey(pr)) && !pr.reviewRequested ? { ...pr, reviewRequested: true } : pr, login: conn.login, runs: relevantRuns, chats: respondChats, responses, ignored: ignoredReviews })
   const detailPr = pulls.find(pr => prKey(pr) === opened)
   function inspect(pr) {
     // While a review runs, the frame on the row is the signal; opening it lands on the Review tab.
@@ -419,7 +427,8 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
     setReviewReadError('')
     let findings
     try {
-      findings = await wholeSavedFindings(statusFor(source), ignoredReviews, async id => (await collaborationRequest(token, appId, `review-runs/${encodeURIComponent(id)}`)).run)
+      const status = statusFor(source)
+      findings = await wholeSavedFindings(status, ignoredReviews, async id => (await collaborationRequest(token, appId, `review-runs/${encodeURIComponent(id)}`)).run, { answered: findingsAnswered(responses, source, status) })
     } catch { if (alive.current) setReviewReadError('The saved review could not be read just now, so Respond to feedback did not open. Try again.'); return }
     if (alive.current) setAddressing({ pr: { ...source, repository: { ...source.repository } }, findings, response: responseView(responses, source) })
   }
@@ -555,6 +564,7 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
       respondError: respondFailure?.key === prKey(pr) ? respondFailure.message : '',
       onPostResponse: answer && (again => answerAction(pr, () => approveResponse({ slug: answer.slug, digest: answer.result.digest, pr, chat: respondChatOf(respondChats, pr), token, capabilities, again }))),
       onDiscardResponse: answer && (() => answerAction(pr, () => discardResponse({ slug: answer.slug, digest: answer.result.digest }))),
+      onWithdrawResponse: answer && (() => answerAction(pr, () => withdrawResponse({ slug: answer.slug, digest: answer.result.digest }))),
       onRespondAgain: onStartAgent ? () => choose([pr], 'respond', prKey(pr)) : undefined,
       onIgnore: onIgnoreReview ? item => setIgnoring({ pr, item }) : undefined,
       onUndoIgnore: onUndoIgnore || undefined,
@@ -627,7 +637,7 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   // A merge changes the list (the PR leaves it), so it reads again once done. A write GitHub may have
   // taken reads it again too, and the sheet waits for that read before it lets the owner back to the list.
   const readAgain = () => Promise.allSettled([load(), onChanged?.()])
-  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls, record: acting.record, capabilities })} onConfirm={async ({ choice, people, note, onConfirmed }) => (await staleOutcome(acting.pulls || [acting.pr])) || actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={() => { if (acting.intent !== FOLLOW && (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record))) void readAgain() }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
+  const actionDialog = acting ? <ReviewDialog onClose={closeAction}><ActionConfirm pr={acting.pr} pulls={acting.pulls} copy={ACTION_COPY[acting.intent](acting.pr, { status: statusFor(acting.pr), ignored: ignoredReviews, standing: standingOf(acting.pr), candidates, pulls: acting.pulls, record: acting.record, capabilities })} onConfirm={async ({ choice, people, note, onConfirmed }) => (await staleOutcome(acting.pulls || [acting.pr])) || actionHandlers[acting.intent]({ ...acting, choice, people, note, shell: { shellConfirm, onConfirmed } })} onDone={outcome => { if (acting.intent !== FOLLOW && (acting.intent !== 'open_for_review' || !isPersonalDraft(acting.record))) void readAgain(); void onReceipt?.(acting.pr, outcome) }} onUnconfirmed={readAgain} onClose={closeAction} viaShell={acting.viaShell} autoConfirm={acting.oneTap} /></ReviewDialog> : null
   const assignPane = <TaskPane id="task:assign" dock={false}>{assigning ? <AssigneePicker key={assigning.map(prKey).join(',')} pulls={assigning} appId={appId} token={token} ownLogin={conn.login} onStale={() => void load()} onClose={() => { setAssigning(null); task?.close() }} onAssigned={(login, keys) => {
       acknowledge(keys, login)
       void onChanged?.()
@@ -700,7 +710,7 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
     {!assignAnchor ? assignPane : null}
     {relevantRuns.filter(run => !visibleKeys.has(runAnchor(run))).map(runPane)}
     {data.loading && !pulls.length ? <div className="co-pr-skel" role="status" aria-label="Loading pull requests">{[3, 2, 3].map((lines, index) => <Skeleton key={index} lines={lines} label="" />)}</div> : null}
-    {!data.loading && !data.error && !visible.length ? (data.partial && filter !== 'all' ? <p className="co-pr-note" role="status">The details of these pull requests are still arriving.</p> : <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={requestedKeys.size} />) : null}
+    {!data.loading && !data.error && !visible.length ? (data.partial && filter !== 'all' ? <p className="co-pr-note" role="status">The details of these pull requests are still arriving.</p> : <EmptyPulls scope={scope} filter={filter} query={query} hasNextPage={data.hasNextPage} waiting={askedKeys.size} />) : null}
     <div className="co-pr-list">{visible.map(pr => {
       const key = prKey(pr)
       // A row that holds only its titles shows what it knows (who, when, GitHub's review decision) and offers nothing that needs

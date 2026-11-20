@@ -101,7 +101,7 @@ test('scheduled autopilot retries durable attention after a lost respond call', 
   assert.match(source, /400 <= exc\.code < 500 and exc\.code not in \(409, 429\)/)
 })
 
-test('scheduled autopilot ignores exact own replies, not all owner activity', () => {
+test('the scheduled job ignores the exact replies Möbius posted and everything the signed-in owner wrote, without a request of its own', () => {
   const source = readFileSync(new URL('../job.sh', import.meta.url), 'utf8')
   assert.match(source, /ignored_event_urls/)
   // The classifier lives in github_events.py (behavior: test_github_events.py).
@@ -110,6 +110,13 @@ test('scheduled autopilot ignores exact own replies, not all owner activity', ()
   assert.match(events, /review\.get\("url"\) not in ignored/)
   assert.doesNotMatch(source, /gh", "api", "user"/)
   assert.doesNotMatch(source, /ignore_login/)
+  // The signed-in login rides on the one batched read (`viewer { login }`), and what that login wrote joins the ignored replies.
+  const github = readFileSync(new URL('../job_github.py', import.meta.url), 'utf8')
+  assert.match(github, /VIEWER_FIELD = "viewer \{ login \} "/)
+  assert.match(source, /return "query \{ " \+ \(job_github\.VIEWER_FIELD if extended else ""\)/)
+  assert.match(source, /return own_event_urls\(node, VIEWER\)/)
+  assert.match(source, /ignore_urls = _ignored_event_urls\(rec\) \| own_urls/)
+  assert.match(events, /e\["author"\]\.lower\(\) == mine/)
 })
 
 test('merge conflicts remain a human handoff, not an authorized rewrite', () => {

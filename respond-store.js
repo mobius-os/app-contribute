@@ -1,6 +1,7 @@
 // Reading the saved Respond-to-feedback results and writing the owner's decision, through the app's storage.
 // The helper writes `respond-results/`; the app writes `respond-decisions/` and `respond-findings/`; neither writes the other's folder.
 import { DECISION_FOLDER, RESULT_FOLDER, normalizeDecision, normalizeResult, postingSoon, resultSlug } from './respond-result.js'
+import { settleResponse } from './respond-lifecycle.js'
 import { SYNC_POLICY } from './refresh.js'
 import { listingStamp, versionedReader } from './storage.js'
 
@@ -43,24 +44,36 @@ async function readOne(storage, path) {
 // What the app remembers of the two folders between reads (see readFolder). One per reader of the responses.
 export const rememberResponseFolders = () => ({ results: new Map(), decisions: new Map() })
 
-// Every saved response with the owner's decision about it: `{ slug, result, decision }`. Throws when the folders cannot be read
-// completely, so a screen keeps what it last knew instead of showing nothing.
-export async function loadResponses(storage = storageOf(), memory = rememberResponseFolders()) {
+const seconds = ms => Math.floor(ms / 1000)
+
+// Every saved response with the owner's decision about it: `{ slug, result, decision, lifecycle }`. Throws when the folders cannot
+// be read completely, so a screen keeps what it last knew instead of showing nothing. Every load applies the lazy tick
+// (respond-lifecycle.js): a post that made no progress for its deadline reads `failed`, and `lifecycle` says when an approved answer
+// whose chat never started is NOT_STARTED, with no timer of its own: the sync hub reads these again (closely right after Post).
+export async function loadResponses(storage = storageOf(), memory = rememberResponseFolders(), now = Date.now()) {
   const [results, decisions] = await Promise.all([readFolder(storage, RESULT_FOLDER, memory.results), readFolder(storage, DECISION_FOLDER, memory.decisions)])
   const responses = []
   for (const [name, raw] of results) {
     const result = normalizeResult(raw)
     // A file only counts under its own PR's name, so a stray or renamed file can never speak for another PR.
     if (!result || name !== `${resultSlug(result.repo, result.number)}.json`) continue
-    responses.push({ slug: name.slice(0, -'.json'.length), result, decision: normalizeDecision(decisions.get(name)) })
+    responses.push(settleResponse({ slug: name.slice(0, -'.json'.length), result, decision: normalizeDecision(decisions.get(name)) }, { now: seconds(now) }))
   }
   return responses
 }
 
-// The result as the server holds it right now, for a decision that publishes. An offline answer is not trusted.
-export async function readFreshResult(slug, storage = storageOf()) {
+// The result as the server holds it right now, for a decision that publishes. An offline answer is not trusted. A post whose deadline
+// has passed reads `failed` here too, so Try again is not refused as "already being posted".
+export async function readFreshResult(slug, storage = storageOf(), now = Date.now()) {
   const loaded = await storage.getWithVersion(`${RESULT_FOLDER}${slug}.json`)
-  return loaded?.offline ? null : normalizeResult(loaded?.value)
+  const result = loaded?.offline ? null : normalizeResult(loaded?.value)
+  return result ? settleResponse({ slug, result, decision: null }, { now: seconds(now) }).result : null
+}
+
+// The owner's decision as the server holds it right now. An offline answer is not trusted.
+export async function readFreshDecision(slug, storage = storageOf()) {
+  const loaded = await storage.getWithVersion(`${DECISION_FOLDER}${slug}.json`)
+  return loaded?.offline ? null : normalizeDecision(loaded?.value)
 }
 
 // A file the helper or the agent reads from disk, accepted only when the server has it. `what` names it in the sentence the owner reads.
@@ -74,8 +87,8 @@ async function writeDurably(path, value, what, storage) {
 }
 
 // The owner's decision: the helper reads it from disk before it posts anything.
-export const writeDecision = (slug, { result_id: resultId, digest, decision, at }, storage = storageOf()) =>
-  writeDurably(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at }, 'decision', storage)
+export const writeDecision = (slug, { result_id: resultId, digest, decision, at, attempt }, storage = storageOf()) =>
+  writeDurably(`${DECISION_FOLDER}${slug}.json`, { version: 1, result_id: resultId, digest, decision, at, ...(attempt ? { attempt } : {}) }, 'decision', storage)
 
 // The whole saved review of a ticked item, where its brief tells the agent to read it (address-feedback.js). Nothing to write when none is ticked.
 export function writeFindings(items, storage = storageOf()) {
@@ -85,6 +98,11 @@ export function writeFindings(items, storage = storageOf()) {
 
 export async function clearDecision(slug, storage = storageOf()) {
   try { await storage.remove(`${DECISION_FOLDER}${slug}.json`) } catch { /* the helper only ever acts on an approval for the exact answer, so a left-over one is harmless */ }
+}
+
+// Taking an approval back is the owner's own request, so unlike clearDecision it says when the approval is still there.
+export async function withdrawDecision(slug, storage = storageOf()) {
+  try { await storage.remove(`${DECISION_FOLDER}${slug}.json`); return { ok: true } } catch { return { ok: false, error: 'Post could not be taken back. Sync and try again.' } }
 }
 
 // The saved answers as a fact of the sync hub (ui/useRespondResults.js): read now and then, and closely while an answer is being posted,

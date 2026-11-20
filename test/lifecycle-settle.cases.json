@@ -1,0 +1,679 @@
+{
+ "now": 1800000000,
+ "iso": "2027-01-15T08:00:00Z",
+ "cases": [
+  {
+   "name": "a stranded update the merge already covers is settled with its note, and the request about it goes",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    },
+    "stranded_reminded_at": "2027-01-14T00:00:00Z",
+    "needs_attention": true,
+    "attention": {
+     "type": "owner_request",
+     "key": "owner_request:update:STRANDED_UPDATE:1799999900",
+     "title": "x",
+     "message": "y"
+    }
+   },
+   "exit": "COVERED_BY_MERGE",
+   "successor": "",
+   "expect": {
+    "regions": {
+     "publication": "MERGED",
+     "update": "NONE"
+    },
+    "fields": {
+     "status": "merged",
+     "updated_at": "2027-01-15T08:00:00Z",
+     "stranded_reminded_at": null,
+     "needs_attention": false,
+     "attention": null,
+     "update_outcome": {
+      "exit": "COVERED_BY_MERGE",
+      "at": "2027-01-15T08:00:00Z",
+      "note": "The merged pull request already contained these changes."
+     }
+    }
+   }
+  },
+  {
+   "name": "a stranded update of a closed PR can be discarded: the PR stays closed and the outcome says only that",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "closed",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "CLOSED",
+       "since": 1799999900,
+       "deadline": 1802591900
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    },
+    "needs_attention": true,
+    "attention": {
+     "type": "owner_request",
+     "key": "owner_request:update:STRANDED_UPDATE:1799999900",
+     "title": "x",
+     "message": "y"
+    }
+   },
+   "exit": "DISCARD_UPDATE",
+   "successor": "",
+   "expect": {
+    "regions": {
+     "publication": "CLOSED",
+     "update": "NONE"
+    },
+    "fields": {
+     "status": "closed",
+     "needs_attention": false,
+     "attention": null,
+     "update_outcome": {
+      "exit": "DISCARD_UPDATE",
+      "at": "2027-01-15T08:00:00Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "a stranded update kept as new work names the record that took it over, and the PR is left as it is",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    },
+    "needs_attention": true,
+    "attention": {
+     "type": "owner_request",
+     "key": "owner_request:update:STRANDED_UPDATE:1799999900",
+     "title": "x",
+     "message": "y"
+    }
+   },
+   "exit": "PRESERVE_AS_NEW",
+   "successor": "new-1",
+   "expect": {
+    "regions": {
+     "publication": "MERGED",
+     "update": "NONE"
+    },
+    "fields": {
+     "status": "merged",
+     "needs_attention": false,
+     "attention": null,
+     "update_outcome": {
+      "exit": "PRESERVE_AS_NEW",
+      "at": "2027-01-15T08:00:00Z",
+      "successor": "new-1"
+     }
+    }
+   }
+  },
+  {
+   "name": "a merge that never landed, landed again as new work, is superseded by that record, which every card follows",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "ORPHANED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    },
+    "needs_attention": true,
+    "attention": {
+     "type": "owner_request",
+     "key": "owner_request:publication:ORPHANED:1799999900",
+     "title": "x",
+     "message": "y"
+    }
+   },
+   "exit": "OWNER_RELANDS",
+   "successor": "new-2",
+   "expect": {
+    "regions": {
+     "publication": "SUPERSEDED",
+     "update": "NONE"
+    },
+    "fields": {
+     "status": "superseded",
+     "superseded_by": "new-2",
+     "needs_attention": false,
+     "attention": null
+    }
+   }
+  },
+  {
+   "name": "an attention that is not the job's request about this state stays",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    },
+    "needs_attention": true,
+    "attention": {
+     "type": "human_required",
+     "key": "k"
+    }
+   },
+   "exit": "DISCARD_UPDATE",
+   "successor": "",
+   "expect": {
+    "regions": {
+     "publication": "MERGED",
+     "update": "NONE"
+    },
+    "fields": {
+     "needs_attention": true,
+     "attention": {
+      "type": "human_required",
+      "key": "k"
+     }
+    }
+   }
+  },
+  {
+   "name": "an exit that needs a successor is refused without one",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "PRESERVE_AS_NEW",
+   "successor": "",
+   "expect": null
+  },
+  {
+   "name": "a successor that is the record itself is refused",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "ORPHANED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "OWNER_RELANDS",
+   "successor": "held-1",
+   "expect": null
+  },
+  {
+   "name": "a successor that is not a record id is refused",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "ORPHANED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "OWNER_RELANDS",
+   "successor": "../x",
+   "expect": null
+  },
+  {
+   "name": "a finished PR that waits on nothing accepts no exit",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "DISCARD_UPDATE",
+   "successor": "",
+   "expect": null
+  },
+  {
+   "name": "an open PR accepts no exit of a finished one",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "open",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "OPEN",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "COVERED_BY_MERGE",
+   "successor": "",
+   "expect": null
+  },
+  {
+   "name": "a stranded update does not accept the exit of a merge that never landed",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "OWNER_RELANDS",
+   "successor": "new-3",
+   "expect": null
+  },
+  {
+   "name": "a merge that never landed does not accept the exits of an update",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "ORPHANED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "NONE",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "DISCARD_UPDATE",
+   "successor": "",
+   "expect": null
+  },
+  {
+   "name": "a word that is no exit is refused",
+   "record": {
+    "id": "held-1",
+    "type": "pr",
+    "status": "merged",
+    "title": "T",
+    "url": "https://github.com/o/r/pull/7",
+    "number": 7,
+    "repo": "o/r",
+    "plan": {
+     "action": "pr_update",
+     "repo": "o/r"
+    },
+    "lifecycle": {
+     "v": 1,
+     "regions": {
+      "publication": {
+       "state": "MERGED",
+       "since": 1799999900,
+       "deadline": null
+      },
+      "update": {
+       "state": "STRANDED_UPDATE",
+       "since": 1799999900,
+       "deadline": 1800604700
+      },
+      "followup": {
+       "state": "CLOSED_OUT",
+       "since": 1799999900,
+       "deadline": null
+      }
+     },
+     "history": [],
+     "attention": {
+      "flags": []
+     }
+    }
+   },
+   "exit": "SEND",
+   "successor": "",
+   "expect": null
+  },
+  {
+   "name": "a comment record is not tracked, so it has no exit",
+   "record": {
+    "id": "c-1",
+    "type": "issue_comment",
+    "status": "commented"
+   },
+   "exit": "DISCARD_UPDATE",
+   "successor": "",
+   "expect": null
+  }
+ ]
+}

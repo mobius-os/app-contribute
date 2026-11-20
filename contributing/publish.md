@@ -44,7 +44,10 @@ continue under the existing instruction when Hard stop #1 permits it. Stop
 only for a genuinely missing decision or approval, not every failed preflight.
 
 A record flipped to `abandoned` means the partner dropped it — never argue with
-one, never resurrect it unasked.
+one, never resurrect it unasked. Dropping only an update on a public PR does not
+abandon the record in engine mode (`lifecycle_writer`, [ledger.md](ledger.md)):
+its PR stays open or draft and no update waits, so do not restage that update
+unasked.
 
 ## Offering Send in chat
 
@@ -70,9 +73,10 @@ The card is that chat's live view of its contributions, read from the ledger:
 
 - **What it shows.** One row per contribution: its PR title over its project
   and lines changed, with a pill once something happens. The helper names
-  the records you list, every other contribution of this chat that is ready
-  with its whole stack (`--chat-id`, default `$CHAT_ID`, required; unreviewed
-  work is never pulled in), and every prepared layer of any stack among them.
+  the records you list, every other contribution of this chat that can be sent now
+  with its whole stack (`--chat-id`, default `$CHAT_ID`, required; unreviewed,
+  held, failed or still-unconfirmed work is never pulled in), and every prepared
+  layer of any stack among them.
   It refuses the card if any of those, stack layers included, is not all
   clear for its current head or is from another chat (review it, or restage
   it from this chat first). At most 12 contributions fit; with more, ask the

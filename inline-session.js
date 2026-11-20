@@ -45,7 +45,7 @@ import { cardKind, CHAT_INTENT, inChat, validRecordId } from './chat-blocks.js'
 import { stageOf, stageWords } from './publication-stage.js'
 import { planScreenshots, publicationVersion, screenshotCountText, uncertainPublication } from './domain.js'
 import { isAutopilotEnabled } from './autopilot.js'
-import { isPublished, publicationUnits, publishedPull, reviewIncomplete, sendBlocker } from './send-readiness.js'
+import { closedUnmerged, isDroppedUpdate, isPublished, isStranded, isSuperseded, publicationUnits, publishedPull, pullKey, reviewIncomplete, sendBlocker, strandedPill } from './send-readiness.js'
 import { RETRY_CHECK_REASON, reviewStateFor } from './review.js'
 import { ACCOUNT_CODES, askRev, cardAsk, holdCode } from './card-asks.js'
 
@@ -61,8 +61,13 @@ const UNKNOWN_NOTE = 'GitHub hasn’t confirmed the result yet.'
 // nothing is ever retried blindly.
 export const RECHECK_DELAYS_MS = [3000, 6000, 12000, 24000, 45000, 60000]
 export const RECHECK_WINDOW_MS = 10 * 60 * 1000
-// An open pull request needs no word beside its link; Merged is the finished state.
-const PULL_STATUS = { draft: ['Draft', 'neutral'], open: ['', 'neutral'], landing: ['', 'neutral'], merged: ['Merged', 'success'], closed: ['Closed', 'neutral'] }
+// An open pull request needs no word beside its link; Merged is the finished state, and only a merge
+// into the default branch (send-readiness.js `pullKey`: one word per publication state).
+const PULL_STATUS = { draft: ['Draft', 'neutral'], open: ['', 'neutral'], merged: ['Merged', 'success'], merged_elsewhere: ['Merged to a branch', 'neutral'],
+  orphaned: ['Not shipped', 'attention'], closed: ['Closed', 'neutral'] }
+export const STRANDED_NOTE = 'The pull request merged or closed before this update went out.'
+// An update the owner discarded while its pull request stays public: nothing was sent.
+export const DROPPED_PILL = 'Update dropped'
 // A pending recheck never keeps a process alive on its own (Node's unref);
 // in a browser frame it is an ordinary timeout.
 const DEFAULT_TIMERS = { set: (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id }, clear: id => clearTimeout(id) }
@@ -117,6 +122,8 @@ export function observeAttempt(attempt, byId) {
   const records = attempt.ids.map(id => byId.get(id))
   if (records.length && records.every(isPublished)) return { ...attempt, state: 'sent', note: '' }
   if (attempt.state !== 'unknown') return attempt
+  // An update whose PR merged or closed first never went out: that answers the attempt.
+  if (records.some(isStranded)) return { ...attempt, state: 'failed', note: STRANDED_NOTE }
   // A saved error that says the send may already be public is not a refusal.
   const failed = records.find(record => record?.status === 'prepared' && record.last_submit_error
     && !uncertainPublication(record) && Date.parse(record.updated_at) > attempt.at)
@@ -373,7 +380,7 @@ export function createInlineSession({ sessionId, actions, items = null, features
     let at = id
     for (let step = 0; step < MAX_SUCCESSORS; step++) {
       const record = byId.get(at)
-      const next = record?.status === 'superseded' && validRecordId(record.superseded_by) && !seen.has(record.superseded_by) ? record.superseded_by : ''
+      const next = isSuperseded(record) && validRecordId(record.superseded_by) && !seen.has(record.superseded_by) ? record.superseded_by : ''
       if (!next) return { id: at, record: record || null, seen }
       if (!byId.has(next)) return { id: at, record, seen, next }
       seen.add(next)
@@ -388,9 +395,10 @@ export function createInlineSession({ sessionId, actions, items = null, features
 
   // The card's rows, in card order: each named record's current version that
   // belongs to the attested chat, as `pending` (waiting to be sent), `sent`,
-  // `dismissed`, `missing` (a named record or successor that is gone) or
-  // `unread` (one that could not be read yet). Missing and unread rows hold
-  // the card: they are never a completed dismissal.
+  // `stranded` (an update whose PR merged or closed before it went out: it
+  // can no longer be sent), `dismissed`, `missing` (a named record or
+  // successor that is gone) or `unread` (one that could not be read yet).
+  // Missing and unread rows hold the card: they are never a completed dismissal.
   function entries() {
     if (!tracks()) return []
     const byId = current()
@@ -411,7 +419,7 @@ export function createInlineSession({ sessionId, actions, items = null, features
         else if (failed) list.push({ id, record, kind: 'unread' })
         continue
       }
-      const kind = isPublished(record) ? 'sent' : ['prepared', 'submitting'].includes(record.status) ? 'pending'
+      const kind = isStranded(record) ? 'stranded' : isDroppedUpdate(record) ? 'dismissed' : isPublished(record) ? 'sent' : ['prepared', 'submitting'].includes(record.status) ? 'pending'
         : ['abandoned', 'superseded'].includes(record.status) ? 'dismissed' : ''
       if (kind) list.push({ id, record, kind })
     }
@@ -563,6 +571,8 @@ export function createInlineSession({ sessionId, actions, items = null, features
     return attempt && ['failed', 'not_attempted'].includes(attempt.state) && !isPublished(current().get(id)) ? attempt : null
   }
 
+  const pullLinks = record => { const pull = publishedPull(record); return pull ? [{ label: `#${pull.number}`, url: pull.url }] : [] }
+
   // One record's live state: sending, checking, its pull request, or why it failed.
   function rowState(id) {
     const record = current().get(id)
@@ -570,9 +580,11 @@ export function createInlineSession({ sessionId, actions, items = null, features
     if (attempt?.state === 'sending') return { status: 'Sending', busy: true }
     if (isPublished(record)) {
       const pull = publishedPull(record)
-      const [status, statusTone] = PULL_STATUS[record.status] || ['', 'neutral']
+      const [status, statusTone] = PULL_STATUS[pullKey(record)] || ['', 'neutral']
       return { status, statusTone, links: [{ label: `#${pull.number}`, url: pull.url }] }
     }
+    // Its PR ended before the update went out: said as that, never as a merge or a send in doubt.
+    if (isStranded(record)) return { status: strandedPill(record), statusTone: 'attention', links: pullLinks(record) }
     if (attempt?.state === 'unknown') {
       // The card's action asks for its repair (fixFor, `publication_changed`).
       if (findingOf(id) === 'changed') return { status: CHANGED_PILL, statusTone: 'attention' }
@@ -600,6 +612,7 @@ export function createInlineSession({ sessionId, actions, items = null, features
       ...(lines ? { lines } : {}), intent: `review:${id}` }
     if (kind === 'missing') return { ...row, pill: HOLD.gone, tone: 'attention' }
     if (kind === 'unread') return { ...row, pill: HOLD.unread }
+    if (kind === 'dismissed' && isDroppedUpdate(record)) return { ...row, pill: DROPPED_PILL, tone: 'neutral', links: pullLinks(record) }
     if (kind === 'dismissed') return { ...row, pill: record.status === 'abandoned' ? 'Dismissed' : 'Replaced' }
     const state = rowState(id)
     if (state) return { ...row, pill: state.status, tone: state.statusTone || 'neutral', busy: state.busy === true, links: state.links || [] }
@@ -648,7 +661,7 @@ export function createInlineSession({ sessionId, actions, items = null, features
         : count === 1 ? 'Contribution sent' : `${count} contributions sent`
       // Success only on the live card and only when none was closed unmerged:
       // a history card stays neutral.
-      return { title, titleTone: newest() && sent.every(entry => entry.record.status !== 'closed') ? 'success' : 'neutral' }
+      return { title, titleTone: newest() && !sent.some(entry => closedUnmerged(entry.record)) ? 'success' : 'neutral' }
     }
     const unknown = pending.filter(entry => latestAttempt(entry.id)?.state === 'unknown')
     if (unknown.length) {
@@ -666,14 +679,16 @@ export function createInlineSession({ sessionId, actions, items = null, features
     const holds = hold?.holds || []
     const account = sendKey(key) ? blocked(key)?.account || (holds.some(item => ACCOUNT_CODES.has(item.code)) ? 'reconnect' : '') : ''
     const unreadCount = list.filter(entry => entry.kind === 'unread').length
+    const strandedCount = list.filter(entry => entry.kind === 'stranded').length
     const fixIds = new Set([...pending.filter(entry => rowFailure(entry.id) && !ACCOUNT_CODES.has(rowFailure(entry.id).code)).map(entry => entry.id),
       ...holds.filter(item => !WAITING.has(item.pill) && !ACCOUNT_CODES.has(item.code)).map(item => item.id)])
     const parts = [
       account ? account === 'connect' ? 'GitHub not connected' : 'Reconnect GitHub' : '',
       fixIds.size ? `${fixIds.size} ${fixIds.size === 1 ? 'needs' : 'need'} a fix` : '',
+      strandedCount ? `${plural(strandedCount, 'update', 'updates')} not sent` : '',
       unreadCount ? `couldn’t load ${unreadCount}` : '',
     ].filter(Boolean)
-    const tone = account || fixIds.size ? 'attention' : 'neutral'
+    const tone = account || fixIds.size || strandedCount ? 'attention' : 'neutral'
     if (sent.length) return { title: [`${sent.length} of ${counted.length} sent`, ...parts].join(' · '), titleTone: tone }
     if (parts.length) {
       const title = parts.join(' · ')
