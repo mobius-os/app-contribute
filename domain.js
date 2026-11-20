@@ -409,6 +409,21 @@ export function timeAgo(iso) {
   return new Date(t).toLocaleDateString()
 }
 
+/** "on 5 Oct", with the year once it is nearly a year back: the date a relative time falls back to. */
+export const onDate = (time, seconds) => `on ${new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(seconds > 300 * 86400 ? { year: 'numeric' } : {}) })}`
+
+// "just now", "5s ago", "3m ago", "2h ago", "4d ago", "1w ago": one letter for the unit, for a line with little room. A month or more is a date.
+const COMPACT_UNITS = [[1, 's', 60], [60, 'm', 3600], [3600, 'h', 86400], [86400, 'd', 7 * 86400], [7 * 86400, 'w', 30 * 86400]]
+export function compactTimeAgo(iso) {
+  const time = Date.parse(iso)
+  if (!iso || Number.isNaN(time)) return ''
+  const seconds = Math.max(0, (Date.now() - time) / 1000)
+  if (seconds < 5) return 'just now'
+  const [size, unit] = COMPACT_UNITS.find(([, , limit]) => seconds < limit) || []
+  if (unit) return `${Math.floor(seconds / size)}${unit} ago`
+  return onDate(time, seconds)
+}
+
 // The staged screenshots a plan carries, keeping only well-formed entries so
 // a malformed record never produces a request or a count the owner relies on.
 export const SCREENSHOT_NAME = /^[a-z0-9][a-z0-9-]{0,60}\.png$/

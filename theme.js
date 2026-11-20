@@ -25,6 +25,7 @@ export const CSS = `
   /* The two reading sizes: a PR description on a phone only (owner's choice, 2026-11-06; DESIGN.md). */
   --co-text-reading: 13px;
   --co-text-code: 12px;
+  --co-text-fine: 12px;       /* the note under the header's Sync: the smallest type on the page, and nothing else uses it */
   --co-control-height: 44px;
   --co-tap-reach: 0px;        /* how far a control's tap area reaches past its drawn edge, above and below */
   --co-icon-scale: 1;         /* every icon is drawn at its size times this */
@@ -166,10 +167,14 @@ export const CSS = `
   width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--muted);
 }
-.co-toolbar-refresh { gap: 7px; white-space: nowrap; text-align:left; }
-.co-sync-copy { display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
-.co-label-short { display: none; }
+.co-btn.co-toolbar-refresh { gap: 10px; min-height: 48px; padding-inline: 8px 12px; white-space: nowrap; text-align:left; border-color: transparent; background: none; color: var(--muted); }
+.co-btn.co-toolbar-refresh:not(:disabled):hover { border-color: transparent; background: var(--surface); color: var(--text); }
+/* The mark is big enough to stand beside two lines: the word, and under it how old the sync is, in the smallest type on the page. */
+.co-sync-copy { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+.co-sync-label { color: var(--text); font-size: var(--co-text-body); font-weight: 600; line-height: 1.15; text-box: trim-both cap alphabetic; }
 .co-sync-note { color: var(--muted); font-size: var(--co-text-meta); white-space: nowrap; font-weight:500; }
+.co-toolbar-refresh .co-sync-note { font-size: var(--co-text-fine); line-height: 1.2; text-box: trim-both cap alphabetic; }
+.co-sync-note.is-failed { color: var(--danger-text, var(--danger)); }
 .co-boot {
   min-height: 70dvh; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 24px;
@@ -528,16 +533,9 @@ export const CSS = `
 .co-conn-row { display: flex; align-items: flex-start; gap: 10px; }
 .co-conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .co-conn-body .co-conn-actions { margin-top: 10px; }
-.co-settings { position: relative; flex: none; }
-.co-settings > summary { gap: 8px; min-width: 44px; padding: 0 10px; min-height: 44px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; border-radius: var(--co-radius-control); list-style: none; }
-.co-settings > summary > span { font-size: var(--co-text-meta); white-space: nowrap; }
-.co-settings > summary::-webkit-details-marker { display: none; }
-.co-settings > summary:hover, .co-settings[open] > summary { background: var(--surface); color: var(--text); }
-.co-settings-panel { position: absolute; top: 52px; right: 0; z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 120px); overflow-y: auto; overscroll-behavior: contain; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--co-radius-panel); }
-.co-settings-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.co-settings-panel h2 { margin: 0; font-size: var(--co-text-body); }
-.co-settings-panel .co-conn { border: 0; padding: 0; margin: 0; background: transparent; }
-.co-settings-panel .co-conn.is-connected { display: block; }
+.co-btn.co-toolbar-settings { flex: none; gap: 8px; min-width: 44px; padding-inline: 10px; display: none; align-items: center; justify-content: center; border-color: transparent; background: none; color: var(--muted); }
+.co-btn.co-toolbar-settings:hover { background: var(--surface); color: var(--text); }
+.co-btn.co-toolbar-settings.is-always { display: inline-flex; }
 .co-account-default { display: flex; gap: 10px; align-items: center; }
 .co-account-default > .co-icon { color: var(--accent); }
 .co-account-default > div { display: grid; gap: 4px; }
@@ -1423,11 +1421,12 @@ export const CSS = `
   .co-title { font-size: var(--co-text-body); }
   .co-toolbar { gap: 3px; }
   .co-toolbar-check { width: 32px; padding: 0; justify-content: center; }
-  /* Sync and Settings keep a word on a phone: an icon alone is not a label (DESIGN.md). */
-  .co-toolbar .co-label-long { display: none; }
+  /* Sync keeps its word on a phone, so the mark is not the only hint that it syncs. The last-sync time stays for screen readers,
+     and only a failed sync is spelled out beside the word. */
   .co-sync-last { display: none; }
-  .co-toolbar .co-label-short { display: inline; }
-  .co-toolbar-refresh { min-width: 40px; justify-content: center; }
+  .co-btn.co-toolbar-refresh { min-height: 44px; padding-inline: 6px 8px; gap: 6px; }
+  .co-toolbar-refresh > .co-icon { width: 24px; height: 24px; }
+  .co-sync-note:not(.is-failed) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .co-project-control { max-width: 108px; padding-inline: 8px; }
   .co-project-control > span { overflow: hidden; text-overflow: ellipsis; }
   .co-project-control b { display: none; }

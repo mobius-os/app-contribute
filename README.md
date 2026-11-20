@@ -50,7 +50,7 @@ contribution. This app is the dashboard for that loop:
   Settings → Updates applies them for Möbius and the App Store for apps, and a
   merged run links to the right one. On phones, a task takes the
   screen and **Back to project** restores the same inventory.
-- **Sync with GitHub** (in the header) — reloads this Möbius and asks GitHub, read-only, whether
+- **Sync** (in the header, named Sync with GitHub for screen readers; the time of the last sync is under it as "Last synced 3m ago", in s, m, h, d and w) — reloads this Möbius and asks GitHub, read-only, whether
   each project's repository has commits newer than the one this Möbius last
   compared with (`upstream-check.js`, one GraphQL query through the platform
   proxy). It reports commits, never files: what an update changes is still the
@@ -826,6 +826,12 @@ fix conversations for that exact repository and number. The block declares no
 executable capability and grants nothing.
 
 ### Respond to feedback: the saved answer
+
+**Respond again** starts on the agent the PR's conversation already has ("Same agent as the first
+answer, so it builds on that work"). Its Agent row is the same picker as everywhere else: a model of
+the same provider can be chosen, and it is applied to that conversation before the new message goes in.
+Models of the other provider are listed but dimmed ("Codex can't continue this Claude conversation"),
+because a conversation cannot change provider once it has run; the platform refuses it too.
 
 A Respond-to-feedback chat never reviews the PR again and never publishes. When it
 finishes it runs `respond_result.py save`, which records what Git and GitHub say (the

@@ -167,9 +167,11 @@ window.fetch = async (url, options = {}) => {
   // The app's own conversation for a PR's Respond scope, with the agent it keeps.
   if (call.method === 'GET' && call.url.startsWith('/api/app-chats?scope=')) return response([{ id: 'respond-chat-fixture', provider: 'codex', model: 'fixture-model', effort: 'xhigh', scope: decodeURIComponent(call.url.split('scope=')[1]) }])
   if (call.method === 'POST' && /^\/api\/chats\/[\w-]+\/messages$/.test(call.url)) { calls.messages.push({ chatId: call.url.split('/')[3], ...call.body }); return response({ status: 'started' }) }
-  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['none','minimal','low','medium','high','xhigh'],default_effort:'low'}]}})
+  // A model change on a conversation the app made: allowed within its provider (the platform refuses another).
+  if (call.method === 'PATCH' && /^\/api\/app-chats\/[\w-]+$/.test(call.url)) return response({ id: call.url.split('/')[3], ...call.body })
+  if (call.url === '/api/models') return response({providers:{codex:[{id:'fixture-model',label:'Fixture model',available:true,effort_levels:['none','minimal','low','medium','high','xhigh'],default_effort:'low'},{id:'other-fixture-model',label:'Other fixture model',available:true,effort_levels:['low','medium','high'],default_effort:'medium'}],claude:[{id:'claude-fixture',label:'Claude fixture',available:true,effort_levels:null,default_effort:'high'}]}})
   if (call.url === '/api/owner/model-prefs') return response({hidden_ids:[]})
-  if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'}})
+  if (call.url === '/api/auth/providers/status') return response({codex:{configured:true,available:true,name:'OpenAI Codex'},claude:{configured:true,available:true,name:'Claude Code'}})
   if (window.presetsMissing && call.url === '/api/github/contributions/fixture-app/review-presets') return new Response(JSON.stringify({detail:'Not Found'}), {status:404})
   if (call.url === '/api/github/contributions/fixture-app/review-presets' && call.method === 'GET') return response({presets:{review_prompt:'Review fixture',fix_prompt:'Fix fixture',merge_prompt:'Merge fixture',autopilot:true},capabilities:window.fixtureCapabilities || {review_fix_merge:false,post_review:false}})
   if (call.url === '/api/github/contributions/fixture-app/review-preview' && call.method === 'POST') return response({preview_sha256:'f'.repeat(64),options:{provider:'codex',model:'fixture-model'}})
@@ -550,6 +552,8 @@ root.render(<Fixture />)
 const frame = () => new Promise(resolve => requestAnimationFrame(resolve))
 const text = node => node?.textContent?.replace(/\s+/g, ' ').trim() || ''
 const query = selector => document.querySelector(selector)
+// Settings is a row of the rail on a wide screen and a header button where the rail is gone: the one that is showing.
+const settingsButton = () => [...document.querySelectorAll('[aria-label$="— Settings"]')].find(node => node.offsetParent)
 // An icon-only button has no text, so its accessible name counts too.
 const button = (name, root = document) => [...root.querySelectorAll('button')].find(node => text(node) === name || node.getAttribute('aria-label') === name)
 const review = () => query('.co-review-window')
@@ -1830,7 +1834,7 @@ window.runWorkspaceChecks = async () => {
       window.postMessage({type:'moebius:frame-visibility',visible:true}, '*')
       await frame(); await frame()
       await click(query('.co-toolbar-refresh'))
-      await until(() => query('.co-settings summary')?.getAttribute('aria-label')?.includes('reconnected-owner'), 'Sync did not display the new account')
+      await until(() => settingsButton()?.getAttribute('aria-label')?.includes('reconnected-owner'), 'Sync did not display the new account')
       const returning = calls.requests.slice(previous)
       ensure(returning.filter(call => call.url === '/api/github/status').length === 1, 'Returning checked the account more than once')
       const overlays = returning.filter(call => call.url === '/api/github/graphql' && call.body.query.includes('resource(url:'))
@@ -1840,12 +1844,13 @@ window.runWorkspaceChecks = async () => {
       ensure(returning.every(call => call.method === 'GET' || call.url === '/api/github/graphql'), 'Returning mutated public work')
     })
     await check('settings leads with the GitHub account then one prompt editor and a precise destination', async () => {
-      await click(query('.co-settings summary'))
+      await click(settingsButton())
       await until(()=>query('.co-prompt-settings textarea'), 'Prompt editor did not settle')
-      const panel=query('.co-settings-panel'), headings=[...panel.querySelectorAll('h3')]
+      const panel=query('.co-settings-workspace'), headings=[...panel.querySelectorAll('h3')]
       ensure(headings.map(h=>text(h)).join('|')==='GitHub|Default agent|Agent prompts', 'Settings section order or headings differ')
       ensure(panel.querySelectorAll('.co-prompt-settings textarea').length===1, 'Settings did not show exactly one prompt editor')
       ensure(button('Manage account',panel) && !text(panel).includes('Manage in Settings'), 'Settings destination is ambiguous')
+      await captureShot('settings-window')
       await click(button('Close settings',panel))
     })
     await check('a chat card sends only after Confirm, through the guarded app handler with the confirmed snapshot', async () => {
@@ -2517,7 +2522,7 @@ window.runTapBoxChecks = async () => {
     await shoot('tap-boxes-review-window', review())
     await closeReview()
     await until(() => !review(), 'The review window did not close')
-    await click(query('summary[aria-label$="Contribute settings"]'))
+    await click(settingsButton())
     await until(() => query('[aria-label="Close settings"]'), 'Settings did not open')
     tapBoxes('Settings', query('.co-settings-workspace'))
     // Every screen is probed before anything fails, so one run lists every miss.
@@ -3718,8 +3723,20 @@ window.runRespondAgainChecks = async () => {
     const agentLine = text(query('.co-review-window [aria-label="Agent"]'))
     ensure(agentLine.includes('Extra high') && agentLine.includes('Same agent as the first answer') && !query('.co-review-window .co-model-list'), 'The agent line said: ' + agentLine)
     ensure(calls.requests.some(call => call.url === '/api/app-chats?scope=' + encodeURIComponent('contribute-address:owner/project#7')), 'The agent was not read from the PR’s own conversation')
-    checks.push({ name: 'Respond again names the agent the PR’s conversation keeps, with its effort, and offers no picker', status: 'pass' })
+    checks.push({ name: 'Respond again starts on the agent the PR’s conversation keeps, with its effort, and nothing chosen', status: 'pass' })
     await captureShot('respond-again-window')
+    // Another model of the same provider can be chosen; the other provider’s models are listed but cannot be picked.
+    await click(query('.co-review-window .co-agent-trigger'))
+    await until(() => query('.co-review-window .co-model-list'), 'The picker did not open')
+    const rows = [...document.querySelectorAll('.co-review-window .co-model-row')]
+    const claudeRow = rows.find(node => text(node).includes('Claude fixture'))
+    ensure(claudeRow?.disabled && text(claudeRow).includes('Claude can’t continue this Codex conversation'), 'The other provider’s model was not held back: ' + rows.map(text).join(' | '))
+    const sameProvider = rows.find(node => text(node).includes('Other fixture model'))
+    ensure(sameProvider && !sameProvider.disabled, 'A model of the conversation’s own provider could not be picked')
+    claudeRow.scrollIntoView({ block: 'center' })
+    await captureShot('respond-again-picker')
+    await click(sameProvider)
+    checks.push({ name: 'Respond again lists the other provider’s models dimmed with the reason, and lets a model of the same provider be chosen', status: 'pass' })
     const runsReads = () => calls.requests.filter(isRunsRead).length
     const readsBefore = runsReads()
     await until(() => button(NAMES.respondAgain) && !button(NAMES.respondAgain).disabled, 'Respond again is not ready: ' + window_)
@@ -3728,10 +3745,12 @@ window.runRespondAgainChecks = async () => {
     const sent = calls.messages[0]
     ensure(sent.chatId === 'respond-chat-fixture' && /^respond-/.test(sent.cid), 'The message went to ' + sent.chatId + ' as ' + sent.cid)
     ensure(sent.content.includes('respond_result.py save --pr owner/project#7') && !/approval card/.test(sent.content), 'The brief was: ' + sent.content.slice(0, 400))
-    ensure(calls.appChatStarts.length === 1 && calls.appChatStarts[0].scope === 'contribute-address:owner/project#7', 'The start used another scope: ' + JSON.stringify(calls.appChatStarts))
-    ensure(!calls.requests.some(call => call.method === 'PATCH' && call.url.startsWith('/api/app-chats/')), 'A second pass changed the conversation’s agent')
+    ensure(calls.appChatStarts.length === 0, 'Respond again was bound to the conversation the picker read, so it never starts the scope again: ' + JSON.stringify(calls.appChatStarts))
+    const patch = calls.requests.find(call => call.method === 'PATCH' && call.url.startsWith('/api/app-chats/'))
+    ensure(patch?.url === '/api/app-chats/respond-chat-fixture' && patch.body.provider === 'codex' && patch.body.model === 'other-fixture-model', 'The chosen model was not applied to the PR’s conversation: ' + JSON.stringify(patch))
+    ensure(calls.requests.indexOf(patch) < calls.requests.findIndex(call => call.method === 'POST' && /\/messages$/.test(call.url)), 'The model was applied after the message went')
     await until(() => text(query('.co-review-window')).includes('The agent is on it'), 'The window did not confirm: ' + text(query('.co-review-window')))
-    checks.push({ name: 'Respond again goes into the PR’s own conversation as one message, with the new brief', status: 'pass' })
+    checks.push({ name: 'Respond again goes into the PR’s own conversation as one message, with the new brief and the chosen model applied first', status: 'pass' })
     // The platform does not list the conversation yet (respondChats stays empty): the PR shows it at work anyway, and reads again at once.
     await until(() => runsReads() > readsBefore, 'The runs were not read again after the start')
     await click(button('Close'))
@@ -3938,6 +3957,19 @@ window.runAskApprovalChecks = async () => {
     await until(() => calls.merges.length === 2, 'The chosen way was not sent')
     ensure(calls.merges[1].method === 'merge' && JSON.stringify(calls.grants[3].args) === JSON.stringify(['merge', {}, calls.merges[1]]), 'The shell was asked for ' + JSON.stringify(calls.grants[3]?.args) + ' and the platform got ' + JSON.stringify(calls.merges[1]))
     checks.push({ name: 'Merge options… lets the owner choose how it lands, then the shell confirms that exact choice', status: 'pass' })
+    // 6. GitHub says up front that this account can only read the repository: Merge is stopped with the reason, and no sheet opens.
+    const mergesBefore = calls.merges.length
+    await mountDeskApp({ own: true, pullPatch: { ...approvedAt(HEAD), repository: { nameWithOwner: 'owner/project', viewerPermission: 'READ' } } })
+    await openPage()
+    await click(query('[aria-label="Choose an action for PR 7"]'))
+    await until(() => menuItems().length, 'The Actions menu did not open')
+    const stopped = menuItems().find(node => text(node.querySelector('strong')) === 'Merge')
+    ensure(stopped && (stopped.getAttribute('aria-disabled') === 'true' || stopped.disabled), 'Merge was offered to an account that can only read')
+    ensure(text(stopped.querySelector('small')) === 'Merging needs write access to this repository. Your account has read access.', 'Merge said: ' + text(stopped))
+    await captureShot('merge-without-write-access')
+    await click(stopped)
+    ensure(!query('.co-review-window') && calls.merges.length === mergesBefore, 'A stopped Merge still opened a sheet or sent a merge')
+    checks.push({ name: 'Merge is stopped, with its reason, for an account that can only read; no sheet opens and nothing is sent', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
@@ -4191,9 +4223,10 @@ window.runSyncNoteChecks = async () => {
     await syncAgain()
     await until(() => note().startsWith('Last synced'), 'A Sync that read everything did not say Last synced: ' + note())
     checks.push({ name: 'a Sync that read everything says Last synced', status: 'pass' })
+    await captureShot('header-sync')
     window.failIncoming = true
     await syncAgain()
-    ensure(note().startsWith('Couldn’t sync · Last synced'), 'A failed retry lost the last successful time: ' + note())
+    ensure(note().startsWith('Couldn’t sync · last synced'), 'A failed retry lost the last successful time: ' + note())
     checks.push({ name: 'a failed retry keeps the last successful time beside it', status: 'pass' })
     // A phone header has no room for the long form: it keeps the failure and drops the time.
     ensure(window.innerWidth > 480 || query('.co-sync-note').innerText.trim() === 'Couldn’t sync', 'The failure note grew past the button on a phone: ' + query('.co-sync-note').innerText)
@@ -4338,7 +4371,8 @@ window.runInstantOpenChecks = async () => {
     await until(() => rowOf('Approved change'), 'The desk did not open from the last-known copy while the ledger read was held')
     ensure(!query('.co-boot'), 'The opening screen showed although a saved copy exists')
     ensure(statusOf('Approved change').includes('Ready to merge'), 'The saved row said: ' + statusOf('Approved change'))
-    ensure(note().startsWith('Updating…') && note().includes('last synced') && /2 hours ago/.test(note()), 'The header said: ' + note())
+    ensure(note().startsWith('Updating…') && note().includes('last synced') && /2h ago/.test(note()), 'The header said: ' + note())
+    await captureShot('header-sync-updating')
     noSpinnerOrRetry('The saved desk')
     await captureShot('instant-open-saved-desk')
     window.releaseLedgerRead()
@@ -4395,7 +4429,7 @@ window.runInstantOpenChecks = async () => {
     await mountDeskApp()
     await until(() => note().startsWith('Couldn’t sync'), 'A failed update did not say so: ' + note())
     ensure(rowOf('Approved change') && statusOf('Approved change').includes('Ready to merge'), 'A failed update dropped the last-known rows')
-    ensure(note().includes('Last synced') || window.innerWidth <= 480, 'A failed update lost the copy\'s age: ' + note())
+    ensure(note().includes('last synced') || window.innerWidth <= 480, 'A failed update lost the copy\'s age: ' + note())
     ensure(![...document.querySelectorAll('button')].some(node => /retry|try again/i.test(text(node))), 'A failed update offered a Retry')
     window.failIncoming = false
     await click(query('.co-toolbar-refresh'))
@@ -4464,7 +4498,7 @@ window.runRepositoryListChecks = async () => {
     await until(() => rowCount() === 2, 'The repository did not open from its saved list: ' + text(query('main')).slice(0, 300))
     ensure(!query('.co-pr-skel'), 'The saved list showed placeholder rows')
     ensure(text(row(7)).includes('Title three hours ago'), 'The saved list showed: ' + text(row(7)))
-    ensure(note().startsWith('Updating…') && note().includes('last synced') && /3 hours ago/.test(note()), 'The list said: ' + note())
+    ensure(note().startsWith('Updating…') && note().includes('last synced') && /3h ago/.test(note()), 'The list said: ' + note())
     await captureShot('repository-list-from-copy')
     const kept = row(7)
     await until(() => window.releasePulls, 'The list was not updated behind the saved rows')

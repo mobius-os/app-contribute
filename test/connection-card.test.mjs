@@ -5,9 +5,9 @@ import { frontendModules, renderModule } from './render-harness.mjs'
 const connectionRenderer = () => renderModule(`
   import React from 'react'
   import { renderToStaticMarkup } from 'react-dom/server'
-  import { ConnectionCard, ConnectionSettings } from './ui/ConnectionCard.jsx'
+  import { ConnectionCard, SettingsButton } from './ui/ConnectionCard.jsx'
   export function renderSettings(conn) {
-    return renderToStaticMarkup(React.createElement(ConnectionSettings, { conn }))
+    return renderToStaticMarkup(React.createElement(SettingsButton, { conn, onOpen: () => {}, className: 'co-rail-item' }, 'Settings'))
   }
   export function renderConnection(conn, props = {}) {
     return renderToStaticMarkup(React.createElement(ConnectionCard, {
@@ -30,9 +30,8 @@ test('disconnected Contribute sends the owner to Settings instead of signing in 
   assert.equal((html.match(/>Go to Settings to connect</g) || []).length, 1)
   assert.doesNotMatch(html, /Connect with GitHub|device code|Private repositories|Disconnect/)
   const closed = renderSettings(conn)
-  assert.match(closed, /Contribute settings/)
-  assert.match(closed, /Connect GitHub/)
-  assert.doesNotMatch(closed, /co-settings-panel/)
+  assert.match(closed, /Connect GitHub — Settings/)
+  assert.doesNotMatch(closed, /Contribute settings/)
 })
 
 test('connected Contribute shows the account read-only with a Settings link', async t => {
@@ -49,13 +48,12 @@ test('the header shows the connected handle without claiming an unchecked connec
   if (!frontendModules) return t.skip('MOBIUS_FRONTEND_NODE_MODULES is required')
   const { renderSettings } = await connectionRenderer()
   const connected = renderSettings({ state: 'connected', login: 'octocat' })
-  assert.match(connected, /octocat[\s\S]*Contribute settings/)
-  assert.match(connected, /<span class="co-label-long">Contribute settings<\/span><span class="co-label-short">Settings<\/span>/, 'the long name on a wide screen, Settings on a phone')
-  assert.match(connected, /GitHub connected as octocat — Contribute settings/)
-  assert.doesNotMatch(connected, /Connect GitHub|co-settings-panel/)
+  assert.match(connected, /GitHub connected as octocat — Settings/)
+  assert.match(connected, /title="GitHub connected · Settings"/)
+  assert.doesNotMatch(connected, /Connect GitHub|Contribute settings/)
   for (const state of ['checking', 'unknown', 'unsupported']) {
     const html = renderSettings({ state })
-    assert.match(html, /<span class="co-label-short">Settings<\/span>/)
-    assert.doesNotMatch(html, /GitHub connected|Connect GitHub|co-settings-panel/)
+    assert.match(html, /aria-label="GitHub — Settings"/)
+    assert.doesNotMatch(html, /GitHub connected|Connect GitHub/)
   }
 })

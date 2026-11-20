@@ -23,7 +23,8 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
   // The agent saved for reviews and fixes starts the window and is the picker's
   // Default row; without one, the server's answer below names the default.
   const ownDefault = defaultAgent?.model ? defaultAgent : null
-  const [agent, setAgent] = useState(ownDefault)
+  // A second pass starts on the conversation's own agent: choosing none keeps it, so nothing is applied.
+  const [agent, setAgent] = useState(response ? null : ownDefault)
   // What "default" means right now (the owner's background agent and its quota
   // fallback), read the way the review window reads it, so the picker can name it.
   const [defaultChoice, setDefaultChoice] = useState(null)
@@ -44,7 +45,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
     return () => controller.abort()
   }, [token, pr.repository.nameWithOwner, pr.number, pr.headRefOid])
   useEffect(() => {
-    if (ownDefault) return undefined
+    if (ownDefault || response) return undefined
     let alive = true
     loadWorkflowOptions(token, appId)
       .then(data => previewWorkflow(token, appId, requestOptions(reviewOptions({ post_review: false, propose_verdict: false }, data.options), 'review'), undefined, 'review'))
@@ -52,6 +53,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       .catch(() => {})
     return () => { alive = false }
   }, [token, appId])
+  const pickAgent = next => { setAgent(next); return true }
   const toggle = (key, checked) => setState(old => ({ ...old, items: old.items.map(item => item.key === key ? { ...item, checked } : item) }))
   const ticked = state.items.filter(item => item.checked).length
   async function start() {
@@ -60,7 +62,7 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       // The agent reads the whole saved review from a file, so it is written before the brief that names it goes out.
       const saved = await writeFindings(state.items)
       if (!saved.ok) { setError(saved.error); return }
-      const result = await onStart(respondAction({ pr, items: state.items, appId, cid, agent, answered: !!response }))
+      const result = await onStart(respondAction({ pr, items: state.items, appId, cid, agent, chatId: response?.result?.chat_id }))
       if (result?.ok) setStarted(result)
       else setError(result?.error || 'Could not start the agent. Try again.')
     } catch { setError('Could not start the agent. Try again.') }
@@ -90,9 +92,9 @@ export function AddressFeedbackWindow({ pr, findings = null, response = null, to
       {ticked ? <p className="co-rw-note">{coverageLine(state.items)}</p> : null}
       <p className="co-rw-note co-rw-callout"><b>It does not review the PR again.</b> It answers only what is ticked, fixes it in a private copy and runs the tests.</p>
       <p className="co-rw-note co-rw-callout"><b>Then:</b> the answers, changed files and commits appear in this PR’s Review tab. Nothing is pushed or posted{ownerGrant ? <> until you press <b>{NAMES.postAnswer}</b></> : ''}.</p>
-      {response ? <><p className="co-rw-note co-rw-callout">This replaces the answer that is waiting.</p><ConversationAgent token={token} scope={respondScope(pr.repository.nameWithOwner, pr.number)} /></>
+      {response ? <><p className="co-rw-note co-rw-callout">This replaces the answer that is waiting.</p><ConversationAgent token={token} scope={respondScope(pr.repository.nameWithOwner, pr.number)} chatId={response.result?.chat_id} choice={agent} onChange={pickAgent} /></>
         : <AgentModelSettings token={token} choice={agent} defaultChoice={ownDefault || defaultChoice} explicitDefault={!!ownDefault}
-          defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={next => { setAgent(next); return true }} />}
+          defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={pickAgent} />}
     </div>
     <footer className="co-rw-foot">
       <SeenOnGithub tone="private" text={`nothing. It works in a private copy; nothing goes out${ownerGrant ? ` until you press ${NAMES.postAnswer}` : ''}.`} />

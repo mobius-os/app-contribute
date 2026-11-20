@@ -10,7 +10,7 @@ const action = (decision, id) => decision.actions.find(item => item.id === id)
 // Every combination of the facts that change a decision. The platform sweeps the same space.
 const SPACE = {
   role: ['author', 'reviewer'], lifecycle: ['draft', 'open', 'unknown'], checks: ['pass', 'fail', 'pending', 'none', 'unknown'],
-  mergeable: ['yes', 'conflict', 'unknown'], permission: ['READ', 'WRITE', 'MAINTAIN'],
+  mergeable: ['yes', 'conflict', 'unknown'], permission: ['READ', 'TRIAGE', 'WRITE', 'MAINTAIN', 'unknown'],
   reviews: [[], [{ by: 'sam', state: 'APPROVED', commit: 'h2' }], [{ by: 'sam', state: 'APPROVED', commit: 'h1' }],
     [{ by: 'sam', state: 'CHANGES_REQUESTED', commit: 'h1' }], [{ by: 'qa-bot', state: 'APPROVED', commit: 'h2', bot: true }],
     [{ by: 'sam', state: 'APPROVED', commit: 'h1', sameWork: true }], [{ by: 'sam', state: 'APPROVED', commit: 'h1', sameWork: false }],
@@ -30,6 +30,7 @@ const sweep = () => Object.entries(SPACE).reduce((combos, [key, values]) => comb
 // What changes the PR or starts an agent on it, and what a quiet readable PR always offers its author or its reviewer.
 // Take over is left out of OFFERED: it stays for maintainers.
 const CHANGES_THE_PR = ['merge', 'close', 'open_for_review', 'back_to_draft', 'check_my_pr', 'respond', 'finish_it', 'review', 'take_over']
+const READS_ONLY = ['READ', 'TRIAGE']
 const OFFERED = { author: ['check_my_pr', 'respond', 'finish_it', 'open_for_review', 'back_to_draft', 'request_review', 'merge', 'close'], reviewer: ['review', 'merge', 'close'] }
 const otherApprovedThisVersion = facts => facts.reviews.some(review => review.state === 'APPROVED' && (review.commit === facts.head || review.sameWork === true) && !review.bot && review.by !== facts.author)
 const INVARIANTS = {
@@ -52,7 +53,14 @@ const INVARIANTS = {
     || !decision.actions.some(item => CHANGES_THE_PR.includes(item.id) && item.enabled),
   'with nothing in the way, every action of yours is offered, whatever the review standing': (decision, facts) => {
     const inTheWay = facts.readComplete === false || !['open', 'draft'].includes(facts.lifecycle) || (facts.job && facts.job.state !== 'stalled') || facts.outbox || facts.queued === true
-    return inTheWay || OFFERED[facts.role].every(id => action(decision, id)?.enabled)
+    // Merge alone also waits for write access, and only when GitHub said the account has less.
+    const offered = OFFERED[facts.role].filter(id => id !== 'merge' || !READS_ONLY.includes(facts.permission))
+    return inTheWay || offered.every(id => action(decision, id)?.enabled)
+  },
+  'Merge is off, with the reason, for an account GitHub says has no write access; an unknown permission leaves it to the platform': (decision, facts) => {
+    const merge = action(decision, 'merge')
+    const stopped = ['open', 'draft'].includes(facts.lifecycle) && facts.readComplete !== false && facts.queued !== true && READS_ONLY.includes(facts.permission)
+    return !stopped || (!merge.enabled && merge.reason === `Merging needs write access to this repository. Your account has ${facts.permission.toLowerCase()} access.`)
   },
   'take over is for maintainers only': (decision, facts) => !action(decision, 'take_over')?.enabled || ['MAINTAIN', 'ADMIN'].includes(facts.permission),
   'a PR GitHub’s merge queue holds reads as in the merge queue, and its Merge is off for that reason': (decision, facts) => {
