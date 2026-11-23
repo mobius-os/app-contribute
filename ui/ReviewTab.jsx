@@ -125,7 +125,8 @@ function SavedReview({ quiet = false, pr = null, token, appId, status: listed, r
   // Never a cut copy of the findings, or a verdict without its words: the box waits for the run itself.
   if (documents.reading || earlierDocuments.reading) return <div className="co-review-box" aria-label="Review"><p className="co-review-note" role="status"><Shine>Reading the review…</Shine></p></div>
   if (documents.failed || earlierDocuments.failed) return <div className="co-review-box" aria-label="Review"><p className="co-review-note" role="alert">The saved review could not be read just now. Close this page and open it again.</p></div>
-  if (!status && earlier) return <EarlierReview earlier={earlier} response={response} own={own === true} headNow={pr?.headRefOid} standing={standing} busy={busy} readOnly={readOnly} onHeld={onHeld} onVerdict={onVerdict} onCheck={onCheck} />
+  // The earlier card decides on its own reader's documents: it waits on that reader's freshness, not the current-head one (which has no run here and is always current).
+  if (!status && earlier) return <EarlierReview earlier={earlier} response={response} own={own === true} headNow={pr?.headRefOid} standing={standing} busy={busy || !earlierDocuments.current} readOnly={readOnly} onHeld={onHeld} onVerdict={onVerdict} onCheck={onCheck} />
   if (!status) {
     // The Actions menu above already starts a review, so there is nothing to offer here.
     return <div className="co-review-box" aria-label="Review">

@@ -554,6 +554,8 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   const reviewProps = pr => {
     const run = statusFor(pr)?.run
     const earlier = run ? null : earlierReviewForPull(relevantRuns, pr)
+    // The run whose outcome a check reads: the current one, or the earlier held review this card is about when no current run exists.
+    const observed = run || earlier?.run
     const answer = responseView(responses, pr)
     return {
       token, appId, own: isOwnPull(pr, conn.login), standing: standingOf(pr), respondChat: respondChatOf(respondChats, pr), earlier, busy, error: runError, pulls, listState: data,
@@ -574,10 +576,10 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
       onUndoIgnore: onUndoIgnore || undefined,
       onStop: run ? () => stopRun(run) : undefined,
       onRetry: run ? () => choose(retryPulls(run), retryJob(run, pr), runAnchor(run)) : undefined,
-      onVerdict: run || earlier ? (item, proposal, decision, extra) => decideVerdict(run || earlier.run, item, proposal, decision, extra) : undefined,
+      onVerdict: observed ? (item, proposal, decision, extra) => decideVerdict(observed, item, proposal, decision, extra) : undefined,
       onHeld: earlier ? () => proposeHeld(earlier) : undefined,
       onRepair: run && capabilities?.push_approval === true ? (item, attempt, decision) => decideRepair(run, item, attempt, decision) : undefined,
-      onCheck: run && !runDetailsElsewhere(run) ? () => checkRun(run) : undefined,
+      onCheck: observed && !runDetailsElsewhere(observed) ? () => checkRun(observed) : undefined,
     }
   }
   const runPane = run => <TaskPane key={run.id} dock={false} id={`task:run:${run.id}`}>

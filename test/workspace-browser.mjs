@@ -16,6 +16,7 @@
 // runRepositoryListChecks (the whole app: a repository's list opens from its last-known copy and updates in place, titles come first for a repository with no copy, lists are read in the background only after the desk's reads, the always-load switch, and every action reads its PR as it starts),
 // runListCadenceChecks (the whole app, on a fake clock: a pinned list is kept current by one probe a minute and only the PRs that moved are read, and the hub's budget rules hold for it),
 // runShortRunsChecks (the whole app, on a Möbius that answers the short list of review runs: the Review tab reads the run itself before it shows a document),
+// runEarlierVerdictChecks (the whole app: the earlier/held review card keeps Check again and Discard for an unconfirmed verdict, and its decision waits while its own reader re-reads a changed run),
 // runReviewHelperWaitChecks (the whole app: a review waiting on its helper reads as at work, not stopped),
 // runRespondAnswerChecks (the whole app: a Respond-to-feedback chat that asks you is answered from the Review tab, with no Answer-the-agent button),
 // runRespondResultChecks (the whole app, on a Möbius that confirms Post on its own sheet: a saved Respond-to-feedback answer is a draft to send in the Review tab, and Post, Discard and its stale and busy states work),
@@ -4775,6 +4776,68 @@ window.runShortRunsChecks = async () => {
   }
 }
 
+// The earlier (held/moved) review card carries the same verdict handling as a current one, through the whole app. When its verdict GitHub never
+// confirmed, the card keeps Check again and Discard: the observation handler is resolved from the earlier run, not only a current-head one. And its
+// decision controls wait while the card's own reader re-reads a changed run, so an unread update can never be confirmed from a stale proposal.
+window.runEarlierVerdictChecks = async () => {
+  const checks = []
+  const OLD = 'd'.repeat(40)
+  const reviewTab = () => [...document.querySelectorAll('.co-detail-tabs button')].find(node => text(node).startsWith('Review'))
+  const verdictBtn = label => [...document.querySelectorAll('.co-verdict button')].find(node => text(node) === label)
+  // A finished review of PR 7 against an old commit, so the current PR (head HEAD) carries it as the earlier card, verdict and all.
+  const earlierRun = verdict => { const run = verdictRun(verdict); run.id = 'review-earlier'; run.items[0].head_sha = OLD; run.items[0].verdict_proposal.head_sha = OLD; return run }
+  const earlierReads = () => calls.exactRuns.filter(id => id === 'review-earlier').length
+  const openReview = async () => {
+    await until(() => [...document.querySelectorAll('.co-desk-row')].some(node => text(node).includes('Contribution 7')), 'The Desk did not list the PR')
+    await click([...document.querySelectorAll('.co-desk-row')].find(node => text(node).includes('Contribution 7')))
+    await until(() => query('.co-desk-back') && reviewTab(), 'The PR page did not open')
+    await click(reviewTab())
+    await until(() => text(query('.co-review-box')).includes('Checked'), 'The earlier review card did not open: ' + text(query('.co-pull-page')).slice(0, 300))
+  }
+  try {
+    window.summaryRuns = true
+    // An unknown verdict on the earlier card keeps its read-only recovery (the held submission's unknown result).
+    reviewRuns.length = 0; reviewRuns.push(earlierRun('unknown'))
+    await mountDeskApp(); await openReview()
+    await until(() => verdictBtn('Check again'), 'The unconfirmed earlier verdict offered no Check again: ' + text(query('.co-review-box')).slice(0, 400))
+    ensure(!verdictBtn('Check again').disabled, 'Check again was disabled on the earlier card')
+    ensure(verdictBtn('Discard') && !verdictBtn('Discard').disabled, 'Discard was missing or disabled on the earlier card')
+    ensure(text(query('.co-verdict')).includes('GitHub did not confirm the verdict'), 'The earlier card did not say its verdict is unconfirmed: ' + text(query('.co-verdict')).slice(0, 200))
+    checks.push({ name: 'an unknown verdict on the earlier card keeps Check again and Discard, the held submission’s recovery', status: 'pass' })
+
+    // A proposed verdict on the earlier card offers Approve and Discard, enabled.
+    reviewRuns.length = 0; reviewRuns.push(earlierRun('proposed'))
+    await mountDeskApp(); await openReview()
+    await until(() => verdictBtn('Approve on GitHub'), 'The earlier card did not offer the proposed verdict’s Approve')
+    ensure(!verdictBtn('Approve on GitHub').disabled && !verdictBtn('Discard').disabled, 'The proposed earlier verdict was disabled before any refresh')
+    checks.push({ name: 'a proposed verdict on the earlier card offers Approve and Discard, enabled', status: 'pass' })
+
+    // The list announces a changed earlier run and its re-read is held: the controls wait on that reader (not on the current-head reader, which has no
+    // run here and is always current), so the stale proposal cannot be confirmed meanwhile.
+    const before = earlierReads()
+    window.holdSingleRun = true
+    reviewRuns[0] = { ...earlierRun('proposed'), state: 'complete' }
+    shownAgain()
+    await until(() => earlierReads() > before, 'The earlier run was not re-read after the list changed')
+    // While the reader is held, the submit is disabled (it reads "Working…", so its idle label is gone) and Discard is disabled too.
+    await until(() => verdictBtn('Discard')?.disabled, 'The earlier verdict stayed enabled while its reader re-read a changed run: ' + text(query('.co-verdict')).slice(0, 300))
+    ensure(!verdictBtn('Approve on GitHub'), 'Approve was still offered as live while its reader re-read a changed run')
+    ensure([...document.querySelectorAll('.co-verdict button')].some(node => text(node) === 'Working…'), 'The submit did not enter its waiting state during the refresh')
+    checks.push({ name: 'a proposed earlier verdict waits while its own reader re-reads a changed run', status: 'pass' })
+
+    // The re-read lands: the card reads as current again and its decision is live once more.
+    window.holdSingleRun = false; window.releaseSingleRun?.()
+    await until(() => verdictBtn('Approve on GitHub') && !verdictBtn('Approve on GitHub').disabled, 'The earlier verdict stayed disabled after its reader settled')
+    checks.push({ name: 'the earlier verdict is live again once its reader settles', status: 'pass' })
+    ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
+    return { status: 'pass', checks, forbidden: calls.forbidden }
+  } catch (error) {
+    return { status: 'fail', checks, error: error.stack, dom: text(query('main')).slice(0, 5000), calls, forbidden: calls.forbidden }
+  } finally {
+    window.summaryRuns = false; window.holdSingleRun = false; window.releaseSingleRun?.()
+  }
+}
+
 // The whole app: three states the lifecycle machine added show on the Desk. Your own PR in the merge queue is a My PRs row that says so; a review that
 // did not finish says "Not finished" and is the owner's move; a list of review runs that is cut says so, with the way to read the older ones.
 window.runLifecycleViewsChecks = async () => {
@@ -5166,7 +5229,7 @@ async function main() {
     const protocol = cdp(browser), reports = []
     // Each scenario gets a fresh page, so the whole-app Desk scenario never inherits the project fixture's state.
     // WORKSPACE_BROWSER_ONLY=runDeskFrameChecks runs one scenario.
-    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks', 'runLifecycleViewsChecks', 'runHeldRecordChecks']
+    const scenarios = process.env.WORKSPACE_BROWSER_ONLY ? [process.env.WORKSPACE_BROWSER_ONLY] : ['runPullIntentChecks', 'runWorkspaceChecks', 'runPopupFitChecks', 'runBulkReviewWindowChecks', 'runDeskFrameChecks', 'runDeskListChecks', 'runPullReadingChecks', 'runReviewRequestChecks', 'runSyncNoteChecks', 'runInstantOpenChecks', 'runRepositoryListChecks', 'runListCadenceChecks', 'runShortRunsChecks', 'runEarlierVerdictChecks', 'runReviewHelperWaitChecks', 'runRespondAnswerChecks', 'runRespondResultChecks', 'runRespondPostOffChecks', 'runRespondAgainChecks', 'runAskApprovalChecks', 'runFollowChecks', 'runRequestReviewChecks', 'runRequestReviewListChecks', 'runRepositoryPickerChecks', 'runTapBoxChecks', 'runSyncChecks', 'runSyncLineChecks', 'runRepositoryLinkChecks', 'runStaleAnswerChecks', 'runProjectScreenChecks', 'runRepositoryGroupChecks', 'runLifecycleViewsChecks', 'runHeldRecordChecks']
     // 'wide' (a 2560 screen) runs only when asked for with WORKSPACE_BROWSER_VIEWPORT=wide: the PR page's width is shown there.
     const viewports = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', width: 390, height: 844 }, { name: 'wide', width: 2560, height: 1300 }].filter(size => process.env.WORKSPACE_BROWSER_VIEWPORT ? size.name === process.env.WORKSPACE_BROWSER_VIEWPORT : size.name !== 'wide')
     for (const [viewport, scenario] of viewports.flatMap(size => scenarios.map(name => [size, name]))) {

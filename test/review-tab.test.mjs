@@ -414,6 +414,20 @@ test('Post it anyway is absent on a closed PR and without the handler', async t 
   assert.doesNotMatch(closed, /Post it anyway/)
 })
 
+test('a held review whose verdict GitHub never confirmed keeps Check again and Discard on the earlier card', async t => {
+  const earlier = heldReview({ live_blocker: undefined, post_findings: { allowed: false, code: 'has_verdict' },
+    verdict_proposal: { id: 'p1', state: 'unknown', event: 'REQUEST_CHANGES', head_sha: HELD_HEAD, body: 'Blocking bug.' } })
+  const standing = standingOfHeld(earlier)
+  const html = await render(t, 'ReviewTab', { pr, status: null, earlier, standing, onHeld: () => {}, onVerdict: () => {}, onCheck: () => {} })
+  if (!html) return
+  assert.match(html, /GitHub did not confirm the verdict/)
+  assert.match(html, />Check again</)
+  assert.match(html, />Discard</, 'the owner can still dismiss the unconfirmed held verdict from the earlier card')
+  // Without the observation handler (the regression: reviewProps gave it only for a current-head run) the recovery disappears.
+  const noCheck = await render(t, 'ReviewTab', { pr, status: null, earlier, standing, onHeld: () => {}, onVerdict: () => {} })
+  assert.doesNotMatch(noCheck, />Check again</)
+})
+
 test('once the held review has its proposal the card shows the exact words to send and no second Post it anyway', async t => {
   const earlier = heldReview({ live_blocker: undefined, post_findings: { allowed: false, code: 'has_verdict' },
     verdict_proposal: { id: 'p1', state: 'proposed', event: 'REQUEST_CHANGES', head_sha: HELD_HEAD, moved_to: 'a'.repeat(40),
