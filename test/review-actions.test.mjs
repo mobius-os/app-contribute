@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { IGNORE_REASONS, postableFindings, reviewActionPlan, reviewStoppable } from '../review-actions.js'
+import { IGNORE_REASONS, notPostedReason, postableFindings, reviewActionPlan, reviewStoppable } from '../review-actions.js'
 import { reviewItemProgress } from '../collaboration.js'
 
 const keys = plan => plan.map(action => action.key)
@@ -123,4 +123,21 @@ test('a review that did not finish offers another review first, then its convers
   assert.deepEqual(keys(reviewActionPlan({ tone: 'blocked', own: false, chat: true, can: { ...everything, post: true } })), ['again', 'ask'])
   assert.equal(reviewActionPlan({ tone: 'blocked', chat: true, can: everything })[0].primary, true)
   assert.deepEqual(keys(reviewActionPlan({ tone: 'blocked', chat: true, can: {} })), ['ask'])
+})
+
+test('a review the platform refused because the head moved names both versions and says nothing was sent', () => {
+  const item = { head_sha: '0090c53e1111', live_blocker: 'This pull request no longer matches the approved selection.' }
+  assert.equal(notPostedReason(item, '42b2c1082222'),
+    'The pull request moved from 0090c53 to 42b2c10 before this review could be sent, so nothing was sent to GitHub. The findings stay private.')
+})
+
+test('a refusal that is not a moved head is shown in the platform’s own words', () => {
+  const item = { head_sha: 'abc1234', live_blocker: 'GitHub could not be reached' }
+  assert.equal(notPostedReason(item, 'abc1234'), 'This review was not sent to GitHub: GitHub could not be reached. The findings stay private.')
+  assert.equal(notPostedReason(item, undefined), 'This review was not sent to GitHub: GitHub could not be reached. The findings stay private.')
+})
+
+test('a review nobody refused has no not-posted reason', () => {
+  assert.equal(notPostedReason({ head_sha: 'abc1234' }, 'def5678'), '')
+  assert.equal(notPostedReason(null, 'def5678'), '')
 })

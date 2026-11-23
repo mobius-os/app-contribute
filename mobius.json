@@ -223,6 +223,7 @@
     "pr-machine.js",
     "pr-facts.js",
     "pr-standing.js",
+    "feedback-flag.js",
     "pull-view.js",
     "same-work.js",
     "carried-approvals.js",

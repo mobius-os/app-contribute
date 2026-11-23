@@ -513,6 +513,9 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   // The owner's own Push or Don't push for fixes an agent prepared. The platform pushes exactly
   // that commit, once, and only if the branch has not moved; the agent never pushes by itself.
   const decideRepair = (run, item, attempt, decision) => runAction(run, 'repairs/decision', { repo: item.repo, number: item.number, head_sha: item.head_sha, attempt_id: attempt.id, decision }, 'repair')
+  // The owner's own Post it anyway for a review the platform held back because the PR moved: it only saves the exact verdict
+  // proposal (worded with the commit it covered); sending it is the ordinary confirmed submit above.
+  const proposeHeld = ({ run, item }) => runAction(run, 'held-verdict', { repo: item.repo, number: item.number, head_sha: item.head_sha })
   function toggle(pr) {
     setSelected(old => { const next = new Set(old); const key = prKey(pr); next.has(key) ? next.delete(key) : next.add(key); return next })
   }
@@ -550,9 +553,10 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
   // What a PR's Review tab needs: the run's own actions and whether you wrote the PR.
   const reviewProps = pr => {
     const run = statusFor(pr)?.run
+    const earlier = run ? null : earlierReviewForPull(relevantRuns, pr)
     const answer = responseView(responses, pr)
     return {
-      token, appId, own: isOwnPull(pr, conn.login), standing: standingOf(pr), respondChat: respondChatOf(respondChats, pr), earlier: run ? null : earlierReviewForPull(relevantRuns, pr), busy, error: runError, pulls, listState: data,
+      token, appId, own: isOwnPull(pr, conn.login), standing: standingOf(pr), respondChat: respondChatOf(respondChats, pr), earlier, busy, error: runError, pulls, listState: data,
       ignored: ignoredReviews,
       canPost: capabilities?.post_findings_now === true,
       onPost: ({ run: postRun, item }) => setPosting({ pr, run: postRun, item, own: isOwnPull(pr, conn.login) }),
@@ -570,7 +574,8 @@ export function PullRequests({ appId, token, project, conn, capabilities: knownC
       onUndoIgnore: onUndoIgnore || undefined,
       onStop: run ? () => stopRun(run) : undefined,
       onRetry: run ? () => choose(retryPulls(run), retryJob(run, pr), runAnchor(run)) : undefined,
-      onVerdict: run ? (item, proposal, decision, extra) => decideVerdict(run, item, proposal, decision, extra) : undefined,
+      onVerdict: run || earlier ? (item, proposal, decision, extra) => decideVerdict(run || earlier.run, item, proposal, decision, extra) : undefined,
+      onHeld: earlier ? () => proposeHeld(earlier) : undefined,
       onRepair: run && capabilities?.push_approval === true ? (item, attempt, decision) => decideRepair(run, item, attempt, decision) : undefined,
       onCheck: run && !runDetailsElsewhere(run) ? () => checkRun(run) : undefined,
     }

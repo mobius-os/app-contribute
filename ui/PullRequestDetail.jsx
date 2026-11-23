@@ -27,6 +27,7 @@ import { CommitChangesHead, PullCommits } from './PullCommits.jsx'
 import { PullFiles } from './PullFiles.jsx'
 import { PullChecks } from './PullChecks.jsx'
 import { PullEscalation } from './PullEscalation.jsx'
+import { feedbackFlagOf } from '../feedback-flag.js'
 import { FollowLine } from './FollowLine.jsx'
 export { DateLabel, PullFiles }
 
@@ -65,36 +66,24 @@ function threadLocation(thread) {
   if (Number.isInteger(thread.originalLine)) return `original line ${thread.originalStartLine && thread.originalStartLine !== thread.originalLine ? `${thread.originalStartLine}–` : ''}${thread.originalLine}`
   return 'line unavailable'
 }
-// New feedback on a tracked PR, kept visible under the folded description.
-// The record's attention is server-maintained: it appears when a review or
-// comment lands and clears once addressed, so no flag means nothing waits.
-// An approving review, or the all-clear review an agent run posted, is good news
-// not a task: it gets the green box, naming the posted review's copyable id.
-const FEEDBACK_FLAGS = {
-  changes_requested: { label: 'Changes requested', tone: 'blocker', note: 'Not addressed yet. Read the review under Comments.' },
-  github_activity: { label: 'New feedback', tone: 'news', note: 'The text is under Comments.' },
-}
-function PullFeedbackFlag({ record, status = null, activity = null }) {
-  const attention = record?.attention
-  const flag = FEEDBACK_FLAGS[attention?.type]
+// New feedback on a tracked PR, kept visible under the folded description. What it says is feedback-flag.js: the record's
+// saved attention names what landed, and the PR machine's live decision says who still holds a change request.
+// An approving review, or the all-clear review an agent run posted, is good news not a task: it gets the green box.
+// Whether the newest feedback is such an approval. A run's all-clear speaks only for the review it posted: any other event
+// (a later comment reporting a problem) keeps its New feedback warning.
+function approvingFeedback(attention, status, activity) {
   const reference = commentReference(attention?.url)
   const flagged = reference ? (activity?.items || []).find(item => String(item.id) === reference) : null
-  // A run's all-clear speaks only for the review it posted: any other event
-  // (a later comment reporting a problem) keeps its New feedback warning.
   const anchor = url => String(url || '').split('#')[1] || ''
   const posted = status?.item?.public_review
   const runPostedIt = status?.item?.state === 'all_clear' && posted?.state === 'posted'
     && !!anchor(attention?.url) && anchor(attention.url) === anchor(posted.url)
-  const clear = attention?.type === 'github_activity' && (flagged?.state === 'APPROVED' || runPostedIt)
-  if (clear) {
-    return <p className="co-pr-feedback-flag is-clear" role="status">
-      <Icon name="check" size={16} />
-      <span className="co-flag-text"><b>Review clear</b><span>This review found no blocking problems.</span></span>
-    </p>
-  }
+  return flagged?.state === 'APPROVED' || runPostedIt
+}
+function PullFeedbackFlag({ flag }) {
   if (!flag) return null
   return <p className={'co-pr-feedback-flag is-' + flag.tone} role="status">
-    <Icon name="feedback" size={16} />
+    <Icon name={flag.tone === 'clear' ? 'check' : 'feedback'} size={16} />
     <span className="co-flag-text"><b>{flag.label}</b><span>{flag.note}</span></span>
   </p>
 }
@@ -420,6 +409,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
   // The conversation loads as one unit: a single skeleton stands in for the
   // description, the flag and the comments, and everything appears together.
   // A PR page holds the whole detail back instead of revealing it in parts.
+  const feedbackFlag = feedbackFlagOf({ attention: record?.attention, decision: review?.standing, approvedInFeedback: approvingFeedback(record?.attention, status, ready(activity) ? activity.data : null) })
   const conversationLoading = tab === 'conversation'
     && [description, activity, threads, related].some(value => value.loading)
   if (holdUntilLoaded && conversationLoading) {
@@ -428,7 +418,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
     </div>
   }
   return <div className="co-pr-detail" aria-label={`Details for PR ${pr.number}`}>
-    <PullStickyTitle pr={pr} targetRef={titleRef} tone={FEEDBACK_FLAGS[record?.attention?.type]?.tone} />
+    <PullStickyTitle pr={pr} targetRef={titleRef} tone={feedbackFlag?.tone} />
     <header className="co-gh-pr-head">
       <h3 className="co-gh-pr-title" ref={titleRef}><span className="co-pr-title-num">#{pr.number}</span> {pr.title}</h3>
     </header>
@@ -460,7 +450,7 @@ function PullRequestDetailView({ cacheStore, pr, token, appId, onReview, onAssig
       </div>
     </details>
     <PullEscalation key={record?.attention?.key || ''} record={record} appId={appId} token={token} readOnly={readOnly} />
-    <PullFeedbackFlag record={record} status={status} activity={ready(activity) ? activity.data : null} />
+    <PullFeedbackFlag flag={feedbackFlag} />
     </>}
     <nav className="co-detail-tabs" aria-label="Pull request details" ref={tabStrip}>{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key} onClick={() => { setTab(key); if (key === 'commits') setOpenCommit(null) }}>{label}
       {key === 'checks' && checks?.total ? <><span className={'co-tab-dot is-' + checks.state} title={`${checks.passed} of ${checks.total} checks passed or skipped`} aria-label={{ success: 'checks passed', failure: 'checks failing', pending: 'checks running' }[checks.state]} /><span className="co-tab-count">{checks.failed ? `${checks.failed} failing` : `${checks.passed}/${checks.total}`}</span></> : null}
