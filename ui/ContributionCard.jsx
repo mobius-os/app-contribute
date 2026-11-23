@@ -545,17 +545,22 @@ function CoauthorOmittedNote({ rec }) {
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
-export function ReviewPlan({ rec, loadDiff }) {
+// `sections` reads the description in sections and `fileCount` badges the Files tab: both are the prepared PR page's
+// (PreparedPage.jsx); the card keeps its plain description.
+export function ReviewPlan({ rec, loadDiff, sections = false, fileCount = null }) {
   const plan = rec.plan
   const [tab, setTab] = useState('description')
   const isPr = plan.action === 'pr' || rec.type === 'pr'
   const screenshots = useScreenshots(rec, tab === 'description')
   return <>
     <nav className="co-detail-tabs" aria-label="Prepared contribution details">
-      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}</button>)}
+      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
+        {key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}
+        {key === 'files' && fileCount != null ? <span className="co-tab-count">{fileCount}</span> : null}
+      </button>)}
     </nav>
     {tab === 'description' ? <>
-      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} images={screenshots.images} />
+      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} images={screenshots.images} sections={sections} />
       {screenshots.count && rec.status === 'prepared' ? <p className="co-shot-note">
         {screenshotCountText(screenshots.count)} will be uploaded to your GitHub account when you send (your fork, or this repository if you own it), so the pull request can show {screenshots.count === 1 ? 'it' : 'them'}.
       </p> : null}
@@ -1136,6 +1141,23 @@ export function ContributionDecision({
   )
 }
 
+// Where a contribution stands, as the state chip and the one plain line under it say it. A blocked card leads with its
+// SubmitErrorAlert instead, and an attention record with its callout, so both suppress the calm lifecycle narration.
+// Shared by the card and the prepared PR page.
+export function cardStatus(rec, reviewState) {
+  const status = rec.status || 'prepared'
+  const prepared = status === 'prepared'
+  const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
+  const blocked = prepared && (reviewState?.state === 'needs_refresh' || rec.needs_attention === true)
+  const quality = qualityReviewFor(rec)
+  return {
+    blocked,
+    label: blocked ? 'Needs update' : prepared ? (isPr ? quality.label : 'Draft') : (STATUS_LABELS[status] || status),
+    key: blocked ? 'needs-refresh' : prepared && isPr ? quality.state : status,
+    narration: blocked ? '' : statusNarration(rec),
+  }
+}
+
 export function ContributionCard({
   rec,
   reviewState,
@@ -1152,24 +1174,7 @@ export function ContributionCard({
 }) {
   const status = rec.status || 'prepared'
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
-  const blocked = status === 'prepared' && (
-    reviewState?.state === 'needs_refresh' || rec.needs_attention === true
-  )
-  const qualityState = qualityReviewFor(rec)
-  const statusLabel = blocked
-    ? 'Needs update'
-    : status === 'prepared'
-      ? (isPr ? qualityState.label : 'Draft')
-      : (STATUS_LABELS[status] || status)
-  const statusClass = blocked
-    ? 'needs-refresh'
-    : status === 'prepared' && isPr
-      ? qualityState.state
-      : status
-  // The one plain-language line under the chip. A blocked card leads with its
-  // SubmitErrorAlert instead, and an attention record with its callout, so both
-  // suppress the calm lifecycle narration here.
-  const narration = blocked ? '' : statusNarration(rec)
+  const { blocked, label: statusLabel, key: statusClass, narration } = cardStatus(rec, reviewState)
   const typeLabel = TYPE_LABELS[rec.type] || rec.type || 'Contribution'
   const when = timeAgo(rec.updated_at || rec.created_at)
   const [expanded, setExpanded] = useState(initialExpanded)
