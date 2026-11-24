@@ -20,9 +20,9 @@ export function ReviewFrame({ state = 'idle', inset = 0, radius = 12, look = 'ri
     const node = box.current
     if (!node || state === 'idle') return undefined
     const measure = () => {
-      setSize(old => old && old.width === node.clientWidth && old.height === node.clientHeight
-        ? old : { width: node.clientWidth, height: node.clientHeight })
       if (rippling) setWave(old => sameWave(old, rippleWave(node.getBoundingClientRect(), node.querySelector(STATUS_ICON)?.getBoundingClientRect())))
+      else setSize(old => old && old.width === node.clientWidth && old.height === node.clientHeight
+        ? old : { width: node.clientWidth, height: node.clientHeight })
     }
     measure()
     if (!window.ResizeObserver) return undefined
