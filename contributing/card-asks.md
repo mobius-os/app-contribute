@@ -53,3 +53,54 @@ not an ask: its row says "Stack not valid" and the card opens Contribute. If the
 scope, a closed target PR, a different repository), ask for that decision
 instead. A GitHub connection problem is never an ask: the card offers the
 owner the account itself.
+
+## A stranded update
+
+The card says **PR merged first** or **PR closed first** on a row when an
+update to a public pull request was prepared and the PR merged or closed before
+the update was sent (the record's `lifecycle` shows `update.state`
+`STRANDED_UPDATE`, [ledger.md](ledger.md)). The update can no longer be sent: a
+PR that is not open takes no update. The record waits in Needs you, as **Update
+not sent**, until the owner settles it. It is not an ask code and never approval
+to send, push, reopen or retarget the PR. When the owner asks you to settle it,
+do exactly the exit they choose, and ask which when they have not. Then record
+the exit: **only the checked writer records an exit**, so never hand-edit
+`status` or `lifecycle`, and never write the record by `mapi`.
+
+```bash
+python3 /data/apps/contribute/settle_exit.py <record-id> <EXIT> [--successor <new record id>]
+```
+
+It reads the record, refuses an exit its state does not accept, and writes the
+outcome (`update_outcome`, [ledger.md](ledger.md)), the `lifecycle` and the status
+word it derives in one compare-and-swap write. Exit 0 saved; 2 refused, nothing
+written; 3 the record changed under it, or Möbius could not be reached: run it
+again. The owner's own buttons on the record (**Already in the merge**,
+**Discard**) are the same writer: if they settled it first, the script says the
+record no longer accepts the exit, and you are done.
+
+| Exit | When | What to do |
+|---|---|---|
+| `COVERED_BY_MERGE` | The PR merged and already contains these changes | Compare the record's staged head with the merged PR on the default branch. If something of the update is missing, it is not this exit. If nothing is, tell the owner so, stage nothing and push nothing, and run `settle_exit.py <record-id> COVERED_BY_MERGE`: the record keeps the note that the merge already contained the changes. |
+| `PRESERVE_AS_NEW` | Part of the update is still wanted | Rebuild only that change on the repository's fresh default branch in its own review worktree ([branch.md](branch.md)), stage it as a new record with a new `<record-id>` (never the stranded one), review it, and print its card. Then run `settle_exit.py <stranded-record-id> PRESERVE_AS_NEW --successor <the new record id>`, which stores the successor on the stranded record, and tell the owner which record replaces it. |
+| `DISCARD_UPDATE` | The update is no longer wanted | Change nothing else. Run `settle_exit.py <record-id> DISCARD_UPDATE`: dropping the update leaves the merged or closed PR exactly as it is, never abandoned and never reopened. |
+
+If the PR is reopened, the update can go out again: print a fresh card and do
+not restage unless the head moved.
+
+## A merge that never landed
+
+The card says **Merged elsewhere** when the PR was merged into a branch other
+than the default branch, and that branch did not reach the default branch (the
+record's `lifecycle` shows `publication.state` `ORPHANED`, [ledger.md](ledger.md)).
+The job waited, then asked the owner once. If that branch reaches the default
+branch after all, the job records it by itself and the record is merged; nothing
+for you to do. When the owner wants the change in the default branch, re-land it
+as new work and record the exit:
+
+| Exit | When | What to do |
+|---|---|---|
+| `OWNER_RELANDS` | The owner wants the change landed again | Rebuild it on the repository's fresh default branch in its own review worktree ([branch.md](branch.md)), stage it as a new record with a new `<record-id>`, review it, and print its card. Then run `settle_exit.py <orphaned-record-id> OWNER_RELANDS --successor <the new record id>`: the record becomes `superseded` by the new one (`superseded_by`), which every card follows. |
+
+The same rules apply: `settle_exit.py` is the only way to record the exit, and
+it is never approval to send, push, reopen or retarget anything.

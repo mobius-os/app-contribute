@@ -19,7 +19,7 @@
 // send failed (building-apps.md "Passive block sessions").
 import { sendTarget } from './chat-blocks.js'
 import { uncertainPublication } from './domain.js'
-import { isPublished, publicationUnits, publishedPull, sendBlocker } from './send-readiness.js'
+import { isDroppedUpdate, isPublished, isStranded, publicationUnits, publishedPull, pullKey, sendBlocker, strandedPill } from './send-readiness.js'
 import { RETRY_CHECK_REASON, reviewStateFor } from './review.js'
 import { confirmationItem } from './inline-session.js'
 
@@ -36,7 +36,11 @@ export const EXPIRED_NOTE = 'GitHub hasn’t confirmed the result. Open Contribu
 // card opens Contribute; nothing is ever retried blindly.
 export const RECHECK_DELAYS_MS = [3000, 6000, 12000, 24000, 45000, 60000]
 export const RECHECK_WINDOW_MS = 10 * 60 * 1000
-const PULL_STATUS = { draft: ['Draft', 'neutral'], open: ['Open', 'success'], landing: ['Open', 'success'], merged: ['Merged', 'accent'], closed: ['Closed', 'neutral'] }
+// One word per publication state (send-readiness.js `pullKey`): Merged is only a merge into the default branch.
+const PULL_STATUS = { draft: ['Draft', 'neutral'], open: ['Open', 'success'], merged: ['Merged', 'accent'], merged_elsewhere: ['Merged to a branch', 'neutral'],
+  orphaned: ['Not shipped', 'danger'], closed: ['Closed', 'neutral'] }
+export const STRANDED_NOTE = 'The pull request merged or closed before this update went out.'
+export const DROPPED_PILL = 'Update dropped'
 // A pending recheck never keeps a process alive on its own (Node's unref);
 // in a browser frame it is an ordinary timeout.
 const DEFAULT_TIMERS = { set: (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id }, clear: id => clearTimeout(id) }
@@ -95,6 +99,8 @@ export function observeAttempt(attempt, byId) {
   const records = attempt.ids.map(id => byId.get(id))
   if (records.length && records.every(isPublished)) return { ...attempt, state: 'sent', note: '' }
   if (attempt.state !== 'unknown') return attempt
+  // An update whose PR merged or closed first never went out: that answers the attempt.
+  if (records.some(isStranded)) return { ...attempt, state: 'failed', note: STRANDED_NOTE }
   // A saved error that says the send may already be public is not a refusal:
   // the attempt stays unknown, locked and in the checkpoint.
   const failed = records.find(record => record?.status === 'prepared' && record.last_submit_error
@@ -348,7 +354,7 @@ export function createInlineSession({ sessionId, actions, items = null, features
     if (checkingResult) return ['Checking GitHub', 'neutral']
     if (unknown) return ['Not confirmed', 'neutral']
     if (failure) return ['Not sent', failure.state === 'failed' ? 'danger' : 'neutral']
-    if (published) return records.length === 1 ? PULL_STATUS[records[0].status] || ['Sent', 'success'] : ['Sent', 'success']
+    if (published) return records.length === 1 ? PULL_STATUS[pullKey(records[0])] || ['Sent', 'success'] : ['Sent', 'success']
     return ['', 'neutral']
   }
 
@@ -363,10 +369,16 @@ export function createInlineSession({ sessionId, actions, items = null, features
     const record = current().get(id)
     const attempt = latestAttempt(id)
     if (attempt?.state === 'sending') return { status: 'Sending', busy: true }
+    if (isDroppedUpdate(record)) return { status: DROPPED_PILL, statusTone: 'neutral', links: [{ label: `#${publishedPull(record).number}`, url: publishedPull(record).url }] }
     if (isPublished(record)) {
       const pull = publishedPull(record)
-      const [status, statusTone] = PULL_STATUS[record.status] || ['Sent', 'success']
+      const [status, statusTone] = PULL_STATUS[pullKey(record)] || ['Sent', 'success']
       return { status, statusTone, links: [{ label: `#${pull.number}`, url: pull.url }] }
+    }
+    // Its PR ended before the update went out: said as that, never as a merge or a send in doubt.
+    if (isStranded(record)) {
+      const pull = publishedPull(record)
+      return { status: strandedPill(record), statusTone: 'danger', links: pull ? [{ label: `#${pull.number}`, url: pull.url }] : [] }
     }
     if (attempt?.state === 'unknown') return checkingAttempt(attempt) ? { status: 'Checking GitHub', busy: true } : { status: 'Not confirmed' }
     const failed = rowFailure(id)
@@ -392,7 +404,9 @@ export function createInlineSession({ sessionId, actions, items = null, features
     if (ids.some(id => open(id) && (latestAttempt(id)?.state === 'sending' || latestAttempt(id) && checkingAttempt(latestAttempt(id))))) {
       return `Sending ${plural(ids.length, 'contribution', 'contributions')}`
     }
-    const sent = records.filter(isPublished).length
+    const sent = records.filter(record => isPublished(record) && !isDroppedUpdate(record)).length
+    const stranded = records.filter(isStranded).length
+    if (stranded) return sent ? `${sent} of ${ids.length} sent · ${stranded} not sent` : `${plural(stranded, 'update', 'updates')} not sent`
     if (sent < ids.length) {
       if (sent) return `${sent} of ${ids.length} sent`
       return ids.some(id => latestAttempt(id)?.state === 'unknown') ? 'Result not confirmed' : ''

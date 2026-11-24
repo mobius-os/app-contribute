@@ -7,7 +7,7 @@ import { postFindingsCopy } from '../action-copy.js'
 // words (and a hash that binds the post to them), so what the owner reads is what is posted. While the
 // words load, or when the platform refuses (nothing to post, the PR moved), the sheet says so with the
 // button off and the X as its only way out. A post GitHub may have taken is read back the way a finished one is.
-export function PostFindings({ pr, run, item, own = false, token, appId, onClose, onDone }) {
+export function PostFindings({ pr, run, item, own = false, token, appId, shellConfirm = null, onClose, onDone }) {
   const [state, setState] = useState({ preview: null, error: '' })
   useEffect(() => {
     let live = true
@@ -18,5 +18,5 @@ export function PostFindings({ pr, run, item, own = false, token, appId, onClose
   }, [token, appId, run.id, item.repo, item.number, item.head_sha])
   const copy = postFindingsCopy(pr, { preview: state.preview, error: state.error, own })
   return <ActionConfirm key={state.preview ? 'ready' : state.error ? 'refused' : 'loading'} pr={pr} copy={copy} onClose={onClose} onDone={onDone} onUnconfirmed={onDone}
-    onConfirm={() => postFindings(token, appId, run, item, state.preview)} />
+    viaShell={!!shellConfirm} onConfirm={({ onConfirmed }) => postFindings(token, appId, run, item, state.preview, { shellConfirm, onConfirmed })} />
 }

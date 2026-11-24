@@ -2,10 +2,10 @@
 // record, whether its next phase can be sent now, and why not. Pure; the
 // guarded Send handlers in index.jsx remain the only publication path.
 import { uncertainPublication } from './domain.js'
+import { regionsOf } from './lifecycle-record.js'
 import { leadingReason, qualityReviewFor, reviewCheckBlocker, reviewStateFor } from './review.js'
 import { publicationStackUnit, stackIntent, stackPublicationRecords, stackReadiness } from './stack.js'
 
-const PUBLIC_STATUSES = new Set(['draft', 'open', 'landing', 'merged', 'closed'])
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 // The PR a record became, only when its saved URL is exactly that PR.
@@ -15,7 +15,42 @@ export function publishedPull(record) {
   return REPO.test(repo) && Number.isSafeInteger(number) && number > 0
     && record?.url === `https://github.com/${repo}/pull/${number}` ? { number, url: record.url } : null
 }
-export const isPublished = record => PUBLIC_STATUSES.has(record?.status) && Boolean(publishedPull(record))
+
+// Where a record stands, in the words of the lifecycle regions, never the status word: an update
+// waiting on a public PR reads `prepared` there, and an update stranded by a merge reads `merged`.
+// Every ledger record has a type; one without is read as the pull request these surfaces are about.
+const regionsFor = record => regionsOf(record?.type ? record : { type: 'pr', ...record })
+export const publicationStateOf = record => regionsFor(record)?.publication ?? null
+// The PR merged or closed before the update went out. It is not a send that went out, whatever
+// the PR's own state says.
+export const isStranded = record => regionsFor(record)?.update === 'STRANDED_UPDATE'
+// Replaced by other work: the card follows `superseded_by` to the current version.
+export const isSuperseded = record => publicationStateOf(record) === 'SUPERSEDED'
+const PUBLIC_PULLS = ['DRAFT', 'OPEN', 'QUEUED', 'MERGED', 'MERGED_ELSEWHERE', 'ORPHANED', 'CLOSED', 'CLOSED_QUIET']
+// A public PR with an exact receipt and no update of its own still to go out: an update that is
+// waiting, being sent, unconfirmed or stranded is not a send that has happened.
+export function isPublished(record) {
+  const found = regionsFor(record)
+  return Boolean(found) && PUBLIC_PULLS.includes(found.publication) && found.update === 'NONE' && Boolean(publishedPull(record))
+}
+
+// The update was dropped, not sent: the PR is public with nothing waiting, and the last thing that
+// happened to its update region (the history in `lifecycle`, whether the engine wrote it or read it
+// from an abandoned word) was the owner discarding it. A record with no such entry reads as before.
+export function isDroppedUpdate(record) {
+  const last = (regionsFor(record)?.vector.history || []).filter(entry => entry.region === 'update' && !entry.refused).at(-1)
+  return isPublished(record) && last?.type === 'DISCARD_UPDATE'
+}
+
+// What a published PR is called on a card: one word per publication state, so "merged" means the PR
+// merged into the default branch and nothing else (a merge into another branch, or an update that
+// went out, is not it). Each card maps these keys to its own pill.
+const PULL_KEYS = { DRAFT: 'draft', OPEN: 'open', QUEUED: 'open', MERGED: 'merged', MERGED_ELSEWHERE: 'merged_elsewhere',
+  ORPHANED: 'orphaned', CLOSED: 'closed', CLOSED_QUIET: 'closed' }
+export const pullKey = record => PULL_KEYS[publicationStateOf(record)] || ''
+export const closedUnmerged = record => pullKey(record) === 'closed'
+// The pill of a stranded update: which way its PR ended first.
+export const strandedPill = record => (closedUnmerged(record) ? 'PR closed first' : 'PR merged first')
 
 export const needsSourceRefresh = reviewState => reviewState?.state === 'needs_refresh'
 export const sendNeedsAttention = record => Boolean(record?.last_submit_error) || record?.needs_attention === true
@@ -26,7 +61,9 @@ export const reviewIncomplete = record => qualityReviewFor(record).state !== 'al
 export function sendBlocker(record, reviewState, { requireCheck = false } = {}) {
   if (!record) return 'This contribution is no longer in Contribute.'
   if (record.status !== 'prepared') {
-    return record.status === 'abandoned' ? 'This contribution was dismissed.' : 'This contribution is not waiting to be sent.'
+    if (isStranded(record)) return 'The pull request ended before this update went out, so it cannot be sent.'
+    // An abandoned update whose pull request is still public reads as that live PR, so it was not dismissed.
+    return publicationStateOf(record) === 'ABANDONED' ? 'This contribution was dismissed.' : 'This contribution is not waiting to be sent.'
   }
   if (!['pr', 'pr_update'].includes(record.plan?.action)) return 'Only pull requests can be sent from here.'
   if (needsSourceRefresh(reviewState)) return 'The reviewed source changed. Sync Contribute to read it again.'

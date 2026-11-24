@@ -5,7 +5,8 @@
 // in place, dimmed, with the machine's reason.
 import { checkSummary, conversationCount } from './collaboration.js'
 import { isPersonalDraft } from './domain.js'
-import { allowedMergeMethods } from './action-copy.js'
+import { canOpenForReview } from './ready-offer.js'
+import { allowedMergeMethods, usesMergeQueue } from './action-copy.js'
 import { ownerConfirmOffered } from './owner-grant.js'
 import { FOLLOW_MODE_WORDS, canStartFollowing, followState } from './autopilot.js'
 import { NAMES } from './names.js'
@@ -48,8 +49,12 @@ const DESTRUCTIVE = new Set(['close'])
 const asItem = (action, icon) => ({ intent: action.id, icon, title: action.title, detail: action.detail, rec: action.highlighted, off: !action.enabled, reason: action.reason, danger: DESTRUCTIVE.has(action.id) })
 
 // Whether this Möbius can run one of your own actions for you (the menu lists it, the next-step button offers it).
+// A draft the app sent opens for review through its own record, which the platform allows only when the record is checked for this exact version
+// (ready-offer.js): that row is offered when the record satisfies the rule and not otherwise, whatever the capability says, so it never ends in a refusal.
 export const mayRunYourAction = (id, { record, capabilities }) => !!YOUR_MENU[id]
-  && (capabilities?.[CAPABILITY[id]] === true || (id === 'open_for_review' && isPersonalDraft(record)))
+  && (id === 'open_for_review' && isPersonalDraft(record)
+    ? canOpenForReview(record)
+    : capabilities?.[CAPABILITY[id]] === true)
 
 // The Request review button of the PR page: absent where this Möbius cannot do it or the PR is not your own,
 // dimmed with the machine's reason where it cannot run now.
@@ -93,7 +98,8 @@ function yourItems(decision, pr, { record, capabilities }) {
 
 // The second, smaller choice on the Merge row, and off for the same reason when Merge is off.
 function withMergeOptions(items, pr, capabilities) {
-  if (!ownerConfirmOffered(capabilities) || allowedMergeMethods(pr.repository).length < 2) return items
+  // A merge queue picks how the PR lands, so there is nothing to choose.
+  if (!ownerConfirmOffered(capabilities) || allowedMergeMethods(pr.repository).length < 2 || usesMergeQueue(pr)) return items
   const side = { intent: MERGE_OPTIONS, title: NAMES.mergeOptions, detail: 'Choose how it lands.' }
   return items.map(item => (item.intent === 'merge' ? { ...item, side } : item))
 }

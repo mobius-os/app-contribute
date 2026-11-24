@@ -1008,8 +1008,10 @@ test('the B2 host accepts a confirmation that names screenshots', async t => {
   ]
   const parsed = b2.confirmationOf(items)
   assert.ok(parsed, 'the host rejected the list, which would keep Confirm disabled')
-  assert.equal(parsed[0].facts.find(fact => fact.label === 'Change').value, '1 file · +2\u00a0−0 · 2 screenshots')
-  assert.match(parsed[1].facts.find(fact => fact.label === 'Change').value, /1 screenshot$/)
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Screenshots').value, '2 screenshots')
+  assert.equal(parsed[1].facts.find(fact => fact.label === 'Screenshots').value, '1 screenshot')
+  assert.deepEqual(parsed[0].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+2\u00a0−0', lines: { added: 2, removed: 0 } })
+  assert.deepEqual(parsed[1].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+1\u00a0−0', lines: { added: 1, removed: 0 } })
 })
 
 // ---- Card states: calm progress, rechecks, and what each row says afterwards.

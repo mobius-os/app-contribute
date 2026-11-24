@@ -27,9 +27,9 @@ test('the pop-ups all open in the one shared window, and none draws its own back
   assert.deepEqual([...new Set(backdrops)].sort(), ['.co-agent-menu-scrim'], 'the other backdrops are the windows\' own native ::backdrop (the shared window and the picture viewer)')
 })
 
-test('a window keeps its foot on screen and stacks its buttons, the main one on top, on a phone', () => {
+test('a window keeps its foot on screen; on a phone Cancel sits left of the wider main button, and labels too long for one line stack, the main one on top', () => {
   assert.match(css, /\.co-rw-foot \{ position:sticky; bottom:0;/)
-  assert.match(css, /\.co-rw-actions \{ flex-direction:column-reverse; align-items:stretch; \}/)
+  assert.match(css, /\.co-rw-actions \{ flex-wrap:wrap-reverse; \}\n \.co-rw-actions > \.co-btn \{ flex:1 1 auto; \}\n \.co-rw-actions > \.co-btn-primary \{ flex-grow:2; \}/)
   assert.match(css, /\.co-task-dock > \.co-run-approval \.co-run-approval-actions \{ display:flex; flex-direction:column-reverse; align-items:stretch; \}/)
 })
 

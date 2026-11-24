@@ -8,6 +8,8 @@ export const NAMES = Object.freeze({
   // Things
   pr: 'PR',
   preparedPr: 'Prepared PR',
+  // The tab that lists prepared PRs, and the way back to it from one that is open.
+  preparedPrs: 'Prepared PRs',
   localChanges: 'Local changes',
   // One name for the agent's work: an agent run. Not a job, workflow, cycle, activity or progress.
   agentRun: 'Agent run',
@@ -64,6 +66,7 @@ export const NAMES = Object.freeze({
   askRereview: 'Ask for re-review',
   // Posts a note naming the reviewers who commented but have not approved (the PR machine's ask_approval).
   askApproval: 'Ask for approval',
+  postAnyway: 'Post it anyway',
   // The quiet button on a PR that has waited on its reviewers for days. It opens the Ask or Request review sheet the PR machine offers for that PR.
   askAgain: 'Ask again',
   // The quiet block under Needs you: your own PRs that have waited on others for days. It is a reminder and counts in no badge.
@@ -102,11 +105,13 @@ export const NAMES = Object.freeze({
   showFullMessage: 'Show the full message',
   seeChanges: 'See changes',
   viewOnGitHub: 'View on GitHub',
-  settings: 'Contribute settings',
+  settings: 'Settings',
 
   // The app's list of followed repositories. Say repository, not project or app: "Projects" is the Möbius shell's own word for something else.
   repositories: 'Repositories',
   moreRepositories: 'More repositories',
+  workedWith: 'Worked with',
+  otherRepositories: 'Other repositories',
   allRepositories: 'All repositories',
   addRepository: 'Add repository',
   // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.

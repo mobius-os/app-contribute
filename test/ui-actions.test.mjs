@@ -37,7 +37,7 @@ test('new contributions use GitHub automatically without a route picker', () => 
   assert.doesNotMatch(appSource, /onChooseSubmissionMethod|submissionError|setSubmissionError/)
   assert.doesNotMatch(connectionSource, /co-method-setting|Send Möbius contributions as|onChooseSubmissionMethod/)
   assert.match(appSource, /publicationPreference="github"/)
-  assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
+  assert.equal((appSource.match(/<SettingsWindow/g) || []).length, 1)
   assert.doesNotMatch(connectionSource, /onChooseChanges|onOpenSetup/)
 })
 
@@ -372,12 +372,13 @@ test('GitHub account changes live only in Möbius Settings', () => {
   assert.doesNotMatch(connectionSource, /hasFullPrAccess|unsupported|open-contribute-settings/)
 })
 
-test('one on-demand settings surface owns account setup in the toolbar', () => {
-  assert.equal((appSource.match(/<ConnectionSettings/g) || []).length, 1)
-  assert.match(connectionSource, /open \? <div className="co-settings-panel co-settings-workspace"/)
-  assert.match(connectionSource, /Contribute settings/)
+test('one on-demand settings window owns account setup, opened from the rail', () => {
+  assert.equal((appSource.match(/<SettingsWindow/g) || []).length, 1)
+  assert.match(connectionSource, /<ReviewDialog label=\{NAMES\.settings\} onClose=\{onClose\}>/)
   assert.match(connectionSource, /className="co-set-card"/)
-  assert.match(themeSource, /\.co-settings-panel \{[\s\S]*?position: absolute/)
+  assert.doesNotMatch(themeSource, /\.co-settings-panel/, 'the panel under the header is gone')
+  assert.match(appSource, /railFoot=\{<SettingsButton[^>]*className="co-rail-item is-settings"/, 'Settings is the last row of the rail')
+  assert.match(readFileSync(new URL('../ui/Desk.jsx', import.meta.url), 'utf8'), /\{foot \? <div className="co-rail-foot">\{foot\}<\/div> : null\}/)
 })
 
 test('Follow sent PRs says what it does in its own row, with no hidden help to open', () => {
@@ -416,7 +417,7 @@ test('the Projects summary reserves its row while source checks refresh', () => 
 test('project status and essential controls remain visible with a readable type floor', () => {
   assert.doesNotMatch(controlsSource, /More actions|View reviews/)
   assert.match(controlsSource, /className="co-btn co-btn-primary co-task-primary"/)
-  assert.match(sourceMapSource, /<span>\{facts\.work\}<\/span>/)
+  assert.match(sourceMapSource, /: facts\.work\}<\/span>/)
   assert.match(sourceMapSource, /className="co-source-shared">\{shared\}/)
   const sizes = [...(themeSource + workspaceTheme).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map(match => Number(match[1]))
   assert.ok(sizes.every(size => size === 0 || size >= 14))

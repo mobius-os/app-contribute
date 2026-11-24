@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 
 from agent_snapshot import find_ledger
+from lifecycle_record import sendable_now
 from pr_block import bounded, utf16_length
 
 RECORD_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}')
@@ -148,20 +149,30 @@ def in_chat(record, chat_id):
   return bool(chat_id) and (record.get('chat_id') == chat_id or chat_id in ids)
 
 
+def joins_card(record, chat_id):
+  """Whether a record of this chat can be sent right now, so it may join the card: waiting to be
+  sent (a private pull request, or an update on a public one), all clear for its exact head, and
+  with no attention flag, no refusal or send error and no send still to be confirmed. The same
+  rule the card's Send applies when it is tapped (send-readiness.js sendBlocker), so a held
+  record never makes the card say "Send 3" and then refuse to confirm."""
+  return (in_chat(record, chat_id) and (record.get('plan') or {}).get('action') in ('pr', 'pr_update')
+    and all_clear(record) and sendable_now(record))
+
+
 def chat_records(chat_id, ledger):
-  """Every prepared pull request of this chat that is all clear for its
-  current head, oldest first. The newest card in a chat is its only live one,
-  so it names all of the chat's ready work, not only what this turn prepared.
-  Unreviewed work is never pulled in, so it cannot hold the card."""
+  """Every pull request of this chat that can be sent now, oldest first. The
+  newest card in a chat is its only live one, so it names all of the chat's
+  sendable work, not only what this turn prepared. Work that is unreviewed,
+  held, failed or still being confirmed is never pulled in, so it cannot hold
+  the card."""
   found = []
   for path in sorted(Path(ledger).glob('*.json')):
     try:
       record = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
       continue
-    if (isinstance(record, dict) and record.get('status') == 'prepared' and in_chat(record, chat_id)
-        and RECORD_ID.fullmatch(str(record.get('id') or '')) and path.name == f'{record["id"]}.json'
-        and (record.get('plan') or {}).get('action') in ('pr', 'pr_update') and all_clear(record)):
+    if (isinstance(record, dict) and RECORD_ID.fullmatch(str(record.get('id') or '')) and path.name == f'{record["id"]}.json'
+        and joins_card(record, chat_id)):
       found.append(record)
   return sorted(found, key=lambda record: str(record.get('created_at') or ''))
 
@@ -169,9 +180,9 @@ def chat_records(chat_id, ledger):
 def card_block(records, ledger=None, chat_id=None):
   records = list({record['id']: record for record in records}.values())
   if chat_id and ledger is not None:
-    # The chat's other ready work joins only with its whole stack ready and
+    # The chat's other ready work joins only with its whole stack sendable and
     # from this chat, so it can never hold or refuse the card.
-    ready = lambda group: all(all_clear(member) and in_chat(member, chat_id) for member in group)
+    ready = lambda group: all(joins_card(member, chat_id) for member in group)
     joining = [record for record in chat_records(chat_id, ledger) if ready(with_complete_stacks([record], ledger))]
     records = list({record['id']: record for record in [*records, *joining]}.values())
   if ledger is not None:
@@ -193,6 +204,7 @@ def card_block(records, ledger=None, chat_id=None):
   block = {'app': 'contribute', 'intent': CHAT_INTENT,
     'title': '1 contribution' if len(records) == 1 else f'{len(records)} contributions',
     'inline': True, 'interaction': 'inline', 'expand': False,
+    'status_placement': 'footer',
     # Every value reads on its own, so fallback and Confirm rows show values
     # only (labels kept for assistive technology).
     'item_facts': 'values', 'confirm_facts': 'values', 'items': items,

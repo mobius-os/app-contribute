@@ -41,13 +41,16 @@ import { buildContributionRun, findRunItemByRecord } from './run.js'
 import { stackPublicationRecords } from './stack.js'
 import { deliverCycleMessage } from './cycle-delivery.js'
 import { DEFAULT_STAGE, stageOf } from './publication-stage.js'
-import { abandonPrepared, cacheFeed, cacheSourceSnapshot, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, saveAppSettings } from './storage.js'
+import { abandonPrepared, cacheFeed, cacheSourceSnapshot, dismissProjectRun, loadAppSettings, loadCachedFeed, loadCachedSourceSnapshot, loadSavedFeedStamp, loadContributionRecord, loadFreshContributionRecord, loadFreshContributionRecords, loadCycleState, isCurrentRecord, loadFullDiff, loadLedger, restoreAbandoned, settleHeld, settleSetting, updateAppSettings } from './storage.js'
 import { SYNC_POLICY, createSyncHub, onShownAgain } from './refresh.js'
 import { settledPulls, slimReviewRow } from './desk-copy.js'
 import { useDeskCopySave, useSavedDeskCopy } from './ui/useDeskCopy.js'
 import { checkUpstream } from './upstream-check.js'
-import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, projectNeedsCount, settleReviewRequest, withOwnerPulls } from './desk.js'
-import { withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
+import { DESK_LAST_LOOKED_KEY, agentRunsWaiting, deskCounts, incomingCutOf, ownPullRefs, projectNeedsCount, requestsWaiting, settleReviewRequest, withOwnerPulls, withReadPulls } from './desk.js'
+import { reviewsOfPr, withIgnoreNote, withoutIgnoreNote } from './collaboration.js'
+import { recordsForPull } from './provenance.js'
+import { baseIsDefaultOf, writePullReceipt } from './pull-receipt.js'
+import { followAfterSend, followAtSend } from './follow-note.js'
 import { sharedPublicationObserver } from './publication-observer.js'
 import {
   contributionPathDecision,
@@ -56,6 +59,8 @@ import {
 import {
   fetchIncomingReviews,
   fetchOwnPulls,
+  readExactPulls,
+  searchCutOf,
   fetchGithubStatus,
   githubRemainingPoints,
   fetchLiveStates,
@@ -74,13 +79,14 @@ import {
   updateContributionStack,
   withdrawMobiusContribution,
 } from './api.js'
-import { ConnectionSettings } from './ui/ConnectionCard.jsx'
+import { SettingsButton, SettingsWindow } from './ui/ConnectionCard.jsx'
 import { openAgentConversation } from './ui/BatchAction.jsx'
 import { ContributionRun } from './ui/Feed.jsx'
 import { ScreenshotLoaderContext } from './ui/useScreenshots.js'
 import { Icon } from './ui/Icons.jsx'
 import { SourceMap } from './ui/SourceMap.jsx'
 import { SyncHubContext, useDeskReviewRuns, useReviewList } from './ui/useReviewList.js'
+import { useProjectRuns } from './ui/useProjectRuns.js'
 import { RepositoryListsContext } from './ui/useRepositoryList.js'
 import { useBackgroundLists } from './ui/useBackgroundLists.js'
 import { createRepositoryLists } from './repository-lists.js'
@@ -98,13 +104,16 @@ import { reviewSelectionIdFromIntent } from './review-selection.js'
 import { FOLLOWED_REPOSITORIES, PINNED_REPOSITORIES, followedRepositories, pinChoices, pinnedRepositories, setRepositoryPinned } from './repositories.js'
 import { ProjectControls } from './ui/ProjectControls.jsx'
 import { PullRequests } from './ui/PullRequests.jsx'
-import { collaborationRequest, discoverRepositories, discoverRepository } from './collaboration.js'
+import { collaborationRequest, discoverRepositories, discoverRepository, repositoryName } from './collaboration.js'
 import { chatBlockTarget, validRecordId } from './chat-blocks.js'
 import { InlineBlockSession } from './ui/InlineBlockSession.jsx'
 import { reviewAddressFor, writeBindingRefusal } from './send-readiness.js'
 import { Shine, Words } from './ui/Shine.jsx'
 import { RowArrivalContext, useDeskPainted } from './ui/DeskRow.jsx'
 import { useCapabilities } from './ui/useCapabilities.js'
+
+// What a setting that could not be saved says: the words of a failed pin (ui/AlwaysLoad.jsx).
+const SETTING_NOT_SAVED = 'Could not save this. Try again.'
 
 // The app's own icon, with a lettered fallback for installs whose icon route
 // 404s. Mirrors the App Store header pattern.
@@ -238,11 +247,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // lease back when the owner leaves that PR's detail or the project.
   const [pullFocus, setPullFocus] = useState(null)
   const pullFocusRef = useRef(null)
-  pullFocusRef.current = pullFocus
   const sourceProjectsRef = useRef([])
   const tokenRef = useRef(token)
   tokenRef.current = token
-  const releasePullFocus = useCallback(nonce => setPullFocus(old => old?.nonce === nonce ? null : old), [])
+  const releasePullFocus = useCallback(nonce => {
+    if (pullFocusRef.current?.nonce === nonce) pullFocusRef.current = null
+    setPullFocus(old => old?.nonce === nonce ? null : old)
+  }, [])
   // Open the project that owns a repository: the local one when known,
   // otherwise the repository as an external project.
   function openRepository(repoName, nonce) {
@@ -258,14 +269,33 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       releasePullFocus(nonce)
     })
   }
-  function openPullFocus(target, nonce) {
+  async function openPullFocus(target, nonce) {
     setSelectionError('')
-    setPullFocus({ repo: target.repo, number: target.number, nonce })
-    openRepository(target.repo, nonce)
+    // Hold the intent synchronously: discovery may settle after another link.
+    pullFocusRef.current = { nonce }
+    setPullFocus(null)
+    setReviewFocus(null)
+    setPullPage(null)
+    const project = sourceProjectsRef.current.find(item => item.canonical_repo?.toLowerCase() === target.repo.toLowerCase())
+    try {
+      const repository = project ? null : await discoverRepository(tokenRef.current, target.repo)
+      if (pullFocusRef.current?.nonce !== nonce) return
+      const external = repository && {
+        key: `external:${repository.nameWithOwner.toLowerCase()}`, kind: 'external',
+        name: repository.nameWithOwner, canonical_repo: repository.nameWithOwner,
+        viewerPermission: repository.viewerPermission, available: false, state: 'unavailable',
+      }
+      setPullPage({ key: project?.key || external.key, project: external, repo: target.repo, number: target.number, tab: 'conversation', intent: '', nonce })
+    } catch (error) {
+      if (pullFocusRef.current?.nonce === nonce) setSelectionError(error.message)
+    }
   }
   // A run link opens the run's own project with that run's detail.
   async function openRunFocus(id, nonce) {
     setSelectionError('')
+    pullFocusRef.current = { runId: id, nonce }
+    setPullPage(null)
+    setReviewFocus(null)
     setPullFocus({ runId: id, nonce })
     // Read the exact run: the recent list is capped and would hide older runs.
     let run = null
@@ -345,11 +375,37 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const [reviewAgent, setReviewAgent] = useState(null)
   // Findings the owner set aside, by review version (see ignoreKey). Kept in the app's settings.
   const [ignoredReviews, setIgnoredReviews] = useState({})
+  // A setting that could not be saved (offline, an older Möbius): the control goes back to what it showed and this says so.
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [deskView, setDeskView] = useState('needs')
   const [lastLooked, setLastLooked] = useState('')
   // The PR page the desk pane shows, over whatever view or project is behind
   // it. Back only clears this, so the place the owner came from is untouched.
   const [pullPage, setPullPage] = useState(null)
+  // The PR page is a place of its own, so Back (the shell's or the page's own button) returns to where it was opened from, with what was there as it was
+  // (SourceMap keeps that pane mounted): one navigation entry while a page is open, as the repository and the approval link register theirs.
+  const pullNav = useRef(null)
+  const lastPullPage = useRef(null)
+  lastPullPage.current = pullPage || lastPullPage.current
+  const pullOpen = !!pullPage
+  useEffect(() => {
+    if (!pullOpen) {
+      const finished = pullNav.current
+      pullNav.current = null
+      try { finished?.close?.() } catch { /* the entry is gone with the page */ }
+      return
+    }
+    if (pullNav.current || !window.mobius?.nav?.open) return
+    let handle
+    handle = window.mobius.nav.open('contribute-pull', {
+      onBack: () => { if (pullNav.current !== handle) return; pullNav.current = null; pullFocusRef.current = null; setPullPage(null) },
+      onForward: () => { pullNav.current = handle; setPullPage(lastPullPage.current) },
+    })
+    pullNav.current = handle
+    void Promise.resolve(handle.outcome).then(outcome => { if (pullNav.current === handle && outcome?.status !== 'owned') pullNav.current = null })
+  }, [pullOpen])
+  useEffect(() => () => { try { pullNav.current?.close?.() } catch { /* gone */ } }, [])
   const submissionMethod = 'github'
   const [refreshKey, setRefreshKey] = useState(0)
   const [earlierCycle, setEarlierCycle] = useState(null)
@@ -378,6 +434,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // lists them asks (the fold of finished work), and every later pass of the ledger keeps them too.
   const [historyComplete, setHistoryComplete] = useState(false)
   const historyWantedRef = useRef(false)
+  // When the owner last contributed to each repository, from the whole ledger index (storage.js workedRepositories); read with
+  // the saved feed so the first screen already groups the repositories they worked with.
+  const [workedRepos, setWorkedRepos] = useState({})
+  const keepWorkedRepos = useCallback(next => setWorkedRepos(old => (JSON.stringify(old) === JSON.stringify(next) ? old : next)), [])
   // Whether the last read of the review requests came back; the hub settles a failed read without throwing.
   const incomingReadOkRef = useRef(true)
   useEffect(() => { connRef.current = conn }, [conn])
@@ -469,6 +529,16 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   const applyRecordUpdates = useCallback((updates) => (
     replaceFeed(mergeRecordUpdates(recordsRef.current, updates))
   ), [replaceFeed])
+
+  // The owner's own Merge, Close, Open for review or Back to draft is confirmed: the PR's contribution record says so now (pull-receipt.js),
+  // not at the job's next pass. A PR with no record of ours has nothing to write; a write that did not go through leaves that pass to settle it.
+  const onPullReceipt = useCallback(async (pr, receipt) => {
+    const record = recordsForPull(recordsRef.current, pr)[0]
+    if (!record) return null
+    const written = await writePullReceipt({ rec: record, receipt, baseRef: pr.baseRefName, baseIsDefault: baseIsDefaultOf(pr) })
+    if (written?.ok) applyRecordUpdates({ ...written.ok, path: record.path })
+    return written
+  }, [applyRecordUpdates])
 
   // The older settled records, asked for by the fold of finished work. One read brings them in; a read that
   // could not list them all is asked again at the next opening of the fold.
@@ -620,6 +690,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return status
   }, [token])
 
+  // Opening Settings reads the GitHub account again, as the panel it replaces did.
+  const openSettings = useCallback(() => { setSettingsOpen(true); void refreshConnection() }, [refreshConnection])
   const refreshConnectionRef = useRef(null)
   refreshConnectionRef.current = refreshConnection
 
@@ -630,6 +702,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // and their own PRs), which answers well before the full list: those rows are right
   // as soon as it does, and the full read replaces the list when it answers.
   const [incomingFirstReady, setIncomingFirstReady] = useState(false)
+  // Which search GitHub says it stopped short of in the last full read (api.js searchCutOf); null when that read did not say.
+  const [incomingMore, setIncomingMore] = useState(null)
   const incomingAnsweredRef = useRef(false)
   const ownerReadStarted = useRef(false)
   useEffect(() => {
@@ -654,12 +728,38 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         setIncomingFirstReady(true)
         if (early) { setIncomingReviews(old => withOwnerPulls(old, rows, connRef.current.login)); return }
         incomingReadOkRef.current = true
+        setIncomingMore(searchCutOf(rows.pageInfo))
         setIncomingReviews(connRef.current.state === 'connected' ? rows : [])
       },
       failed: () => { incomingReadOkRef.current = false; setIncomingFirstReady(true) }, // the list stays as it was
     })
   }, [hub, token, sendOnly])
   const refreshIncomingReviews = useCallback(() => hub.refresh('incoming'), [hub])
+
+  // One of the owner's own open PRs moved without being over (a push, a review, a comment, new checks): the probe says which, and just those PRs are read
+  // again (their own points, at most once per cooldown), never the lists. A read that failed asks again after the cooldown.
+  const movedOwn = useRef(new Map())
+  useEffect(() => {
+    if (sendOnly) return undefined
+    return hub.fact('ownPulls', {
+      github: true,
+      read: async () => {
+        const refs = [...movedOwn.current.values()]
+        movedOwn.current = new Map()
+        if (!refs.length || connRef.current.state !== 'connected') return []
+        try { return (await readExactPulls(token, refs, 'ContributeMovedOwnPulls')).filter(Boolean) } catch (error) {
+          refs.forEach(ref => movedOwn.current.set(`${ref.repo.toLowerCase()}#${ref.number}`, ref))
+          throw error
+        }
+      },
+      apply: read => { if (read.length) setIncomingReviews(old => withReadPulls(old, read)) },
+      failed: () => {},
+    })
+  }, [hub, token, sendOnly])
+  const onOwnMoved = useCallback(refs => {
+    refs.forEach(ref => movedOwn.current.set(`${ref.repo.toLowerCase()}#${ref.number}`, ref))
+    void hub.automatic('ownPulls')
+  }, [hub])
 
   // A review submitted from a PR page answers its request: the row leaves
   // Review requests now. Reads already in flight are superseded so none can
@@ -681,7 +781,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [hub, settleIncomingReview])
 
   // Review runs for the whole desk: its rows show which PRs are under review.
-  const { runs: reviewRuns, respondChats, error: runsError, ready: runsReady, refresh: refreshReviewRuns, patch: patchReviewRun, respondStarted } = useDeskReviewRuns({
+  const { runs: reviewRuns, respondChats, error: runsError, ready: runsReady, refresh: refreshReviewRuns, patch: patchReviewRun, respondStarted, runsCut } = useDeskReviewRuns({
     hub, token, appId, connState: conn.state, sendOnly, pullPageOpen: !!pullPage, onReviewsMoved,
   })
   // The answers Respond to feedback saved: the Review tab shows them and the PR logic knows a draft is waiting.
@@ -724,6 +824,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       const savedFeed = await savedFeedPromise
       if (!cancelled && savedFeed) {
         recordsRef.current = cached
+        keepWorkedRepos(savedFeed.worked)
         setRecords(cached)
         setLoading(false)
         setFeedKnown(true)
@@ -748,7 +849,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       if (typeof appSettings[DESK_LAST_LOOKED_KEY] === 'string') {
         setLastLooked(appSettings[DESK_LAST_LOOKED_KEY])
       }
-      void saveAppSettings({ ...appSettings, [DESK_LAST_LOOKED_KEY]: new Date().toISOString() })
+      void updateAppSettings(settings => ({ ...settings, [DESK_LAST_LOOKED_KEY]: new Date().toISOString() }))
       connRef.current = status
       setConn(status)
 
@@ -758,6 +859,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       const recs = reconcileLedgerSnapshot(recordsRef.current, ledger.records)
       recordsRef.current = recs
       setOmittedCount(ledger.omitted.length)
+      keepWorkedRepos(ledger.worked)
       setRecords(recs)
       setFromCache(ledger.fromCache)
       ledgerCurrentRef.current = !ledger.fromCache
@@ -826,6 +928,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       refreshConnectionRef.current?.(),
     ])
     setOmittedCount(ledger.omitted.length)
+    keepWorkedRepos(ledger.worked)
     ledgerCurrentRef.current = !ledger.fromCache
     if (ledger.wholeHistory) { historyWantedRef.current = true; setHistoryComplete(true) }
     if (!ledger.fromCache) {
@@ -861,10 +964,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         return
       }
       const selectionId = reviewSelectionIdFromIntent(event.data.intent)
-      if (selectionId) { void openSelection(selectionId); return }
+      if (selectionId) { pullFocusRef.current = null; setPullFocus(null); setPullPage(null); void openSelection(selectionId); return }
       const target = contributionReviewTargetFromIntent(event.data.intent)
       if (!target) return
       closeSelection()
+      pullFocusRef.current = null
+      setPullFocus(null)
+      setPullPage(null)
       setReviewFocus({
         ...target,
         nonce: String(event.data.nonce ?? Date.now()),
@@ -1116,6 +1222,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         url: outcome.url || next.url,
         viaMobius,
         updated: updating,
+        // Whether the platform stamped the follow-up grant: the sent card says so (follow-note.js).
+        followed: updating ? undefined : followAfterSend(next),
       }
     }
     if (outcome.pending) {
@@ -1250,6 +1358,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         id: next.id,
         url: outcome.url || next.url || '',
       })
+      // The PR is no longer a draft on GitHub: the Desk's list of the owner's PRs says so now, not at the next read.
+      void refreshIncomingReviews()
       return { ok: true, record: next }
     }
 
@@ -1260,6 +1370,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
         const next = { ...fresh, path: current.path }
         applyRecordUpdates(next)
         refreshReviewStatus()
+        void refreshIncomingReviews()
         return { ok: true, record: next }
       }
       if (fresh?.readying) {
@@ -1274,6 +1385,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           const next = { ...outcome.ok, path: current.path }
           applyRecordUpdates(next)
           refreshReviewStatus()
+          void refreshIncomingReviews()
           return { ok: true, record: next }
         }
       }
@@ -1290,7 +1402,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       error: outcome.error || 'Could not open for review.',
       failure: outcome.failure,
     }
-  }, [appId, token, applyRecordUpdates, refreshReviewStatus])
+  }, [appId, token, applyRecordUpdates, refreshReviewStatus, refreshIncomingReviews])
 
   const relaySubmittingIds = useMemo(() => records
     .filter((rec) => (
@@ -1374,35 +1486,55 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     return outcome
   }, [appId, token, applyRecordUpdates])
 
+  // The note that a setting did not save belongs to the moment of the save: it goes when the owner moves to another screen (a view, a repository,
+  // a PR page), and at the next save, successful or not.
+  const pageKey = pullPage ? `${pullPage.repo}#${pullPage.number}` : ''
+  useEffect(() => { setSettingsError('') }, [deskView, projectOpen, pageKey])
+
   const onChangeNewPrStage = useCallback(async (next) => {
     const stage = stageOf(next)
-    setNewPrStage(stage)
-    const settings = await loadAppSettings()
-    saveAppSettings({ ...settings, new_pr_stage: stage })
-  }, [])
+    const before = newPrStage
+    setNewPrStage(stage); setSettingsError('')
+    const saved = await updateAppSettings(settings => ({ ...settings, new_pr_stage: stage }))
+    if (!settleSetting(saved, setNewPrStage, stage, before)) setSettingsError(SETTING_NOT_SAVED)
+  }, [newPrStage])
 
-  // Setting a review's findings aside is the owner's own note: nothing is posted anywhere.
+  // Setting a review's findings aside is the owner's own note: nothing is posted anywhere. It is a checked write
+  // (storage.js updateAppSettings): the note is added to the settings as the file holds them now, and the screens
+  // show it only once it is saved. Resolves to whether it was; when it was not, the page says so.
   const saveIgnoredReviews = useCallback(async (change) => {
-    setIgnoredReviews(change)
-    const settings = await loadAppSettings()
-    saveAppSettings({ ...settings, ignored_reviews: change(settings.ignored_reviews || {}) })
+    let notes = null
+    setSettingsError('')
+    const saved = await updateAppSettings(settings => {
+      notes = change(settings.ignored_reviews || {})
+      return { ...settings, ignored_reviews: notes }
+    })
+    if (saved) setIgnoredReviews(notes)
+    else setSettingsError(SETTING_NOT_SAVED)
+    return saved
   }, [])
-  const onIgnoreReview = useCallback((item, reason) => saveIgnoredReviews(notes => withIgnoreNote(notes, item, reason)), [saveIgnoredReviews])
+  // The note belongs to the review it is made on, so it names that run: a later review of the same version starts without it.
+  const onIgnoreReview = useCallback((item, reason) => {
+    const run = reviewsOfPr(reviewRuns, item.repo, item.number).find(review => review.item.head_sha === item.head_sha)?.run
+    return saveIgnoredReviews(notes => withIgnoreNote(notes, item, reason, undefined, run))
+  }, [saveIgnoredReviews, reviewRuns])
   const onUndoIgnore = useCallback(item => saveIgnoredReviews(notes => withoutIgnoreNote(notes, item)), [saveIgnoredReviews])
 
   // A chosen agent is saved; the Default row clears it, so windows follow the Möbius setting again.
   const onChangeReviewAgent = useCallback(async (next) => {
     const agent = next?.model ? { provider: next.provider, model: next.model, ...(next.effort ? { effort: next.effort } : {}) } : null
-    setReviewAgent(agent)
-    const { review_agent: _replaced, ...settings } = await loadAppSettings()
-    saveAppSettings(agent ? { ...settings, review_agent: agent } : settings)
-  }, [])
+    const before = reviewAgent
+    setReviewAgent(agent); setSettingsError('')
+    const saved = await updateAppSettings(({ review_agent: _replaced, ...settings }) => (agent ? { ...settings, review_agent: agent } : settings))
+    if (!settleSetting(saved, setReviewAgent, agent, before)) setSettingsError(SETTING_NOT_SAVED)
+  }, [reviewAgent])
 
   const onToggleAutopilotDefault = useCallback(async (next) => {
-    setAutopilotDefault(next)
-    const settings = await loadAppSettings()
-    saveAppSettings({ ...settings, autopilot_default: next })
-  }, [])
+    const before = autopilotDefault
+    setAutopilotDefault(next); setSettingsError('')
+    const saved = await updateAppSettings(settings => ({ ...settings, autopilot_default: next }))
+    if (!settleSetting(saved, setAutopilotDefault, next, before)) setSettingsError(SETTING_NOT_SAVED)
+  }, [autopilotDefault])
 
 
   // One explicit confirmation advances the exact current phase of an already-
@@ -1617,7 +1749,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
   // Dismiss = CAS flip to abandoned (storage.js owns the If-Match dance). On
   // success the record moves to the Run's Dismissed fold in place; on a conflict the feed is
-  // reloaded so the card shows whatever actually happened to it.
+  // reloaded so the card shows whatever actually happened to it. A public record handed back by a discard (a prepared update whose PR lives on,
+  // with `lifecycle_writer` on "engine") is no abandoned work: it leaves the Ready list and stays in the open list, never in Dismissed, because
+  // the lists read its status (run.js), which is the PR's own.
   const onDismiss = useCallback(async (rec) => {
     const outcome = await abandonPrepared({ appId, token, rec })
     if (outcome.ok) {
@@ -1637,6 +1771,24 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     }
     return outcome
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
+
+  // Settle = the owner's exit from a finished PR that waits on them (an update that can no longer go out, a merge that never landed): one checked
+  // write of the exit and what it derives (storage.js settleHeld). The record leaves Needs you in place; the other outcomes are onDismiss's.
+  const onSettle = useCallback(async (rec, exit) => {
+    const outcome = await settleHeld({ rec, exit })
+    if (outcome.ok) {
+      applyRecordUpdates({ ...outcome.ok, path: rec.path })
+      window.mobius?.signal?.('contribution_settled', { id: rec.id, exit })
+    } else if (outcome.conflict) {
+      applyRecordUpdates({ ...outcome.conflict, path: rec.path })
+    } else if (outcome.gone) {
+      replaceFeed(recordsRef.current.filter((item) => item.id !== rec.id))
+    } else if (outcome.conflict === null) {
+      const fresh = await loadFreshContributionRecord(rec.id)
+      if (fresh) applyRecordUpdates({ ...fresh, path: rec.path })
+    }
+    return outcome
+  }, [applyRecordUpdates, replaceFeed])
 
   // Restore = CAS flip an archived record back to `prepared`. Mirrors onDismiss:
   // on success it moves from Dismissed back to the current Run in place; on a
@@ -1660,7 +1812,9 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   }, [appId, token, applyRecordUpdates, replaceFeed, refreshReviewStatus])
 
   // Reviews you started: one row per PR for the Agent runs page, counted in the rail.
-  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, runsReady, lastKnown: savedCopy?.reviewRows, knownPulls: savedCopy?.reviewPulls, chats: respondChats, responses, pulls: incomingReviews, ignored: ignoredReviews, login })
+  // The change probe also watches the owner's own open PRs, so a merge or a close made on GitHub reaches the Desk within its minute.
+  const ownPulls = useMemo(() => ownPullRefs(incomingReviews, login), [incomingReviews, login])
+  const reviewList = useReviewList({ hub, enabled: !sendOnly && conn.state === 'connected', token, runs: reviewRuns, runsReady, lastKnown: savedCopy?.reviewRows, knownPulls: savedCopy?.reviewPulls, chats: respondChats, responses, pulls: incomingReviews, ownPulls, onOwnMoved, ignored: ignoredReviews, login })
   reviewListRef.current = reviewList
 
   // A linked repository outside the owner's lists still opens as a project.
@@ -1668,11 +1822,17 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // A waiting agent run on a repository nothing else involves still gets its card (and so its badge).
   const runReposKey = agentRunsWaiting(reviewList.entries, new Set()).map(entry => String(entry.item.repo)).sort().join('|')
   const runRepos = useMemo(() => (runReposKey ? [...new Set(runReposKey.split('|'))] : []), [runReposKey])
+  // Reviews the owner ran count as work in a repository too, though no date comes with them.
+  const reviewedReposKey = reviewList.entries.map(entry => repositoryName(entry.item?.repo)).filter(Boolean).sort().join('|')
+  const workHistory = useMemo(
+    () => ({ ...Object.fromEntries(reviewedReposKey ? [...new Set(reviewedReposKey.split('|'))].map(repo => [repo, 0]) : []), ...workedRepos }),
+    [reviewedReposKey, workedRepos],
+  )
   const sourceProjects = useMemo(
     () => attachSourceProjects(sourceSnapshot, records, incomingReviews,
       linkedRepository ? [...repositoryAccess.repositories, linkedRepository] : repositoryAccess.repositories,
-      linkedRepository ? [...followedRepos, linkedRepository.nameWithOwner] : followedRepos, runRepos),
-    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, linkedRepository, runRepos],
+      linkedRepository ? [...followedRepos, linkedRepository.nameWithOwner] : followedRepos, runRepos, workHistory),
+    [sourceSnapshot, records, incomingReviews, repositoryAccess.repositories, followedRepos, linkedRepository, runRepos, workHistory],
   )
   sourceProjectsRef.current = sourceProjects
   const contributionRun = useMemo(() => buildContributionRun({
@@ -1692,11 +1852,21 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
 
   // What the shared decision of each PR is read from besides the PR itself (pr-standing.js): the desk's
   // counts and its rows decide from the same facts, so the numbers equal the rows.
-  const standingFacts = useMemo(() => ({ runs: reviewRuns, chats: respondChats, responses, ignored: ignoredReviews }), [reviewRuns, respondChats, responses, ignoredReviews])
+  // A project's agent run that stopped, failed or asks is Needs you as well (ui/useProjectRuns.js).
+  const projectRuns = useProjectRuns({ hub, enabled: !sendOnly, projects: sourceProjects })
+  // Dismissing a run that stopped, failed or never started is recorded on its cycle record; the row leaves with the next read of the runs, asked for now.
+  const dismissRun = useCallback(async (key, k) => {
+    const done = await dismissProjectRun(key, k)
+    if (done) void hub?.refresh('projectRuns')
+    return done
+  }, [hub])
+  const standingFacts = useMemo(() => ({ runs: reviewRuns, chats: respondChats, responses, ignored: ignoredReviews, projectRuns }), [reviewRuns, respondChats, responses, ignoredReviews, projectRuns])
   // What waits on the owner in each project: the same count its Needs you
   // card lists, so the rail and the card never disagree.
   const projectAttention = useMemo(() => Object.fromEntries(sourceProjects
     .map(project => [project.key, projectNeedsCount(project, projectRun(project).decisions, login, reviewList.entries, standingFacts)])), [sourceProjects, records, reviewStatus, login, reviewList.entries, standingFacts])
+  // How many of each project's review requests are the owner's move: the number its row says, its tab's badge and Needs you count (desk.js requestsWaiting).
+  const projectAsked = useMemo(() => Object.fromEntries(sourceProjects.map(project => [project.key, requestsWaiting(project.reviewRequests, login, standingFacts).length])), [sourceProjects, login, standingFacts])
   // The home's clickable counts: every number names a next step and its view.
   const deskCountsValue = useMemo(() => deskCounts({
     projects: sourceProjects,
@@ -1721,19 +1891,26 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     respondChats,
     responses,
     ignored: ignoredReviews,
+    onDismissRun: dismissRun,
+    projectRuns,
+    runsCut,
+    incomingCut: incomingCutOf(incomingReviews),
+    asked: projectAsked,
     reviews: reviewList,
     lastLooked,
     decisionsFor: project => projectRun(project).decisions,
     onOpenPull: openPullPage,
     pull: pullPage,
-    onClosePull: () => setPullPage(null),
+    onClosePull: () => { pullFocusRef.current = null; setPullPage(null) },
     renderPull: () => {
       if (!pullPage) return null
       const project = sourceProjects.find(item => item.key === pullPage.key)
         || sourceProjects.find(item => item.canonical_repo?.toLowerCase() === pullPage.repo.toLowerCase())
-        || null
+        || pullPage.project || null
       return renderPullRequests(project, null, null, pullPage)
     },
+    // GitHub's own answer, when the last full read carried it (api.js searchCutOf), replaces the guess made from the size of a page.
+    ...(incomingMore === null ? {} : { incomingCut: incomingMore }),
   }
   function projectRun(project) {
     return project ? buildContributionRun({
@@ -1744,6 +1921,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   function openPullPage(project, pr, tab = 'conversation', intent = '') {
     const repo = pr?.repository?.nameWithOwner || project?.canonical_repo || ''
     if (!repo || !pr?.number) return
+    pullFocusRef.current = null
     setPullPage({ key: project?.key || '', repo, number: pr.number, tab, intent, nonce: crypto.randomUUID() })
   }
   // `view` comes from the project tabs: which PRs to show, how to switch tabs,
@@ -1753,13 +1931,13 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       return <PullRequests key={`page:${page.repo}#${page.number}`} appId={appId} token={token} capabilities={capabilities}
         project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
         runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
-        presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
+        presentation="page" focusPull={page} onFocusRelease={() => {}} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot} onReceipt={onPullReceipt}
         records={recordsForProject(records, project)} />
     }
     return <PullRequests key={`pulls:${project?.key || 'all'}`} appId={appId} token={token} capabilities={capabilities}
       project={project} conn={conn} refreshKey={refreshKey} onChanged={refreshIncomingReviews} onReviewPosted={settleIncomingReview}
       runs={reviewRuns} respondChats={respondChats} responses={responses} onResponsesChanged={refreshResponses} runsError={runsError} onRunsChanged={refreshReviewRuns} onRunPatched={patchReviewRun} onRespondStarted={respondStarted}
-      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot}
+      scope={view?.scope || 'all'} onScope={view?.onScope} onTotal={view?.onTotal} defaultAgent={reviewAgent} onStartAgent={startAgentTask} onOpenForReview={onMarkReady} ignoredReviews={ignoredReviews} onIgnoreReview={onIgnoreReview} onUndoIgnore={onUndoIgnore} onSetAutopilot={onSetAutopilot} onReceipt={onPullReceipt}
       onOpenPage={(pr, tab) => openPullPage(project, pr, tab)}
       focusPull={pullFocus?.number ? pullFocus : null} focusRun={pullFocus?.runId ? pullFocus : null} onFocusRelease={releasePullFocus}
       records={recordsForProject(records, project)} onRecord={record => {
@@ -1789,8 +1967,10 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       // Every list read in the background is brought up to date in place; the Sync does not wait for it.
       if (!quiet) void syncLists()
       const incoming = quiet ? hub.catchUp('incoming') : refreshIncomingReviews()
-      const [, , checked] = await Promise.all([loadRepositories(), incoming, checkUpstream(token, sourceProjects), refreshReviewRuns(), reviewList.syncPulls({ quiet })])
-      upstream = checked
+      const [, , checked, runsOk, pullsOk] = await Promise.all([loadRepositories(), incoming, checkUpstream(token, sourceProjects), refreshReviewRuns(), reviewList.syncPulls({ quiet })])
+      // `upstream` is how what Sync asked outside the app went: the upstream check, and the reads of the runs and of the reviewed PRs, which the
+      // hub keeps to their own `failed` and so only answer here. A read that failed is a failed Sync, as a failed read of the review requests is.
+      upstream = { ...checked, ok: checked.ok && runsOk !== false && pullsOk !== false }
       if (checked.ok) setUpstreamChecks(checked.results)
     }
     setRefreshKey(value => value + 1)
@@ -1818,7 +1998,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
   // The first successful load and later explicit refreshes share one header history (ui/useDeskSync.js).
   const { refreshingAll, refreshNote, setRefreshNote, syncResult, syncAll, markSynced } = useDeskSync({
     refreshEverything, booted, connected: conn.state === 'connected', enabled: !sendOnly,
-    facts: syncFacts({ incoming: incomingReviews, counts: deskCountsValue, projects: sourceProjects, checks: upstreamChecks }),
+    facts: syncFacts({ incoming: incomingReviews, counts: deskCountsValue, projects: sourceProjects, checks: upstreamChecks, login }),
   })
   const refreshAll = () => syncAll()
   const copyReady = !!savedCopy && saved.hasFeed && !!sourceSnapshot && feedKnown
@@ -1840,7 +2020,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     setOpenSynced(true)
     // Without a connected GitHub account there is nothing to sync. A GitHub that could not be reached is a failed update.
     if (conn.state === 'disconnected') { setRefreshNote(null); return }
-    const synced = conn.state === 'connected' && !sourceError && syncReadsCurrent() && reviewList.settled && !reviewList.failed
+    const synced = conn.state === 'connected' && !sourceError && syncReadsCurrent() && reviewList.settled && !reviewList.failed && !runsError
     setRefreshNote(old => (synced ? { at: new Date().toISOString(), failed: false } : { at: old?.at || null, failed: true }))
     if (synced) markSynced()
   }, [booted, openReadsAnswered, openSynced, conn.state, sourceError])
@@ -1946,21 +2126,20 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
     <ScreenshotLoaderContext.Provider value={loadScreenshot}>
     <div className="co-root" data-design-seed="ae1883df">
       <style>{CSS}</style>
+      {settingsOpen ? <SettingsWindow onClose={() => setSettingsOpen(false)}
+        appId={appId} conn={conn} token={token} onChanged={refreshConnection}
+        autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
+        newPrStage={newPrStage} onChangeNewPrStage={onChangeNewPrStage}
+        reviewAgent={reviewAgent} onChangeReviewAgent={onChangeReviewAgent} /> : null}
       <div className="co-header-shell">
         <Header appId={appId} fromCache={fromCache} checking={checking} onBack={projectOpen && !pullPage ? () => setProjectFocus({ key: '', nonce: crypto.randomUUID() }) : null}>
           <button type="button" className="co-btn co-toolbar-refresh" onClick={refreshAll} disabled={refreshingAll} aria-busy={refreshingAll} aria-label={NAMES.sync} aria-describedby={refreshNote?.at || refreshNote?.failed || refreshNote?.updating ? SYNC_NOTE_ID : undefined}>
-            <Icon name={refreshingAll ? 'refresh' : 'github'} size={16} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
-            <span className="co-sync-copy"><span className="co-label-long">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.sync}</span>
-              <span className="co-label-short">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
+            <Icon name={refreshingAll ? 'refresh' : 'github'} size={28} className={'co-icon' + (refreshingAll ? ' is-spinning' : '')} />
+            <span className="co-sync-copy"><span className="co-sync-label">{refreshingAll ? <Shine>Syncing…</Shine> : NAMES.syncShort}</span>
               <SyncNote note={refreshNote} />
             </span>
           </button>
-          <ConnectionSettings
-            appId={appId} conn={conn} token={token} onChanged={refreshConnection}
-            autopilotDefault={autopilotDefault} onToggleAutopilotDefault={onToggleAutopilotDefault}
-            newPrStage={newPrStage} onChangeNewPrStage={onChangeNewPrStage}
-            reviewAgent={reviewAgent} onChangeReviewAgent={onChangeReviewAgent}
-          />
+          <SettingsButton conn={conn} onOpen={openSettings} className={'co-btn co-toolbar-settings' + (selectionFocus || (sourceLoading && !sourceSnapshot && !sourceProjects.length) ? ' is-always' : '')}><Icon name="settings" size={20} /><span>{NAMES.settings}</span></SettingsButton>
         </Header>
         <div className="co-sync-result-slot" role="status" aria-live="polite">
           {syncResult ? <p key={syncResult.id} className="co-sync-result"><Icon name="check" size={16} className="co-sync-result-check" /><span><Words text={syncResult.text} /></span></p> : null}
@@ -1968,12 +2147,14 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
       </div>
       <main ref={pageRef} className="co-page is-sources">
         {selectionError ? <p className="co-run-error" role="alert">{selectionError}</p> : null}
+        {settingsError ? <p className="co-run-error" role="alert">{settingsError}</p> : null}
         {selectionFocus ? <ReviewSelection selectionId={selectionFocus} appId={appId} token={token} onClose={closeSelection} onRunsChanged={refreshReviewRuns} /> : <SourceMap
           snapshot={sourceSnapshot} projects={sourceProjects} focusKey={projectFocus} desk={desk}
           onProjectOpenChange={setProjectOpen}
           renderRepositoryControls={project => (project.canonical_repo && conn.state === 'connected' ? <AlwaysLoad key={project.key} repo={project.canonical_repo} pinned={pinned.has(project.canonical_repo.toLowerCase())} onChange={setPinned} /> : null)}
           conn={conn} loading={sourceLoading} error={sourceError}
           checks={upstreamChecks} attention={projectAttention}
+          railFoot={<SettingsButton conn={conn} onOpen={openSettings} className="co-rail-item is-settings"><Icon name="settings" size={15} /><span className="co-rail-label">{NAMES.settings}</span></SettingsButton>}
           addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
@@ -1987,7 +2168,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
             {project ? <ProjectControls key={`controls:${project.key}`} appId={appId} token={token} project={project} run={projectRun(project)} loading={loading || !ledgerReady || sourceLoading || !!sourceError} onStart={startAgentTask}>
             {({ controls, progress }) => <ContributionRun
               renderPublicWork={project ? view => renderPullRequests(project, navigation, view) : null}
-              reviewRequestCount={project?.reviewRequests?.length || 0}
+              reviewRequestCount={project ? projectAsked[project.key] ?? requestsWaiting(project.reviewRequests, login, standingFacts).length : 0}
               edits={project && localChangeSentence(project).edits ? <ProjectEdits key={sourceSnapshot?.generated_at} project={project} run={projectRun(project)} loadProjectDiff={loadProjectDiff} onRefresh={refreshAll} /> : null}
               editsCount={project && localChangeSentence(project).edits ? localChangeSummary(project).changed : null}
               controls={controls}
@@ -2000,7 +2181,8 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
               publicationPreference="github" githubState={conn.state} newPrStage={newPrStage}
               reviewStatus={reviewStatus}
               onSend={onSend} onSendStack={onSendStack} onMarkReady={onMarkReady}
-              onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore}
+              followAtSend={record => followAtSend(record, { autopilotDefault, available: conn.autopilotAvailable === true })}
+              onFeedback={onFeedback} onReview={startAgentTask} onDismiss={onDismiss} onRestore={onRestore} onSettle={onSettle}
               onSetAutopilot={onSetAutopilot} onWithdraw={onWithdraw}
               onRefresh={refreshReviewStatus} loadDiff={loadFullDiff}
               focusTarget={(project?.key || '') === focusedProjectKey ? reviewFocus : null}

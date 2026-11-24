@@ -101,7 +101,8 @@ export function reviewWindowCopy({ mode, intent = '', title = '', posting = fals
     steps,
     publicEffect: reviewPublicEffect({ merge, posting, verdict: proposing, agentPosts: agent, count }),
     startLabel: reviewStartLabel({ merge, posting, verdict: proposing, agentPosts: agent }),
-    footnote: versionNote(count, bindCurrentTarget, merge),
+    // A live review that does not merge reads the PR as it is when it starts, which needs no note.
+    footnote: bindCurrentTarget && !merge ? '' : versionNote(count, bindCurrentTarget, merge),
   }
 }
 

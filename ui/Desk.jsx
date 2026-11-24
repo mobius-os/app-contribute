@@ -51,9 +51,9 @@ function RailProjectButton({ project, attention, selectedKey, onOpenProject }) {
 // (finding 2). Quiet apps, local-only apps and repositories not installed here fold
 // into one "More projects" row; Add project is the block's last row (finding 12).
 // On narrow screens CSS hides it and DeskChips takes over.
-export function DeskRail({ view, counts, projects, attention, selectedKey, onView, onOpenProject, addProject = null }) {
+export function DeskRail({ view, counts, projects, attention, selectedKey, onView, onOpenProject, addProject = null, foot = null }) {
   const groups = splitProjects(projects, attention)
-  const more = [...groups.quiet, ...groups.external]
+  const more = [...groups.other, ...groups.external]
   const moreOpen = more.some(project => project.key === selectedKey)
   return (
     <div className="co-rail">
@@ -62,7 +62,7 @@ export function DeskRail({ view, counts, projects, attention, selectedKey, onVie
       </nav>
       <nav className="co-rail-projects" aria-labelledby="co-rail-projects-head">
         <h2 className="co-rail-head" id="co-rail-projects-head">{NAMES.repositories}</h2>
-        {[...groups.active, ...groups.builtHere].map(project => (
+        {[...groups.workedWith, ...groups.builtHere].map(project => (
           <RailProjectButton key={project.key} project={project} attention={attention} selectedKey={selectedKey} onOpenProject={onOpenProject} />
         ))}
         {more.length ? (
@@ -77,6 +77,7 @@ export function DeskRail({ view, counts, projects, attention, selectedKey, onVie
         </button>
         {addProject ? <div className="co-rail-add">{addProject}</div> : null}
       </nav>
+      {foot ? <div className="co-rail-foot">{foot}</div> : null}
     </div>
   )
 }

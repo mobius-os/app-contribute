@@ -106,7 +106,9 @@ export function activeContribution(rec) {
 
 // `runRepos` are the repositories of the agent reviews the owner started: a run that waits on them needs a
 // card in Needs you, so its repository becomes a project even when nothing else involves it.
-export function attachSourceProjects(snapshot, records, incomingReviews = [], repositories = [], followedRepositories = [], runRepos = []) {
+// `workHistory` is when the owner last worked in each repository ({ 'owner/name': ms }, 0 when they did but the date is not
+// known): the repositories they worked with stay in view after their work is done (desk.js splitProjects).
+export function attachSourceProjects(snapshot, records, incomingReviews = [], repositories = [], followedRepositories = [], runRepos = [], workHistory = {}) {
   const base = []
   if (snapshot?.platform) base.push(snapshot.platform)
   if (Array.isArray(snapshot?.apps)) {
@@ -186,6 +188,7 @@ export function attachSourceProjects(snapshot, records, incomingReviews = [], re
     // Involvement only places a repository here; a review request needs the owner.
     project.reviewRequests = project.incomingReviews.filter(item => item.reviewRequested)
     if (project.reviewRequests.length) project.attention = true
+    project.lastWorkedAt = workHistory[repoKey(project.canonical_repo)] ?? null
   }
   return projects.sort((a, b) => {
     const aBuiltHere = a.builtHere

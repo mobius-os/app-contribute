@@ -70,7 +70,7 @@ test('every PR waits on you under the step of its one shared decision: merge, fi
   assert.equal(step(pr(4, { mergeable: 'CONFLICTING' })), 'fix', 'a merge conflict')
   assert.equal(step(pr(5, opinion('CHANGES_REQUESTED'))), 'fix', 'a change request at this version')
   const theirs = (extra = {}) => pr(6, { author: { login: 'teammate' }, viewerLatestReview: { state: 'APPROVED', commit: { oid: HEAD } }, ...opinion('APPROVED', 'owner'), ...extra })
-  assert.equal(step(theirs()), 'merge', 'a PR you reviewed that is ready to merge is a Merge too')
+  assert.equal(decide(theirs()).turn, 'none', 'a PR of someone else that is ready to merge waits on nobody here: landing it is theirs')
   assert.equal(step(theirs({ headRefOid: 'b'.repeat(40) })), 'again', 'new commits since your review')
 })
 
@@ -87,13 +87,14 @@ test('the shared decision, not GitHub\'s review decision, says what waits: pendi
   assert.deepEqual(rows([pr(6), pr(7, { isDraft: true, commits: rollup(1, 2) }), pr(8, { latestOpinionatedReviews: null })]), [])
 })
 
-test('authored pulls keep only the owner PRs that are not review requests', () => {
+test('authored pulls keep the owner PRs, even one GitHub also lists as a review request (a team of theirs was asked)', () => {
   const incoming = [
     pr(1, { reviewRequested: true }),
     pr(2, { author: { login: 'Owner' } }),
     pr(3, { author: { login: 'teammate' } }),
+    pr(4, { reviewRequested: true, author: { login: 'teammate' } }),
   ]
-  assert.deepEqual(authoredPulls(incoming, 'owner').map(item => item.number), [2])
+  assert.deepEqual(authoredPulls(incoming, 'owner').map(item => item.number), [1, 2])
   assert.deepEqual(authoredPulls(incoming, ''), [])
 })
 
@@ -152,12 +153,27 @@ test('the counts name next steps and the rail badges follow them', () => {
   assert.equal(railBadge('runs', { reviewsRunning: 2 }), 2)
 })
 
-test('projects with review requests never fold into the quiet group', () => {
-  const quiet = { key: 'a', kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0 }
+test('projects with review requests are worked with, never among the other repositories', () => {
+  const quiet = { key: 'a', kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0, lastWorkedAt: null }
   const asked = { ...quiet, key: 'b', reviewRequests: [pr(1)] }
   const groups = splitProjects([quiet, asked], {})
-  assert.deepEqual(groups.quiet.map(project => project.key), ['a'])
-  assert.deepEqual(groups.active.map(project => project.key), ['b'])
+  assert.deepEqual(groups.other.map(project => project.key), ['a'])
+  assert.deepEqual(groups.workedWith.map(project => project.key), ['b'])
+})
+
+test('finished work keeps a repository worked with, after what is going on and latest first', () => {
+  const resting = { kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0, lastWorkedAt: null }
+  const projects = [
+    { ...resting, key: 'never' },
+    { ...resting, key: 'long-ago', lastWorkedAt: 1000 },
+    { ...resting, key: 'busy', workingFiles: 2 },
+    { ...resting, key: 'reviewed-only', lastWorkedAt: 0 },
+    { ...resting, key: 'yesterday', lastWorkedAt: 5000 },
+  ]
+  const groups = splitProjects(projects, {})
+  assert.deepEqual(groups.workedWith.map(project => project.key), ['busy', 'yesterday', 'long-ago', 'reviewed-only'])
+  assert.deepEqual(groups.other.map(project => project.key), ['never'])
+  assert.deepEqual(splitProjects(projects, { never: 1 }).workedWith.map(project => project.key).slice(0, 2), ['never', 'busy'], 'a card that needs the owner is current work')
 })
 
 test('feedback on a published PR opens the PR itself; publication decisions keep their card', async () => {
@@ -221,12 +237,13 @@ test('the Needs you badge is the sum of the chips next to it, whatever the page 
   assert.equal(counts.drafts, 1)
 })
 
-test('a reviewed PR that is ready to merge counts under Merge, never under Review again', () => {
+test('a reviewed PR of someone else that is ready to merge is not in Needs you; new commits still bring it back for Review again', () => {
   const entries = [theirs(5), theirs(6, moved)]
-  assert.deepEqual(entries.map(entry => entry.bucket), ['waiting', 'waiting'], 'the Agent runs page lists both as waiting on you')
+  assert.deepEqual(entries.map(entry => entry.bucket), ['done', 'waiting'], 'ready to merge is finished here, new commits wait on you')
+  assert.equal(entries[0].chips[0].label, 'Ready to merge', 'the Agent runs page still says so')
   const counts = deskCounts({ reviewEntries: entries, login: 'owner' })
-  assert.deepEqual([counts.merge, counts.again], [1, 1])
-  assert.equal(needsCount(counts), 2)
+  assert.deepEqual([counts.merge, counts.again], [0, 1])
+  assert.equal(needsCount(counts), 1)
 })
 
 test('each PR counts once: a request, a card or an own PR already listed is not counted again for its review run', () => {

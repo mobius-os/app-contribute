@@ -76,6 +76,20 @@ class PublicationObserveTest(unittest.TestCase):
         self.assertEqual(set(re.findall(r"'([a-z_]+)'", codes)), set(publication_observe.UNCONFIRMED_CODES))
         self.assertEqual(set(re.findall(r"'([a-z_]+)'", stages)), set(publication_observe.UNSETTLED_STAGES))
 
+    def test_a_push_error_counts_only_when_that_push_is_the_version_the_plan_sends_now(self):
+        # lifecycle_record's rule (domain.js lastSendUnconfirmed), not a copy of it: a restage keeps
+        # `pushed` and the old push sha, so a refusal of the new head is not a lost send.
+        pushed = {"last_submit_stage": "pushed", "last_submit_error": "refused", "plan": {"head_sha": "b" * 40}}
+        self.assertFalse(uncertain(record("a", last_submit_push_sha="a" * 40, **pushed)))
+        self.assertTrue(uncertain(record("a", last_submit_push_sha="b" * 40, **pushed)))
+        self.assertTrue(uncertain(record("a", **pushed)), "no push sha recorded: the old rule holds")
+        self.assertTrue(uncertain(record("a", last_submit_push_sha="B" * 40, **pushed)), "shas compare without case")
+
+    def test_the_lists_are_lifecycle_records_own(self):
+        import lifecycle_record
+        self.assertEqual(publication_observe.UNCONFIRMED_CODES, frozenset(lifecycle_record.UNCONFIRMED_SUBMIT_CODES))
+        self.assertEqual(publication_observe.UNSETTLED_STAGES, frozenset(lifecycle_record.UNSETTLED_SUBMIT_STAGES))
+
     def test_a_new_head_or_attempt_is_a_new_question(self):
         platform = FakePlatform({"a": "changed"})
         self.observer(platform).run([record("a", plan={"head_sha": "1" * 40})])

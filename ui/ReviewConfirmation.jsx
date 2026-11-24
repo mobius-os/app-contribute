@@ -8,9 +8,9 @@ import { focusActionRegion } from './TaskPane.jsx'
 import { Icon } from './Icons.jsx'
 import { ReviewPromptPreview } from './ReviewPromptSettings.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
-import { SeenOnGithub } from './SeenOnGithub.jsx'
 import { WindowHead } from './WindowHead.jsx'
 import { NAMES } from '../names.js'
+import { SeenOnGithub } from './SeenOnGithub.jsx'
 import { Shine } from './Shine.jsx'
 
 // Finish it for me and Take over promise to stop before every push for your approval and never to
@@ -47,7 +47,7 @@ function WhoSees({ who, agentAllowed, disabled, onChange }) {
           className={who === key ? 'is-on' : ''} disabled={disabled} onClick={() => onChange(key)}>{label}</button>)}
       </div>
     </div>
-    <p className="co-rw-note">{WHO.find(([key]) => key === who)?.[2]}</p>
+    <p className="co-rw-who-note">{WHO.find(([key]) => key === who)?.[2]}</p>
   </div>
 }
 
@@ -74,11 +74,12 @@ function SinceReview({ token, pr, since }) {
   return <p className="co-rw-note" role="status">{sinceReviewLine({ ...seen, at: since.at })}</p>
 }
 
+// Folded, so the choices and the start button fit one phone screen; the steps are one tap away.
 function WhatHappens({ copy }) {
-  return <>
-    <h4 className="co-rw-label">What happens</h4>
+  return <details className="co-rw-fold">
+    <summary><span>What happens</span><small>{copy.steps.length} steps</small><Icon name="chevron" size={16} className="co-icon co-rw-fold-chevron" /></summary>
     <ol className="co-rw-steps">{copy.steps.map((step, index) => <li key={step.text} className={step.added ? 'is-added' : ''}><b>{index + 1}</b><span>{step.text}</span></li>)}</ol>
-  </>
+  </details>
 }
 
 // What this choice actually grants on this Möbius. A saved selection can still hold an older grant
@@ -101,25 +102,28 @@ function OwnNote({ own, total }) {
     : `${own} of these ${total} are your own PRs. The agent only checks those for you: nothing is posted, proposed or merged on them.`}</p>
 }
 
+// The window asks "Who sees the result?" only where the choice can be changed and this Möbius can draft a verdict.
+const choosesWhoSees = ({ onOptionsChange, capabilities }) => !!onOptionsChange && offersDraft(capabilities)
+
 // Who sees the result, then whether it merges once you approve. Merging only ever
-// follows a verdict you sent yourself, so it needs "Draft for me".
+// follows a verdict you sent yourself, so the switch is drawn only where it can be turned on:
+// with "Draft for me", on a PR that is not a draft and that you may merge.
 function ReviewSwitches({ choice, promptOptions, capabilities, onModeChange, onOptionsChange, busy, own }) {
   const granted = publicChoice(choice, promptOptions, capabilities)
   const who = whoOf(granted)
   const drafts = choice.pulls.some(pr => pr.isDraft)
   const mayMergeAll = choice.pulls.every(pr => mayMerge(pr.repository.viewerPermission))
   const mergeBlocker = mergeWhenSafeBlocker({ drafts, mayMergeAll, notDrafting: who !== 'draft' })
-  const canDraft = !!onOptionsChange && offersDraft(capabilities)
+  const canDraft = choosesWhoSees({ onOptionsChange, capabilities })
   const hints = reviewSwitchHints(choice.pulls.length)
   if (own === choice.pulls.length) return <OwnNote own={own} total={own} />
   const pick = key => {
     onOptionsChange({ ...promptOptions, ...choice.options, ...WHO_OPTIONS[key] })
     if (key !== 'draft' && granted.merge) onModeChange?.('review')
   }
-  // A switch that cannot be turned on stays drawn, off and dimmed, with its reason where the hint would be.
   const blocked = !granted.merge && !!mergeBlocker
-  const mergeSwitch = !onModeChange || choice.intent !== 'review' ? null
-    : <Switch checked={granted.merge} disabled={busy || blocked} label="Merge after I approve" detail={blocked ? mergeBlocker : hints.merge}
+  const mergeSwitch = !onModeChange || choice.intent !== 'review' || blocked ? null
+    : <Switch checked={granted.merge} disabled={busy} label="Merge after I approve" detail={hints.merge}
       onChange={checked => onModeChange(checked ? 'review_merge' : 'review')} />
   return <>
     {canDraft ? <WhoSees who={who} agentAllowed={capabilities?.agent_submits_verdict === true} disabled={busy || !promptOptions} onChange={pick} /> : null}
@@ -143,9 +147,12 @@ function takeoverBlockerFor(choice, capabilities) {
     || (choice.intent === 'take_over' && !String(choice.takeover_reason || '').trim() ? 'Write why you are taking it over.' : '')
 }
 
-// The consent for one agent workflow on exact PRs: what the agent will do,
-// what GitHub will see, which model runs it, and one start button whose label
-// matches what is allowed. Opened in a dialog from a PR list, or inline on a
+// The consent for one agent workflow on exact PRs: who sees the result, which
+// model runs it, what the agent will do, and one start button whose label
+// matches what is allowed. Where the owner picks who sees the result, that choice
+// says what reaches GitHub; every other window (a takeover, an older saved link)
+// keeps the "What GitHub sees" summary. A live review reads the PR as it is, so
+// only a takeover (which pushes code) and a pinned link show the versions. Opened in a dialog from a PR list, or inline on a
 // saved review-link page.
 export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, onCancel, onModeChange, appId, token, onResolved, onOptionsChange, onAgentChange, onReasonChange, bindCurrentTarget = false, capabilities: served = null, ownLogin = '', defaultAgent = null }) {
   const confirmation = useRef(null)
@@ -179,6 +186,7 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
   const copy = reviewWindowCopy({ mode: ownOnly ? 'review' : choice.mode, intent: ownOnly ? 'check_my_pr' : choice.intent, title: choice.title, posting, verdict, agentPosts, count: choice.pulls.length, bindCurrentTarget })
   const postingUnavailable = choice.mode === 'review_merge' && !!capabilities && !(capabilities.post_review === true && capabilities.propose_verdict === true)
   const startBlocked = takeover && !!blocker
+  const choosesWho = !takeover && (ownOnly || choosesWhoSees({ onOptionsChange, capabilities }))
   return <section ref={confirmation} tabIndex={-1} className="co-review-window is-sized" aria-labelledby={titleId}>
     <WindowHead title={copy.title} titleId={titleId} pulls={choice.pulls} />
     <div className="co-rw-body">
@@ -189,15 +197,15 @@ export function ReviewConfirmation({ choice, busy, disabled, error, onConfirm, o
         : <ReviewSwitches choice={choice} promptOptions={promptOptions} capabilities={capabilities} onModeChange={onModeChange} onOptionsChange={onOptionsChange} busy={busy} own={own} />}
       {startBlocked ? <p className="co-rw-blocker" role="status">{blocker}</p> : null}
       {postingUnavailable ? <p className="co-rw-blocker" role="status">Merging after your approval needs a newer Möbius. This would run as a private review.</p> : null}
-      <WhatHappens copy={copy} />
       {onAgentChange ? <AgentModelSettings token={token} choice={choice.agent} defaultChoice={ownDefault || defaultChoice} explicitDefault={!!ownDefault}
         defaultHint={ownDefault ? 'Your default for reviews and fixes' : 'Your background agent setting'} onChange={next => { onAgentChange(next); return true }} /> : null}
+      <WhatHappens copy={copy} />
       {appId && token ? <ReviewPromptPreview token={token} appId={appId} choice={choice} onResolved={resolve} onUnsupported={() => setUnsupported(true)} /> : null}
-      <VersionDetails pulls={choice.pulls} live={bindCurrentTarget} />
+      {takeover || !bindCurrentTarget ? <VersionDetails pulls={choice.pulls} live={bindCurrentTarget} /> : null}
     </div>
     <footer className="co-rw-foot">
-      <SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />
-      <p>{copy.footnote}</p>
+      {choosesWho ? null : <SeenOnGithub tone={copy.publicEffect.tone} text={copy.publicEffect.text} />}
+      {copy.footnote ? <p>{copy.footnote}</p> : null}
       <div className="co-rw-actions">
         {onCancel ? <button type="button" className="co-btn" disabled={busy} onClick={onCancel}>{NAMES.cancel}</button> : null}
         <button type="button" className="co-btn co-btn-primary" disabled={busy || disabled || startBlocked} onClick={onConfirm}>{busy ? <Shine>Starting…</Shine> : copy.startLabel}</button>

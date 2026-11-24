@@ -10,7 +10,7 @@ const action = (decision, id) => decision.actions.find(item => item.id === id)
 // Every combination of the facts that change a decision. The platform sweeps the same space.
 const SPACE = {
   role: ['author', 'reviewer'], lifecycle: ['draft', 'open', 'unknown'], checks: ['pass', 'fail', 'pending', 'none', 'unknown'],
-  mergeable: ['yes', 'conflict', 'unknown'], permission: ['READ', 'WRITE', 'MAINTAIN'],
+  mergeable: ['yes', 'conflict', 'unknown'], permission: ['READ', 'TRIAGE', 'WRITE', 'MAINTAIN', 'unknown'],
   reviews: [[], [{ by: 'sam', state: 'APPROVED', commit: 'h2' }], [{ by: 'sam', state: 'APPROVED', commit: 'h1' }],
     [{ by: 'sam', state: 'CHANGES_REQUESTED', commit: 'h1' }], [{ by: 'qa-bot', state: 'APPROVED', commit: 'h2', bot: true }],
     [{ by: 'sam', state: 'APPROVED', commit: 'h1', sameWork: true }], [{ by: 'sam', state: 'APPROVED', commit: 'h1', sameWork: false }],
@@ -20,13 +20,17 @@ const SPACE = {
   outbox: [null, { head: 'h2', state: 'drafted' }, { head: 'h2', state: 'unconfirmed' }],
   readComplete: [true, false],
   result: [null, { head: 'h2', outcome: 'findings' }, { head: 'h2', outcome: 'clear' }],
+  queued: [undefined, true],
+  reviewRequested: [undefined, true],
 }
+// The fact reader sets a review request only on someone else's PR (pr-facts.js), so an author with one is not swept: half the cost.
 const sweep = () => Object.entries(SPACE).reduce((combos, [key, values]) => combos.flatMap(facts => values.map(value => ({ ...facts, [key]: value }))),
-  [{ head: 'h2', openThreads: 0 }]).map(facts => ({ ...facts, author: facts.role === 'author' ? 'alex' : 'sam' }))
+  [{ head: 'h2', openThreads: 0 }]).filter(facts => !(facts.role === 'author' && facts.reviewRequested)).map(facts => ({ ...facts, author: facts.role === 'author' ? 'alex' : 'sam' }))
 
 // What changes the PR or starts an agent on it, and what a quiet readable PR always offers its author or its reviewer.
 // Take over is left out of OFFERED: it stays for maintainers.
 const CHANGES_THE_PR = ['merge', 'close', 'open_for_review', 'back_to_draft', 'check_my_pr', 'respond', 'finish_it', 'review', 'take_over']
+const READS_ONLY = ['READ', 'TRIAGE']
 const OFFERED = { author: ['check_my_pr', 'respond', 'finish_it', 'open_for_review', 'back_to_draft', 'request_review', 'merge', 'close'], reviewer: ['review', 'merge', 'close'] }
 const otherApprovedThisVersion = facts => facts.reviews.some(review => review.state === 'APPROVED' && (review.commit === facts.head || review.sameWork === true) && !review.bot && review.by !== facts.author)
 const INVARIANTS = {
@@ -48,10 +52,29 @@ const INVARIANTS = {
   'a PR that cannot be read is never acted on': (decision, facts) => !(facts.readComplete === false || facts.lifecycle === 'unknown')
     || !decision.actions.some(item => CHANGES_THE_PR.includes(item.id) && item.enabled),
   'with nothing in the way, every action of yours is offered, whatever the review standing': (decision, facts) => {
-    const inTheWay = facts.readComplete === false || !['open', 'draft'].includes(facts.lifecycle) || (facts.job && facts.job.state !== 'stalled') || facts.outbox
-    return inTheWay || OFFERED[facts.role].every(id => action(decision, id)?.enabled)
+    const inTheWay = facts.readComplete === false || !['open', 'draft'].includes(facts.lifecycle) || (facts.job && facts.job.state !== 'stalled') || facts.outbox || facts.queued === true
+    // Merge alone also waits for write access, and only when GitHub said the account has less.
+    const offered = OFFERED[facts.role].filter(id => id !== 'merge' || !READS_ONLY.includes(facts.permission))
+    return inTheWay || offered.every(id => action(decision, id)?.enabled)
+  },
+  'Merge is off, with the reason, for an account GitHub says has no write access; an unknown permission leaves it to the platform': (decision, facts) => {
+    const merge = action(decision, 'merge')
+    const stopped = ['open', 'draft'].includes(facts.lifecycle) && facts.readComplete !== false && facts.queued !== true && READS_ONLY.includes(facts.permission)
+    return !stopped || (!merge.enabled && merge.reason === `Merging needs write access to this repository. Your account has ${facts.permission.toLowerCase()} access.`)
   },
   'take over is for maintainers only': (decision, facts) => !action(decision, 'take_over')?.enabled || ['MAINTAIN', 'ADMIN'].includes(facts.permission),
+  'a PR GitHub’s merge queue holds reads as in the merge queue, and its Merge is off for that reason': (decision, facts) => {
+    const held = facts.queued === true && ['open', 'draft'].includes(facts.lifecycle) && facts.readComplete !== false
+    return !held || (decision.state === 'in_merge_queue' && action(decision, 'merge').reason === 'This pull request is already in the merge queue.')
+  },
+  // GitHub drops a request when its reviewer reviews, so a request listed beside a review of this version was made again.
+  'a request GitHub lists beside your review of this version is your turn to review, unless the PR is a draft or already has an agent job, a draft of yours or the queue': (decision, facts) => {
+    const free = facts.role === 'reviewer' && facts.reviewRequested === true && facts.myReview?.commit === facts.head && facts.lifecycle === 'open'
+      && facts.readComplete !== false && !facts.job && !facts.outbox && facts.queued !== true
+    return !free || (decision.state === 'reviewer.re_requested' && decision.turn === 'you' && action(decision, 'review')?.highlighted === true)
+  },
+  'a review request changes the words and the turn only: what may be done is exactly what it is without it': (decision, facts) => facts.reviewRequested !== true
+    || JSON.stringify(decide({ ...facts, reviewRequested: undefined }).actions.map(({ id, enabled, reason }) => [id, enabled, reason])) === JSON.stringify(decision.actions.map(({ id, enabled, reason }) => [id, enabled, reason])),
   'at most one action is highlighted': decision => decision.actions.filter(item => item.highlighted).length <= 1,
   'a state that highlights an action always offers it': decision => !decision.next || decision.actions.some(item => item.id === decision.next && item.enabled),
 }
@@ -104,6 +127,20 @@ test('the agent’s own merge keeps the full readiness rule that the owner’s t
   const facts = cases.find(item => item.name.startsWith('Your PR, nobody approved')).facts
   assert.equal(action(decide(facts), 'merge').reason, '')
   assert.equal(notReadyToMerge(facts), 'Nobody but the author has approved it yet.')
+})
+
+test('a review request listed again after your review of this version is your turn, whatever your review said', () => {
+  const base = cases.find(item => item.name === 'You requested changes at this version').facts
+  for (const state of ['CHANGES_REQUESTED', 'APPROVED', 'COMMENTED']) {
+    const decision = decide({ ...base, myReview: { state, commit: 'h2' }, reviewRequested: true })
+    assert.deepEqual([decision.state, decision.turn, decision.label, decision.next], ['reviewer.re_requested', 'you', 'Asked to review again', 'review'], state)
+    assert.equal(decide({ ...base, myReview: { state, commit: 'h2' } }).state === 'reviewer.re_requested', false, `${state}: without the request`)
+  }
+  assert.equal(decide({ ...base, reviewRequested: true, lifecycle: 'draft' }).state, 'reviewer.waiting_author', 'a draft stays its author’s to finish')
+  assert.equal(decide({ ...base, reviewRequested: true, queued: true }).state, 'in_merge_queue')
+  assert.equal(decide({ ...base, reviewRequested: true, job: { state: 'running' } }).state, 'working', 'an agent already on it comes first')
+  assert.equal(decide({ ...base, reviewRequested: false }).state, 'reviewer.waiting_author')
+  assert.equal(decide({ ...base, role: 'author', author: 'alex', reviewRequested: true }).state.startsWith('reviewer.'), false, 'an own PR is never read as a request to you')
 })
 
 test('a reply alone never brings their PR back for re-review; a new commit does', () => {

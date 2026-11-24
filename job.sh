@@ -35,6 +35,24 @@
 # of weakening the update to a blind write. On a lost race (412), it is left
 # for the app's live refresh and the next scheduled run to reconcile.
 #
+# Who computes the stored status word is the app's `lifecycle_writer` setting
+# (settings.json). Absent or "shadow": exactly the logic above, with the
+# lifecycle engine taking notes beside it (lifecycle_shadow.py). "engine": every
+# record the job reads goes through the engine (lifecycle_job.py), which stores
+# the status word and the `lifecycle` field in the same write and whose effects
+# the job performs. Engine mode also follows a PR closed less than 30 days ago
+# (it may be reopened), a merge into a side branch until its parent branch
+# reaches the default branch (an orphaned one is asked about once a day), and a
+# PR whose prepared update has not gone out.
+# In either mode a one-time sweep (lifecycle_backfill.py) empties the attention
+# left on finished PRs, without a notification. A pull request the app itself
+# merged or closed (its receipt marks the record `merged_announced: false` /
+# `closed_announced: false`) is told once and its follow-up grant closed out,
+# in either mode; an update that was waiting then is stranded, and the receipt's
+# `stranded_announced: false` has the job ask the owner and tell them once. If
+# GitHub rejects the one batched document (the lifecycle's newer fields), the
+# job asks once more with the fields it always asked.
+#
 # The supervised app-job runner passes the numeric app id as $1 and mints a
 # short-lived APP_TOKEN scoped to this installed app. The job keeps the runner's
 # API base and pins gh's config/HOME/PATH — without those, gh can't find the
@@ -80,6 +98,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -123,16 +142,88 @@ sys.path.insert(0, os.environ["SCRIPT_DIR"])
 from ledger_scan import LedgerScan, awaiting_publication_connection
 from github_events import (
   AUTHOR_ATTENTION_TYPES, COMMENT_FIELDS, REVIEW_FIELDS, TRUSTED, UNTRUSTED,
-  UNVERIFIED, attention_provenance, latest_events, review_events,
-  trusted_changes_request,
+  UNVERIFIED, attention_provenance, latest_events, own_event_urls, review_events,
+  standing_changes_request, trusted_changes_request,
 )
+import job_github
+
+# A PR the owner asked changes on that has new commits (review_again_alerts.py).
+# It reads GitHub, not the ledger, so it runs before the empty-ledger exit below,
+# and its failure must not stop the passes after it.
+import review_again_alerts
+
+try:
+  review_again_alerts.Alerts(
+    _call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None,
+  ).run()
+except Exception as exc:
+  print("contribute: review-again alert error: %s" % exc, file=sys.stderr)
 
 LEDGER = LedgerScan(_call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None)
+
+# Who computes the stored status word: "shadow" keeps today's logic
+# beside the engine's notes; "engine" stores the engine's status and `lifecycle` in the same
+# write (lifecycle_job.py). Anything unreadable in the setting is "shadow".
+import lifecycle_job
+
+ENGINE = lifecycle_job.writer_mode(_call, APP_ID) == "engine"
+NOW_EPOCH = int(time.time())
+now = (
+  datetime.datetime.now(datetime.timezone.utc)
+  .replace(microsecond=0)
+  .isoformat()
+  .replace("+00:00", "Z")
+)
+LEDGER.engine = ENGINE  # engine mode also reads a recently closed PR, a side-branch merge, a due deadline
 records = LEDGER.records_needing_work()
+
+# One-time sweep of the attention left on finished PRs (lifecycle_backfill.py). It reads and
+# writes only records the ordinary scan skips, sends no notification, and may fail on its own.
+import lifecycle_backfill
+import lifecycle_shadow
+
+try:
+  BACKFILL = lifecycle_backfill.Backfill(
+    _call, APP_ID, os.environ.get("APP_JOB_STATE_DIR") or None, ENGINE, NOW_EPOCH, now,
+    None if ENGINE else lifecycle_shadow.Shadow(os.environ.get("APP_JOB_STATE_DIR") or None),
+  )
+  BACKFILL.run(LEDGER.finished_with_leftovers())
+  # A record it rewrote carries a stale version here: swap in the record and version its write
+  # returned, so its terminal cleanup and app connection do not wait a pass.
+  records = [(name, *BACKFILL.refreshed.get(name, (record, etag))) for name, record, etag in records]
+except Exception as exc:
+  print("contribute: lifecycle backfill error: %s" % exc, file=sys.stderr)
 if not records:
   # Nothing live, prepared, awaiting connection, or holding a checkout.
   LEDGER.save()
   sys.exit(0)
+
+# Shadow mode (lifecycle_shadow.py): the lifecycle engine runs beside this job, takes notes
+# where it would have stored a different status, and changes nothing. Its failure must never
+# stop a pass, and its notes are saved however the pass ends.
+import atexit
+
+SHADOW = None
+
+
+def _shadow(step, *args):
+  if SHADOW is None:
+    return
+  try:
+    getattr(SHADOW, step)(*args)
+  except Exception as exc:
+    print("contribute: lifecycle shadow %s error: %s" % (step, exc), file=sys.stderr)
+
+
+try:
+  # The engine is the writer in engine mode: its notes would only compare it with itself.
+  SHADOW = None if ENGINE else lifecycle_shadow.Shadow(os.environ.get("APP_JOB_STATE_DIR") or None)
+  if SHADOW is not None:
+    atexit.register(_shadow, "save")
+except Exception as exc:
+  print("contribute: lifecycle shadow unavailable: %s" % exc, file=sys.stderr)
+for _name, _record, _etag in records:
+  _shadow("read", _record)
 
 # Prepared reconciliation (prepared_reconcile.py) shares this process and this
 # one ledger scan, but stays a separate pass from the live-PR polling below:
@@ -145,7 +236,7 @@ import prepared_reconcile
 PREPARED_STORAGE = prepared_reconcile.Storage(API, TOKEN, APP_ID)
 try:
   prepared_reconcile.run(
-    PREPARED_STORAGE, prepared_reconcile.GitHub(), records=records,
+    PREPARED_STORAGE, prepared_reconcile.GitHub(), records=records, engine=ENGINE,
   )
 except Exception as exc:
   print("contribute: prepared reconciliation error: %s" % exc, file=sys.stderr)
@@ -179,6 +270,9 @@ def _terminal_staging_checkout(rec):
   return resolved if inside_staging and os.path.isdir(resolved) else ""
 
 
+CLEANED = set()  # records whose cleanup-staging call succeeded in this pass (it also closes out the grant)
+
+
 def _reconcile_terminal_staging():
   for _name, rec, _etag in records:
     checkout = _terminal_staging_checkout(rec)
@@ -196,6 +290,7 @@ def _reconcile_terminal_staging():
         {},
       )
       result = json.loads(raw) if raw else {}
+      CLEANED.add(_name)
       if LEDGER.note_cleanup_result(_name, checkout, result):
         print(
           "contribute: terminal staging remains %s" % rec.get("id"),
@@ -257,30 +352,66 @@ except Exception as exc:
 
 
 def _is_target(rec):
-  return (
+  on_github = (
     rec.get("type") in ("pr", "issue")
-    and rec.get("status") in ("draft", "open", "landing")
     and isinstance(rec.get("url"), str)
     and rec["url"].startswith("https://github.com/")
   )
+  if not on_github:
+    return False
+  if rec.get("status") in ("draft", "open", "landing"):
+    return True
+  # Engine mode also follows a recently closed PR (it may be reopened), a merge into a
+  # side branch, and a PR whose prepared update has not gone out (lifecycle_job.is_polled).
+  return ENGINE and lifecycle_job.is_polled(rec, NOW_EPOCH)
+
+
+def _repo_slug(rec):
+  repo = rec.get("repo")
+  if isinstance(repo, str):
+    repo = repo.strip()
+    parts = repo.split("/")
+    if len(parts) == 2 and parts[0] and parts[1]:
+      return repo
+  url = rec.get("url")
+  if isinstance(url, str):
+    parts = urllib.parse.urlparse(url).path.strip("/").split("/")
+    if len(parts) >= 2 and parts[0] and parts[1]:
+      return "%s/%s" % (parts[0], parts[1])
+  return ""
 
 
 targets = [(name, rec, etag) for (name, rec, etag) in records if _is_target(rec)]
+# A PR the app itself merged or closed is found finished, and nothing here would ever tell the
+# owner or close out its follow-up grant. The app's receipt marks it (lifecycle_job.owed_finish).
+OWED = [(name, rec, etag, owed) for (name, rec, etag) in records
+        if (owed := lifecycle_job.owed_finish(rec, now))]
+# Engine mode also moves the records that need no GitHub read (a send nobody confirmed, a
+# deadline that has passed), so it runs on, even with nothing to ask GitHub about.
 if not targets:
-  sys.exit(0)
+  if not ENGINE and not OWED:
+    sys.exit(0)
 
 # One document, aliased resource() nodes. JSON string escaping is exactly the
 # GraphQL string-literal escaping the url needs.
 aliases = {}
-parts = []
+lean = set()
 for i, (name, rec, etag) in enumerate(targets):
-  alias = "r%d" % i
-  aliases[alias] = (name, rec, etag)
-  url_lit = json.dumps(rec["url"])
-  parts.append(
+  aliases["r%d" % i] = (name, rec, etag)
+  if ENGINE and lifecycle_job.is_lean(rec, NOW_EPOCH):
+    lean.add(name)
+
+
+def _resource(alias, name, rec, extended):
+  # `extended` asks the lifecycle's newer fields too; without it the selection is exactly what
+  # this job asked before the lifecycle (the retry after GitHub rejected the newer fields).
+  if name in lean:
+    return job_github.lean_alias(alias, rec["url"], extended)
+  return (
     "%(alias)s: resource(url: %(url)s) { __typename "
     "... on PullRequest { "
     "state isDraft updatedAt reviewDecision mergeable "
+    "%(extra)s"
     "comments(last: 10) { nodes { %(comment)s } } "
     "reviews(last: 10) { nodes { %(review)s } } "
     "commits(last: 1) { nodes { commit { statusCheckRollup { "
@@ -295,26 +426,87 @@ for i, (name, rec, etag) in enumerate(targets):
     "state updatedAt "
     "comments(last: 10) { nodes { %(comment)s } } "
     "} }" % {
-      "alias": alias, "url": url_lit,
+      "alias": alias, "url": json.dumps(rec["url"]),
       "comment": COMMENT_FIELDS, "review": REVIEW_FIELDS,
+      "extra": job_github.PR_EXTRA_FIELDS if extended else "",
     }
   )
-query = "query { " + " ".join(parts) + " }"
 
-try:
-  out = subprocess.run(
-    ["gh", "api", "graphql", "-f", "query=" + query],
-    capture_output=True, text=True, timeout=30,
-  )
-except Exception:
-  sys.exit(0)
-if out.returncode != 0:
-  # gh error (rate limit, revoked token, org restriction) — leave state as-is.
-  sys.exit(0)
-try:
-  data = (json.loads(out.stdout) or {}).get("data") or {}
-except Exception:
-  sys.exit(0)
+
+def _document(extended):
+  parts = [_resource(alias, name, rec, extended) for alias, (name, rec, _etag) in aliases.items()]
+  return "query { " + (job_github.VIEWER_FIELD if extended else "") + " ".join(parts) + " }"
+
+
+def _graphql(query):
+  # The finished gh process, or None when gh could not be run at all (missing, timed out).
+  try:
+    return subprocess.run(
+      ["gh", "api", "graphql", "-f", "query=" + query],
+      capture_output=True, text=True, timeout=30,
+    )
+  except Exception:
+    return None
+
+
+def _answered(out):
+  # (data, rejected). `data` is None when GitHub could not be read: leave state as-is (rate limit,
+  # revoked token, org restriction, an outage), exactly as an unreadable answer always did. `rejected`
+  # says GitHub refused the document: its answer holds `errors` and no data (gh exits non-zero then
+  # too, and prints that answer). That is the one case the older, smaller document is worth a second
+  # try; a non-zero exit with no such answer is an outage, and asking again would only fail again.
+  if out is None:
+    return None, False
+  try:
+    body = json.loads(out.stdout) or {}
+    data = body.get("data")
+    rejected = bool(body.get("errors") and not data)
+  except Exception:
+    return None, False
+  if out.returncode != 0:
+    return None, rejected
+  return (data or {}), rejected
+
+
+def _read_github():
+  # One request. If GitHub rejects the document, ONE more in the same pass with the fields this job
+  # always asked, so alerts, attention and notices still run (the newer states then see "not known").
+  data, rejected = _answered(_graphql(_document(True)))
+  if rejected:
+    data, _ = _answered(_graphql(_document(False)))
+  return data
+
+
+# A PR merged into a side branch waits for the PR whose head branch is that branch. That lookup is a
+# document of its own: a repository the token can no longer read makes `repository(...)` fail, and
+# that must not take the read of every other record down with it.
+routes = {}
+if ENGINE:
+  for i, (name, rec, etag) in enumerate(targets):
+    if lifecycle_job.watching_route(rec) and _repo_slug(rec):
+      routes[name] = "p%d" % i
+
+
+def _read_routes():
+  # Whatever a partial answer still holds is used (gh exits non-zero when one repository is unreadable).
+  parts = [
+    job_github.route_alias(alias, _repo_slug(rec), lifecycle_job.watching_route(rec))
+    for name, rec, _etag in targets if (alias := routes.get(name))
+  ]
+  out = _graphql("query { " + " ".join(parts) + " }") if parts else None
+  try:
+    return (json.loads(out.stdout) or {}).get("data") or {} if out is not None else {}
+  except Exception:
+    return {}
+
+
+data = _read_github() if targets else {}
+if data is None:
+  data = {}
+  aliases = {}
+route_data = _read_routes() if aliases else {}
+# The signed-in owner, from the same read: their own comments and reviews are not feedback.
+VIEWER = job_github.viewer_login(data)
 
 
 def _live_status(node):
@@ -393,7 +585,12 @@ def _failing_checks(node):
   return checks
 
 
-def _record_head(rec):
+def _record_head(rec, node=None):
+  # GitHub's head when this read has it: a push made outside the platform must
+  # change the key. The ledger's head is the fallback for a read without it.
+  live = node.get("headRefOid") if isinstance(node, dict) else None
+  if isinstance(live, str) and live:
+    return live
   plan = rec.get("plan") if isinstance(rec.get("plan"), dict) else {}
   return str(plan.get("head_sha") or rec.get("head_sha") or rec.get("branch") or "")
 
@@ -412,21 +609,6 @@ def _gh_json(args, timeout=20):
     return json.loads(out.stdout) if out.stdout else None
   except Exception:
     return None
-
-
-def _repo_slug(rec):
-  repo = rec.get("repo")
-  if isinstance(repo, str):
-    repo = repo.strip()
-    parts = repo.split("/")
-    if len(parts) == 2 and parts[0] and parts[1]:
-      return repo
-  url = rec.get("url")
-  if isinstance(url, str):
-    parts = urllib.parse.urlparse(url).path.strip("/").split("/")
-    if len(parts) >= 2 and parts[0] and parts[1]:
-      return "%s/%s" % (parts[0], parts[1])
-  return ""
 
 
 def _default_branch(repo):
@@ -505,6 +687,12 @@ def _classified_failing_checks(rec, node):
   return classified, (branch or "")
 
 
+def _all_inherited(checks):
+  # Failing checks that ALL also fail on the default branch are not this PR's
+  # doing. An empty list proves nothing, so it is never "all inherited".
+  return bool(checks) and all(c.get("classification") == "inherited" for c in checks)
+
+
 def _checks_message(checks, branch):
   if not checks:
     return "The latest GitHub checks are failing."
@@ -534,7 +722,7 @@ def _is_autopilot(rec):
 _RESOLVED_WHEN = {
   "checks_failed": lambda checks, mergeable, review: checks == "SUCCESS",
   "merge_conflict": lambda checks, mergeable, review: mergeable == "MERGEABLE",
-  "changes_requested": lambda checks, mergeable, review: review == "APPROVED",
+  "changes_requested": lambda checks, mergeable, review: review not in (None, "CHANGES_REQUESTED"),
 }
 
 
@@ -563,10 +751,12 @@ def _round_answered(rec, key):
 # a settled round that named its key, or an approval at or after the event
 # (the approval of a reviewer's own review is not an unanswered question).
 # A merged or closed PR clears every note where the status changes.
-def _activity_answered(rec, attention, node, review_decision):
+def _activity_answered(rec, attention, node, review_decision, own_urls=()):
   if attention.get("type") != "github_activity":
     return False
-  if _round_answered(rec, attention.get("key")):
+  if _round_answered(rec, attention.get("key")) or attention.get("url") in own_urls:
+    # Your own words are never feedback: a note that names one was raised
+    # before the owner's login was known, and nobody owes it an answer.
     return True
   since = str(attention.get("event_at") or attention.get("detected_at") or "")
   return review_decision == "APPROVED" and any(
@@ -583,7 +773,7 @@ def _without_type(items: list, kind: str) -> list:
 # waits while GitHub still shows it, and returns, already announced, once the
 # slot frees: a blocker is never lost and never pushed twice.
 def _waiting_blockers(rec: dict, current: dict, attention: dict | None,
-                      slot_free: bool, state: tuple) -> tuple:
+                      slot_free: bool, state: tuple, held: bool = False) -> tuple:
   waiting = [
     item for item in (rec.get("waiting_attention") or [])
     if isinstance(item, dict) and not _attention_resolved(item, *state)
@@ -591,6 +781,10 @@ def _waiting_blockers(rec: dict, current: dict, attention: dict | None,
   if not attention:
     return (waiting[0], waiting[1:]) if slot_free and waiting else (None, waiting)
   waiting = _without_type(waiting, attention.get("type"))
+  if held:
+    # An escalation keeps the slot until the owner resumes: what arrives
+    # later waits behind it and is never lost, never replacing it.
+    return None, waiting + [attention]
   displaced = (
     not slot_free and current.get("type") in _RESOLVED_WHEN
     and current.get("type") != attention.get("type")
@@ -653,6 +847,53 @@ def _attention_provenance(rec, attention, node, ignore_urls):
   )
 
 
+# Whose words never count as feedback: every comment and review the signed-in owner wrote
+# (`viewer { login }`, read in the same batched document), besides the exact replies Möbius itself
+# posted (`autopilot.ignored_event_urls`, merged in by `_ignored_event_urls`). An earlier rule let the
+# owner's other comments count; most "new activity" notices were then about the owner's own words.
+# The cost: a comment the owner writes to steer the follow-up agent no longer wakes it. This one
+# function is the whole rule.
+def _owner_words(node):
+  return own_event_urls(node, VIEWER)
+
+
+def _rule_checks(check_state, failing_checks):
+  # Failures that ALL also fail on the default branch are not this PR's doing: the rules see them
+  # as passing, so none is raised and a standing one clears. (inherited_only, the state the rules read)
+  inherited_only = _all_inherited(failing_checks)
+  return inherited_only, ("SUCCESS" if inherited_only else check_state)
+
+
+def _held_slot(rec, resolved, current_attention):
+  # An escalation or an owner request keeps the slot until the owner moves it; what arrives
+  # later waits behind it.
+  return (
+    bool(rec.get("needs_attention")) and not resolved
+    and current_attention.get("type") in ("human_required", "owner_request")
+  )
+
+
+def _checks_item(rec, check_state, failing_checks, base_branch, head):
+  # The checks_failed attention for the head GitHub reports.
+  return {
+    "type": "checks_failed",
+    "key": "checks_failed:%s:%s" % (check_state, head),
+    "title": "Checks failed",
+    "message": _checks_message(failing_checks, base_branch),
+    "url": rec.get("url") or "",
+    "detected_at": now,
+  }
+
+
+def _refreshed_checks(current_attention, checks_attention):
+  # The same failure standing on the record, its text brought up to date (None when nothing changed).
+  refreshed = dict(current_attention)
+  refreshed.update({key: checks_attention[key] for key in ("type", "key", "title", "message", "url")})
+  if not refreshed.get("detected_at"):
+    refreshed["detected_at"] = now
+  return refreshed if refreshed != current_attention else None
+
+
 def _attention_update(rec, node):
   patch = {}
   if not isinstance(node, dict):
@@ -662,14 +903,21 @@ def _attention_update(rec, node):
     if (value or rec.get(key)) and rec.get(key) != value:
       patch[key] = value
 
-  ignore_urls = _ignored_event_urls(rec)
+  own_urls = _owner_words(node)
+  ignore_urls = _ignored_event_urls(rec) | own_urls
 
   check_state = _check_state(node)
   failing_checks, base_branch = _classified_failing_checks(rec, node)
+  inherited_only, check_rule_state = _rule_checks(check_state, failing_checks)
   set_if_changed("last_check_rollup_state", check_state)
   set_if_changed("failing_checks", failing_checks)
 
   review_decision = node.get("reviewDecision") or ""
+  # None when the read did not ask: "no change request stands" is then unknown. A null decision (a repository with no review rule) says
+  # no more than that: a request a trusted reviewer's newest review still makes stands, and only the reviews can say it does not.
+  review_state = review_decision if "reviewDecision" in node else None
+  if "reviewDecision" in node and not review_decision and standing_changes_request(node, ignore_urls=ignore_urls):
+    review_state = "CHANGES_REQUESTED"
   previous_review = rec.get("last_review_decision")
   set_if_changed("last_review_decision", review_decision)
 
@@ -695,8 +943,8 @@ def _attention_update(rec, node):
     rec.get("attention") if isinstance(rec.get("attention"), dict) else {}
   )
   resolved = _attention_resolved(
-    current_attention, check_state, mergeable, review_decision
-  ) or _activity_answered(rec, current_attention, node, review_decision)
+    current_attention, check_rule_state, mergeable, review_state
+  ) or _activity_answered(rec, current_attention, node, review_decision, own_urls)
   if resolved:
     patch["needs_attention"] = False
     patch["attention"] = None
@@ -709,14 +957,16 @@ def _attention_update(rec, node):
     bool(rec.get("needs_attention")) and "attention" not in patch
     and _attention_provenance(rec, current_attention, node, ignore_urls) != UNTRUSTED
   )
-  if check_state == "SUCCESS" and rec.get("last_checks_attention_key"):
+  if check_rule_state == "SUCCESS" and rec.get("last_checks_attention_key"):
     patch["last_checks_attention_key"] = None
   if mergeable == "MERGEABLE" and rec.get("last_conflict_attention_key"):
     patch["last_conflict_attention_key"] = None
   # One attention slot holds one reason. A conflict that arrived while another
   # reason held the slot is raised once the slot frees, so it is never lost.
   slot_free = resolved or not (rec.get("needs_attention") and current_attention)
-  conflict_key = "merge_conflict:%s" % _record_head(rec)
+  held = _held_slot(rec, resolved, current_attention)
+  head = _record_head(rec, node)
+  conflict_key = "merge_conflict:%s" % head
   conflict_pending = (
     mergeable == "CONFLICTING"
     and conflict_key not in (
@@ -725,15 +975,8 @@ def _attention_update(rec, node):
 
   attention = None
   checks_attention = None
-  if check_state in ("FAILURE", "ERROR"):
-    checks_attention = {
-      "type": "checks_failed",
-      "key": "checks_failed:%s:%s" % (check_state, _record_head(rec)),
-      "title": "Checks failed",
-      "message": _checks_message(failing_checks, base_branch),
-      "url": rec.get("url") or "",
-      "detected_at": now,
-    }
+  if check_state in ("FAILURE", "ERROR") and not inherited_only:
+    checks_attention = _checks_item(rec, check_state, failing_checks, base_branch, head)
   # Raise per checks KEY (state + head sha), not per raw state transition: an
   # autopilot follow-up push that fails again must fire for the NEW head even
   # though the stored rollup state never left FAILURE. The platform dedupes
@@ -784,7 +1027,7 @@ def _attention_update(rec, node):
       "event_at": latest["at"],
       "detected_at": now,
     }
-    if pending_work:
+    if pending_work or held:
       patch["outside_activity"] = outside
     else:
       attention = outside
@@ -805,24 +1048,15 @@ def _attention_update(rec, node):
     and current_attention.get("type") == "checks_failed"
     and current_attention.get("key") == checks_attention["key"]
   ):
-    refreshed = dict(current_attention)
-    refreshed.update({
-      "type": checks_attention["type"],
-      "key": checks_attention["key"],
-      "title": checks_attention["title"],
-      "message": checks_attention["message"],
-      "url": checks_attention["url"],
-    })
-    if not refreshed.get("detected_at"):
-      refreshed["detected_at"] = now
-    if refreshed != current_attention:
+    refreshed = _refreshed_checks(current_attention, checks_attention)
+    if refreshed:
       patch["attention"] = refreshed
 
   restored, waiting = _waiting_blockers(
     rec, current_attention, attention, slot_free,
-    (check_state, mergeable, review_decision))
+    (check_rule_state, mergeable, review_state), held)
   set_if_changed("waiting_attention", waiting)
-  attention = attention or restored
+  attention = None if held else (attention or restored)
 
   if (
     not attention
@@ -1029,34 +1263,19 @@ def _deliver_attention(name, node):
           file=sys.stderr)
 
 
-now = (
-  datetime.datetime.now(datetime.timezone.utc)
-  .replace(microsecond=0)
-  .isoformat()
-  .replace("+00:00", "Z")
-)
+# Fields the job keeps for itself: a write that changes only these does not count as the
+# record having been touched (`updated_at` stays), so a quiet record stays quiet. The told-once
+# markers and the reminder time are the job's own books too.
+BOOKKEEPING = frozenset((
+  "lifecycle", "github_head_sha", "github_base_ref", "merged_announced", "closed_announced",
+  "stranded_reminded_at", "stranded_announced",
+))
+# The two details that follow GitHub's own (job_github.saved_fields) are books too: a write made of
+# these and BOOKKEEPING alone says nothing about attention, so it never decides whether one is delivered.
+FOLLOWS_GITHUB = frozenset(("publication_stage", "title"))
 
-for alias, (name, rec, etag) in aliases.items():
-  node = data.get(alias)
-  new_status = _live_status(node)
-  patch = _attention_update(rec, node)
-  was = rec.get("status")
-  if was == "landing" and new_status in ("open", "draft"):
-    new_status = None
-  if new_status and new_status != was:
-    patch["status"] = new_status
-    if new_status in ("merged", "closed"):
-      patch["needs_attention"] = False
-      patch["attention"] = None
-      if rec.get("waiting_attention"):
-        patch["waiting_attention"] = []
-  if not patch:
-    _deliver_attention(name, node)
-    continue
-  if not etag:
-    print("contribute: skip %s — storage version unavailable" % name,
-          file=sys.stderr)
-    continue
+
+def _write_record(name, rec, etag, patch):
   # One conditional write. If-Match pins the exact version this run read (and
   # computed the GraphQL verdict from), so a concurrent writer — the agent
   # claiming/submitting a record, the app's Dismiss — cannot be clobbered.
@@ -1064,64 +1283,148 @@ for alias, (name, rec, etag) in aliases.items():
   # observed GitHub state, updated_at) and preserves whatever fields other
   # writers added. On a 412 the record changed under us — skip it and let the
   # app's live refresh and the next scheduled run re-read and reapply if it still
-  # needs it, rather than fight for the write.
+  # needs it, rather than fight for the write. Returns the record written, or None.
+  if not etag:
+    print("contribute: skip %s — storage version unavailable" % name,
+          file=sys.stderr)
+    return None
   updated = dict(rec)
   updated.update(patch)
-  updated["updated_at"] = now
-  headers = {"If-Match": etag}
+  if set(patch) - BOOKKEEPING:
+    updated["updated_at"] = now
   try:
-    _call("PUT", _record_path(name), updated, headers=headers)
+    _call("PUT", _record_path(name), updated, headers={"If-Match": etag})
   except urllib.error.HTTPError as exc:
     if exc.code == 412:
       print("contribute: skip %s — changed under refresh (412)" % name,
             file=sys.stderr)
     else:
       print("contribute: PUT %s failed (%s)" % (name, exc.code), file=sys.stderr)
-    continue
+    return None
   except Exception as exc:
     print("contribute: PUT %s error: %s" % (name, exc), file=sys.stderr)
+    return None
+  return updated
+
+
+def _cleanup_staging(name, rec):
+  try:
+    _call(
+      "POST",
+      "/api/github/contributions/%s/%s/cleanup-staging" % (
+        APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
+      ),
+      {},
+    )
+  except Exception as exc:
+    print("contribute: staging cleanup %s failed: %s" % (name, exc),
+          file=sys.stderr)
+
+
+def _send_notice(rec, notice):
+  # One per event, after the write that recorded the event. A failed send is
+  # swallowed: the record already moved, so it is never retried (as before).
+  try:
+    _call("POST", "/api/notifications/send", {
+      "title": notice["title"],
+      "body": notice["body"],
+      "source_id": str(rec.get("id") or ""),
+      "target": _record_target(rec),
+    })
+  except Exception:
+    pass
+
+
+def _run_actions(name, rec, updated, node, actions, deliver=True):
+  # What a stored move calls for, in the order it always had: close out the
+  # follow-up, connect the app after a true merge, deliver attention, then tell
+  # the owner. lifecycle_job.py names where each action comes from.
+  for action in actions:
+    if action["do"] == "cleanup":
+      _cleanup_staging(name, rec)
+    elif action["do"] == "connect_app":
+      _finish_publication_connection(updated)
+  if deliver:
+    _deliver_attention(name, node)
+  for action in actions:
+    if action["do"] == "notify":
+      _send_notice(rec, action)
+
+
+def _route_of(name, node):
+  # ROUTE_RESOLVED data for a side-branch merge, from the parent read (`_read_routes`).
+  if name not in routes or not isinstance(node, dict):
+    return None
+  return job_github.route_resolution(
+    str(node.get("mergedAt") or ""), job_github.default_branch_of(node) or "",
+    job_github.parents_of(route_data.get(routes[name])),
+  )
+
+
+def _decide(name, rec, node, patch):
+  # (patch, actions) for one record the GitHub read covered. In shadow mode the
+  # status word is today's; in engine mode the engine's, with its effects.
+  was = rec.get("status")
+  if ENGINE:
+    plan = lifecycle_job.plan_record(rec, node, NOW_EPOCH, now, patch, _route_of(name, node))
+    return (plan["patch"], plan["actions"]) if plan else (patch, [])
+  new_status = _live_status(node)
+  if was == "landing" and new_status in ("open", "draft"):
+    new_status = None
+  _shadow("observed", rec, node, new_status or was, job_github.default_branch_of(node))
+  if new_status and new_status != was:
+    patch["status"] = new_status
+    if new_status in ("merged", "closed"):
+      patch["needs_attention"] = False
+      patch["attention"] = None
+      patch.update(lifecycle_job.emptied_attention(rec, patch))
+  return patch, lifecycle_job.today_actions(rec, was, new_status)
+
+
+def _owed_finish_pass():
+  # In both modes: the marker first (compare-and-swap, so a lost race tells nobody twice), then
+  # the grant close-out (unless this pass's terminal cleanup already made that call) and the notice.
+  for name, rec, etag, owed in OWED:
+    updated = _write_record(name, rec, etag, owed["patch"])
+    if updated is not None:
+      actions = [a for a in owed["actions"] if not (a["do"] == "cleanup" and name in CLEANED)]
+      _run_actions(name, rec, updated, None, actions, deliver=False)
+
+
+def _engine_idle_pass():
+  # Records the job read that need no GitHub read: a send nobody confirmed, a deadline that
+  # passed, a record seen for the first time. Written only when the engine has something to say.
+  polled = set(item[0] for item in targets) | set(item[0] for item in OWED)
+  for name, rec, etag in records:
+    plan = None if name in polled else lifecycle_job.plan_record(rec, None, NOW_EPOCH, now, {})
+    if not plan or not plan["patch"]:
+      continue
+    updated = _write_record(name, rec, etag, plan["patch"])
+    if updated is not None:
+      _run_actions(name, rec, updated, None, plan["actions"], deliver=False)
+
+
+_owed_finish_pass()
+if ENGINE:
+  _engine_idle_pass()
+
+for alias, (name, rec, etag) in aliases.items():
+  node = data.get(alias)
+  # A finished PR has no attention to decide; only its state is read.
+  patch, actions = _decide(name, rec, node, {} if name in lean else _attention_update(rec, node))
+  if patch:
+    # Part of a write the job makes anyway, never a write of its own.
+    patch.update(job_github.saved_fields({**rec, **patch}, node))
+  if not patch:
+    _deliver_attention(name, node)
     continue
-  if new_status in ("merged", "closed"):
-    try:
-      _call(
-        "POST",
-        "/api/github/contributions/%s/%s/cleanup-staging" % (
-          APP_ID, urllib.parse.quote(str(rec.get("id") or ""), safe=""),
-        ),
-        {},
-      )
-    except Exception as exc:
-      print("contribute: staging cleanup %s failed: %s" % (name, exc),
-            file=sys.stderr)
-  if new_status == "merged":
-    _finish_publication_connection(updated)
-  _deliver_attention(name, node)
-  if new_status == "merged" and was != "merged":
-    title = rec.get("title") or "contribution"
-    try:
-      _call("POST", "/api/notifications/send", {
-        "title": "Contribution merged 🎉",
-        "body": "Your %s was merged — it ships to everyone 🎉" % title,
-        "source_id": str(rec.get("id") or ""),
-        "target": _record_target(rec),
-      })
-    except Exception:
-      pass
-  # PR rejected: a close without a merge is a terminal outcome the owner should
-  # hear about once (parity with the merged 🎉 notification). Non-autopilot
-  # records historically got no close notification; sending it for all closed
-  # PRs is strictly more informative and never noisy (one per record, ever).
-  if new_status == "closed" and was != "closed":
-    title = rec.get("title") or "contribution"
-    try:
-      _call("POST", "/api/notifications/send", {
-        "title": "Contribution closed",
-        "body": "Your %s was closed on GitHub without merging." % title,
-        "source_id": str(rec.get("id") or ""),
-        "target": _record_target(rec),
-      })
-    except Exception:
-      pass
+  updated = _write_record(name, rec, etag, patch)
+  if updated is not None:
+    _run_actions(name, rec, updated, node, actions)
+  elif set(patch) <= BOOKKEEPING | FOLLOWS_GITHUB:
+    # A write that only keeps the job's own books never holds back a delivery that was due before
+    # it: an empty patch always delivered, and the same record must not lose that to a lost race.
+    _deliver_attention(name, node)
 PY
 
 exit 0

@@ -384,3 +384,33 @@ test('nobody asked rewords only the wait for a first review: a PR that has revie
 test('the PR read carries the count of review requests and nothing about who they are', () => {
   assert.match(PR_FIELDS, /reviewRequests\(first:1\) \{ totalCount \}/)
 })
+
+test('a review that was blocked is not a result: their PR is still yours to review', () => {
+  const blocked = decideFor(pull(), [run({ state: 'needs_you', summary: 'Could not read the diff.', blocked: true })])
+  assert.equal(blocked.state, 'reviewer.to_review')
+  assert.equal(decideFor(pull(), [run({ state: 'needs_you', summary: 'A bug.' })]).state, 'reviewer.result_ready', 'findings still wait for your verdict')
+})
+
+// A finished review of an older version that the platform held back because the PR moved first.
+const held = (extra = {}) => run({ state: 'needs_you', head_sha: OLD, summary: 'Blocking bug', post_findings: { allowed: true, held_back: true }, ...extra })
+
+test('a review held back for a moved PR offers Post it anyway, in the machine’s words, on someone else’s PR', () => {
+  const decision = decideFor(pull(), [held()])
+  const action = decision.actions.find(item => item.id === 'post_at_reviewed_commit')
+  assert.deepEqual([action.enabled, action.title], [true, 'Post it anyway'])
+  assert.deepEqual(decision.heldReview, { reviewed: OLD, now: HEAD })
+})
+
+test('Post it anyway is not offered for a review of this very version, one nothing held back, or your own PR', () => {
+  const offered = (pr, runs) => decideFor(pr, runs).actions.find(item => item.id === 'post_at_reviewed_commit')?.enabled
+  assert.equal(offered(pull(), [held({ head_sha: HEAD })]), false, 'the PR did not move')
+  assert.equal(offered(pull(), [held({ post_findings: { allowed: true } })]), false, 'nothing was held back')
+  assert.equal(offered(mine(), [held()]), undefined, 'a reviewer’s action: your own PR never has it')
+})
+
+test('Post it anyway waits while an agent works on the PR and once the held review has its proposal', () => {
+  const offered = (runs, chats) => decideFor(pull(), runs, null, chats).actions.find(item => item.id === 'post_at_reviewed_commit').enabled
+  assert.equal(offered([held(), run({ state: 'reviewing', head_sha: HEAD }, { id: 'r2', state: 'running', execution_state: 'running' })]), false)
+  const proposed = held({ post_findings: { allowed: false, code: 'has_verdict' }, verdict_proposal: { id: 'p1', state: 'proposed', event: 'REQUEST_CHANGES', head_sha: OLD } })
+  assert.equal(offered([proposed]), false, 'the proposal card takes over')
+})

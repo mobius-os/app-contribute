@@ -5,6 +5,7 @@ import { localChangeSummary, projectCycleIdentity } from '../source-map.js'
 import { Icon } from './Icons.jsx'
 import { SourceConversations } from './SourceConversations.jsx'
 import { useProjectCycle } from './useProjectCycle.js'
+import { useCovered } from './useReviewList.js'
 import { TaskPane, useProjectTask } from './TaskPane.jsx'
 import { DateLabel } from './PullRequestDetail.jsx'
 import { AgentModelSettings } from './AgentModelSettings.jsx'
@@ -40,11 +41,12 @@ const cancelLabel = phase => phase === 'paused' ? 'Cancel paused work' : 'Cancel
 const NEXT_STEP = {
   paused: 'You can open it, cancel it, or start new work below.',
   failed: 'You can open it, or start new work below.',
+  stopped: 'You can open it, or start new work below.',
 }
 
-// The project's current conversation, shown inside Prepare and Pull. Paused or
-// failed work is not in progress, so it sits above Start rather than replacing
-// it (only a running turn or a question holds new starts back).
+// The project's current conversation, shown inside Prepare and Pull. Paused,
+// stopped or failed work is not in progress, so it sits above Start rather than
+// replacing it (only a running turn or a question holds new starts back).
 function CycleNotice({ cycle, label, waiting, workflow }) {
   const nextStep = NEXT_STEP[cycle.phase]
   const started = cycle.startedAt ? <> · <DateLabel value={cycle.startedAt} prefix="started " /></> : null
@@ -60,7 +62,7 @@ function CycleNotice({ cycle, label, waiting, workflow }) {
 
 export function ProjectControls({ appId, token, project, run, onStart, loading, children }) {
   const task = useProjectTask()
-  const workflow = useProjectCycle(projectCycleIdentity(project), onStart)
+  const workflow = useProjectCycle(projectCycleIdentity(project), onStart, useCovered())
   const { cycle } = workflow
   const [error, setError] = useState('')
   const [follow, setFollow] = useState(false)
@@ -121,9 +123,9 @@ export function ProjectControls({ appId, token, project, run, onStart, loading, 
       {cycle.history?.length ? <details><summary>Past agent runs ({cycle.history.length})</summary><ul className="co-cycle-history">{cycle.history.map((item, index) => <li key={`${index}:${item.started_at || item.chat_id}`}><button type="button" className="co-btn co-btn-quiet" onClick={() => workflow.open(item.chat_id)}>{item.title || 'Previous agent run'}{item.started_at ? <> · <DateLabel value={item.started_at} prefix="Started " /></> : null}</button></li>)}</ul></details> : null}
     </TaskPane>
   </section> : null
-  const progress = cycle.chatId && (active || waiting || ['paused', 'failed'].includes(cycle.phase))
+  const progress = cycle.chatId && (active || waiting || ['paused', 'failed', 'stopped'].includes(cycle.phase))
     ? <CycleNotice cycle={cycle} label={statusLabel} waiting={waiting} workflow={workflow} /> : null
-  // Work in progress replaces Start; paused or failed work only sits above it.
+  // Work in progress replaces Start; paused, stopped or failed work only sits above it.
   const startHeld = Boolean(progress) && (active || waiting)
   const alert = error || cycle.error ? <div className="co-alert" role="alert"><strong>{cycle.phase === 'unknown' ? 'Couldn’t check work status' : 'Work needs attention'}</strong><p className="co-alert-text">{error || cycle.error}</p>{pendingRecovery}</div> : null
   const controls = <section className="co-local-work" aria-label={`Actions for ${project.name}`}>

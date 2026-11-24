@@ -1,7 +1,7 @@
 // The words on an action's confirm sheet: what it does, what GitHub shows now,
 // and what it cannot undo. Pure, so the sheet states exactly what the PR's own
 // data says and the tests can hold it to that.
-import { checkSummary, reviewItemProgress } from './collaboration.js'
+import { checkSummary, reviewedOtherBranch, reviewReading } from './collaboration.js'
 import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { FOLLOW_MODE_WORDS, followState } from './autopilot.js'
@@ -97,6 +97,9 @@ export const allowedMergeMethods = repository => Object.keys(MERGE_METHODS).filt
 // The method to name in the merge call: none while the owner stays on the first allowed one, which is
 // also what the platform picks. A repository that merges through a queue chooses for itself and refuses a named method.
 export const methodToSend = (repository, choice) => (choice && choice !== allowedMergeMethods(repository)[0] ? choice : '')
+// Whether the PR's base branch merges through GitHub's merge queue: the queue, not the owner, picks how it lands, so no method
+// is offered (the platform refuses one). Only a read that says so counts; an older copy of the PR says nothing and asks as before.
+export const usesMergeQueue = pr => pr?.isMergeQueueEnabled === true
 
 // Who approved this version (the PR machine's count: never the author, never a bot). An approval of an
 // older commit counts only when the PR's own change was proved the same since, and the sheet says so. A change
@@ -121,26 +124,31 @@ function approvalFacts(standing) {
 const gateFact = pr => (pr?.reviewDecision === 'REVIEW_REQUIRED' ? { tone: 'bad', text: 'GitHub still needs a review' } : null)
 
 // What the owner's own agent review of this exact version said, if there is one.
-function reviewFact(status, ignored) {
+function reviewFact(status, ignored, pr) {
   if (!status) return null
-  const progress = reviewItemProgress(status.run, status.item, { ignored })
+  // A review made against another target branch says nothing about what would merge now.
+  if (reviewedOtherBranch(status, pr)) return null
+  const reading = reviewReading(status.run, status.item, { ignored })
   if (status.item.state === 'all_clear') return { tone: 'ok', text: 'Your agent’s review is clear for this version' }
-  if (progress.turn === 'owner') return { tone: 'warn', text: status.item.state === 'needs_you' ? 'Your agent’s review found problems on this version' : 'Your agent’s review is waiting on you' }
+  // A review that stopped found nothing: its obstacle is not "problems".
+  if (['NOT_FINISHED', 'STALLED'].includes(reading.state)) return { tone: 'warn', text: 'Your agent’s review did not finish on this version' }
+  if (reading.turn === 'owner') return { tone: 'warn', text: status.item.state === 'needs_you' ? 'Your agent’s review found problems on this version' : 'Your agent’s review is waiting on you' }
   return null
 }
 
 // Merge: lands this exact version. Contribute cannot undo it.
 export function mergeCopy(pr, { status = null, ignored = null, method = '', standing = null } = {}) {
   const base = pr.baseRefName || 'the target branch'
+  const queue = usesMergeQueue(pr)
   const allowed = allowedMergeMethods(pr.repository)
-  const chosen = allowed.includes(method) ? method : allowed[0] || ''
+  const chosen = allowed.includes(method) && !queue ? method : allowed[0] || ''
   return {
     title: `Merge #${pr.number} into ${base}?`,
-    confirm: chosen ? MERGE_METHODS[chosen].action : 'Merge',
+    confirm: !queue && chosen ? MERGE_METHODS[chosen].action : 'Merge',
     working: 'Merging…',
     workingTitle: `Merging #${pr.number} into ${base}`,
-    facts: [...approvalFacts(standing), gateFact(pr), checksFact(pr, { blocking: true }), conflictFact(pr), reviewFact(status, ignored)].filter(Boolean),
-    choices: allowed.length > 1 ? { label: 'How should it land?', value: chosen, options: allowed.map(key => ({ key, label: MERGE_METHODS[key].label, action: MERGE_METHODS[key].action, detail: MERGE_METHODS[key].detail(base) })) } : null,
+    facts: [...approvalFacts(standing), gateFact(pr), checksFact(pr, { blocking: true }), conflictFact(pr), reviewFact(status, ignored, pr)].filter(Boolean),
+    choices: allowed.length > 1 && !queue ? { label: 'How should it land?', value: chosen, options: allowed.map(key => ({ key, label: MERGE_METHODS[key].label, action: MERGE_METHODS[key].action, detail: MERGE_METHODS[key].detail(base) })) } : null,
     footnote: `Merges the version you are looking at (${short(pr.headRefOid)}). If anyone pushes first, nothing is merged and you are told. Contribute cannot undo a merge: to take it back you would open a revert on GitHub.`,
     done: outcome => outcome?.state === 'queued'
       ? { title: 'Added to the merge queue', text: `GitHub merges **#${pr.number}** into \`${base}\` when the queue reaches it.` }

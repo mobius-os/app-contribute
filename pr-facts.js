@@ -2,9 +2,9 @@
 // what Contribute's own review runs hold for that PR. A fact that could not be
 // read is 'unknown' (or readComplete is false), never a guess from older data.
 // Pure: no DOM, no network.
-import { checkSummary, ignoredNote, isBotAuthor, reviewItemProgress, waitingRepair } from './collaboration.js'
+import { checkSummary, isBotAuthor, reviewOfPull, reviewReading, waitingRepair } from './collaboration.js'
 import { isOwnPull } from './pull-view.js'
-import { responseFor, responseOutbox } from './respond-result.js'
+import { pointsAnswering, responseFor, responseOutbox, responseView } from './respond-result.js'
 
 const LIFECYCLE = { MERGED: 'merged', CLOSED: 'closed' }
 const MERGEABLE = { MERGEABLE: 'yes', CONFLICTING: 'conflict' }
@@ -86,27 +86,22 @@ function openThreadsOf(pr, login) {
   return threads + (waitsOnYou(lastPersonIn([...(pr.comments?.nodes || []), ...reviewWords(pr)]), login) ? 1 : 0)
 }
 
-// The newest Contribute review of this PR (any version), with its run.
-export function newestReviewOf(runs, pr) {
-  const matches = (runs || []).flatMap(run => (run.items || []).filter(item => samePr(item, pr)).map(item => ({ run, item })))
-  return matches.sort((a, b) => (Date.parse(b.run.created_at || '') || 0) - (Date.parse(a.run.created_at || '') || 0))[0] || null
-}
-
 // The job a run is on this PR. A run you stopped holds nothing; one that failed or was
 // interrupted has stalled. A review whose own turn ended ("completed") while it still says
 // "reviewing" is working: it hands the PR to its reviewer helper and sleeps until that
 // helper reports. When nothing will wake it any more, the platform reports "interrupted".
-function jobOf(run, progress) {
+function jobOf(run, reading) {
   if (run.execution_state === 'stopped') return ''
-  if (progress.waiting) return 'needs_answer'
-  if (progress.halted) return 'stalled'
-  return progress.turn === 'agent' ? 'running' : ''
+  if (reading.waiting) return 'needs_answer'
+  if (reading.halted) return 'stalled'
+  return reading.turn === 'agent' ? 'running' : ''
 }
 // What a saved item says is on its way to GitHub, or uncertain there.
+// A merge GitHub's queue holds is not on its way to GitHub: it is `queued` (below), which words it and switches Merge off.
 const ITEM_OUTBOX = {
-  merging: ['merge', 'sending'], queued: ['merge', 'sending'], merge_unknown: ['merge', 'unconfirmed'],
+  merging: ['merge', 'sending'], merge_unknown: ['merge', 'unconfirmed'],
   pushing: ['push', 'sending'], push_unknown: ['push', 'unconfirmed'],
-  marking_ready: ['ready', 'sending'], ready_unknown: ['ready', 'unconfirmed'],
+  marking_ready: ['ready', 'sending'], ready_unknown: ['ready', 'unconfirmed'], ready_unattributable: ['ready', 'unconfirmed'],
   verdict_posting: ['verdict', 'sending'], verdict_unknown: ['verdict', 'unconfirmed'],
 }
 // A verdict and a fix deal with the findings of their review: while one waits or is on its way it owns them (pr-machine.js).
@@ -124,14 +119,36 @@ function outboxOf(item) {
   return kind ? { kind, head: item.head_sha, state, ...(COVERING_KINDS.has(kind) ? { covers: true } : {}) } : null
 }
 
-function resultOf(item, progress, ignored) {
+// The review's states (review-reading.js) that hold findings. A review that did not finish (not finished, stalled, stopped,
+// asking) found nothing and is no result at all. A verdict GitHub refused (`not_dispatched`) leaves the findings open:
+// nothing was decided, and the owner may send it again.
+const FINDINGS = new Set(['PROBLEMS', 'SET_ASIDE', 'ANSWERED'])
+function resultOf(item, reading) {
   // A clean review has no verdict to send and no finding to set aside, and the Review tab offers
   // neither: it stands as a private review of this version ("kept private"), not as work waiting on you.
   if (item.state === 'all_clear') return { head: item.head_sha, outcome: 'clear', setAside: true }
-  if (item.state !== 'needs_you' || progress.waiting || progress.halted) return null
-  const setAside = !!ignoredNote(item, ignored) || ['discarded', 'not_dispatched'].includes(item.verdict_proposal?.state)
-  return { head: item.head_sha, outcome: 'findings', setAside }
+  if (item.state !== 'needs_you' || !FINDINGS.has(reading.state)) return null
+  return { head: item.head_sha, outcome: 'findings', setAside: reading.state !== 'PROBLEMS' || item.verdict_proposal?.state === 'discarded' }
 }
+
+// Whether an answer already posted covers this review's findings: Post sent replies to its points at this version (a draft
+// answer that has not been posted does not, and neither does one made for another version).
+export function findingsAnswered(responses, pr, review) {
+  const view = responseView(responses, pr)
+  return view?.status === 'posted' && !!review && pointsAnswering(view, review.run, review.item) > 0
+}
+
+// Whether GitHub's merge queue holds this PR: a queue entry on the read (`mergeQueueEntry`, null when there is none). GitHub's own
+// answer decides; a read that does not carry the field (an older copy of the PR) falls back to the merge this app's review queued
+// at this version, and says nothing (null) when neither knows.
+function queuedOf(pr, review) {
+  if (pr && 'mergeQueueEntry' in pr) return !!pr.mergeQueueEntry?.id
+  return review?.item.state === 'queued' && review.item.head_sha === pr?.headRefOid ? true : null
+}
+
+// A finished review of another version that the platform held back, unsent, because the PR moved first (it marks the item
+// `held_back` only for a run that proposes verdicts, and only while nothing was proposed or sent for it).
+const heldOf = (item, pr) => (item.post_findings?.held_back === true && item.head_sha && item.head_sha !== pr?.headRefOid ? { head: item.head_sha } : null)
 
 // A clean private review of an older version. The result itself is only ever of the current
 // version, so this remembers that the PR was reviewed and has since moved: it needs another look.
@@ -148,11 +165,18 @@ function sentReview(item) {
 
 // Your review that counts: a plain comment never hides an opinion of yours (a change
 // request you still owe a re-review on), and a pending review is not one yet.
+// An approval of an older commit carries the reader's proof that the work is the same. The viewer's own review is read from two
+// lists (the opinions and the viewer's latest review) and the reader marks both; whichever is marked speaks for the same review.
+const proofOf = (...nodes) => {
+  const marked = nodes.find(node => node && 'sameWork' in node)
+  return marked ? { sameWork: marked.sameWork } : {}
+}
 function myReviewOf(pr, sent, reviews, login) {
   const latest = pr?.viewerLatestReview
   const opinion = (reviews || []).find(review => lower(review.by) === lower(login))
+  const same = opinion && opinion.state === latest?.state && opinion.commit === latest?.commit?.oid ? opinion : null
   const github = latest?.commit?.oid && latest.state !== 'PENDING'
-    ? (latest.state === 'COMMENTED' && opinion ? opinion : { state: latest.state, commit: latest.commit.oid })
+    ? (latest.state === 'COMMENTED' && opinion ? opinion : { state: latest.state, commit: latest.commit.oid, ...proofOf(latest, same) })
     : opinion || null
   if (!sent || github?.commit === pr.headRefOid) return github
   return sent.commit === pr.headRefOid ? sent : github || sent
@@ -178,16 +202,17 @@ const respondJobOf = (chats, pr) => {
 // A stalled run holds nothing, so a live Respond conversation takes the PR before it.
 const jobFor = (runJob, chats, pr) => (runJob && runJob.state !== 'stalled' ? runJob : respondJobOf(chats, pr) || runJob)
 
-function runFacts(review, pr, own, ignored) {
-  if (!review) return { job: null, result: null, earlier: null, outbox: null, sent: null }
+function runFacts(review, pr, own, ignored, answered) {
+  if (!review) return { job: null, result: null, earlier: null, held: null, outbox: null, sent: null }
   const { run, item } = review
-  const progress = reviewItemProgress(run, item, { own, ignored })
+  const reading = reviewReading(run, item, { own, ignored, answered })
   const outbox = outboxOf(item)
-  const job = jobOf(run, progress)
+  const job = jobOf(run, reading)
   return {
     job: job && !(job === 'running' && outbox?.state === 'sending') ? { kind: run.mode || 'review', state: job } : null,
-    result: resultOf(item, progress, ignored),
+    result: resultOf(item, reading),
     earlier: earlierOf(item, pr),
+    held: heldOf(item, pr),
     outbox,
     sent: sentReview(item),
   }
@@ -199,8 +224,8 @@ function runFacts(review, pr, own, ignored) {
 export function prFacts({ pr, login, runs = [], ignored = null, chats = [], responses = [] }) {
   const own = isOwnPull(pr, login)
   const reviews = reviewsOf(pr)
-  const review = newestReviewOf(runs, pr)
-  const fromRuns = runFacts(review, pr, own, ignored)
+  const review = reviewOfPull(runs, pr)
+  const fromRuns = runFacts(review, pr, own, ignored, findingsAnswered(responses, pr, review))
   const myReview = own ? null : myReviewOf(pr, fromRuns.sent, reviews, login)
   const threads = own ? openThreadsOf(pr, login) : 0
   return {
@@ -222,9 +247,14 @@ export function prFacts({ pr, login, runs = [], ignored = null, chats = [], resp
     job: jobFor(fromRuns.job, chats, pr),
     result: fromRuns.result,
     earlier: fromRuns.earlier,
+    heldReview: fromRuns.held,
     // A review run's own draft comes first; otherwise a saved Respond answer is the draft (or the sending) there is.
     outbox: fromRuns.outbox || responseOutbox(responseFor(responses, pr), pr, review),
     // Without the connected account, whose PR this is cannot be told: nothing is decided.
     readComplete: !!login && reviews !== null && threads !== null,
+    queued: queuedOf(pr, review),
+    // The lists that read `review-requested:@me` flag the PRs that ask for the connected account's review (api.js). Someone else's PR only:
+    // an own PR the account's team was asked about is still the owner's own.
+    ...(!own && pr?.reviewRequested === true ? { reviewRequested: true } : {}),
   }
 }

@@ -6,7 +6,8 @@ import { attentionListItems } from './run.js'
 import { sameLogin } from './domain.js'
 import { NAMES } from './names.js'
 import { standingFor, waitsOnReviewers } from './pr-standing.js'
-import { projectIsQuiet } from './source-map.js'
+import { isOpenPull } from './pull-view.js'
+import { projectCycleIdentity, projectIsQuiet } from './source-map.js'
 import { DESK_HISTORY_DAYS } from './storage.js'
 
 // The four views (finding 2). Every other place a PR can be lives inside one of them.
@@ -27,10 +28,16 @@ export const deskViewKey = key => FOLDED_VIEWS[key] || key
 // `facts` are what it is decided from besides the PR: the saved reviews, live conversations, answers and set-aside notes.
 export const deskStanding = (pr, login, facts = {}) => standingFor({ pr, login, ...facts })
 
-// PRs the owner authored, out of everything GitHub says involves them.
+// PRs the owner authored and that are still open, out of everything GitHub says involves them. GitHub's search lags a merge, so a read can
+// still list a PR its own node says is merged or closed: that one is over, and is no row, no count and no wait. A PR of the owner's own
+// that GitHub also lists as a review request (a team they belong to was asked) is still their own PR, under My PRs; it is no request to them.
 export function authoredPulls(incoming, login) {
-  return (incoming || []).filter(pr => !pr.reviewRequested && sameLogin(pr?.author?.login, login))
+  return (incoming || []).filter(pr => sameLogin(pr?.author?.login, login) && isOpenPull(pr))
 }
+
+// The owner's own open PRs as the change probe watches them (api.js fetchChangeProbe: { repo, number }), so a merge or a close made on GitHub
+// reaches the Desk within the probe's minute and not at the next full read.
+export const ownPullRefs = (incoming, login) => authoredPulls(incoming, login).map(pr => ({ repo: pr.repository.nameWithOwner, number: pr.number }))
 
 // The quiet "Waiting on others" block under Needs you: your own PRs that have gone to their reviewers and sat there this long.
 // It is a reminder, never a number: no badge, chip or sentence counts it (The One Count Rule).
@@ -38,7 +45,7 @@ export const WAITING_ON_OTHERS_DAYS = 2
 const DAY_MS = 24 * 60 * 60 * 1000
 
 // The PRs a row of Needs you already stands for (a PR, a feedback card or a review run): the quiet block never repeats one of them.
-const needsRowKey = row => row.pr ? pullKey(row.pr) : row.item ? [...feedbackPullKeys([row.item])][0] : `${String(row.entry.item.repo).toLowerCase()}#${row.entry.item.number}`
+const needsRowKey = row => row.pr ? pullKey(row.pr) : row.item ? [...feedbackPullKeys([row.item])][0] : row.run ? `run:${row.run.key}` : `${String(row.entry.item.repo).toLowerCase()}#${row.entry.item.number}`
 
 // Those PRs of one repository, longest wait first, as { pr, decision, days }. Which ones wait on reviewers is the PR machine's word
 // (waitsOnReviewers). "Since" is GitHub's updatedAt, the one date the desk already holds that every way a PR goes back to its reviewers
@@ -58,6 +65,16 @@ export function waitingOnOthers(project, decisions, login, reviewEntries = [], f
 export function withOwnerPulls(incoming, owned, login) {
   const concernsOwner = pr => pr.reviewRequested || sameLogin(pr?.author?.login, login)
   return [...owned, ...(incoming || []).filter(pr => !concernsOwner(pr))]
+}
+
+// PRs read again one by one (api.js readExactPulls) laid over the list as it stood: each replaces its own row and keeps what that row said about
+// the owner's review requests (an exact read does not carry it); nothing is added and nothing is dropped.
+export function withReadPulls(incoming, read) {
+  const fresh = new Map((read || []).map(pr => [pullKey(pr), pr]))
+  return (incoming || []).map(old => {
+    const pr = fresh.get(pullKey(old))
+    return pr ? { ...pr, ...(old.reviewRequested ? { reviewRequested: true } : {}) } : old
+  })
 }
 
 // Submitting a review answers its request on GitHub, which then stops listing
@@ -121,14 +138,27 @@ export const agentRunsWaiting = (entries, shownKeys) => (entries || [])
 const QUIET_DRAFTS = new Set(['author.draft', 'author.draft_ready'])
 const waitsOnYou = decision => decision.turn === 'you' && !QUIET_DRAFTS.has(decision.state) && decision.state !== 'unknown'
 
+// The PRs that ask for your review and are yours to move, by the PR machine's turn and not by GitHub's request list: a draft (their move),
+// one you reviewed and kept private (nobody's) or one in the merge queue are asked of you on GitHub and wait on nothing you can do.
+// ONE function for everything that says how many requests there are: Needs you, the Requests view, a project's tab badge and its body.
+// A PR that could not be read stays: its next step, Try again, is yours. So does one whose review the agent is at work on, or whose verdict is
+// on its way: it is still your request, and its row wears the working frame until the review ends (pr-standing.js frameOf).
+const REQUEST_TURNS = new Set(['you', 'agent'])
+export const requestsWaiting = (requests, login, facts = {}) => (requests || []).filter(pr => !sameLogin(pr?.author?.login, login) && REQUEST_TURNS.has(deskStanding(pr, login, facts).turn))
+
 // The Needs you step (the key of a NEEDS_CHIPS chip) a PR's shared decision puts it under: Merge when merging is the next
 // step, otherwise Fix on your own PR and Review again on someone else's that you reviewed.
 export const stepOf = decision => (decision.next === 'merge' ? 'merge' : decision.role === 'author' ? 'fix' : 'again')
 
+// A project's agent run that waits on you (the lifecycle's `run` region, cycle-lifecycle.js: stopped, failed, asks you, never started).
+// `facts.projectRuns` is what ui/useProjectRuns.js read: [{ key, name, rows }], each row an engine waitingOn row. Each is a row under To look at.
+// `k` is the cycle the row was read from: Dismiss records itself against it (storage.js dismissProjectRun), so a newer run is never dismissed by an old row.
+const projectRunRows = (runs = []) => runs.flatMap(run => (run.rows || []).filter(row => row.waits === 'owner').map(row => ({ step: 'look', run: { key: run.key, name: run.name, k: run.record?.k ?? 0, ...row } })))
+
 // Everything Needs you lists, as one definition for a project's card, the project's number in the rail and the
 // chips (deskCounts), so they cannot disagree. One row per PR or saved decision, in the first of these that holds it:
-// a review request (Review), a saved feedback card (To look at), your own PR whose decision waits on you, then a review
-// run that waits on you. Your own PRs and the runs sit under the step of their shared decision (stepOf).
+// a review request whose turn is yours (Review), a saved feedback card (To look at), your own PR whose decision waits on you, then a review
+// run that waits on you, then a project run that stopped (To look at). Your own PRs and the runs sit under the step of their shared decision (stepOf).
 export function needsRows({ requests = [], pulls = [], decisions = [], entries = [], login = '', facts = {} }) {
   const items = attentionListItems(decisions)
   const covered = feedbackPullKeys(items)
@@ -136,22 +166,26 @@ export function needsRows({ requests = [], pulls = [], decisions = [], entries =
   const decided = own.map(pr => ({ pr, decision: deskStanding(pr, login, facts) })).filter(({ decision }) => waitsOnYou(decision))
   // A run is left out only when its PR already is a row. The incoming PRs and the review list read GitHub separately, so a PR can
   // read as "waiting on reviewers" here (no row) while the review list's newer read says its review waits on you: that run stays.
-  const listed = new Set([...covered, ...requests.map(pullKey), ...decided.map(({ pr }) => pullKey(pr))])
+  const asked = requestsWaiting(requests, login, facts)
+  const listed = new Set([...covered, ...asked.map(pullKey), ...decided.map(({ pr }) => pullKey(pr))])
   // A run's own decision, read from the newer PR, is held to the same rule as a PR's: a draft ready to open is a quiet line, not a row.
   const runs = agentRunsWaiting(entries, listed).filter(entry => !entry.decision || waitsOnYou(entry.decision))
   return [
-    ...requests.map(pr => ({ step: 'review', pr })),
+    ...asked.map(pr => ({ step: 'review', pr })),
     ...items.map(item => ({ step: 'look', item })),
     ...decided.map(({ pr, decision }) => ({ step: stepOf(decision), pr, decision })),
     // A Respond conversation has no decision of its own here, and it is always on your own PR.
     ...runs.map(entry => ({ step: entry.decision ? stepOf(entry.decision) : 'fix', entry })),
+    ...projectRunRows(facts.projectRuns),
   ]
 }
 
 // A repository's Needs you rows (finding 4); its rail badge is how many there are.
 export function projectNeedsRows(project, decisions, login, reviewEntries = [], facts = {}) {
+  const identity = projectCycleIdentity(project)
   return needsRows({
-    requests: project.reviewRequests || [], pulls: project.incomingReviews || [], decisions, login, facts,
+    requests: project.reviewRequests || [], pulls: project.incomingReviews || [], decisions, login,
+    facts: facts.projectRuns ? { ...facts, projectRuns: facts.projectRuns.filter(run => run.key === identity) } : facts,
     entries: (reviewEntries || []).filter(entry => sameRepo(entry.item.repo, project.canonical_repo)),
   })
 }
@@ -162,8 +196,8 @@ export const projectNeedsCount = (...args) => projectNeedsRows(...args).length
 // (needsCount), so the two can never disagree. A PR counts once, under the step of its
 // shared decision (needsRows). Drafts ready to open and local files are not urgent:
 // they get a quiet line and the project banner, never a number here.
-export function deskCounts({ decisions = [], incoming = [], records = [], login = '', reviews = null, reviewEntries = [], runs, chats, responses, ignored } = {}) {
-  const facts = { runs, chats, responses, ignored }
+export function deskCounts({ decisions = [], incoming = [], records = [], login = '', reviews = null, reviewEntries = [], runs, chats, responses, ignored, projectRuns } = {}) {
+  const facts = { runs, chats, responses, ignored, projectRuns }
   const rows = needsRows({ requests: (incoming || []).filter(pr => pr.reviewRequested), pulls: incoming || [], decisions, entries: reviewEntries, login, facts })
   const inStep = step => rows.filter(row => row.step === step).length
   const pulls = authoredPulls(incoming, login)
@@ -226,15 +260,46 @@ export function feedbackPull(item) {
   return { number, repository: { nameWithOwner: repo } }
 }
 
-// The rail's project groups, in the directory's own order: projects with
-// something going on first, quiet apps folded, externals last.
+// The project groups, in the directory's own order: the repositories the owner works with first, the other installed ones
+// folded, externals last. Worked with is what has something going on, then what they contributed to before, the latest first
+// (lastWorkedAt, source-map.js): finished work does not make a repository "nothing to do".
 export function splitProjects(projects, attention = {}) {
   const tracked = (projects || []).filter(project => project.kind !== 'external' && !project.builtHere)
-  const isQuiet = project => projectIsQuiet(project) && !attention[project.key] && !(project.reviewRequests?.length)
+  const isQuiet = project => projectIsQuiet(project) && !attention[project.key]
+  const quiet = tracked.filter(isQuiet)
+  const workedBefore = quiet.filter(project => project.lastWorkedAt != null).sort((a, b) => b.lastWorkedAt - a.lastWorkedAt)
   return {
-    active: tracked.filter(project => !isQuiet(project)),
-    quiet: tracked.filter(isQuiet),
+    workedWith: [...tracked.filter(project => !isQuiet(project)), ...workedBefore],
+    other: quiet.filter(project => project.lastWorkedAt == null),
     builtHere: (projects || []).filter(project => project.builtHere),
     external: (projects || []).filter(project => project.kind === 'external'),
   }
 }
+
+// The list of review runs is paged: say so when it is cut, never present it as the whole. Older finished runs are the only ones missing from a
+// paged list (everything unfinished is in it), so only the Agent runs view says it, with the way to read more; an older Möbius cuts a full page of
+// 100 and may be missing a run that waits on you, so Needs you says that too, and there is nothing more to read there.
+export const runsCutWords = ({ cut, onMore }, view) => {
+  if (cut === 'finished' && view === 'runs') return { text: 'Older finished reviews are not shown here. Everything that is still working or waiting on you is.', action: onMore ? 'Show older reviews' : '' }
+  if (cut === 'any' && ['runs', 'needs'].includes(view)) return { text: 'This Möbius lists only the newest 100 review runs, so an older one, even one waiting on you, may be missing here.', action: '' }
+  return null
+}
+
+// GitHub's search answers one page of at most 50 PRs for the PRs that involve you and 50 for the review requests (api.js readViewerPulls), and does not
+// say when it stopped there. A full page is read as "there may be more" (the same rule collaboration.js applies to the runs), so the Desk never presents it as
+// the whole. '' when nothing is hidden, otherwise which search was full.
+export const INCOMING_PAGE = 50
+export function incomingCutOf(incoming) {
+  const rows = incoming || []
+  const requested = rows.filter(pr => pr.reviewRequested).length
+  if (requested >= INCOMING_PAGE) return 'requests'
+  return rows.length - requested >= INCOMING_PAGE ? 'involved' : ''
+}
+
+// The note a cut read of the owner's PRs wears, on the views that list them: Needs you, Review requests and My PRs.
+export function incomingCutWords(cut, view) {
+  if (cut === 'requests' && ['needs', 'requests'].includes(view)) return 'GitHub lists only the first 50 PRs that ask for your review, so some may be missing here.'
+  if (cut === 'involved' && ['needs', 'mine'].includes(view)) return 'GitHub lists only the first 50 PRs that involve you, so some of yours may be missing here.'
+  return ''
+}
+

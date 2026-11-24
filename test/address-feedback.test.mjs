@@ -74,10 +74,26 @@ test('the action the window starts carries a cid, so a second pass reaches the P
   assert.equal(first.title, 'Respond to feedback on #120')
   assert.deepEqual(first.agent, agent)
   assert.notEqual(first.applyModel, false)
-  const again = respondAction({ pr, items, cid: 'respond-2', agent, answered: true })
-  assert.equal(again.agent, undefined, 'the conversation already has its agent')
-  assert.equal(again.applyModel, false)
-  assert.equal(respondAction({ pr, items, cid: 'respond-3' }).agent, undefined)
+  const again = respondAction({ pr, items, cid: 'respond-2', agent })
+  assert.deepEqual(again.agent, agent, 'a model chosen for a second pass is applied to the PR’s conversation')
+  assert.equal(again.applyModel, undefined)
+  assert.equal(respondAction({ pr, items, cid: 'respond-3' }).agent, undefined, 'choosing nothing keeps the conversation’s own agent')
+  assert.equal(respondAction({ pr, items, cid: 'respond-4', agent: { provider: '', model: '', effort: '' } }).agent, undefined, 'the Default row sends nothing')
+  assert.equal(respondAction({ pr, items, cid: 'respond-5' }).chatId, undefined, 'a first pass names no conversation')
+  assert.equal(respondAction({ pr, items, cid: 'respond-6', chatId: 42 }).chatId, '42', 'a second pass is bound to the conversation that wrote the answer it replaces')
+})
+
+test('a second pass bound to a deleted conversation says so and never starts a new one', async () => {
+  const { deliverCycleMessage } = await import('../cycle-delivery.js')
+  const items = addressItems(pr, { activity: [review('miljanm', 'CHANGES_REQUESTED')] })
+  const calls = []
+  const fetcher = async (url, init) => { calls.push([url, init?.method]); return { ok: false, status: 404, json: async () => ({}) } }
+  const action = respondAction({ pr, items, cid: 'respond-7', chatId: 'chat-1', agent: { provider: 'claude', model: 'claude-sonnet-5-5' } })
+  const result = await deliverCycleMessage('t', action, fetcher)
+  assert.equal(result.ok, false)
+  assert.equal(result.gone, true)
+  assert.equal(result.error, 'This conversation was deleted.')
+  assert.equal(calls.some(([url]) => url === '/api/app-chats/start'), false, 'the scope is never started again in its place')
 })
 
 test('the checklist renders as real controls', async t => {

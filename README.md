@@ -17,18 +17,22 @@ contribution. This app is the dashboard for that loop:
   requests, public progress, questions and history belong to their project.
   There is no separate Reviews destination. All, **With local changes** and
   **Behind GitHub** filter the same searchable overview, where each project
-  carries a Platform or App tag and apps with nothing to do fold away.
+  carries a Platform or App tag. **Worked with** leads: what has something going on, then the repositories you contributed to before, the latest first, each saying when. The installed repositories you have not worked with fold into **Other repositories**.
 - **Needs you holds the blockers** — the Needs you destination lists what needs
   you on tracked contributions, blockers before news; a project page no longer
   repeats them in a banner. Each row names the reason (Merge
-  blocked, Checks failing, Changes requested, New feedback), the affected PR
-  and its related group, and when it was detected; its button says what it
-  opens. A blocker leaves the list once GitHub shows it resolved. A blocker
-  pushed aside by a newer reason comes back, without a second push
+  blocked, Checks failing, Changes requested, New feedback, or, with
+  `lifecycle_writer` on `"engine"`, Needs your decision when a send could not
+  be confirmed, a merge went into a branch that never reached the default
+  branch, or an update can no longer go out), the
+  affected PR and its related group, and when it was detected; its button says
+  what it opens. A blocker leaves the list once GitHub shows it resolved. A
+  blocker pushed aside by a newer reason comes back, without a second push
   notification, while GitHub still shows it.
 - **One tab per job** — under the project's controls, **All PRs**
   (the default), **Prepared PRs** (private PRs waiting for you, one row each,
-  shown only while there are some), **Review requests** and **Agent runs** (the project's agent
+  shown only while there are some), **Review requests** (the ones that are your
+  move) and **Agent runs** (the project's agent
   runs, the reviews you started and finished work) split the project by what the
   owner came to do. Saved public work the live list cannot show stays on All
   PRs, so an unreachable GitHub never hides it behind another tab. It appears
@@ -46,7 +50,7 @@ contribution. This app is the dashboard for that loop:
   Settings → Updates applies them for Möbius and the App Store for apps, and a
   merged run links to the right one. On phones, a task takes the
   screen and **Back to project** restores the same inventory.
-- **Sync with GitHub** (in the header) — reloads this Möbius and asks GitHub, read-only, whether
+- **Sync** (in the header, named Sync with GitHub for screen readers; the time of the last sync is under it as "Last synced 3m ago", in s, m, h, d and w) — reloads this Möbius and asks GitHub, read-only, whether
   each project's repository has commits newer than the one this Möbius last
   compared with (`upstream-check.js`, one GraphQL query through the platform
   proxy). It reports commits, never files: what an update changes is still the
@@ -122,10 +126,15 @@ contribution. This app is the dashboard for that loop:
     opens the PR on GitHub, and records the URL. A diverged fork is left
     untouched and the send stops with an actionable error. Non-PR records are
     review-only for now; **Chat** returns to the chat that prepared
-    the record. **Discard** marks the record
-    abandoned — a compare-and-swap write when the
+    the record. **Discard** marks work that was never sent
+    abandoned. With `lifecycle_writer` set to `"engine"` (see
+    [The lifecycle state machine](#the-lifecycle-state-machine)), discarding an
+    update on a public PR drops only the update: the PR stays public and
+    tracked, keeps its link and number, leaves Ready and does not go to
+    Dismissed. In the default shadow mode the record is marked abandoned, as
+    before. Either way it is a compare-and-swap write when the
     runtime returns a version (older runtimes fall back to a best-effort
-    re-read), so it avoids racing a concurrent submit; either way it needs a
+    re-read), so it avoids racing a concurrent submit, and it needs a
     live connection (offline, the app is read-only: the feed still renders from
     its cache, but discarding waits until you're back online). Records
     staged by an older agent without a review plan still show the plain
@@ -188,7 +197,16 @@ only for the core and the one mode it is working in.
   and Agent runs, then a **Repositories** block of its own (More repositories,
   All repositories, **Add repository** last). The Needs you chips (To look at,
   Review, Merge, Fix, Review again) filter the list under them, and the badge is
-  their sum. Drafts ready to open are a quiet line; local changes live in the
+  their sum; the list, the Review requests view and a project's tab and badge
+  count the same rows. A review request is a row only where it is your turn (or
+  your agent's review of it is at work): a draft, a PR you reviewed and kept
+  private, a PR in the merge queue and an approved PR of someone else's that you
+  reviewed (landing it is up to them) are not. A project's agent run that
+  stopped, failed, asked you a question or did not start is a To look at row;
+  a stopped, failed or unsent one has a quiet **Dismiss**, which closes the row
+  for that run (the next run of the project is a new row), and a run the
+  platform's status says you stopped yourself needs nothing more and is no row.
+  Drafts ready to open are a quiet line; local changes live in the
   project's Local changes tab. On a phone the four views are one segmented bar
   (one row where all four fit), the repository list is a button beside the
   search, a row is three lines, and a row whose PR has a next step swipes left
@@ -239,14 +257,22 @@ only for the core and the one mode it is working in.
 - This app declares `permissions.github_access: true` in its manifest. That
   permission is what lets its app-scoped token reach the read-only GitHub
   status + GraphQL endpoints; the platform enforces it server-side.
+- Its agents declare `agent.scope: "admin"` (full access, as every app agent
+  had before Möbius let apps confine them). Every agent Contribute starts, and
+  every review run started from it (the platform opens those review chats in
+  Contribute's name, with their reviewer helpers), edits the platform and app
+  sources, works in git checkouts outside the app's folder, uses `gh` and calls
+  the `/api/github/*` contribution and review-run routes. A confined room
+  (Tools, Read or Edit) can reach none of these, so a narrower scope would
+  break every agent feature. Older Möbius releases ignore the `agent` key.
 
 ## How it stores data
 
 The ledger is one JSON file per contribution under the app's own storage
-(`contributions/<id>.json`), written by your agent from chat and by a daily
-cron job (`job.sh`). This app reads it via `window.mobius.storage`; the cron
-job reads and updates it via the storage API with the service token. Record
-shape:
+(`contributions/<id>.json`), written by your agent from chat and by the
+scheduled job (`job.sh`, every 15 minutes). This app reads it via
+`window.mobius.storage`; the job reads and updates it via the storage API with
+the service token. Record shape:
 
 ```jsonc
 {
@@ -266,7 +292,7 @@ shape:
   "last_pushed_branch_url": "optional branch URL if push succeeded before PR creation failed",
   "needs_attention": true,
   "attention": {
-    "type": "checks_failed | changes_requested | github_activity | merge_conflict | human_required",
+    "type": "checks_failed | changes_requested | github_activity | merge_conflict | human_required | owner_request",
     "title": "Checks failed",
     "message": "The latest GitHub checks are failing.",
     "url": "https://github.com/…"
@@ -274,6 +300,37 @@ shape:
   // Blockers displaced from the one attention slot while GitHub still shows
   // them; the job puts the first one back when the slot frees.
   "waiting_attention": [{ "type": "merge_conflict", "key": "…" }],
+  // Optional: where this contribution stands, as the lifecycle state machine
+  // keeps it (below). Three regions: publication, update, followup. Times are
+  // whole seconds since the epoch; `deadline` is null for a state that has
+  // none. `history` keeps at most the last 30 moves. A record without it
+  // is read from `status` and its other fields, so never require it.
+  "lifecycle": {
+    "v": 1,
+    "regions": {
+      "publication": { "state": "OPEN", "since": 1783328400, "deadline": null },
+      "update": { "state": "NONE", "since": 1783328400, "deadline": null },
+      "followup": { "state": "IDLE", "since": 1783328400, "deadline": null }
+    },
+    "attention": { "flags": ["checks_failed"] },
+    "history": [{ "at": 1783328400, "type": "MARKED_READY", "source": "github", "region": "publication", "from": "DRAFT", "to": "OPEN", "inferred": true }]
+  },
+  // What the job last read from GitHub about the PR. These never replace the
+  // version you reviewed and approved (`plan.head_sha`), which stays as sent.
+  "github_head_sha": "…",
+  "github_base_ref": "main",
+  // `false` = you merged this PR in the app (or closed it: `closed_announced`)
+  // and the job has not yet told you once; the job sets `true` after it has.
+  // Absent on every other record.
+  "merged_announced": false,
+  // `false` = the update that was waiting when you merged or closed the PR in
+  // the app is stranded now, and the job has not yet asked you about it.
+  "stranded_announced": false,
+  // When the one reminder about an update that can no longer go out was sent.
+  "stranded_reminded_at": "2026-07-20T09:00:00Z",
+  // How you settled that update (written by the record's buttons or settle_exit.py,
+  // never by hand): the exit, when, and the record that took the change over.
+  "update_outcome": { "exit": "PRESERVE_AS_NEW", "at": "2026-07-21T09:00:00Z", "successor": "<record id>" },
   // Display-only MIRROR of the autopilot state (see below). The real grant +
   // claim live in a platform DB row; this block is written by the platform for
   // the app/cron to render and must never be treated as authorization.
@@ -328,23 +385,148 @@ labels that already exist in the target repository; it never creates taxonomy
 as a side effect of publishing a PR.
 
 `submitting` means the platform submit endpoint has claimed the record and the
-action is in flight; `commented` is the terminal status for comment actions.
+action is in flight; `commented` is the terminal status for comment actions;
+`superseded` means other work replaced the record (`superseded_by` names the
+record that did). `landing` is the platform's own word while it lands a stack
+that already exists: the PR is open, and the lifecycle engine never writes or
+replaces that word. A public PR with an update waiting reads `prepared`,
+because Send claims a record by that word, and `merged` also covers a merge
+into a branch other than the default one: the `lifecycle` says whether that
+branch has reached the default branch. The `status` word is derived from the
+`lifecycle`, and with `lifecycle_writer` set to `"engine"` it is written only
+through the engine path (the job, this app's own buttons and the platform's
+routes); in the default shadow mode it is written as before. See
+[The lifecycle state machine](#the-lifecycle-state-machine).
+
 The scheduled job (every 15 minutes) also reconciles prepared PR records whose
 reviewed work reached the target repository's main through another path. Exact
 reviewed commits or diffs become `merged`; an exact merged branch or a strong
 match of distinctive added identifiers becomes `superseded`. Both keep the
 landing PR or commit reference. Weaker identifier evidence leaves the record
-prepared and adds a **Looks already landed** dismissal hint instead. Every
-reconciliation write uses the record version originally read, so a concurrent
-Send, Discard, or agent refresh wins.
+prepared and adds a **Looks already landed** dismissal hint instead; **Dismiss
+hint** clears that hint alone, and the job can raise it again on a later check
+while it still finds the same evidence on the default branch. Every reconciliation write
+uses the record version originally read, so a concurrent Send, Discard, or
+agent refresh wins.
+
+With `lifecycle_writer` set to `"engine"` the job also follows what the status
+word alone cannot say. A PR closed less than 30 days ago is read in case it is
+reopened (one notice, and the record is open or draft again). A merge into a
+branch other than the default one is not announced as shipped: the job waits
+for that branch to reach the default branch, asks you once if it never does
+(`owner_request`, "Merged into a branch that never landed"), and looks at such
+a record at most once a day after that. An update that was prepared for a PR
+that merged or closed first is a stranded update: you hear once, get one
+reminder, and choose what to do with it. It waits in Needs you (**Update not sent**,
+and **Merged elsewhere** for a merge that never landed) until you settle it from its
+card: **Already in the merge** and **Discard** are one checked write there, **Keep as
+new work** and **Land it again** open the source chat, where the agent stages the new
+record and records the exit with `settle_exit.py` (`contributing/card-asks.md`). In both modes, a merge into the default
+branch or a close that you made in this app is told once by the job
+(`merged_announced` and `closed_announced`), which also closes out a follow-up
+grant that was left on. If an update was waiting when you did that, the job
+also asks you about the stranded update and tells you once
+(`stranded_announced`).
+
+The scheduled job also tells you when someone else's PR that you asked changes
+on gets new commits (`review_again_alerts.py`): one notification per new head,
+opening that PR. It reads GitHub, not the ledger, and keeps only the last head
+it announced per PR in the job's state folder. A pass with no saved state
+records what it sees without notifying, so a backlog is never announced at
+once.
 
 The scheduled job also adds `needs_attention` + `attention`
 when GitHub activity, changes requested, failing checks, or a merge conflict need
-follow-up. It and the Discard flow both write with `If-Match` (compare-and-swap)
-when the runtime returns a version, so concurrent writers — the agent, the cron
-refresh, the Discard button — avoid silently overwriting each other. On older
-runtimes that don't return a version, Discard re-reads and re-checks the record
-before writing, while the cron refresh falls back to a plain best-effort write.
+follow-up. A check that also fails on the default branch asks for nobody; the
+comments and reviews you wrote yourself are not new activity; a change request
+clears when none stands any more; and an escalation (`human_required`) or an
+`owner_request` holds the one attention slot until it is dealt with, while
+later blockers wait behind it. When a PR merges or closes, both attention slots
+are emptied (an `owner_request` for a region that still waits on you stays), and
+a one-time sweep does the same for finished PRs that still carried an
+attention, without a notification (in engine mode it also stores their
+lifecycle, and once the setting changes from shadow to engine it visits the
+records it swept in shadow mode once more for that). The job also saves
+GitHub's own head and base of the PR as `github_head_sha` and `github_base_ref`,
+but never rewrites the version you reviewed and approved. It and the Discard
+flow both write with `If-Match` (compare-and-swap) when the runtime returns a
+version, so concurrent writers — the agent, the cron refresh, the Discard
+button — avoid silently overwriting each other. On older runtimes that don't
+return a version, Discard re-reads and re-checks the record before writing,
+while the cron refresh falls back to a plain best-effort write.
+
+## The lifecycle state machine
+
+One state machine says where a contribution stands and who it waits on. It is
+written as tables of data, not as code. A contribution record has three
+regions (publication, update and follow-up); a saved Respond answer, an agent
+review, a proposed verdict and a project's agent run have one each. Every
+state names who must act next (you, GitHub, the platform or an agent, or
+nobody), and an event moves a region to its next state. A state
+that waits on a machine has a deadline and a named exit, so nothing waits for
+ever. One small interpreter applies the events and the deadlines the same way
+in JavaScript and in Python, and the platform carries a byte-identical copy of
+the tables and the interpreter. Nothing runs a timer: a deadline takes effect
+the next time a record is loaded.
+
+- `lifecycle_tables.py` is the one source of the tables; `lifecycle-tables.js`
+  is generated from it and is never edited by hand.
+- `lifecycle_engine.py` and `lifecycle-engine.js` are the same pure
+  interpreter: apply an event, tick the deadlines, observe what a GitHub read
+  shows, and adopt a record whose `status` word another writer changed.
+- `lifecycle_record.py` and `lifecycle-record.js` read a stored record (and a
+  GitHub read) into the facts the interpreter works on.
+- `lifecycle_job.py`, `lifecycle_backfill.py` and `lifecycle_shadow.py` bind the
+  scheduled job to it; `lifecycle-write.js` and `pull-receipt.js` do the same
+  for this app's own Discard and for your own Merge or Close.
+- `test/lifecycle.cases.json` is the shared set of answers every copy must give,
+  and `test/lifecycle.lock.json` pins the tables, the interpreter and the case
+  file by hash. The platform pins the same lock, so a change to one copy fails
+  tests until the other copy and both locks follow.
+
+**To change a table**, edit `lifecycle_tables.py` and nothing else by hand, then
+run `python3 test/make_lifecycle_cases.py --write`, which regenerates
+`lifecycle-tables.js`, `test/lifecycle.cases.json` and `test/lifecycle.lock.json`.
+Copy `lifecycle_tables.py`, `lifecycle_engine.py`, `test/lifecycle.cases.json`
+and `test/lifecycle.lock.json` to the platform (which keeps them as
+`contribution_lifecycle_tables.py`, `contribution_lifecycle_engine.py`,
+`contribution_lifecycle_cases.json` and `contribution_lifecycle_lock.json`).
+Both locks must match: setting `LIFECYCLE_PLATFORM_LOCK` to the platform's lock
+file makes this repository's tests compare them.
+
+**`lifecycle_writer`** in the app's `settings.json` says who writes the `status`
+word.
+
+- Absent or `"shadow"` (anything but `"engine"` reads as shadow, and so does a
+  settings file that cannot be read): today's code writes the status words as it
+  always did and no `lifecycle` field is stored. The engine only takes notes in
+  the job-state file `lifecycle-shadow.json`, where it would have stored
+  another word or done something the job did not.
+- `"engine"`: the engine computes the `status` word and the `lifecycle` field
+  and they are stored in the same write. The job and the app's own buttons
+  perform what the engine asks for (a notice, a close-out, a reminder), and the
+  new moves exist: a reopened PR, a merge into another branch, the merge queue,
+  a stranded update, and discarding an update without abandoning its PR. The
+  platform reads the same setting for its own routes.
+
+What a screen shows is read from the record in both modes, and the fixes that
+do not concern the status word (a post that went quiet, the one Needs you
+count, the attention rules above) are on in both modes.
+
+What the machine keeps true:
+
+- Every state names who it waits on, or that it waits on nobody.
+- A state that waits on a machine (GitHub, the platform or an agent) has a
+  deadline and a named exit, and a state that is not final has a way out; the
+  tables are checked for both.
+- An event no table accepts is refused: nothing changes, and the refusal is
+  logged once in the record's history.
+- A stored `lifecycle` is always brought in line with the stored `status` word
+  first, because the platform's routes, an older app or a hand edit still write
+  that word. A stored `lifecycle` that cannot be read whole (another version, a
+  missing region, an unknown state, a time that is not whole seconds, a
+  deadline on a state that has none) is ignored and seeded again from the
+  record.
 
 ## Actions, answers and PR reviews
 
@@ -354,8 +536,9 @@ platform advertises `merge_now`) each end in a confirm sheet naming what happens
 and what cannot be undone. Where Möbius advertises `owner_confirm`, its own sheet
 (outside the app's frame, `window.mobius.ownerGrant`, see `owner-grant.js`) replaces that
 one for Merge and the five status changes: one tap on the action, one tap to confirm, and
-**Merge options…** (on the Merge row, only where the repository allows more than one way) to choose how it
-lands first. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
+**Merge options…** (on the Merge row, only where the repository allows more than one way and its branch has no
+merge queue) to choose how it lands first. A PR GitHub's merge queue already holds reads In merge queue, and its
+Merge is off. Submitting or discarding a verdict, pushing or discarding a fix, and Post ask
 the same sheet first, so the owner's tap is proven by Möbius and not by the app's own frame;
 until the owner has confirmed, the app's own sheet only says it is waiting. A Möbius without
 it keeps the app's own sheets, and that second path exists only until platform enforcement
@@ -367,15 +550,20 @@ New PRs open from one split button, **Open as draft**
 or **Open for review**; Settings → *New pull requests start as* sets the default
 (the shipped default is Ready, as the product states). A finished review that
 found problems offers **Fix these findings**, **Set aside…** (one reason, for that
-exact version, stored in the app settings as `ignored_reviews`, nothing posted),
+review only, stored in the app settings as `ignored_reviews`, nothing posted: a
+later review of the same version is judged afresh),
 **Review again** and **Ask the reviewer something**. **Agent runs** in the side
 menu lists the reviews you started and the saved agent work by project, in three
-tabs: Waiting on you, Running and Finished (only what is over); it opens on the
-first tab that has rows, and a review row opens its PR on its Review tab.
+tabs: Waiting on you (a review that hit an obstacle and says so, Not finished,
+waits here too), Running and Finished (only what is over); it opens on the
+first tab that has rows, and a review row opens its PR on its Review tab. When
+the platform's list of review runs is cut, the page says so, and **Show older
+reviews** reads more.
 It reads the live state of every PR (in batches of 25), again on each Sync with
 GitHub; a PR GitHub does not return reads Couldn’t read, with Try again. The
-rail shows how many agents are running; a run that waits on you counts in Needs
-you. A write whose answer is lost or unreadable,
+rail shows how many agents are running; a review that waits on you, and a
+project's agent run that stopped, failed, asked you a question or did not start,
+count in Needs you. A write whose answer is lost or unreadable,
 whatever its status, is unconfirmed: it is read back and never repeated from the sheet.
 
 ## Continuous Project Desk: private PR review runs
@@ -388,7 +576,7 @@ visible as unfinished; this iteration does not resume old cycles automatically.
 Review/Fix/Merge guidance shares one flat Settings editor. At launch choose
 **Actions ▾ → Review** (who sees the result: **Only me**, **Draft for me** or,
 where this Möbius supports it, **Agent posts**; with a draft, optionally **Merge
-after I approve**, drawn off and dimmed with its reason where it cannot be turned on), **Review** on your own
+after I approve**, drawn only where it can be turned on), **Review** on your own
 PR (a private check), or **Finish it for me** /
 **Take over**, plus model and effort, in the review window. Settings →
 *Default agent* saves one agent and effort (`review_agent` in the app settings)
@@ -482,10 +670,13 @@ existing action owners, and adds no alternate public authority or merge path.
 intent `chat:contributions` (the same for every card, so the chat host can tell
 the newest one), one action in the earlier card's shape (`chat-send:<id>` for
 one record, `chat-send-batch:<16-hex handle>` over all of them), `"expand":
-false` (no inline app view), and one item per record (`review:<id>`, with
+false` (no inline app view), optional `"status_placement": "footer"` (a compact
+host draws status beneath the card rather than above its rows), and one item per record (`review:<id>`, with
 **Project** and **Change** facts). It adds every other
-contribution of its chat that is ready with its whole stack (`--chat-id`,
-default `$CHAT_ID`, required) and every prepared layer of any stack it names,
+contribution of its chat that can be sent now with its whole stack (all clear
+for its current head, with no attention flag, refusal or send error and no send
+waiting to be confirmed; `--chat-id`, default `$CHAT_ID`, required) and every
+prepared layer of any stack it names,
 then refuses the card if any record in that final set is not all clear for its
 current head or comes from another chat, or if there are more than 12. A record
 that later loses its all clear shows a held pill on the live card.
@@ -505,15 +696,20 @@ intent is `chat:contributions`:
   (on a host with `lines-v1` the change size is the row's `lines`, drawn with
   additions green and deletions red; otherwise it is text in the line), with
   its state in words (Sending, Checking GitHub, Draft, Merged, Closed, Not
-  sent, Not confirmed, Dismissed, Replaced) and the PR link once published.
+  sent, Not confirmed, Dismissed, Replaced, and, for a record that stores its
+  `lifecycle`, Merged to a branch, Not shipped, PR merged first, PR closed
+  first) and the PR link once published.
   An open PR needs no word beside its link, and a state every row shares and
   the header already says is not repeated on each row. The header says the
   state ("2 contributions", "Checking contributions", "2 ready to send",
   "Sending 2…", "Checking GitHub…", "2 pull requests opened", "Sending 1 ·
   checking 1…", "1 of 2 sent · 1 needs a fix", "2 of 3 sent · 1 not confirmed",
-  "1 of 2 sent · couldn’t load 1", "2 need a fix"), with a
+  "1 of 2 sent · couldn’t load 1", "2 need a fix", "1 update not sent"), with a
   check, spinner or exclamation mark. It is a neutral count until a tap's
-  check finds the set ready, and loading is never shown as empty. Every held
+  check finds the set ready, and loading is never shown as empty. The session
+  reports optional `statusPlacement: 'footer'` on every update, including its
+  first read; hosts that do not support this hint retain their prior layout.
+  Every held
   record shows its own reason and is counted; an unreadable record or a
   blocked GitHub account is named as such, never as a fix. While a
   check, a send or GitHub's answer is underway the header says so and no
@@ -631,6 +827,12 @@ executable capability and grants nothing.
 
 ### Respond to feedback: the saved answer
 
+**Respond again** starts on the agent the PR's conversation already has ("Same agent as the first
+answer, so it builds on that work"). Its Agent row is the same picker as everywhere else: a model of
+the same provider can be chosen, and it is applied to that conversation before the new message goes in.
+Models of the other provider are listed but dimmed ("Codex can't continue this Claude conversation"),
+because a conversation cannot change provider once it has run; the platform refuses it too.
+
 A Respond-to-feedback chat never reviews the PR again and never publishes. When it
 finishes it runs `respond_result.py save`, which records what Git and GitHub say (the
 commits as a bundle, the changed files, the PR head) beside the agent's own part (each
@@ -651,7 +853,18 @@ on its own and Post stays off until it is on screen, so the owner has read every
 earlier upload is reused only once its public addresses serve those bytes), pushes the
 commits (a fast-forward, never forced, so they keep their ids), posts the replies, updates the
 description and asks for the re-review, recording each step so a second run repeats
-nothing. The files, rules, exit codes and the app side are in `respond-result.md`.
+nothing. Two deadlines keep an answer from waiting for ever. `post` stamps each step in
+the result's optional `lifecycle` key, and a post with no step for 3 minutes reads as
+stopped (**Posting stopped**, its receipts kept): **Try again** asks again and skips every
+step that already went out, and **Discard** drops the stopped answer. Discard asks first
+when something went out, may have gone out or may still be going out, naming it (it stays
+on GitHub), and acts at once on a stop the chat reported with no step recorded as sent.
+`post` reads the decision again before each step and each reply, so a discarded answer
+stops there; a step or reply already being sent may still arrive, the next is not started.
+An approved answer whose chat has not started after 30 seconds
+reads as a draft to send again, and **Take back Post** then removes the approval so the
+answer is ready again; nothing is posted. The files, rules, exit codes and the app side are
+in `respond-result.md`.
 
 ## How the screens stay in sync
 
@@ -659,8 +872,9 @@ The app gets no push from Möbius or GitHub, so one sync hub (`refresh.js`, `cre
 
 - **Hidden: no reads.** Shown again: the platform lists are read at once.
 - **Review runs and Respond conversations** (a platform read, shared by the Desk, the PR page and the Agent runs view): every 10 s while a review or conversation is at work, every 30 s otherwise.
+- **Project runs** (a platform read of each project's agent conversation, for the Needs you rows): every 10 s while a run is being sent or at work, every 30 s otherwise.
 - **Saved Respond answers** (the app's own storage, not GitHub): every 2.5 s while an answer is being posted and for five minutes after Post, every 30 s otherwise, so the card follows the posting script step by step.
-- **GitHub** is watched by a probe once a minute (one point per 100 reviewed PRs): the open review requests and the PRs you reviewed. A moved review request reads the full list (55 points, seconds) at most once every 5 minutes on its own; moved reviewed PRs are read together, only those, in one read at most every 5 minutes on its own. A busy hour with one reviewed PR moving every minute costs about 730 points; with many different ones moving every minute it is capped near 1,400, and automatic reads stop below 1,000 points left. A review that changed state (not each turn of its conversation) reads its PR and the requests at once; a posted verdict answers its request locally, because GitHub's search lags.
+- **GitHub** is watched by a probe once a minute (one point per 100 watched PRs): the open review requests, the PRs you reviewed and your own open PRs. A moved review request reads the full list (55 points, seconds) at most once every 5 minutes on its own. A moved PR of your own (a push, a review, a comment, new checks) reads just that PR again, also at most once every 5 minutes on its own, for the few points of its own read (14 per 25 PRs, so one point for one PR) and not the 55 of the list; one of your own PRs that GitHub shows merged or closed reads the list at once, so the Desk stops counting it. Moved reviewed PRs are read together, only those, in one read at most every 5 minutes on its own. A busy hour with a request and one reviewed PR moving every minute costs about 730 points, and your own PRs moving every minute add about a point a read; with many different reviewed PRs moving every minute it is capped near 1,400, and automatic reads stop below 1,000 points left. A review that changed state (not each turn of its conversation) reads its PR and the requests at once; a posted verdict answers its request locally, because GitHub's search lags.
 - **Repositories' lists of open PRs** (`repository-lists.js`, `background-lists.js`; one fact, `repositoryLists`): a repository opens from its last-known list (`repository-lists.json`, per account) and updates in place. Once the desk's own reads have answered, one pass reads the **pinned** repositories (the platform's, and any with **Auto-sync** on) in full, then the **active** ones (a PR or review request of yours, agent work, or opened in the last 7 days), one at a time, then counts the open PRs of the **quiet** rest in one question so an empty one shows its empty list at once. The pinned lists are probed once a minute (one point each, `hub.watch(…, 'lists')`) and only the PRs that moved are read again. A repository with no saved list shows its titles first (about a second) and the details in parallel groups of ten behind them. Hidden, low on points and the cooldown stop the pass like every other automatic read; Sync reads on.
 - **Budget:** below 1,000 points left, automatic GitHub reads stop until you press **Sync with GitHub**; the platform reads go on. Sync and your own actions always read, including the PRs you reviewed.
 - **Adding something to read again?** Register it as a fact (`hub.fact(name, { read, apply, every })`), mark it `github: true` if it costs points, and let `hub.refresh(name)` serve the actions that change it. The heavy contribution-history pass stays behind Sync, with no timer.
@@ -693,4 +907,4 @@ The full browser run uses one Chromium for every scenario, and each browser call
 `WORKSPACE_BROWSER_ONLY=<scenario> [WORKSPACE_BROWSER_VIEWPORT=desktop] npm run test:browser`. The scenario names are listed at the top of
 `test/workspace-browser.mjs`.
 
-**Sync with GitHub** renews source, contribution, PR and run status without pulling code, asks GitHub whether anything is new, and says under the button when it last fully succeeded (a failed read, even of the review requests, says "Couldn’t sync" and keeps the last good time). **Make PRs from local changes** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent runs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its **Agent runs** row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.
+**Sync with GitHub** renews source, contribution, PR and run status without pulling code, asks GitHub whether anything is new, and says under the button when it last fully succeeded (a failed read, even of the review requests, the PRs you reviewed or the agent runs, says "Couldn’t sync" and keeps the last good time). **Make PRs from local changes** opens its launch panel independently of old dormant work; older Pull cycles stay visible as agent runs, but Contribute no longer starts them. Prepare's **Follow through to merge** (offered with merge rights) starts a full merge cycle. Once a project has work, its **Agent runs** row shows the current conversation, cancellation and retained history, also without merge rights; a fresh cycle start needs them. All of a project's agent work (Prepare, Pull and full merge cycles) runs in **one** app-owned conversation, scoped `contribute-cycle:<project digest>`; the platform keeps at most one active conversation per scope, so a project cannot have two owners. Cycle k is one message in it with the deterministic id `<scope>:k`: the first cycle uses the platform's scoped start, later ones send to that conversation. The platform de-duplicates that id per conversation, so every delivery (Start, **Send again**, after a reload) first re-reads the project record (online CAS) and acts only while k is its current, unconfirmed cycle; a stale or delivered cycle sends and changes nothing. The first attempt is recorded before it is made and is the only one that may create the conversation. A retry is bound to the conversation that cycle went to; if none holds it any more (deleted, or never created), it is not sent again and the owner starts new work instead. Model and effort are applied until one attempt has applied them. New starts wait while the platform reports work in progress: a running turn, an owner question, or an outstanding Wait, queued message, continuation, non-terminal run or background helper. If the owner deletes the conversation, a delivered cycle counts as finished and the next start creates a new conversation. The conversation's provider is fixed after its first turn, so later cycles may change the model only within that provider. Every launch (project work, review workflows and other agent handoffs) carries its own model choice; leaving it unset uses the chat default. The older single app-wide agent model setting is retired: Contribute removes its saved keys (`agent_provider`, `agent_model`, `agent_effort`) the next time it loads its settings.

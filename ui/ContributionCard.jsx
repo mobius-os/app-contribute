@@ -27,6 +27,9 @@ import {
   needsHuman,
 } from '../autopilot.js'
 import { needsSourceRefresh, reviewIncomplete as recordReviewIncomplete, sendNeedsAttention } from '../send-readiness.js'
+import { discardKeepsPull, settleExits } from '../lifecycle-write.js'
+import { ownerHeld } from '../lifecycle-record.js'
+import { clearReconciliationHint, lifecycleWriterOf, loadAppSettings } from '../storage.js'
 import { FileDiffList } from './FileDiffList.jsx'
 import { MarkdownView } from './MarkdownView.jsx'
 import { useScreenshots } from './useScreenshots.js'
@@ -458,7 +461,21 @@ function AttentionCallout({ rec, onFeedback, onInspect }) {
   )
 }
 
-function ReconciliationHint({ hint, onDismiss }) {
+// What the Discard confirmation says. Discarding a prepared update only drops the update when the
+// engine writes the record (the pull request stays public and tracked); every other case, and every
+// case while the engine is not the writer, abandons the record and keeps its restore.
+const DISMISS_TEXT = 'It will leave your active list and can be restored from Dismissed.'
+const UPDATE_DISCARD = {
+  title: `${NAMES.discard} this update?`,
+  text: 'Only this update is dropped. The pull request stays on GitHub and Contribute keeps following it.',
+}
+export function dismissCopy(rec, { engine = false, isPr = true } = {}) {
+  if (engine && discardKeepsPull(rec)) return UPDATE_DISCARD
+  return { title: `${NAMES.discard} this ${isPr ? 'prepared pull request' : 'draft'}?`, text: DISMISS_TEXT }
+}
+
+// The hint is only a suggestion: this clears it alone (the PR stays prepared); Discard is the other way out.
+function ReconciliationHint({ hint, onDismiss, onClear, clearing }) {
   if (!hint || hint.type !== 'already_landed') return null
   const landingUrl = hint.landing_pr?.url
   return (
@@ -471,6 +488,11 @@ function ReconciliationHint({ hint, onDismiss }) {
             View possible landing PR
           </a>
         ) : null}
+        <p>
+          <button type="button" className="co-btn co-btn-quiet" disabled={clearing} aria-busy={clearing || undefined} onClick={onClear}>
+            Dismiss hint
+          </button>
+        </p>
       </div>
       <button type="button" className="co-btn" onClick={onDismiss}>
         {NAMES.discard}
@@ -523,17 +545,22 @@ function CoauthorOmittedNote({ rec }) {
 // The staged plan, rendered for review. Shown only when rec.plan exists. The
 // diff now reads as a changed-file list (FileDiffList) that fetches and parses
 // the full diff on expand — no raw diff_stat block, no excerpt step.
-export function ReviewPlan({ rec, loadDiff }) {
+// `sections` reads the description in sections and `fileCount` badges the Files tab: both are the prepared PR page's
+// (PreparedPage.jsx); the card keeps its plain description.
+export function ReviewPlan({ rec, loadDiff, sections = false, fileCount = null }) {
   const plan = rec.plan
   const [tab, setTab] = useState('description')
   const isPr = plan.action === 'pr' || rec.type === 'pr'
   const screenshots = useScreenshots(rec, tab === 'description')
   return <>
     <nav className="co-detail-tabs" aria-label="Prepared contribution details">
-      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}</button>)}
+      {['description', ...(isPr ? ['files'] : []), 'activity'].map(key => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
+        {key === 'description' ? 'Description' : key === 'files' ? 'Files' : 'Activity'}
+        {key === 'files' && fileCount != null ? <span className="co-tab-count">{fileCount}</span> : null}
+      </button>)}
     </nav>
     {tab === 'description' ? <>
-      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} images={screenshots.images} />
+      <MarkdownView markdown={plan.body_draft || rec.summary || 'No written description is saved for this proposal.'} images={screenshots.images} sections={sections} />
       {screenshots.count && rec.status === 'prepared' ? <p className="co-shot-note">
         {screenshotCountText(screenshots.count)} will be uploaded to your GitHub account when you send (your fork, or this repository if you own it), so the pull request can show {screenshots.count === 1 ? 'it' : 'them'}.
       </p> : null}
@@ -563,9 +590,20 @@ function ReviewActions({
   // Dismiss removes the prepared record from the active list. It is reversible
   // from the Run's Dismissed fold, but still must not fire on a stray tap.
   const [confirmingDismiss, setConfirmingDismiss] = useState(false)
+  const [clearingHint, setClearingHint] = useState(false)
+  // The saved record shows the hint until the next read of the ledger; once cleared it stays hidden here.
+  const [hintCleared, setHintCleared] = useState(false)
   const [note, setNote] = useState(null)
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
   const isUpdate = rec.plan?.action === 'pr_update'
+  // Which writer discards decides what Discard does to an update, so its confirmation asks once.
+  const [engineWriter, setEngineWriter] = useState(false)
+  useEffect(() => {
+    if (!isUpdate) return undefined
+    let live = true
+    loadAppSettings().then(settings => { if (live) setEngineWriter(lifecycleWriterOf(settings) === 'engine') })
+    return () => { live = false }
+  }, [isUpdate])
   const blocked = needsSourceRefresh(reviewState)
   // A failed publication needs the source-aware agent recovery above this
   // action row. Do not offer the same blind GitHub mutation again while its
@@ -619,6 +657,21 @@ function ReviewActions({
     }
   }
 
+  async function clearHint() {
+    setClearingHint(true)
+    setNote(null)
+    try {
+      const outcome = (await clearReconciliationHint({ rec })) || {}
+      if (outcome.ok) setHintCleared(true)
+      else if (outcome.conflict !== undefined || outcome.gone) setNote('This contribution just changed. Reload it to see its latest state.')
+      else setNote(outcome.error === 'offline'
+        ? 'You are offline — dismissing the hint needs a connection; try again once you are back online.'
+        : 'Could not dismiss the hint: ' + outcome.error)
+    } finally {
+      setClearingHint(false)
+    }
+  }
+
   async function dismiss() {
     setDismissing(true)
     setNote(null)
@@ -641,20 +694,24 @@ function ReviewActions({
 
   if (accepted) return null
 
+  const discardCopy = dismissCopy(rec, { engine: engineWriter, isPr })
+
   return (
     <div className="co-action-block">
-      {!confirmingDismiss ? (
+      {!confirmingDismiss && !hintCleared ? (
         <ReconciliationHint
           hint={rec.reconciliation_hint}
           onDismiss={() => setConfirmingDismiss(true)}
+          onClear={clearHint}
+          clearing={clearingHint}
         />
       ) : null}
       {confirmingDismiss ? (
         <ConfirmWindow
           label="Confirm dismissal"
           eyebrow={recordWhere(rec)}
-          title={`${NAMES.discard} this ${isPr ? 'prepared pull request' : 'draft'}?`}
-          text="It will leave your active list and can be restored from Dismissed."
+          title={discardCopy.title}
+          text={discardCopy.text}
           keep="Keep"
           confirm={NAMES.discard}
           working="Discarding…"
@@ -791,6 +848,82 @@ function RestoreAction({ rec, onRestore }) {
       {note && (
         <p className="co-review-error" role="status" aria-live="polite">{note}</p>
       )}
+    </div>
+  )
+}
+
+// A finished PR that still waits on you (lifecycle-record.js ownerHeld) offers the exits its state accepts. The two that only end the wait are one
+// checked write here; the two that hand the work to a new record open the source chat with the exact operation, because the agent stages that record
+// and then records the exit with settle_exit.py (contributing/card-asks.md).
+const SETTLE_COMMAND = 'python3 /data/apps/contribute/settle_exit.py'
+const HELD_EXITS = {
+  COVERED_BY_MERGE: { label: 'Already in the merge' },
+  PRESERVE_AS_NEW: { label: 'Keep as new work', ask: rec => `Keep the update that could not be sent for contribution ${rec.id} ("${rec.title || 'untitled'}") as new work: rebuild only the change that is still wanted on the repository's fresh default branch, stage it as a new record, review it and print its card. Then record the exit on the stranded record with:\n\n${SETTLE_COMMAND} ${rec.id} PRESERVE_AS_NEW --successor <the new record id>` },
+  DISCARD_UPDATE: { label: NAMES.discard, confirm: { title: `${NAMES.discard} this update?`, text: 'Only the update is dropped. The pull request stays on GitHub exactly as it is.' } },
+  OWNER_RELANDS: { label: 'Land it again', ask: rec => `Land contribution ${rec.id} ("${rec.title || 'untitled'}") again as new work: it was merged into a branch that never reached the default branch. Rebuild it on the repository's fresh default branch, stage it as a new record, review it and print its card. Then record the exit on this record with:\n\n${SETTLE_COMMAND} ${rec.id} OWNER_RELANDS --successor <the new record id>` },
+}
+
+function HeldAction({ rec, onSettle, onFeedback }) {
+  const [busy, setBusy] = useState('')
+  const [confirming, setConfirming] = useState('')
+  const [note, setNote] = useState(null)
+  const exits = settleExits(rec)
+  if (!exits.length) return null
+
+  async function settle(exit) {
+    setBusy(exit)
+    setNote(null)
+    try {
+      const outcome = (await onSettle(rec, exit)) || {}
+      if (outcome.conflict !== undefined) setNote('This contribution just changed under you — the feed has been refreshed.')
+      else if (outcome.gone) setNote('This record no longer exists — the feed has been refreshed.')
+      else if (outcome.error) setNote(outcome.error === 'offline' ? 'You are offline — this needs a connection; try again once you are back online.' : 'Could not save this: ' + outcome.error)
+    } finally {
+      setBusy('')
+      setConfirming('')
+    }
+  }
+
+  function ask(exit) {
+    const outcome = (typeof onFeedback === 'function' && onFeedback(rec, { draft: HELD_EXITS[exit].ask(rec) })) || {}
+    setNote(outcome.ok ? null : outcome.reason === 'missing-chat'
+      ? 'This older record no longer has a source chat to start from.'
+      : 'Open Contribute from inside Möbius to return to the source chat.')
+  }
+
+  const pick = exit => (HELD_EXITS[exit].ask ? ask(exit) : HELD_EXITS[exit].confirm ? setConfirming(exit) : settle(exit))
+  const sure = HELD_EXITS[confirming]?.confirm
+  return (
+    <div className="co-action-block">
+      {sure ? (
+        <ConfirmWindow
+          label="Confirm discard"
+          eyebrow={recordWhere(rec)}
+          title={sure.title}
+          text={sure.text}
+          keep="Keep"
+          confirm={NAMES.discard}
+          working="Discarding…"
+          busy={Boolean(busy)}
+          onKeep={() => setConfirming('')}
+          onConfirm={() => settle(confirming)}
+        />
+      ) : null}
+      <div className="co-review-actions" role="group" aria-label="Choose what happens next">
+        {exits.map(exit => (
+          <button
+            key={exit}
+            type="button"
+            className={exit === 'DISCARD_UPDATE' ? 'co-btn co-btn-danger co-secondary-action co-history-action' : 'co-btn'}
+            disabled={Boolean(busy)}
+            aria-busy={busy === exit || undefined}
+            onClick={() => pick(exit)}
+          >
+            {busy === exit ? <Shine>Saving…</Shine> : HELD_EXITS[exit].label}
+          </button>
+        ))}
+      </div>
+      {note && <p className="co-review-error" role="status" aria-live="polite">{note}</p>}
     </div>
   )
 }
@@ -954,6 +1087,7 @@ export function ContributionDecision({
   onDismiss,
   onRestore,
   onWithdraw,
+  onSettle,
 }) {
   const status = rec?.status || 'prepared'
   const isPr = rec?.plan?.action === 'pr' || rec?.type === 'pr'
@@ -966,10 +1100,11 @@ export function ContributionDecision({
     typeof rec?.relay_contribution_id === 'string' &&
     typeof onWithdraw === 'function'
   const hasConnection = status === 'merged' && !!publicationHandoff(rec)
+  const hasHeld = typeof onSettle === 'function' && ownerHeld(rec) !== null
   const quality = qualityReviewFor(rec)
   const reviewInProgress = quality.state === 'reviewing' || quality.state === 'queued'
   const hasDecision = hasAttention || hasSubmitAlert ||
-    hasPreparedAction || hasRestore || hasWithdraw || hasConnection
+    hasPreparedAction || hasRestore || hasWithdraw || hasConnection || hasHeld
   if (!hasDecision) return null
 
   const title = hasSubmitAlert || hasAttention
@@ -998,11 +1133,29 @@ export function ContributionDecision({
         />
       ) : null}
       {hasRestore ? <RestoreAction rec={rec} onRestore={onRestore} /> : null}
+      {hasHeld ? <HeldAction rec={rec} onSettle={onSettle} onFeedback={onFeedback} /> : null}
       {!isPr && status === 'prepared' && typeof onFeedback !== 'function' ? (
         <p className="co-review-note">Open the source conversation to continue this request.</p>
       ) : null}
     </section>
   )
+}
+
+// Where a contribution stands, as the state chip and the one plain line under it say it. A blocked card leads with its
+// SubmitErrorAlert instead, and an attention record with its callout, so both suppress the calm lifecycle narration.
+// Shared by the card and the prepared PR page.
+export function cardStatus(rec, reviewState) {
+  const status = rec.status || 'prepared'
+  const prepared = status === 'prepared'
+  const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
+  const blocked = prepared && (reviewState?.state === 'needs_refresh' || rec.needs_attention === true)
+  const quality = qualityReviewFor(rec)
+  return {
+    blocked,
+    label: blocked ? 'Needs update' : prepared ? (isPr ? quality.label : 'Draft') : (STATUS_LABELS[status] || status),
+    key: blocked ? 'needs-refresh' : prepared && isPr ? quality.state : status,
+    narration: blocked ? '' : statusNarration(rec),
+  }
 }
 
 export function ContributionCard({
@@ -1021,24 +1174,7 @@ export function ContributionCard({
 }) {
   const status = rec.status || 'prepared'
   const isPr = rec.plan?.action === 'pr' || rec.type === 'pr'
-  const blocked = status === 'prepared' && (
-    reviewState?.state === 'needs_refresh' || rec.needs_attention === true
-  )
-  const qualityState = qualityReviewFor(rec)
-  const statusLabel = blocked
-    ? 'Needs update'
-    : status === 'prepared'
-      ? (isPr ? qualityState.label : 'Draft')
-      : (STATUS_LABELS[status] || status)
-  const statusClass = blocked
-    ? 'needs-refresh'
-    : status === 'prepared' && isPr
-      ? qualityState.state
-      : status
-  // The one plain-language line under the chip. A blocked card leads with its
-  // SubmitErrorAlert instead, and an attention record with its callout, so both
-  // suppress the calm lifecycle narration here.
-  const narration = blocked ? '' : statusNarration(rec)
+  const { blocked, label: statusLabel, key: statusClass, narration } = cardStatus(rec, reviewState)
   const typeLabel = TYPE_LABELS[rec.type] || rec.type || 'Contribution'
   const when = timeAgo(rec.updated_at || rec.created_at)
   const [expanded, setExpanded] = useState(initialExpanded)

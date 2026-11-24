@@ -36,6 +36,7 @@ from urllib.parse import quote
 
 from agent_snapshot import find_ledger
 from review_prs import find_app_id, load_core
+import respond_lifecycle as lifecycle
 import respond_screenshots as shots
 
 
@@ -926,6 +927,16 @@ class Posting:
   screenshots_commit: str | None = None
 
   def persist(self) -> None:
+    """Every write after a step is progress on the stamp the app reads (respond_lifecycle.py): a receipt or a `sending` note
+    starts the app's 3 minutes without progress again."""
+    lifecycle.stamp(self.result, "PROGRESS")
+    write_json_atomic(self.store.result_file(self.pull), self.result)
+
+  def move_to(self, state: str, move: str) -> None:
+    """The post starts (BEGIN), or ends (POST_OK, POST_FAILED): the stamp moves while `state` still says where the result stood
+    (ready, failed, or a post that went quiet), then the word follows, in the same write."""
+    lifecycle.stamp(self.result, move)
+    self.result["state"] = state
     write_json_atomic(self.store.result_file(self.pull), self.result)
 
   def push(self) -> None:
@@ -951,6 +962,14 @@ class Posting:
     except CommandError as error:
       raise CommandError(f"could not confirm the PR on GitHub before this step ({error})") from error
     require_same_pull(self.result, facts, "the steps still to do were not posted")
+
+  def recheck_approval(self) -> None:
+    """The owner's decision is read again before every step and before every reply, as the PR is before a public one: a Discard
+    pressed while the post runs stops what is still to do. A step or reply already being sent may still arrive, and what went out
+    stays in the receipts."""
+    problem = approval_problem(self.result, read_decision(self.store, self.pull))
+    if problem:
+      raise CommandError(f"{problem.rstrip('.')}, so the steps still to do were not posted")
 
   def published_reply(self, index: int, since: str) -> str | None:
     """The link of the comment a reply that may have reached GitHub became, or None when none
@@ -1030,6 +1049,7 @@ class Posting:
     for index, reply in enumerate(replies):
       if any(receipt["index"] == index for receipt in receipts["replies"]):
         continue
+      self.recheck_approval()  # a Discard stops before the next reply, not only before the next stage
       self.recheck()
       path = (f"repos/{repo}/issues/{number}/comments" if reply["reply_to"] is None
               else f"repos/{repo}/pulls/{number}/comments/{reply['reply_to']}/replies")
@@ -1079,9 +1099,8 @@ class Posting:
 
   def fail(self, step: str, error: Exception) -> PostFailed:
     message = str(error) if isinstance(error, (CommandError, Stop, shots.ScreenshotError)) else f"unexpected {type(error).__name__}: {error}"
-    self.result["state"] = "failed"
     self.result["error"] = {"step": step, "message": message}
-    self.persist()
+    self.move_to("failed", "POST_FAILED")
     return PostFailed(
       f"Post stopped at the {step} step: {message.rstrip('. ')}. "
       "What was done is saved; run the same command again to continue."
@@ -1090,17 +1109,21 @@ class Posting:
   def run(self) -> None:
     if any(self.result["receipts"].get(key) for key in (*RECEIPT_KEYS, "screenshots")):
       print("Resuming an earlier post: the steps already done are skipped.")
-    self.result["state"], self.result["error"] = "posting", None
-    self.persist()
+    self.result["error"] = None
+    self.move_to("posting", "BEGIN")
     steps = (("screenshots", self.upload_screenshots), ("push", self.push), ("replies", self.post_replies),
              ("description", self.update_description), ("rerequest", self.request_review))
     for name, step in steps:
       try:
+        self.recheck_approval()
         step()
       except Exception as error:
         raise self.fail(name, error) from error
-    self.result["state"] = "posted"
-    self.persist()
+      except BaseException:
+        # Ctrl-C or an exit in the middle of a step: say so on the saved answer instead of leaving it on "posting".
+        self.fail(name, CommandError("the post was interrupted"))
+        raise
+    self.move_to("posted", "POST_OK")
     print(f"Done: result {self.result['id']} for {self.pull} is posted.")
 
 

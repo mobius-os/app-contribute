@@ -1300,9 +1300,12 @@ test('the host draws an old card as this chat\'s status rows, and only an open l
   if (host.features.includes('rows-v2')) {
     const context = { chatId: CHAT, latest: true, intent: 'review:one' }
     const rows = await rendered(published(prepared('one')), host.features, context)
-    assert.match(rows, /<p class="md-app-block__item-meta">owner\/repo · \+2\u00a0−0<\/p>/)
-    assert.match(rows, /md-app-block__title-mark is-success/)
-    assert.doesNotMatch(rows, /Open a new pull request|<footer>/, 'the saved facts give way to the app\'s rows')
+    assert.match(rows, /<p class="md-app-block__item-meta">owner\/repo · /)
+    assert.match(rows, /2 lines added, 0 removed/)
+    assert.match(rows, /<strong>1 pull request<\/strong>/)
+    assert.match(rows, /href="https:\/\/github.com\/owner\/repo\/pull\/7"/)
+    assert.doesNotMatch(rows, /Open a new pull request|<button[^>]*>Send/, 'the saved facts and send control give way to the app\'s rows')
+    assert.match(rows, /<footer><div class="md-app-block__footer-status"><strong>1 pull request<\/strong>/)
     const elsewhere = await rendered(published(prepared('one', { record: { chat_id: OTHER, chat_ids: [OTHER] } })), host.features, context)
     assert.doesNotMatch(elsewhere, /pull\/7|Change one<\/a>/, 'another chat\'s record is not drawn')
   }
@@ -1324,19 +1327,26 @@ test('the host draws the live card: ledger rows, one action, a sent ending, and 
   }
   const ready = await render({})
   assert.match(ready, /<strong>2 contributions<\/strong>/)
-  assert.match(ready, /intent=review%3Aone">Show confirmation rows in place<\/a><p class="md-app-block__item-meta">owner\/repo · \+142\u00a0−38<\/p>/)
+  assert.match(ready, /intent=review%3Aone">Show confirmation rows in place<\/a><p class="md-app-block__item-meta">owner\/repo · /)
+  assert.match(ready, /142 lines added, 38 removed/)
   assert.doesNotMatch(ready, /From this conversation|<dt>|Rows from/, 'every row is the app\'s')
-  assert.match(ready, /<footer>[^]*>Contribute all<\/button>/)
+  assert.match(ready, /<footer>[^]*>Send 2<\/button>/)
   const confirming = await render({ confirm: true })
   assert.match(confirming, /<li class="is-confirmation">[^]*<dt>Project<\/dt>/, 'Confirm\'s rows keep their labels')
   assert.match(confirming, />Not now<\/button><button[^>]*>Confirm<\/button>/)
   const sentRecords = records.map((record, n) => published(record, 3101 + n))
   const sent = await render({ records: sentRecords })
   assert.match(sent, /md-app-block__title-mark is-success[^]*<strong>2 pull requests<\/strong>/)
-  assert.doesNotMatch(sent, /<footer>/, 'the button goes away')
-  assert.match(sent, />#3101<svg[^]*md-app-block__pill is-success">Open</)
+  assert.doesNotMatch(sent, /<button/, 'published results cannot send again')
+  assert.match(sent, /href="https:\/\/github.com\/owner\/repo\/pull\/3101"/)
+  assert.match(sent, /href="https:\/\/github.com\/owner\/repo\/pull\/3102"/)
+  // Hosts with a stable action lane keep it for results; earlier hosts put
+  // the same links on the rows and omit the empty footer.
+  if (sent.includes('md-app-block--action-lane')) {
+    assert.match(sent.split('<footer>')[1], /md-app-block__results[^]*>#3101<svg[^]*>#3102<svg/)
+  } else assert.doesNotMatch(sent, /<footer>/)
   const earlier = await render({ context: { chatId: CHAT, latest: false, intent: CHAT_INTENT } }, { onJump() {} })
-  assert.match(earlier, /<section class="md-app-block md-app-block--value-facts md-app-block--folded" aria-label="Continued below">/)
+  assert.match(earlier, /<section class="[^"]*md-app-block--folded(?: [^"]*)?" aria-label="Continued below">/)
   assert.match(earlier, />Jump to latest<svg/)
 })
 
@@ -1480,8 +1490,10 @@ test('the B2 host accepts a confirmation that names screenshots', async t => {
   ]
   const parsed = b2.confirmationOf(items)
   assert.ok(parsed, 'the host rejected the list, which would keep Confirm disabled')
-  assert.equal(parsed[0].facts.find(fact => fact.label === 'Change').value, '1 file · +2\u00a0−0 · 2 screenshots')
-  assert.match(parsed[1].facts.find(fact => fact.label === 'Change').value, /1 screenshot$/)
+  assert.equal(parsed[0].facts.find(fact => fact.label === 'Screenshots').value, '2 screenshots')
+  assert.equal(parsed[1].facts.find(fact => fact.label === 'Screenshots').value, '1 screenshot')
+  assert.deepEqual(parsed[0].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+2\u00a0−0', lines: { added: 2, removed: 0 } })
+  assert.deepEqual(parsed[1].facts.find(fact => fact.label === 'Change'), { label: 'Change', value: '+1\u00a0−0', lines: { added: 1, removed: 0 } })
 })
 
 test('Confirm names a draft opening, adds nothing for ready, and sends exactly that stage even if the setting changes first', async () => {
@@ -1966,16 +1978,60 @@ test('a read issued after a settlement still lands (control)', async () => {
 })
 
 // ---- Truthful state: loading is not empty, and counts are real.
-test('before the first exact read answers, the card is loading, never empty', async () => {
+test('every session report opts into footer status, including the settled first read', async () => {
+  const pending = deferred()
+  const h = harness({ ids: ['one'], records: [prepared('one')], loadExact: () => pending.promise })
+  h.session.start()
+  assert.equal(h.last(), undefined, 'an idle remount leaves the host display alone')
+  pending.resolve(prepared('one'))
+  await tick()
+  assert.equal(h.last().loading, false)
+  assert.ok(h.states.length >= 1)
+  assert.ok(h.states.every(report => report.statusPlacement === 'footer'))
+})
+
+test('an owned pending first read reports loading and footer, then a failed read settles', async () => {
+  const pending = deferred()
+  const checkpoint = { id: 'cp', data: encodeCheckpoint([{ id: 'a1', unitKey: 'record:one', ids: ['one'], at: Date.now(), state: 'unknown' }]) }
+  const h = harness({ ids: ['one'], records: [prepared('one')], checkpoint, retain: true,
+    loadExact: () => pending.promise })
+  h.session.start()
+  assert.equal(h.last().loading, true, 'an owned recovery reports while the read is pending')
+  assert.equal(h.last().statusPlacement, 'footer')
+  pending.resolve(Promise.reject(new Error('offline')))
+  await tick()
+  assert.equal(h.last().loading, false, 'a failed read is settled, not indefinitely loading')
+  assert.equal(h.last().statusPlacement, 'footer')
+  const failed = harness({ ids: ['two'], records: [prepared('two')], loadExact: () => Promise.reject(new Error('offline')) })
+  failed.session.start(); await tick()
+  assert.equal(failed.last().loading, false)
+  assert.equal(failed.last().statusPlacement, 'footer')
+  assert.equal(failed.row('two').pill, HOLD.unread)
+})
+
+test('before the first exact read answers, no synthetic loading report replaces the host display', async () => {
   const gate = deferred()
   const h = harness({ ids: ['one', 'two'], records: [prepared('one'), prepared('two')], loadExact: async (id, store) => { await gate.promise; return structuredClone(store.get(id)) } })
   h.session.start(); await tick()
-  assert.equal(h.last().title, '', 'the host keeps the saved title')
-  assert.equal('rows' in h.last(), false, 'the host keeps the printed rows; nothing claims there are none')
-  assert.deepEqual([h.action(KEY).label, h.action(KEY).hidden], ['Loading…', false])
+  assert.equal(h.last(), undefined, 'the host keeps its pending or last observed display, without fresh controls')
   gate.resolve(); await tick()
   assert.equal(h.last().title, '2 contributions')
   assert.equal(h.last().rows.length, 2)
+})
+
+test('a remounted published card reports the exact PR first, never a loading replacement', async () => {
+  const gate = deferred()
+  const h = harness({ ids: ['one'], records: [published(prepared('one'), 34)],
+    loadExact: async (id, store) => { await gate.promise; return structuredClone(store.get(id)) } })
+  h.session.start(); await tick()
+  h.session.refresh('turn'); await tick()
+  assert.equal(h.last(), undefined)
+  gate.resolve(); await tick()
+  assert.equal(h.last().title, '1 pull request')
+  assert.deepEqual(h.row('one').links, [{ label: '#34', url: 'https://github.com/owner/repo/pull/34' }])
+  assert.equal(h.action(KEY).hidden, true)
+  assert.equal(h.needs.length, 0)
+  assert.equal(h.sends.length, 0)
 })
 
 test('every unreadable record and every row that needs a fix is counted', async () => {

@@ -2,7 +2,7 @@
 // and the brief an agent conversation starts from. The job always ends by saving a result for
 // Contribute to show (respond-result.md); the owner posts it from the PR's Review tab. Pure, so the window, the
 // brief and its safety rules are tested without a browser.
-import { checkSummary, ignoredNote, isBotAuthor } from './collaboration.js'
+import { checkSummary, ignoredNote, isBotAuthor, reviewBlocked } from './collaboration.js'
 import { NAMES } from './names.js'
 import { resultSlug } from './respond-result.js'
 
@@ -22,23 +22,26 @@ const unique = list => [...new Set(list)]
 // The findings the owner's own agent review saved for this PR's current version
 // (null when it found none, or the owner set them aside). They are the feedback
 // on a PR you wrote yourself, where the posted review carries your own name and
-// so would never read as someone else's.
-export function savedFindings(status, ignored = null) {
+// so would never read as someone else's. A review that did not finish names an obstacle, not a finding
+// (the platform saves it as needs_you with `blocked`): it is nothing to fix. `answered` is whether a posted reply
+// already covers the findings (pr-facts.js findingsAnswered).
+export function savedFindings(status, ignored = null, { answered = false } = {}) {
   const item = status?.item
   if (!item || item.state !== 'needs_you' || !String(item.summary || '').trim()) return null
-  if (ignoredNote(item, ignored)) return null
+  if (reviewBlocked(item) || answered) return null
+  if (ignoredNote(item, ignored, status.run)) return null
   return { summary: String(item.summary), url: item.public_review?.url || '', head: item.head_sha || '' }
 }
 
 // The findings the Respond window carries are the whole saved review. When the list only holds its short form (the
 // findings cut, collaboration.js loadReviewRuns), the run itself is read first (`readRun(id)` answers the run), so a
 // long review is never sent cut; a run that cannot be read throws, and one that no longer holds the item has no findings.
-export async function wholeSavedFindings(status, ignored, readRun) {
+export async function wholeSavedFindings(status, ignored, readRun, options) {
   // A run another conversation owns is the same short copy in both forms: there is no whole review to read for it.
-  if (status?.item?.summary_truncated !== true || status.run?.summary_only !== true) return savedFindings(status, ignored)
+  if (status?.item?.summary_truncated !== true || status.run?.summary_only !== true) return savedFindings(status, ignored, options)
   const run = await readRun(status.run.id)
   const item = run?.items?.find(candidate => String(candidate.repo).toLowerCase() === String(status.item.repo).toLowerCase() && candidate.number === status.item.number)
-  return savedFindings(item ? { run, item } : null, ignored)
+  return savedFindings(item ? { run, item } : null, ignored, options)
 }
 
 // What the brief carries, in words, so the owner sees that a long review is not cut: every ticked point, every open thread, the whole saved review,
@@ -96,9 +99,12 @@ export function addressItems(pr, { activity = [], threads = [], findings = null 
 export const respondScope = (repo, number) => `contribute-address:${String(repo).toLowerCase()}#${number}`
 
 // What the window starts. It always carries a cid, so the platform's "the PR already has its conversation" answer becomes one more
-// message into that conversation (a plain start would only reopen it, without the job). A second pass keeps the conversation's agent.
-export function respondAction({ pr, items, appId, cid, agent = null, answered = false }) {
-  return { ...addressBrief({ pr, items, appId }), cid, ...(agent?.model && !answered ? { agent } : {}), ...(answered ? { applyModel: false } : {}) }
+// message into that conversation (a plain start would only reopen it, without the job). The agent is sent only when the owner
+// chose one: a second pass otherwise keeps the conversation's own, and a chosen model is applied to that same conversation first.
+// A second pass also names its conversation (`chatId`, the one that wrote the answer it replaces), so it never starts a new one in its
+// place: when that conversation was deleted the send says so instead of continuing without the earlier work.
+export function respondAction({ pr, items, appId, cid, agent = null, chatId = null }) {
+  return { ...addressBrief({ pr, items, appId }), cid, ...(chatId ? { chatId: String(chatId) } : {}), ...(agent?.model ? { agent } : {}) }
 }
 
 // The instruction the agent conversation starts from. Its scope key keeps the

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { loadsInFrame } from '../image-source.js'
+import { sectionedHtml } from '../markdown-sections.js'
 import { PictureViewer, pictureOf, useRepoPictures } from './MarkdownPictures.jsx'
 
 const SCREENSHOT_SCHEME = 'screenshot:'
@@ -70,8 +71,9 @@ function screenshotImage(token, alt, images) {
   return `<span class="co-markdown-shot-pending">${escapeHtml(alt ? `Screenshot: ${alt}` : 'Screenshot')}</span>`
 }
 
-// Marked's HTML before sanitizing; exported for tests, which run without a DOM.
-export function markdownHtml(markdown, images = null) {
+// Marked's HTML before sanitizing; exported for tests, which run without a DOM. `sections` reads the text as a
+// description in sections (markdown-sections.js).
+export function markdownHtml(markdown, images = null, { sections = false } = {}) {
   const parser = new Marked({
     breaks: false,
     gfm: true,
@@ -84,7 +86,8 @@ export function markdownHtml(markdown, images = null) {
       },
     },
   })
-  return parser.parse(String(markdown || ''))
+  const source = String(markdown || '')
+  return sections ? sectionedHtml(parser, parser.lexer(source)) : parser.parse(source)
 }
 
 // The frame's own image policy (the platform's img-src: self, data and blob only) is what stops an
@@ -95,22 +98,22 @@ export function markdownHtml(markdown, images = null) {
 const SANITIZE = { USE_PROFILES: { html: true }, FORBID_TAGS: ['source', 'style'], FORBID_ATTR: ['srcset', 'poster', 'background', 'style'] }
 const cleanHtml = html => linkExternalImages(DOMPurify.sanitize(html, SANITIZE))
 
-function renderMarkdown(markdown, images) {
-  return cleanHtml(markdownHtml(markdown, images))
+function renderMarkdown(markdown, images, sections) {
+  return cleanHtml(markdownHtml(markdown, images, { sections }))
 }
 
 // `images` optionally maps a screenshot name to its data:image/png URL.
-export function MarkdownView({ markdown, images = null }) {
+export function MarkdownView({ markdown, images = null, sections = false }) {
   const box = useRef(null)
   const [viewing, setViewing] = useState(null)
   const html = useMemo(() => {
     if (typeof DOMPurify.sanitize !== 'function') return null
     try {
-      return renderMarkdown(markdown, images)
+      return renderMarkdown(markdown, images, sections)
     } catch {
       return cleanHtml(String(markdown || ''))
     }
-  }, [markdown, images])
+  }, [markdown, images, sections])
 
   useRepoPictures(box, html)
 

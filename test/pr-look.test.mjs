@@ -88,16 +88,23 @@ test('Escape hides an icon button tooltip until the pointer or focus leaves that
   assert.match(detail, /className=\{'co-pr-detail-actions' \+ tips\.className\} onPointerOut=\{tips\.onPointerOut\} onBlur=\{tips\.onBlur\}/)
 })
 
-test('every agent and confirm window starts with the same head: repository and number, then the job, then the PR name', async t => {
+test('every agent and confirm window starts with the same head: the repository, then the job with the number, then the branches on one line', async t => {
   const mod = await load(t)
   if (!mod) return
   const pr = { number: 1923, title: 'Example PR name', repository: { nameWithOwner: 'team/repo' } }
   const one = mod.head({ title: 'Review', titleId: 'x', pulls: [pr], withClose: true })
-  assert.match(one, /<p class="co-rw-eyebrow">team\/repo · #1923<\/p><h3 id="x">Review<\/h3><p class="co-rw-pr"><strong>Example PR name<\/strong><\/p>/)
+  assert.match(one, /<p class="co-rw-eyebrow">team\/repo<\/p><h3 id="x">Review #1923<\/h3><\/div>/)
+  assert.doesNotMatch(one, /Example PR name/, 'the PR’s name is not repeated: the window was opened from that PR')
   assert.match(one, /class="co-rw-tools"><button[^>]*aria-label="Close"/)
-  // The branches the PR merges from and into sit under its name, as on the PR page (one shared BranchFlow).
+  // The branches the PR merges from and into sit under the job, as on the PR page (one shared BranchFlow).
   const branched = mod.head({ title: 'Merge #1923 into main?', pulls: [{ ...pr, headRefName: 'feat/window', baseRefName: 'main' }] })
-  assert.match(branched, /<p class="co-rw-pr"><strong>Example PR name<\/strong><\/p><p class="co-branch-flow" aria-label="Branches"><code>feat\/window<\/code><span class="co-branch-to">[\s\S]*?<code>main<\/code><\/span><\/p>/)
+  assert.match(branched, /<h3>Merge #1923 into main\?<\/h3><p class="co-branch-flow" aria-label="Branches"><code>feat\/window<\/code><span class="co-branch-to">[\s\S]*?<code>main<\/code><\/span><\/p>/, 'a job that already names the number is not given it twice')
+  // A long name is split in the markup, whole in the page: its start may shrink behind an ellipsis, its end never does.
+  const long = mod.head({ title: 'Review', pulls: [{ ...pr, headRefName: 'dependabot/npm_and_yarn/frontend/frontend-minor-patch-626b2fc4c8', baseRefName: 'main' }] })
+  assert.match(long, /<code><span class="co-branch-start">dependabot\/npm_and_yarn\/frontend\/frontend-minor-patch<\/span>-626b2fc4c8<\/code>/)
+  const sheet = readFileSync(new URL('../workspace-theme.js', import.meta.url), 'utf8')
+  assert.match(sheet, /\.co-rw-lines \.co-branch-flow \{[^}]*flex-wrap:nowrap;/, 'the branches always share one line in a window')
+  assert.match(sheet, /\.co-rw-lines \.co-branch-start \{ min-width:2ch; overflow:hidden; text-overflow:ellipsis; \}/)
   assert.doesNotMatch(one, /co-branch-flow/, 'a PR whose branches are not known shows no branch line')
   const several = mod.head({ title: 'Review', pulls: [{ ...pr, headRefName: 'a', baseRefName: 'main' }, { ...pr, number: 2, headRefName: 'b', baseRefName: 'main' }] })
   assert.doesNotMatch(several, /co-branch-flow/, 'a window over several PRs lists them and names no one branch')

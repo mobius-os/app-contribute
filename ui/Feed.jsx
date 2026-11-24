@@ -12,6 +12,7 @@ import {
   contributionPathDecision,
   contributionStackDecision,
 } from '../contribution-policy.js'
+import { followLineOf } from '../follow-note.js'
 import { sortStackRecords, stackMeta, stackPublicationRecords } from '../stack.js'
 import {
   contributionTitle,
@@ -23,6 +24,7 @@ import {
 } from '../run.js'
 import { openAgentConversation } from './BatchAction.jsx'
 import { ContributionCard, ContributionDecision } from './ContributionCard.jsx'
+import { FocusedCard } from './PreparedPage.jsx'
 import { Icon } from './Icons.jsx'
 import { OpenSplitButton } from './OpenSplitButton.jsx'
 import { DEFAULT_STAGE, stageApplies, stageWords } from '../publication-stage.js'
@@ -249,7 +251,7 @@ const PROGRESS_TEXT = {
 // A row that is being sent or opened says so with the moving light; a finished or refused one stands still.
 const progressWords = (mode, state) => (state === 'working' || state === 'checking' ? <Shine>{PROGRESS_TEXT[mode][state]}</Shine> : PROGRESS_TEXT[mode]?.[state])
 
-function ExactActionList({
+export function ExactActionList({
   items,
   mode,
   publicationPreference,
@@ -257,6 +259,7 @@ function ExactActionList({
   stage,
   onSelect,
   progress = {},
+  followLine = null,
 }) {
   return (
     <ol className="co-run-approval-list">
@@ -275,11 +278,13 @@ function ExactActionList({
           ))
           .map(record => {
             const meta = stackMeta(record)
+            const follow = followLine?.(record)
             return (
               <li key={record.id}>
                 <span>
                   <strong>{contributionTitle(record)}</strong>
                   <small>{record?.plan?.repo || record?.repo || 'Project'}</small>
+                  {follow ? <small>{follow}</small> : null}
                 </span>
                 <em className={progress[record.id]?.error ? 'is-failed' : progress[record.id] === 'done' ? 'is-done' : ''}>{progress[record.id]?.notAttempted ? `${PROGRESS_TEXT[mode]['not-attempted']}: ` : ''}{progress[record.id]?.error
                   || progressWords(mode, progress[record.id])
@@ -307,6 +312,7 @@ function ExactBatchAction({
   onSend,
   onSendStack,
   onMarkReady,
+  followAtSend = null,
   onSelect,
 }) {
   const task = useProjectTask()
@@ -325,6 +331,8 @@ function ExactBatchAction({
   // its results; each handled item changes the live set, which must not close it.
   const confirming = !!approval && (approval.locked || approval.fingerprint === fingerprint)
   const [progress, setProgress] = useState({})
+  // What the platform said about following each PR it opened (the send's result, `followed`), by record.
+  const [followed, setFollowed] = useState({})
   const [finished, setFinished] = useState(false)
   const admitted = useRef(false)
   const currentRecords = useRef(records)
@@ -366,6 +374,11 @@ function ExactBatchAction({
   }, [approval, records, mode])
 
   if (count < 1 && !approval?.locked) return null
+
+  // Whether a new PR will be followed, said where the owner confirms the send, and once it is sent what the platform did (follow-note.js).
+  // A legacy draft sent from Möbius's own account never carries the request, so it says nothing.
+  const followLine = record => (mode === 'send' && contributionPath(record, publicationPreference, githubState) !== 'mobius'
+    ? followLineOf(record, { before: followAtSend, state: progress[record.id], followed: followed[record.id] }) : '')
 
   // Open the exact confirmation with the stage chosen for this send (the setting unless the arrow picked the other).
   function openConfirm(nextStage = stage) {
@@ -414,6 +427,8 @@ function ExactBatchAction({
     } catch { outcome = { uncertain: true } }
     const values = records.map(record => [record.id, outcomeFor(record, outcome)])
     setProgress(old => ({ ...old, ...Object.fromEntries(values) }))
+    // A stack's members are never followed and its result carries no word of it; a single send's result does.
+    if (outcome?.followed && item?.unit?.type !== 'stack') setFollowed(old => ({ ...old, [runPrimaryRecord(item).id]: outcome.followed }))
     return !values.some(([, value]) => value?.error)
   }
 
@@ -446,7 +461,7 @@ function ExactBatchAction({
   function closeResults() {
     if (checking || busy) return
     admitted.current = false
-    setApproval(null); setFinished(false); setProgress({}); setNote(''); setPickedStage(null)
+    setApproval(null); setFinished(false); setProgress({}); setFollowed({}); setNote(''); setPickedStage(null)
     task?.close()
   }
 
@@ -498,6 +513,7 @@ function ExactBatchAction({
         githubState={githubState}
         stage={stage}
         progress={progress}
+        followLine={followLine}
         onSelect={busy ? undefined : onSelect}
       />
       {note ? <p className="co-run-error" role="status">{note}</p> : null}
@@ -562,9 +578,10 @@ function activityRowItem(item) {
   return { ...item, detail: `Agent follow-up queued · ${record?.repo || record?.plan?.repo || item.project?.name || 'Project'}` }
 }
 
+// data-opens lets the page this row opens hand focus back to it on Back (TaskPane's focusOpener).
 function QuietRow({ item, onSelect, active = false }) {
   return (
-    <button type="button" className="co-run-quiet-row" onClick={() => onSelect?.(item)}>
+    <button type="button" className="co-run-quiet-row" data-opens={item.id} onClick={() => onSelect?.(item)}>
       {active ? <span className="co-working-icon"><Icon name={item.kind === 'review_in_progress' ? 'review' : 'refresh'} size={16} /></span> : <span className={'co-run-dot is-' + item.kind} aria-hidden="true" />}
       <span><strong>{itemHeading(item)}</strong><small>{item.detail}</small></span>
       <Icon name="right" size={14} />
@@ -685,14 +702,12 @@ function BatchOwnedFocus({ item, reviewStatus, onReview, onFeedback, onSetAutopi
   return (
     <div className="co-focus-unit">
       {item.kind === 'private_review' ? <ContributionDecision rec={record} reviewState={reviewStateFor(record, reviewStatus)} reviewAction={progressReviewAction(runUnitRecords(item), reviewStatus)} onReview={onReview} onFeedback={onFeedback} /> : null}
-      <SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />
-      <ContributionCard
+      <FocusedCard
         rec={record}
         reviewState={reviewStateFor(record, reviewStatus)}
+        chats={<SourceChatChoices records={runUnitRecords(item)} onFeedback={onFeedback} />}
         onSetAutopilot={onSetAutopilot}
         loadDiff={loadDiff}
-        initialExpanded
-        showDecision={false}
       />
     </div>
   )
@@ -721,14 +736,15 @@ function CheckAttentionFocus({ item, reviewStatus, onRefresh, onFeedback, onSetA
         ) : null}
         <SourceChatChoices records={records} onFeedback={onFeedback} />
       </section>
-      {records.map(record => (
+      {records.map(record => records.length === 1 ? (
+        <FocusedCard key={record.id} rec={record} reviewState={reviewStateFor(record, reviewStatus)} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} />
+      ) : (
         <ContributionCard
           key={record.id}
           rec={record}
           reviewState={reviewStateFor(record, reviewStatus)}
           onSetAutopilot={onSetAutopilot}
           loadDiff={loadDiff}
-          initialExpanded={records.length === 1}
           showDecision={false}
         />
       ))}
@@ -743,6 +759,7 @@ export function FocusedItem({
   onReview,
   onDismiss,
   onRestore,
+  onSettle,
   onSetAutopilot,
   onWithdraw,
   onMarkReady,
@@ -828,15 +845,9 @@ export function FocusedItem({
         onDismiss={onDismiss}
         onRestore={onRestore}
         onWithdraw={onWithdraw}
+        onSettle={onSettle}
       />
-      <ContributionCard
-        rec={record}
-        reviewState={reviewStateFor(record, reviewStatus)}
-        onSetAutopilot={onSetAutopilot}
-        loadDiff={loadDiff}
-        initialExpanded
-        showDecision={false}
-      />
+      <FocusedCard rec={record} reviewState={reviewStateFor(record, reviewStatus)} onSetAutopilot={onSetAutopilot} loadDiff={loadDiff} />
     </div>
   )
 }
@@ -855,10 +866,12 @@ export function ContributionRun({
   onSend,
   onSendStack,
   onMarkReady,
+  followAtSend = null,
   onFeedback,
   onReview,
   onDismiss,
   onRestore,
+  onSettle,
   onSetAutopilot,
   onWithdraw,
   onRefresh,
@@ -948,9 +961,12 @@ export function ContributionRun({
   const preparedPrItems = decisions.filter(item => runUnitRecords(item).some(record => record?.type === 'pr' && record?.status === 'prepared'))
   const otherPreparedItems = preparedItems.filter(item => !preparedPrItems.includes(item))
 
+  // An opened prepared PR is the page of the tab that lists it, so it never sits above the send bar and the tabs
+  // (owner's choice, 2026-11-23). Anything else that is opened keeps its place above them.
+  const openInPreparedTab = presentation === 'project' && !!selected && preparedPrItems.some(item => item.id === selected.id)
   const missingSelection = selectedId && !selectedId.startsWith('task:') && !selected
   const focus = (selected || missingTarget || missingSelection) ? (
-      <TaskPane id={selectedId} dock={false}>
+      <TaskPane id={selectedId} dock={false} back={openInPreparedTab ? NAMES.preparedPrs : ''}>
         <div className="co-run-focus-layout">
           <div className="co-run-focus-detail">
         {missingTarget || missingSelection ? (
@@ -967,6 +983,7 @@ export function ContributionRun({
             onReview={onReview}
             onDismiss={onDismiss}
             onRestore={onRestore}
+            onSettle={onSettle}
             onSetAutopilot={onSetAutopilot}
             onWithdraw={onWithdraw}
             onMarkReady={onMarkReady}
@@ -1006,7 +1023,7 @@ export function ContributionRun({
 
   return (
     <section className="co-run" aria-label="Contributions">
-      {focus}
+      {openInPreparedTab ? null : focus}
       {!actionCount(publishItems) && !batchOwnership.send ? <TaskPane id="task:send"><h3>Publication status</h3><p>No reviewed changes are waiting to send. Your contributions below show their current public or private status.</p><button className="co-btn co-btn-primary" onClick={() => task?.close()}>Review public contributions</button></TaskPane> : null}
       {!readyCount(readyItems) && !batchOwnership.ready ? <TaskPane id="task:ready"><h3>Review status</h3><p>No drafts are waiting for a review request. Check your public contributions for their current state.</p><button className="co-btn" onClick={() => task?.close()}>View public contributions</button></TaskPane> : null}
       <div className="co-decisions" aria-label="Ready for you">
@@ -1021,6 +1038,7 @@ export function ContributionRun({
         newPrStage={newPrStage}
         onSend={onSend}
         onSendStack={onSendStack}
+        followAtSend={followAtSend}
         onSelect={selectRunItem}
       />
 
@@ -1042,7 +1060,7 @@ export function ContributionRun({
       </div>
       {presentation === 'project' ? controls : null}
 
-      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedPrItems.length} prepared={<section className="co-prepared-tab" aria-label="Prepared PRs">
+      {presentation === 'project' ? <ProjectTabs reviewCount={reviewRequestCount} renderPullRequests={renderPublicWork} inventory={inventory} myJobs={projectProgress} myWork={myWork} edits={edits} editsCount={editsCount} defaultTab={defaultTab} preparedCount={preparedPrItems.length} openTab={openInPreparedTab ? 'prepared' : ''} openKey={selectedId} prepared={openInPreparedTab ? focus : <section className="co-prepared-tab" aria-label={NAMES.preparedPrs}>
         <p className="co-inventory-note">Prepared on your Möbius for you to inspect. Open one to see what would be sent.</p>
         <div className="co-run-list">{preparedPrItems.map(item => <QuietRow key={item.id} item={item} onSelect={selectRunItem} />)}</div>
       </section>} /> : null}

@@ -65,15 +65,17 @@ async function rendered(t) {
   return renderer
 }
 
-test('a run belongs to the exact repository, PR, code and target branch, bound to the live branch tip', () => {
+test('a run belongs to the exact repository, PR and code, and says whether it saw the target branch at its live tip', () => {
   const item = reviewItem({ repo: 'OWNER/PROJECT' })
   const reviewed = { id: 'exact-run', items: [item] }
   assert.deepEqual(reviewForPull([reviewed], pull()), { run: reviewed, item, exactBase: true })
   for (const [field, value] of [
-    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)], ['base_ref', 'release'],
+    ['repo', 'owner/another-project'], ['number', 8], ['head_sha', 'c'.repeat(40)],
   ]) {
     assert.equal(reviewForPull([{ items: [reviewItem({ [field]: value })] }], pull()), null, field)
   }
+  // The target branch is not part of the code's identity (GitHub retargets a PR): the review is found, never as bound to the live tip.
+  assert.equal(reviewForPull([{ items: [reviewItem({ base_ref: 'release' })] }], pull())?.exactBase, false, 'base_ref')
   assert.equal(reviewForPull([], pull()), null)
 })
 
@@ -348,19 +350,30 @@ test('SSR selecting a focused contribution retains the project inventory and his
   })
   for (const selectedId of ['', privateWork.id, 'task:pulls', 'task:review']) {
     // Selecting never hides inventory: All PRs keeps saved public work, Prepared PRs its list, My work its history.
+    // The one exception is the tab an opened prepared PR belongs to: its page is that tab's content, so that tab is the
+    // one shown whatever tab the project was on (owner's choice, 2026-11-23).
+    const opensPage = selectedId === privateWork.id
     const tabs = { all: ['Published work', 'Prepared PRs'], prepared: ['Private work'], mine: ['Accepted work', 'Historical work'] }
     for (const [defaultTab, labels] of Object.entries(tabs)) {
       const html = ui.render('ContributionRun', { run: current, selectedId, defaultTab }, { activeId: selectedId, host: null })
-      for (const label of labels) assert.match(html, new RegExp(label), `${label} remains listed on ${defaultTab} for ${selectedId}`)
+      if (opensPage) assert.match(html, /aria-selected="true"[^>]*>Prepared PRs/, `the opened prepared PR shows its own tab, not ${defaultTab}`)
+      else for (const label of labels) assert.match(html, new RegExp(label), `${label} remains listed on ${defaultTab} for ${selectedId}`)
       assert.doesNotMatch(html, /This contribution moved|Archived proposals/)
     }
   }
   const all = ui.render('ContributionRun', { run: current, defaultTab: 'all' }, { host: null })
   assert.doesNotMatch(all, /<strong>Private work<\/strong>/)
-  // Opening the row selects it above the tabs, like any other decision; no tab holds a second copy of its detail.
+  // Every row of the list carries the mark that lets the page it opens give focus back to it on Back.
+  const list = ui.render('ContributionRun', { run: current, defaultTab: 'prepared' }, { host: null })
+  assert.match(list, /class="co-run-quiet-row" data-opens="[^"]+"/)
+  // Opening the row draws its page inside the Prepared PRs tab, under the tab strip and the send bar, in place of the list
+  // (owner's choice, 2026-11-23; it used to open above the tabs and stay there whichever tab was shown).
   const selected = ui.render('ContributionRun', { run: current, selectedId: privateWork.id, defaultTab: 'all' }, { activeId: privateWork.id, host: null })
-  assert.match(selected, /Prepared PRs/)
-  assert.match(selected, /co-task-content|co-run-focus-detail/)
+  assert.ok(selected.indexOf('role="tablist"') > -1 && selected.indexOf('role="tablist"') < selected.indexOf('co-task-content'), 'the opened page is under the tab strip')
+  assert.ok(selected.indexOf('co-decisions') < selected.indexOf('co-task-content'), 'the send bar stays above the opened page')
+  assert.doesNotMatch(selected, /co-prepared-tab/, 'the page replaces the list it was opened from')
+  assert.match(selected, /aria-label="Back to Prepared PRs"/, 'a Back link is the way out')
+  assert.doesNotMatch(selected, /aria-label="Close action"/, 'and there is no X beside it')
 })
 
 test('SSR reviewed work waiting on a source check asks the owner, with the reason and the right action', async t => {
@@ -411,7 +424,7 @@ test('SSR a selected source check stays in focus while it is checked again and o
   ]) {
     const html = focusFor(reviewStatus)
     assert.doesNotMatch(html, /This contribution moved/, label)
-    assert.match(html, /class="co-task-content"[\s\S]*Change one/, label)
+    assert.match(html, /class="co-task-content[^"]*"[\s\S]*Change one/, label)
     assert.match(html, expected, label)
     assert.doesNotMatch(html, /Private review needed|Review all|>Review</, label)
   }

@@ -14,12 +14,13 @@ const effortRows = rows => rows.map(([value, label]) => ({ value, label }))
 // Provider default effort scales, as published by the shell's provider
 // registry. A model's `effort_levels` may narrow, reorder or extend them.
 export const PROVIDERS = {
-  codex: { label: 'OpenAI Codex', efforts: effortRows([['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high']]) },
-  claude: { label: 'Claude Code', efforts: effortRows([['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max'], ['ultracode', 'Ultracode']]) },
-  mobius: { label: 'Möbius', efforts: effortRows([['minimal', 'Minimal'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['max', 'Max']]) },
+  codex: { label: 'OpenAI Codex', short: 'Codex', efforts: effortRows([['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high']]) },
+  claude: { label: 'Claude Code', short: 'Claude', efforts: effortRows([['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max'], ['ultracode', 'Ultracode']]) },
+  mobius: { label: 'Möbius', short: 'Möbius', efforts: effortRows([['minimal', 'Minimal'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['max', 'Max']]) },
 }
 const titleCase = value => String(value).replace(/[-_]+/g, ' ').replace(/^./, letter => letter.toUpperCase())
 export const providerLabel = (provider, status) => status?.[provider]?.name || PROVIDERS[provider]?.label || titleCase(provider)
+const shortName = provider => PROVIDERS[provider]?.short || titleCase(provider)
 
 /** Same contract as the shell's modelEfforts: null levels use the provider
  *  scale, an empty list means the model takes no effort setting. */
@@ -104,6 +105,18 @@ export function EffortTrack({ efforts, value, onChange, disabled, label }) {
   </div>
 }
 
+/** The Default row's name: the model it resolves to, or (for a second pass) the first answer's own. */
+const defaultRowTitle = (name, keptName) => {
+  if (keptName) return name ? `${name} (first answer)` : 'The first answer’s model'
+  return name ? `Default (${name})` : 'Default model'
+}
+const modelIsOutOfReach = (provider, onlyProvider) => Boolean(onlyProvider) && provider !== onlyProvider
+/** What a model row says under its name: why it cannot be picked, or its provider. */
+export function modelRowNote({ provider, configured, status, onlyProvider = '' }) {
+  if (modelIsOutOfReach(provider, onlyProvider)) return `${shortName(provider)} can’t continue this ${shortName(onlyProvider)} conversation`
+  return configured ? providerLabel(provider, status) : `${providerLabel(provider, status)} · Not connected`
+}
+
 function ModelRow({ provider, title, subtitle, selected, disabled, onClick }) {
   return <button type="button" className={'co-model-row' + (selected ? ' is-selected' : '')} aria-pressed={selected} disabled={disabled} onClick={onClick}>
     <span className="co-model-mark"><ProviderMark provider={provider} /></span>
@@ -128,13 +141,16 @@ export function defaultRowChoice(defaultChoice, explicitDefault, effort) {
   return { provider: defaultChoice.provider, model: defaultChoice.model, effort: effort || defaultChoice.effort || '' }
 }
 
-/** `choice` is `{provider, model, effort}`; an empty choice means the launch
+/** `onlyProvider` limits the list to one provider: a conversation cannot change provider once it has run, so the other
+ *  providers' models stay in the list, dimmed, with that reason. `keptName` says the Default row is the agent a conversation
+ *  already has (named with "(first answer)"), not the launch default.
+ *  `choice` is `{provider, model, effort}`; an empty choice means the launch
  *  default, which the server resolves when the work starts. `defaultChoice`
  *  names that resolved model when the caller knows it, and `defaultHint` says
  *  which owner setting it comes from. `explicitDefault` marks a default the
  *  owner saved in this app rather than one the server resolves. Effort memory
  *  is per provider and local to this launch. */
-export function AgentModelSettings({ token, choice, onChange, defaultChoice = null, defaultHint = 'Your default model', explicitDefault = false }) {
+export function AgentModelSettings({ token, choice, onChange, defaultChoice = null, defaultHint = 'Your default model', explicitDefault = false, onlyProvider = '', keptName = false }) {
   const [registry, setRegistry] = useState(null)
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
@@ -169,7 +185,7 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
   const defaultModel = defaultChoice?.model ? modelFor(defaultChoice.provider, defaultChoice.model) : null
   const defaultName = defaultModel?.label || defaultChoice?.model
   const defaultEffort = defaultChoice?.effort ? modelEfforts(defaultChoice.provider, defaultModel).find(effort => effort.value === defaultChoice.effort)?.label : ''
-  const defaultTitle = defaultName ? `Default (${defaultName})` : 'Default model'
+  const defaultTitle = defaultRowTitle(defaultName, keptName)
   // The default model with its own effort chosen is still the Default row: the
   // run names the model explicitly, but the list does not jump to another row.
   const matchesDefault = !!(choice?.model && defaultChoice?.model && choice.provider === defaultChoice.provider && choice.model === defaultChoice.model)
@@ -181,7 +197,7 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
     ? { provider: choice.provider, title: defaultTitle, detail: defaultEfforts.find(effort => effort.value === defaultEffortValue)?.label }
     : choice?.model
       ? { provider: choice.provider, title: selected?.label || choice.model, detail: selectedEfforts.find(effort => effort.value === selectedEffort)?.label }
-      : { provider: defaultChoice?.provider || '', title: defaultTitle, detail: defaultEffort || defaultHint }
+      : { provider: defaultChoice?.provider || '', title: defaultTitle, detail: defaultEffort && keptName ? `${defaultEffort} · ${defaultHint}` : defaultEffort || defaultHint }
 
   function chooseModel(provider, model) {
     if (!model) return onChange?.(defaultRowChoice(defaultChoice, explicitDefault, defaultEffortValue))
@@ -212,8 +228,8 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
       {rows.map(({ provider, model, configured }) => {
         const isSelected = choice?.provider === provider && choice?.model === model.id && !matchesDefault
         return <div key={`${provider}:${model.id}`}>
-          <ModelRow provider={provider} title={model.label || model.id} subtitle={configured ? providerLabel(provider, status) : `${providerLabel(provider, status)} · Not connected`}
-            selected={isSelected} disabled={!configured} onClick={() => chooseModel(provider, model)} />
+          <ModelRow provider={provider} title={model.label || model.id} subtitle={modelRowNote({ provider, configured, status, onlyProvider })}
+            selected={isSelected} disabled={!configured || modelIsOutOfReach(provider, onlyProvider)} onClick={() => chooseModel(provider, model)} />
           {isSelected && selectedEfforts.length ? <div className="co-effort-indent"><EffortTrack efforts={selectedEfforts} value={selectedEffort} onChange={chooseEffort} disabled={!configured} label={`Reasoning effort for ${model.label || model.id}`} /></div> : null}
         </div>
       })}
@@ -223,37 +239,30 @@ export function AgentModelSettings({ token, choice, onChange, defaultChoice = nu
   </section>
 }
 
-/** What a conversation's saved agent is called, from its app-chat summary and the
- *  model registry: `{provider, title, detail}`. No saved model means the chat
- *  default of its provider. Null when there is no conversation. */
-export function conversationAgent(chat, registry) {
-  if (!chat?.provider) return null
-  if (!chat.model) return { provider: chat.provider, title: 'Default model', detail: providerLabel(chat.provider) }
-  const model = (registry?.providers?.[chat.provider] || []).find(item => item.id === chat.model)
-  const effort = modelEfforts(chat.provider, model).find(item => item.value === chat.effort)?.label || ''
-  return { provider: chat.provider, title: model?.label || chat.model, detail: effort }
-}
-
 const AGENT_KEPT = 'Same agent as the first answer, so it builds on that work'
 
-/** The agent a second pass runs on, read-only: the PR's conversation keeps its
- *  agent, so the window names it instead of offering a choice. `scope` is the
- *  conversation's app-chat scope. Unreadable, it says so without a name. */
-export function ConversationAgent({ token, scope }) {
-  const [agent, setAgent] = useState(null)
+/** The agent a second pass runs on. The PR's conversation keeps its agent unless the owner picks another model of the same
+ *  provider (it cannot change provider once it has run). `scope` is the conversation's app-chat scope and `chatId` the exact conversation to read in it. Until the conversation
+ *  is read, or when it cannot be, the window names it without a choice. */
+export function ConversationAgent({ token, scope, chatId = null, choice, onChange }) {
+  const [chat, setChat] = useState(null)
   useEffect(() => {
     let alive = true
-    Promise.all([readJson(token, `/api/app-chats?scope=${encodeURIComponent(scope)}`), readJson(token, '/api/models').catch(() => null)])
-      .then(([chats, registry]) => { if (alive) setAgent(conversationAgent(chats?.[0], registry)) })
+    readJson(token, `/api/app-chats?scope=${encodeURIComponent(scope)}`)
+      .then(chats => {
+        const found = chatId ? chats?.find(row => String(row.id) === String(chatId)) : chats?.[0]
+        if (alive) setChat(found?.provider ? found : null)
+      })
       .catch(() => {})
     return () => { alive = false }
-  }, [token, scope])
-  const detail = agent?.detail ? `${agent.detail} · ${AGENT_KEPT}` : AGENT_KEPT
-  return <section className="co-agent-picker" aria-label="Agent">
+  }, [token, scope, chatId])
+  if (!chat) return <section className="co-agent-picker" aria-label="Agent">
     <div className="co-agent-trigger co-agent-kept">
       <span className="co-agent-trigger-label">Agent</span>
-      <span className="co-model-mark"><ProviderMark provider={agent?.provider || ''} /></span>
-      <span className="co-agent-trigger-value"><strong>{agent?.title || 'This PR’s conversation'}</strong><small>{detail}</small></span>
+      <span className="co-model-mark"><ProviderMark provider="" /></span>
+      <span className="co-agent-trigger-value"><strong>This PR’s conversation</strong><small>{AGENT_KEPT}</small></span>
     </div>
   </section>
+  return <AgentModelSettings token={token} choice={choice} onChange={onChange} defaultChoice={{ provider: chat.provider, model: chat.model || '', effort: chat.effort || '' }}
+    defaultHint={AGENT_KEPT} onlyProvider={chat.provider} keptName />
 }

@@ -315,23 +315,22 @@ test('tabs carry GitHub-style count pills: comments, files and a checks dot, no 
   assert.doesNotMatch(html, /co-change-total/) // the +adds −dels stay inside the Files tab
 })
 
-test('several chats of one kind fold into one Open chat dropdown, one stays a plain button', async t => {
+test('several chats share one Chats button whatever their kind, one chat stays a plain button', async t => {
   const pr = { number: 9, repository: { nameWithOwner: 'team/repo' }, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', url: 'https://github.com/team/repo/pull/9' }
-  const two = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), provenance: [
+  const three = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), provenance: [
     { chat_id: 'c1', role: 'source', title: 'Build the thing' },
     { chat_id: 'c2', role: 'source', title: 'Fix the thing' },
     { chat_id: 'c3', role: 'review', title: 'Review it' },
   ] })
-  if (!two) return
-  assert.match(two, /aria-label="Chats 2 · where it started" data-tip="Chats 2 · where it started"/)
-  assert.match(two, /co-chat-group/)
-  assert.doesNotMatch(two, /Where it started #1/) // the list opens on demand, closed by default
-  assert.match(two, /aria-label="Open chat · review" data-tip="Open chat · review · Review it"/) // a single review chat stays a plain icon button, its own title in the tooltip
+  if (!three) return
+  assert.equal(three.match(/co-gh-chat-link/g).length, 1, 'three chats of two kinds are one button, never one per kind')
+  assert.match(three, /aria-haspopup="menu" aria-expanded="false" aria-label="Chats 3"/)
+  assert.doesNotMatch(three, /Build the thing|Where it started/) // the list opens on demand, closed by default
   const one = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), provenance: [{ chat_id: 'c1', role: 'source', title: 'Build the thing' }] })
   assert.match(one, /aria-label="Open chat" data-tip="Open chat · Build the thing"/, 'a PR with one chat says Open chat, then that chat\'s title')
   const plain = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), provenance: [{ chat_id: 'c1', role: 'source', title: 'Source conversation' }] })
   assert.match(plain, /aria-label="Open chat" data-tip="Open chat"/, 'a stand-in role title is not repeated in the tooltip')
-  assert.doesNotMatch(one, /where it started|co-chat-group/)
+  assert.doesNotMatch(one, /aria-haspopup="menu" aria-expanded="false" aria-label="Chats/)
 })
 
 test('files read as one line each, coloured by change, and filter once the list is long', async t => {
@@ -418,4 +417,42 @@ test('a detail page for an escalated PR carries the escalation under its descrip
   if (!html) return
   assert.ok(html.indexOf('Needs a call.') > html.indexOf('co-gh-description'), 'under the description')
   assert.match(html, />Resume<\/button>/)
+})
+
+// The page shows the PR machine's live answer, so a saved "Changes requested" note that the sync has not cleared yet cannot contradict it.
+const authored = (reviews, extra = {}) => ({ number: 9, state: 'OPEN', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', mergeable: 'MERGEABLE',
+  author: { login: 'me' }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' }, url: 'https://github.com/team/repo/pull/9',
+  latestOpinionatedReviews: { nodes: reviews }, viewerLatestReview: null, reviewThreads: { nodes: [] },
+  commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, ...extra })
+const opinion = (login, state, oid = 'a'.repeat(40)) => ({ state, author: { login, __typename: 'User' }, commit: { oid } })
+const staleNote = { attention: { type: 'changes_requested', url: 'https://github.com/team/repo/pull/9#pullrequestreview-777' } }
+
+test('a saved Changes requested note is replaced by the green notice once the machine says the PR was approved', async t => {
+  const pr = authored([opinion('dana', 'APPROVED')])
+  const html = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr, login: 'me' }) } })
+  if (!html) return
+  assert.match(html, /class="co-pr-feedback-flag is-clear"/)
+  assert.match(html, /dana approved this version\./)
+  assert.doesNotMatch(html, /is-blocker/)
+  assert.match(html, /co-sticky-mark co-icon is-clear|co-icon co-sticky-mark is-clear/, 'the phone title bar follows the same flag')
+})
+
+test('a change request that still stands keeps the red flag, now naming who asked', async t => {
+  const pr = authored([opinion('dana', 'CHANGES_REQUESTED')])
+  const html = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr, login: 'me' }) } })
+  if (!html) return
+  assert.match(html, /class="co-pr-feedback-flag is-blocker"/)
+  assert.match(html, /dana asked for changes\. Read the review under Comments\./)
+  assert.doesNotMatch(html, /is-clear/)
+})
+
+test('a dismissed request leaves no flag at all, and unread reviews leave the saved note', async t => {
+  const dismissed = authored([])
+  const none = await render(t, 'PullRequestDetail', { pr: dismissed, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr: dismissed, login: 'me' }) } })
+  if (!none) return
+  assert.doesNotMatch(none, /co-pr-feedback-flag/)
+  const unread = authored(undefined, { latestOpinionatedReviews: null })
+  const kept = await render(t, 'PullRequestDetail', { pr: unread, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr: unread, login: 'me' }) } })
+  assert.match(kept, /class="co-pr-feedback-flag is-blocker"/)
+  assert.match(kept, /Not addressed yet/)
 })

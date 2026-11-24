@@ -251,7 +251,7 @@ test('the read-only PR link helper has its own routing row outside maintainer ri
 test('the Send-in-chat guidance describes the live chat card and its one action', () => {
   const publish = read('contributing/publish.md').replace(/\s+/g, ' ')
   assert.match(publish, /in the chat whose work it is/)
-  assert.match(publish, /every other contribution of this chat that is ready with its whole stack \(`--chat-id`, default `\$CHAT_ID`, required; unreviewed work is never pulled in\)/)
+  assert.match(publish, /every other contribution of this chat that can be sent now with its whole stack \(`--chat-id`, default `\$CHAT_ID`, required; unreviewed, held, failed or still-unconfirmed work is never pulled in\)/)
   assert.match(publish, /It refuses the card if any of those, stack layers included, is not all clear for its current head or is from another chat/)
   assert.match(publish, /one that belongs to another chat is never shown or sent/)
   assert.match(publish, /All of them or none/)
@@ -262,6 +262,13 @@ test('the Send-in-chat guidance describes the live chat card and its one action'
   const readme = read('README.md').replace(/\s+/g, ' ')
   assert.match(readme, /host-attested chat/)
   assert.match(readme, /"expand": false/)
+})
+
+test('the chat card goes last in the reply, and no second card asks what happened to it', () => {
+  const publish = read('contributing/publish.md').replace(/\s+/g, ' ')
+  assert.match(publish, /\*\*Put the card last\.\*\*/)
+  assert.match(publish, /print the card as the final thing in the reply/)
+  assert.match(publish, /Do not follow it with a question card asking whether the work was sent/)
 })
 
 test('prepared PRs name the bug cause and show visible changes with attached screenshots', () => {

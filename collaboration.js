@@ -5,6 +5,8 @@ import { mayWrite } from './pr-machine.js'
 import { sameLogin } from './domain.js'
 
 export { PR_FIELDS } from './api.js'
+// What one agent review says now (review-reading.js) lives in its own module; the screens keep importing it from here.
+export { OWNER_ITEM_STATES, REVIEW_STATE_NAMES, ignoreKey, ignoredNote, reviewBlocked, reviewItemProgress, reviewReading, reviewRunHalted, reviewRunStateLabel, reviewStartedAt, withIgnoreNote, withoutIgnoreNote } from './review-reading.js'
 export const mayAssign = permission => ['TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN'].includes(permission)
 // Merge rights are write rights: the machine owns the one list.
 export const mayMerge = mayWrite
@@ -161,8 +163,6 @@ export async function collaborationRequest(token, appId, path, body) {
 // base_ref, base_sha, state and an optional `public_review: {state, url}`.
 // Prompts, findings and approval wording stay in the owning conversation.
 export const runDetailsElsewhere = run => run?.details_in_owning_chat === true
-// States where the owner, not the agent, holds the next step.
-export const OWNER_ITEM_STATES = new Set(['needs_you', 'failed', 'merge_unknown', 'ready_unknown', 'verdict_pending', 'verdict_unknown'])
 // Own runs carry their frozen options; minimized runs the top-level flag.
 export const runPostsReview = run => runDetailsElsewhere(run) ? run.post_review === true : run?.options?.post_review === true
 // Observe of a run this app does not own is refused with this code: the core
@@ -175,60 +175,6 @@ export const notOursToObserve = error => error?.status === 403 && error?.code ==
 export const reviewRunTitle = run => run.mode === 'review_fix_merge' ? 'Review, fix & merge' : run.mode === 'review_merge' ? 'Review & merge'
   : runPostsReview(run) ? 'GitHub review' : run.mode === 'review' ? 'Private review' : 'Review run'
 
-export const REVIEW_STATE_NAMES = { reviewing: 'Reviewing', repairing:'Fixing review findings', pushing:'Sending scoped fix', marking_ready:'Opening for review', ready_unknown:'Readiness outcome needs checking', push_unknown:'Fix outcome needs checking', pending: 'Waiting to review', all_clear: 'Review clear', needs_you: 'Needs you', merged: 'Merged', queued: 'In merge queue', failed: 'Failed', starting: 'Starting', merging: 'Merging', merge_unknown: 'Outcome needs checking', verdict_pending: 'Verdict waiting for you', verdict_posting: 'Submitting verdict', verdict_unknown: 'Verdict outcome needs checking', complete: 'Complete', stopped: 'Stopped', interrupted:'Interrupted', paused: 'Paused', awaiting_owner: 'Waiting for your answer' }
-
-// One derivation of run and item progress for every run view. Execution
-// belongs to the conversation; saved verdicts and public receipts survive it.
-const SETTLED_ITEMS = new Set(['all_clear', 'merged', 'queued', 'complete'])
-const HALTED_RUNS = new Set(['stopped', 'failed', 'interrupted'])
-export const reviewRunStateLabel = run => REVIEW_STATE_NAMES[run.execution_state] || REVIEW_STATE_NAMES[run.state] || run.state
-// `turn` says whose move the review leaves on its PR: 'agent' while it works,
-// 'owner' while a decision, an answer or a fix waits on you, 'author' once your
-// review is out and the PR's author is next, 'none' once it is settled. The
-// saved word needs_you is what the review FOUND; the verdict receipts say what
-// you already did about it, and only they can hand the move to the author.
-// GitHub refuses "request changes" on your own PR, so a posted one is always on
-// someone else's. A posted plain review hands a PR over only when `own` is
-// known to be false; null (unknown) never does.
-// `ignored` is the owner's notes of findings set aside (ignoreKey -> { reason }):
-// a finding the owner ignored for this exact version no longer waits on them.
-export function reviewItemProgress(run, item, { own = null, ignored = null } = {}) {
-  const found = item.state === 'needs_you'
-  const verdict = item.verdict_proposal
-  const requested = found && verdict?.state === 'posted' && verdict.event === 'REQUEST_CHANGES'
-  const handedOver = requested || (found && own === false && !verdict && item.public_review?.state === 'posted')
-  const dropped = found && verdict?.state === 'discarded'
-  const waived = !handedOver && !!ignoredNote(item, ignored)
-  const settled = SETTLED_ITEMS.has(item.state) || handedOver || dropped || waived
-  const halted = !settled && HALTED_RUNS.has(run.execution_state)
-  const waiting = !settled && run.execution_state === 'awaiting_owner'
-  const label = requested ? 'Changes requested' : handedOver ? 'Review posted' : dropped ? 'Verdict discarded' : waived ? 'Set aside'
-    : halted ? 'Not finished' : REVIEW_STATE_NAMES[item.state] || item.state
-  const turn = handedOver ? 'author' : settled ? 'none' : halted || waiting || OWNER_ITEM_STATES.has(item.state) ? 'owner' : 'agent'
-  return { label, halted, waiting, settled, turn }
-}
-
-// One review of one PR at one exact version: what the owner's "ignore" note is
-// filed under, so a new version of the PR is reviewed and judged afresh.
-export const ignoreKey = item => `${String(item.repo).toLowerCase()}#${item.number}@${item.head_sha}`
-// The notes are kept by exact version, so they stay few: only the newest few hundred are remembered.
-const MAX_IGNORE_NOTES = 200
-export function withIgnoreNote(notes, item, reason, now = new Date().toISOString()) {
-  const next = { ...notes, [ignoreKey(item)]: { reason, at: now } }
-  return Object.fromEntries(Object.entries(next).sort(([, a], [, b]) => String(b.at).localeCompare(String(a.at))).slice(0, MAX_IGNORE_NOTES))
-}
-export function withoutIgnoreNote(notes, item) {
-  const { [ignoreKey(item)]: removed, ...rest } = notes || {}
-  return rest
-}
-// The owner's note setting aside this review's findings, if there is one for them.
-export const ignoredNote = (item, ignored) => (item.state === 'needs_you' ? ignored?.[ignoreKey(item)] || null : null)
-// When the review now on screen began: a run that pushed a fix reviews the new version
-// from the moment you pressed Push, not from when the run itself started.
-export function reviewStartedAt(run, item) {
-  const pushes = (item?.repair_attempts || []).filter(entry => entry.state === 'pushed').map(entry => entry.decided_at)
-  return [run?.created_at, ...pushes].filter(Boolean).sort((a, b) => (Date.parse(b) || 0) - (Date.parse(a) || 0))[0] || null
-}
 // The fix an agent prepared that waits for the owner's Push. The platform saves the
 // fix's new commit as `head_sha` and the PR version it builds on as `from_sha`
 // (contribution_reviews.py, propose repair), so `base` is the version it answers to.
@@ -237,7 +183,6 @@ export function waitingRepair(item) {
   if (!attempt) return null
   return { id: attempt.id, commit: attempt.head_sha || '', base: attempt.from_sha || '', files: Array.isArray(attempt.files) ? attempt.files : [], summary: attempt.summary || '' }
 }
-export const reviewRunHalted = run => run.state !== 'complete' && HALTED_RUNS.has(run.execution_state)
 
 // Public outcomes a run saved before GitHub settled them. The server's observe
 // step is read-only reconciliation, so the view settles them itself: a queued
@@ -253,10 +198,35 @@ const notOurs = new Set()
 // not know the option ignores it and answers in full, with no `view` marker; a short run is marked so a screen that shows
 // documents knows to read the one run first (ui/useRunDocuments.js). The runs and items carry every field the lists, rows
 // and the PR machine read.
+//
+// The list is paged. A platform that knows paging answers `has_more` and `next_cursor`: its first page holds every run that
+// is not finished plus the newest finished ones, so nothing that waits on the owner is ever cut; the rest is older finished
+// history. An older platform cuts the list at one page of 100 and says nothing, so a full page is read as "there may be more".
+// A list that is cut says so in `cut`: 'finished' (older finished runs are not here; every unfinished one is) or 'any' (an older
+// platform's full page: an unfinished run may be missing too). A list with nothing hidden has no `cut`, so a screen never presents
+// a cut list as the whole of it.
+const RUNS_PAGE = 100
+const pagesKnown = list => typeof list?.has_more === 'boolean'
+function cutOf(list) {
+  if (pagesKnown(list)) return list.has_more ? { cut: 'finished' } : {}
+  return (list?.runs || []).length >= RUNS_PAGE ? { cut: 'any' } : {}
+}
+// A run another conversation owns is the same short copy in both forms: it has no documents to read.
+const withMarkedRuns = list => (list?.view === 'summary' ? { ...list, runs: (list.runs || []).map(run => (runDetailsElsewhere(run) ? run : { ...run, summary_only: true })) } : list)
 const runsList = async (token, appId) => {
   const list = await collaborationRequest(token, appId, 'review-runs?view=summary')
-  // A run another conversation owns is the same short copy in both forms: it has no documents to read.
-  return list?.view === 'summary' ? { ...list, runs: (list.runs || []).map(run => (runDetailsElsewhere(run) ? run : { ...run, summary_only: true })) } : list
+  return { ...withMarkedRuns(list), ...cutOf(list) }
+}
+
+// The next page of older finished runs after `list` (what the first read answered), added to it. The list is returned as it was
+// when the platform has no further page to give; a cursor it refuses (400) throws, and the caller keeps what it has.
+export async function moreReviewRuns(token, appId, list) {
+  if (!list?.has_more || !list.next_cursor) return list
+  const page = await collaborationRequest(token, appId, `review-runs?view=summary&cursor=${encodeURIComponent(list.next_cursor)}`)
+  const known = new Set((list.runs || []).map(run => run.id))
+  const more = (withMarkedRuns(page)?.runs || []).filter(run => !known.has(run.id))
+  const { cut, ...rest } = list
+  return { ...rest, runs: [...(list.runs || []), ...more], has_more: page.has_more === true, next_cursor: page.next_cursor || null, ...(page.has_more === true ? { cut: 'finished' } : {}) }
 }
 
 // Shows the saved list at once (onList), then re-reads it after any due
@@ -323,8 +293,8 @@ export function reviewRunRequest(choice) {
 // shell's own sheet comes first, for exactly the body about to be sent: a cancel or a refusal is the outcome and nothing is sent.
 // `onConfirmed` runs once the owner has nothing left to confirm, just before the request goes out, so the app's own sheet can say
 // "Merging…" only from then on.
-async function publicWrite(token, appId, path, body, { code, words, receipt, action, shellConfirm, onConfirmed }) {
-  const stopped = action && shellConfirm ? await shellConfirm(action, {}, body) : null
+async function publicWrite(token, appId, path, body, { code, words, receipt, action, scope = {}, shellConfirm, onConfirmed }) {
+  const stopped = action && shellConfirm ? await shellConfirm(action, scope, body) : null
   if (stopped) return stopped
   onConfirmed?.()
   let result
@@ -428,10 +398,11 @@ export const previewPostedFindings = (token, appId, run, item) =>
     { repo: item.repo, number: item.number, head_sha: item.head_sha })
 
 // Post exactly the previewed words, once, as a plain comment review at the reviewed version. Same
-// outcome shapes as mergePull.
-export const postFindings = (token, appId, run, item, preview) => publicWrite(token, appId,
+// outcome shapes as mergePull. `shell` is { shellConfirm, onConfirmed } of publicWrite: Möbius confirms the same words first.
+export const postFindings = (token, appId, run, item, preview, shell = {}) => publicWrite(token, appId,
   `review-runs/${encodeURIComponent(run.id)}/post`,
   { repo: item.repo, number: item.number, head_sha: item.head_sha, preview_sha256: preview.preview_sha256 }, {
+    action: 'post_findings', scope: { run_id: run.id }, ...shell,
     code: 'post_unconfirmed', words: 'GitHub may have posted it. Check the pull request before trying again.',
     receipt: result => result?.state === 'posted' ? { state: 'posted', url: result.url || '' } : null,
   })
@@ -452,29 +423,41 @@ export async function assignPulls(token, appId, pulls, login) {
   return outcomes
 }
 
-// A run belongs to the PR's exact code (repo, number, head) and target branch,
-// never a lookalike PR. The branch tip keeps moving as other work merges, so
-// `exactBase` says whether the run saw the current tip instead of hiding it.
-export function reviewForPull(runs, pr) {
-  if (!pr.headRefOid || !pr.baseRefName) return null
-  const matches = runs.flatMap(run => {
-    const item = run.items?.find(item => item.repo.toLowerCase() === pr.repository.nameWithOwner.toLowerCase()
-      && item.number === pr.number && item.head_sha === pr.headRefOid && item.base_ref === pr.baseRefName)
-    return item ? [{ run, item, exactBase: !!baseTip(pr) && item.base_sha === baseTip(pr) }] : []
-  })
-  // Prefer the run on the current branch tip; otherwise the newest for this code.
+// Every saved review of one PR (repo and number), at any version, newest first by when its run began. The one place a PR is
+// matched to its reviews: the row, the Review tab and a saved record's frame all start from here.
+const newestFirst = (a, b) => (Date.parse(b.run.created_at || '') || 0) - (Date.parse(a.run.created_at || '') || 0)
+export const reviewsOfPr = (runs, repo, number) => (runs || []).flatMap(run => (run.items || [])
+  .filter(item => String(item.repo).toLowerCase() === String(repo).toLowerCase() && item.number === number)
+  .map(item => ({ run, item }))).sort(newestFirst)
+
+// A run belongs to the PR's exact code (repo, number, head), never a lookalike PR. The target branch is not part of that
+// identity: GitHub retargets a PR (its parent branch merged) without changing its code, and the review of that code still
+// stands. `exactBase` says whether the run saw the branch the PR is aimed at, at its current tip, instead of hiding the
+// difference. Prefer the run on the current branch tip; otherwise the newest for this code.
+function reviewAtHead(reviews, pr) {
+  const matches = reviews.filter(({ item }) => !!pr.headRefOid && item.head_sha === pr.headRefOid)
+    .map(review => ({ ...review, exactBase: !!baseTip(pr) && review.item.base_sha === baseTip(pr) && review.item.base_ref === pr.baseRefName }))
   return matches.find(match => match.exactBase) || matches[0] || null
 }
+// A review made against another branch than the one the PR is aimed at now. The review of the same code still stands (above), but it did not see
+// this branch: the Review tab says so, and a fact that speaks of the review as current for this PR (the Merge sheet's) leaves it out. A tip that
+// moved on the same branch is not this (`exactBase` is false then too, and the branch is the same). Nothing is claimed where either side is unknown.
+export const reviewedOtherBranch = (review, pr) => !!review?.item?.base_ref && !!pr?.baseRefName && review.item.base_ref !== pr.baseRefName
+
+// A PR whose target was not read is not matched at all.
+export const reviewForPull = (runs, pr) => (pr.headRefOid && pr.baseRefName ? reviewAtHead(reviewsOfPr(runs, pr.repository.nameWithOwner, pr.number), pr) : null)
 
 // The newest review of this PR at some other version, for when the PR has
 // changed since it was reviewed: reviewForPull only matches the current head, and
 // "never reviewed" would be wrong.
-export function earlierReviewForPull(runs, pr) {
-  const key = `${pr.repository.nameWithOwner.toLowerCase()}#${pr.number}`
-  const matches = (runs || []).flatMap(run => (run.items || [])
-    .filter(item => `${item.repo.toLowerCase()}#${item.number}` === key && item.head_sha !== pr.headRefOid)
-    .map(item => ({ run, item })))
-  return matches.sort((a, b) => Date.parse(b.run.created_at || '') - Date.parse(a.run.created_at || ''))[0] || null
+export const earlierReviewForPull = (runs, pr) => reviewsOfPr(runs, pr.repository.nameWithOwner, pr.number).find(({ item }) => item.head_sha !== pr.headRefOid) || null
+
+// The review of this PR the PR machine reads (pr-facts.js): the one at the PR's current code, else the newest earlier one.
+// It is the same choice as the Review tab's, without needing the target branch to have been read.
+export function reviewOfPull(runs, pr) {
+  if (!pr) return null
+  const all = reviewsOfPr(runs, pr.repository?.nameWithOwner, pr.number)
+  return reviewAtHead(all, pr) || all[0] || null
 }
 
 // What each "Who sees the result?" choice grants (the review window's switch, ui/ReviewConfirmation.jsx).

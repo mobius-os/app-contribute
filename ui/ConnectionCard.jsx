@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { openGithubSettings } from '../github-connection.js'
 import { Icon } from './Icons.jsx'
 import { DEFAULT_STAGE, stageWords } from '../publication-stage.js'
@@ -6,9 +6,11 @@ import { ReviewPromptSettings } from './ReviewPromptSettings.jsx'
 import { DefaultAgentSettings } from './DefaultAgentSettings.jsx'
 import { NAMES } from '../names.js'
 import { Shine } from './Shine.jsx'
+import { ReviewDialog } from './ReviewDialog.jsx'
 // Component-local settings layout. The app shell keeps its existing theme tokens.
 export const SETTINGS_CSS = `
-.co-settings-workspace { box-sizing:border-box; width:min(820px,calc(100vw - 32px)); height:min(947px,calc(100dvh - 110px)); max-height:calc(100dvh - 110px); display:flex; flex-direction:column; padding:20px; overflow:hidden; scrollbar-width:none; }
+.co-settings-workspace { box-sizing:border-box; flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; padding:20px; overflow:hidden; scrollbar-width:none; }
+.co-dialog[open]:has(> .co-settings-workspace) { display:flex; width:min(820px,calc(100% - 40px)); height:min(780px,calc(100% - 80px)); overflow:hidden; }
 .co-settings-workspace::-webkit-scrollbar,.co-settings-content::-webkit-scrollbar { display:none; }
 .co-settings-workspace > header { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; margin:0; padding-bottom:12px; border-bottom:1px solid var(--border); }
 .co-settings-layout { flex:1; min-height:0; display:flex; }
@@ -33,38 +35,25 @@ export const SETTINGS_CSS = `
 .co-set-row .co-btn { flex:0 0 auto; gap:8px; height:40px; min-height:40px; padding:0 12px; font-size:var(--co-text-meta); }
 .co-settings-workspace > header .co-btn co-btn-quiet { display:grid; place-items:center; width:44px; min-height:44px; padding:0; border:0; border-radius:var(--co-radius-field); background:none; color:var(--muted); cursor:pointer; }
 .co-settings-workspace > header .co-btn co-btn-quiet:hover { background:var(--surface-2); color:var(--text); }
-@media(max-width:650px) { .co-set-row.has-choice { flex-wrap:wrap; } .co-set-row.has-choice > .co-set-text { min-width:200px; } .co-set-row.has-choice > .co-seg { margin-left:48px; } .co-settings-workspace { position:fixed; inset:68px 16px auto; width:auto; height:auto; max-height:calc(100dvh - 84px); padding:16px; overflow-y:auto; } .co-settings-content .co-prompt-settings textarea { flex:none; min-height:240px; } .co-set-row { flex-wrap:wrap; } }
+@media(max-width:680px) { .co-dialog[open]:has(> .co-settings-workspace) { width:calc(100% - 24px); height:min(780px,calc(100% - 12px - max(22px,env(safe-area-inset-bottom)))); } }
+@media(max-width:650px) { .co-set-row.has-choice { flex-wrap:wrap; } .co-set-row.has-choice > .co-set-text { min-width:200px; } .co-set-row.has-choice > .co-seg { margin-left:48px; } .co-settings-workspace { padding:16px; } .co-settings-content .co-prompt-settings textarea { flex:none; min-height:240px; } .co-set-row { flex-wrap:wrap; } }
 `
 
 
-// One settings surface, opened on demand. It shows which GitHub account
-// Contribute uses; connecting or changing that account happens in Möbius
-// Settings, which owns the instance-wide GitHub connection.
-export function ConnectionSettings(props) {
-  const ref = useRef(null)
-  const [open, setOpen] = useState(false)
-  const accountLabel = props.conn?.state === 'connected' && props.conn?.login
-    ? props.conn.login
-    : props.conn?.state === 'disconnected' ? 'Connect GitHub' : 'GitHub'
-  const accountStatus = props.conn?.state === 'connected' ? 'GitHub connected' : accountLabel
-  useEffect(() => {
-    if (!open) return
-    const outside = event => { if (ref.current && !ref.current.contains(event.target)) ref.current.open = false }
-    const escape = event => { if (event.key === 'Escape') { ref.current.open = false; ref.current.querySelector('summary')?.focus() } }
-    document.addEventListener('pointerdown', outside)
-    document.addEventListener('keydown', escape)
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) }
-  }, [open])
-  return <details className="co-settings" ref={ref} onToggle={event => {
-    const next = event.currentTarget.open
-    setOpen(next)
-    if (next) void props.onChanged?.()
-  }}>
-    <summary aria-label={`${accountStatus}${props.conn?.state === 'connected' && props.conn?.login ? ` as ${props.conn.login}` : ''} — Contribute settings`} title={`${accountStatus} · Settings`}>
-      <Icon name="settings" size={20} /><span className="co-label-long">{NAMES.settings}</span><span className="co-label-short">Settings</span>
-    </summary>
-    {open ? <div className="co-settings-panel co-settings-workspace"><style>{SETTINGS_CSS}</style>
-      <header><h2>{NAMES.settings}</h2><button type="button" className="co-btn co-btn-quiet co-btn-icon" aria-label="Close settings" title="Close" onClick={() => { ref.current.open = false; ref.current.querySelector('summary')?.focus() }}><Icon name="close" size={18} /></button></header>
+// The one settings surface: a window over the page, opened from the rail's last row (or the header on a screen with no rail). It shows which
+// GitHub account Contribute uses; connecting or changing that account happens in Möbius Settings, which owns the instance-wide GitHub
+// connection.
+export function SettingsButton({ conn, onOpen, className, children }) {
+  const login = conn?.state === 'connected' && conn?.login ? conn.login : ''
+  const account = conn?.state === 'connected' ? 'GitHub connected' : conn?.state === 'disconnected' ? 'Connect GitHub' : 'GitHub'
+  return <button type="button" className={className} aria-haspopup="dialog" onClick={onOpen}
+    aria-label={`${account}${login ? ` as ${login}` : ''} — ${NAMES.settings}`} title={`${account} · ${NAMES.settings}`}>{children}</button>
+}
+
+export function SettingsWindow({ onClose, ...props }) {
+  return <ReviewDialog label={NAMES.settings} onClose={onClose}>
+    <section className="co-settings-workspace"><style>{SETTINGS_CSS}</style>
+      <header><h2>{NAMES.settings}</h2><button type="button" className="co-btn co-btn-quiet co-btn-icon" aria-label="Close settings" title="Close" onClick={onClose}><Icon name="close" size={18} /></button></header>
       <div className="co-settings-layout">
         <div className="co-settings-content">
           <section className="co-settings-account" aria-label="GitHub account"><h3>GitHub</h3><ConnectionCard {...props} /></section>
@@ -72,8 +61,8 @@ export function ConnectionSettings(props) {
           <ReviewPromptSettings token={props.token} appId={props.appId} />
         </div>
       </div>
-    </div> : null}
-  </details>
+    </section>
+  </ReviewDialog>
 }
 
 const settingsButton = (label, primary = false) => (

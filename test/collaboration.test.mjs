@@ -153,9 +153,9 @@ test('merge option is enabled only for an entirely eligible exact selection', as
   const eligible = render([pull(1)])
   assert.match(eligible, /Merge after I approve/)
   assert.doesNotMatch(eligible, /Not available for drafts|Needs merge rights/)
-  // Merge after I approve explains why an exact selection is not eligible.
-  assert.match(render([pull(1), pull(2, {repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})]), /Needs merge rights on this repository\./)
-  assert.match(render([pull(1, {isDraft:true})]), /Not available for drafts\./)
+  // Merge after I approve is not drawn for a selection that cannot merge.
+  assert.doesNotMatch(render([pull(1), pull(2, {repository:{nameWithOwner:'team/repo',viewerPermission:'READ'}})]), /Merge after I approve/)
+  assert.doesNotMatch(render([pull(1, {isDraft:true})]), /Merge after I approve/)
   // Review, fix and merge starts only for an entirely eligible selection, and says why not.
   assert.doesNotMatch(render([pull(1)], undefined, 'review_fix_merge'), /disabled="">Start, ask me before each push/)
   assert.doesNotMatch(render([pull(1, {isDraft:true})], undefined, 'review_fix_merge'), /disabled="">Start, ask me before each push/, 'a draft can be finished: the agent never readies it')
@@ -263,7 +263,8 @@ test('a minimized core run attaches to its PR row by repository, number, head an
   assert.equal(reviewForPull([run], pull(7)).exactBase, true)
   assert.equal(reviewForPull([run], pull(7, { headRefOid: 'c'.repeat(40) })), null)
   assert.equal(reviewForPull([run], pull(8)), null)
-  assert.equal(reviewForPull([minimized({}, { base_ref: 'release' })], pull(7)), null)
+  // GitHub retargets a PR without changing its code: the review of that code is still found, and says it did not see this branch.
+  assert.equal(reviewForPull([minimized({}, { base_ref: 'release' })], pull(7))?.exactBase, false)
 })
 
 test('a minimized core run is never observed; a details_in_owning_chat refusal stops polling and is not an error', async t => {
