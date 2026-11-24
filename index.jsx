@@ -2155,7 +2155,7 @@ function ContributeApp({ appId, token, addressedRecordIds = null, onPublicationR
           conn={conn} loading={sourceLoading} error={sourceError}
           checks={upstreamChecks} attention={projectAttention}
           railFoot={<SettingsButton conn={conn} onOpen={openSettings} className="co-rail-item is-settings"><Icon name="settings" size={15} /><span className="co-rail-label">{NAMES.settings}</span></SettingsButton>}
-          addProject={quiet => <RepositoryPicker quiet={quiet} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
+          addProject={options => <RepositoryPicker {...options} token={token} connected={conn.state === 'connected'} onAdded={(repo, followed) => {
             setFollowedRepos(followed)
             setRepositoryAccess(old => ({ ...old, repositories: [...old.repositories.filter(item => item.nameWithOwner.toLowerCase() !== repo.nameWithOwner.toLowerCase()), repo] }))
             setProjectFocus({ key: sourceProjects.find(project => project.canonical_repo?.toLowerCase() === repo.nameWithOwner.toLowerCase())?.key || 'external:' + repo.nameWithOwner.toLowerCase(), nonce: crypto.randomUUID() })

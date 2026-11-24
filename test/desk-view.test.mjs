@@ -78,8 +78,8 @@ test('the rail shows its four views with their counts, the Repositories block ap
   assert.match(html, /Needs you/)
   for (const name of ['Needs you', 'Review requests', 'My PRs', 'Agent runs']) assert.match(html, new RegExp(name))
   assert.doesNotMatch(html, /Merged this week|To confirm|PR reviews|My work|Your edits/)
-  // Projects are a block of their own: a labelled nav under the four views, with Add project last.
-  assert.match(html, /<nav class="co-rail-projects" aria-labelledby="co-rail-projects-head"><h2 class="co-rail-head" id="co-rail-projects-head">Repositories<\/h2>/)
+  // The repositories are a block of their own under the four views: a labelled nav whose title row comes first, then the search.
+  assert.match(html, /<nav class="co-rail-projects" aria-labelledby="co-rail-projects-head"><div class="co-rail-headrow"><h2 class="co-rail-head" id="co-rail-projects-head">Repositories<\/h2><\/div><label class="co-search co-rail-search">/)
   assert.match(html, /Möbius/)
   // The project row shows exactly the count held for it (what its Needs you card lists).
   assert.equal(api.projectRailCount(project, { mobius: 3 }), 3)
@@ -87,12 +87,26 @@ test('the rail shows its four views with their counts, the Repositories block ap
   assert.match(html, /aria-current="page"[^>]*>[\s\S]*?Möbius|Möbius[\s\S]*?aria-current/)
 })
 
-test('the side menu opens the Add repository form in flow, because the menu scrolls and would clip a floating panel', () => {
+test('the repository list is title row with Add, then search, then the worked-in repositories and one fold; no second menu, no All repositories row', async t => {
+  const api = await ui(t)
+  if (!api) return
+  const worked = key => projectFixture(key, { lastWorkedAt: 1000 })
+  const quiet = key => projectFixture(key, { lastWorkedAt: null })
+  const html = api.rail({ view: 'needs', counts: countsFixture, projects: [worked('a'), quiet('b'), quiet('c')], attention: {}, selectedKey: '', onView: () => {}, onOpenProject: () => {},
+    addProject: ({ variant }) => `ADD-${variant}` })
+  assert.match(html, /<h2 class="co-rail-head"[^>]*>Repositories<\/h2>ADD-heading<\/div><label class="co-search co-rail-search">/, 'Add sits on the title row, above the search')
+  assert.match(html, /aria-label="Search repositories"[^>]*autoComplete="off"|autocomplete="off"/i, 'the search is told not to be remembered or suggested')
+  assert.match(html, /class="co-search-go" aria-label="Search"/, 'the magnifier is a button at the right end')
+  assert.match(html, /aria-expanded="false">[\s\S]*?<span>Show 2 more<\/span><\/button>/, 'the rest sits behind one fold that counts it')
+  assert.doesNotMatch(html, /More repositories|All repositories|co-rail-quiet|co-rail-add/)
+})
+
+test('the Add repository window is the shared window, not a form that opens in the side list', () => {
   const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
-  const work = read('workspace-theme.js')
-  assert.match(work, /\.co-rail \{[^}]*overflow-y:auto;/, 'the menu scrolls, so anything that floats out of it is cut off')
-  assert.match(work, /\.co-rail-add \.co-repository-picker form,\.co-rail-add \.co-repository-note \{ position:static; width:auto;/, 'in the menu the form and the note take the menu\'s width in flow')
-  assert.match(read('ui/RepositoryPicker.jsx'), /rootRef\.current\?\.scrollIntoView\(/, 'a short menu scrolls the opened form into view')
+  assert.match(read('ui/AddRepositoryWindow.jsx'), /<ReviewDialog label=\{NAMES\.addRepository\} onClose=\{onClose\}>/)
+  assert.match(read('ui/RepositoryPicker.jsx'), /<AddRepositoryWindow /)
+  assert.doesNotMatch(read('workspace-theme.js'), /\.co-rail-add|\.co-repository-picker form/, 'no panel rules are left for a form in the side list')
+  assert.doesNotMatch(read('ui/AddRepositoryWindow.jsx'), /<form/, 'no form: nothing is submitted, so nothing is remembered')
 })
 
 test('count chips name next steps, filter the list, and skip empty ones; drafts are a quiet line', async t => {

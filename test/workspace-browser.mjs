@@ -244,6 +244,10 @@ window.fetch = async (url, options = {}) => {
   if (call.url === '/api/github/graphql' && call.method === 'POST') {
     if (/mutation\b/i.test(call.body.query)) return forbidden('GraphQL mutation')(call)
     if (call.body.query.includes('ContributeReviewSelection')) return response({data:{p0:{nameWithOwner:'owner/project',viewerPermission:window.fixturePermission || 'WRITE',pullRequest:{...pulls[0],state:'OPEN'}}}})
+    // A name alone, searched on GitHub among the repositories the account can see (searchRepositories).
+    if (call.body.query.includes('ContributeFindRepository')) return response({data:{search:{nodes:[
+      {nameWithOwner:'team/community-docs',description:'Guides for people who help run the community',viewerPermission:'READ',isArchived:false},
+      {nameWithOwner:'team/community',description:'The community site',viewerPermission:'WRITE',isArchived:false}]}}})
     if (call.body.query.includes('ContributeRepository')) {
       if (window.holdRepository) await new Promise(resolve => { window.releaseRepository = resolve })
       if (window.failRepository) return response({data:{repository:null}})
@@ -1826,12 +1830,15 @@ window.runWorkspaceChecks = async () => {
     })
     await check('adding an external repository is an explicit saved choice, not a GitHub mutation', async () => {
       await click(button('Back to repositories'))
-      // The side rail's Add repository is hidden on a phone, where the project list carries its own: press the one on screen.
-      await click([...document.querySelectorAll('button')].filter(node => text(node)===NAMES.addRepository).find(node => node.getClientRects().length))
-      const input = query('#co-repository-name')
+      // The side rail's Add is hidden on a phone, where the project list carries its own: press the one on screen.
+      await click([...document.querySelectorAll('button')].filter(node => text(node)===NAMES.addRepository || node.getAttribute('aria-label')===NAMES.addRepository).find(node => node.getClientRects().length))
+      await until(() => query('dialog[open] #co-repository-name'), 'Add repository did not open its window')
+      const input = query('dialog[open] #co-repository-name')
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'team/community')
       input.dispatchEvent(new Event('input',{bubbles:true}))
-      await frame(); await click(button('Add'))
+      // The window reads the repository from GitHub after a pause in typing, then names the one thing it will add.
+      await until(() => button('Add team/community') && !button('Add team/community').disabled, 'The window did not find the repository')
+      await click(button('Add team/community'))
       await until(() => values.get('followed-repositories.json')?.includes('team/community'), 'Repository preference was not saved')
       ensure(query('.co-other-repositories') && !query('.co-other-repositories').open, 'Other repositories cluttered the default project list')
       await click(query('.co-other-repositories summary'))
@@ -2531,7 +2538,7 @@ window.runTapBoxChecks = async () => {
       // The All repositories button under the bar.
       ensure(query('.co-desk-chips-projects'), 'The Desk has no All repositories button')
       await click(query('.co-desk-chips-projects'))
-    } else await click(query('.co-rail-item.is-all'))
+    } else await click(button(NAMES.openDirectory, query('.co-rail')), 'The rail has no way to the full directory')
     await until(() => query('.co-directory-add'), 'The All repositories list did not open')
     tapBoxes('the All repositories list')
     await click(query('.co-source-row'))
@@ -3253,9 +3260,9 @@ window.runRepositoryLinkChecks = async () => {
   }
 }
 
-// The whole app on a fresh page: the Add repository form opens where the owner can see it and type in it.
-// On a desktop it belongs to the side menu's last row, a box that scrolls and so clips anything that floats
-// out of it; on a phone that menu is hidden and the form belongs to the All repositories list.
+// The whole app on a fresh page: Add repository is a window over the page, opened from the side list's title row (or, on a phone where
+// that list is hidden, from the All repositories list). It can be filled in and sent, and the side list's search that finds nothing offers it
+// with the typed words already in the field.
 window.runRepositoryPickerChecks = async () => {
   const checks = []
   // What a person can use: inside the window, inside every box that clips it, and the thing a click at its centre lands on.
@@ -3267,41 +3274,87 @@ window.runRepositoryPickerChecks = async () => {
       if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
       ensure(rect.left >= outer.left - 1 && rect.right <= outer.right + 1 && rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1,
         label + ' is clipped by ' + (box.className || box.tagName) + ': ' + [rect.left, rect.right, rect.top, rect.bottom].map(Math.round) + ' not in ' + [outer.left, outer.right, outer.top, outer.bottom].map(Math.round))
+      // A modal window is drawn in the top layer, above every box it sits in, so those boxes cannot clip it.
+      if (box.matches('dialog:modal')) break
     }
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
     ensure(hit === node || node.contains(hit), label + ' cannot be clicked: ' + (hit?.className || hit?.tagName))
   }
-  const addFrom = async (scope, where) => {
-    await click(button('Add repository', query(scope)), 'No Add repository button in ' + where)
-    await until(() => query(scope + ' #co-repository-name'), 'Add repository did not open its form in ' + where)
-    const input = query(scope + ' #co-repository-name')
-    usable(input, 'The repository field in ' + where); usable(button('Close', query(scope + ' form')), 'The Close button in ' + where)
+  // Adding a repository opens it, which leaves the directory: come back to it, on the side list or (on a phone) the way back from the opened repository.
+  const toDirectory = async () => {
+    if (query('.co-directory-add')) return
+    if (getComputedStyle(query('.co-rail')).display !== 'none') await click(button(NAMES.openDirectory, query('.co-rail')), 'The side list has no way to the full directory')
+    else await click(button('Back to repositories') || query('.co-desk-chips-projects'))
+    await until(() => query('.co-directory-add'), 'The All repositories list did not open')
+  }
+  const fillAndAdd = async (trigger, where) => {
+    await click(trigger, 'No Add repository button in ' + where)
+    await until(() => query('dialog[open] #co-repository-name'), 'Add repository did not open its window in ' + where)
+    const dialog = query('dialog[open]'), input = query('#co-repository-name', dialog)
+    usable(input, 'The repository field in ' + where); usable(button('Cancel', dialog), 'The Cancel button in ' + where)
     await fill(input, 'team/community')
-    usable(button('Add', query(scope + ' form')), 'The Add button in ' + where)
-    await click(button('Add', query(scope + ' form')))
+    await until(() => button('Add team/community', dialog) && !button('Add team/community', dialog).disabled, 'The window did not find the repository typed in ' + where)
+    usable(button('Add team/community', dialog), 'The Add button in ' + where)
+    await click(button('Add team/community', dialog))
     await until(() => values.get('followed-repositories.json')?.includes('team/community'), 'The repository typed in ' + where + ' was not saved')
-    await until(() => !query(scope + ' form'), 'The form in ' + where + ' stayed open after adding')
-    // Back to the saved list this scenario began with, so the next form's save is waited for on its own.
+    await until(() => !query('dialog[open]'), 'The window in ' + where + ' stayed open after adding')
+    // Back to the saved list this scenario began with, so the next window's save is waited for on its own.
     values.set('followed-repositories.json', ['owner/project'])
   }
   try {
     await mountDeskApp()
     await until(() => query('.co-rail'), 'The Desk did not render')
     if (getComputedStyle(query('.co-rail')).display !== 'none') {
-      await addFrom('.co-rail-add', 'the side menu')
-      checks.push({ name: 'the side menu opens the Add repository form inside itself and it can be filled in and sent', status: 'pass' })
-      // A short window leaves the menu scrolling: the form must be brought into view, not opened below the fold.
-      query('.co-rail').style.maxHeight = '320px'
-      await addFrom('.co-rail-add', 'a short side menu')
-      query('.co-rail').style.maxHeight = ''
-      checks.push({ name: 'a side menu that has to scroll scrolls the Add repository form into view', status: 'pass' })
-      await click(query('.co-rail-item.is-all'))
+      await captureShot('repositories-rail')
+      await fill(query('.co-rail-search input'), 'proj')
+      await until(() => text(query('.co-rail-status')).startsWith('1 repository matches'), 'The search did not narrow the list')
+      await captureShot('repositories-rail-search')
+      await click(button('Clear search', query('.co-rail')))
+      await fillAndAdd(query('.co-rail-headrow .co-repository-trigger'), 'the side list')
+      checks.push({ name: 'the side list opens Add repository as a window, and it can be filled in and sent', status: 'pass' })
+      // A search that finds nothing offers to look it up on GitHub, with the words already in the window.
+      await fill(query('.co-rail-search input'), 'zzzz-nothing')
+      await until(() => text(query('.co-rail-status')).startsWith('Nothing called'), 'The search did not say it found nothing')
+      await click(button('Look it up on GitHub', query('.co-rail')))
+      await until(() => query('dialog[open] #co-repository-name')?.value === 'zzzz-nothing', 'The window did not open with the typed words')
+      await click(button('Cancel', query('dialog[open]')))
+      await until(() => !query('dialog[open]'), 'Cancel did not close the window')
+      checks.push({ name: 'a search that finds nothing offers GitHub, and the window opens with the typed words', status: 'pass' })
+      await click(button('Clear search', query('.co-rail')))
+      await click(button(NAMES.openDirectory, query('.co-rail')), 'The side list has no way to the full directory')
     } else {
       await click(query('.co-desk-chips-projects'))
     }
     await until(() => query('.co-directory-add'), 'The All repositories list did not open')
-    await addFrom('.co-directory-add', 'the All repositories list')
-    checks.push({ name: 'the All repositories list opens the Add repository form where it can be filled in and sent', status: 'pass' })
+    await fillAndAdd(button(NAMES.addRepository, query('.co-directory-add')), 'the All repositories list')
+    checks.push({ name: 'the All repositories list opens Add repository as a window that can be filled in and sent', status: 'pass' })
+    // A name alone is searched on GitHub: the answers are listed, one is chosen, and only then can it be added.
+    await toDirectory()
+    await click(button(NAMES.addRepository, query('.co-directory-add')))
+    await until(() => query('dialog[open] #co-repository-name'), 'Add repository did not open for a name')
+    await fill(query('dialog[open] #co-repository-name'), 'community')
+    await until(() => query('dialog[open] .co-add-choices'), 'The window did not list the repositories GitHub found')
+    ensure(document.querySelectorAll('dialog[open] .co-add-choices button').length === 2, 'The window did not list both answers')
+    ensure(button('Add repository', query('dialog[open]')).disabled, 'Add was on before a repository was chosen')
+    await captureShot('add-repository-choices')
+    await click([...document.querySelectorAll('dialog[open] .co-add-choices button')].find(node => text(node).startsWith('team/community-docs')))
+    ensure(button('Add team/community-docs', query('dialog[open]')) && !button('Add team/community-docs', query('dialog[open]')).disabled, 'Choosing an answer did not name it on the button')
+    await click([...document.querySelectorAll('dialog[open] .co-add-choices button')].find(node => text(node).startsWith('team/community') && !text(node).startsWith('team/community-docs')))
+    await click(button('Add team/community', query('dialog[open]')))
+    await until(() => values.get('followed-repositories.json')?.includes('team/community'), 'The repository chosen from the answers was not saved')
+    await until(() => !query('dialog[open]'), 'The window stayed open after adding the chosen repository')
+    values.set('followed-repositories.json', ['owner/project'])
+    checks.push({ name: 'a name alone lists what GitHub found, and only a chosen repository is added', status: 'pass' })
+    // A link to a pull request reads as its repository.
+    await toDirectory()
+    await click(button(NAMES.addRepository, query('.co-directory-add')))
+    await until(() => query('dialog[open] #co-repository-name'), 'Add repository did not open for a link')
+    await fill(query('dialog[open] #co-repository-name'), 'https://github.com/team/community/pull/3')
+    await until(() => button('Add team/community', query('dialog[open]')) && !button('Add team/community', query('dialog[open]')).disabled, 'A pull request link was not read as its repository')
+    await captureShot('add-repository-link')
+    await click(button('Cancel', query('dialog[open]')))
+    await until(() => !query('dialog[open]'), 'Cancel did not close the window')
+    checks.push({ name: 'a link to a pull request reads as its repository', status: 'pass' })
     ensure(calls.forbidden.length === 0, 'Unexpected runtime/transport: ' + JSON.stringify(calls.forbidden))
     return { status: 'pass', checks, forbidden: calls.forbidden }
   } catch (error) {
@@ -4501,8 +4554,11 @@ window.runRepositoryListChecks = async () => {
   const whole = number => ({ ...pull(number, { mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, latestOpinionatedReviews: { nodes: [] }, latestReviews: { nodes: [] }, reviewThreads: { nodes: [] } }) })
   const openProject = async name => {
     if (getComputedStyle(query('.co-rail')).display !== 'none') {
-      await until(() => [...document.querySelectorAll('.co-rail-item.is-project')].find(node => text(node).includes(name)), 'The repository was not in the side menu')
-      await click([...document.querySelectorAll('.co-rail-item.is-project')].find(node => text(node).includes(name)))
+      const inList = () => [...document.querySelectorAll('.co-rail-item.is-project')].find(node => text(node).includes(name))
+      await until(() => inList() || query('.co-rail-more[aria-expanded=false]'), 'The repository was not in the side menu')
+      // A repository the owner never worked in sits behind the fold: unfold it, as a person would.
+      if (!inList()) await click(query('.co-rail-more[aria-expanded=false]'))
+      await click(inList())
     } else {
       await click(query('.co-desk-chips-projects'))
       await until(() => query('.co-source-row'), 'The directory did not open')

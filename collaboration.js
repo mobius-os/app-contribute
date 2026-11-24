@@ -85,9 +85,28 @@ export async function discoverRepositories(token, cursor = null) {
   const connection = data.viewer.repositories
   return { repositories: connection.nodes.filter(repo => mayAssign(repo.viewerPermission) && !repo.isArchived).map(repo => ({ ...repo, openPullRequestCount: repo.pullRequests?.totalCount || 0 })), ...connection.pageInfo }
 }
+// What a person pastes to name a repository: owner/name, or a github.com link to it or to anything inside it (a PR, a
+// branch), with or without http(s)://, www. and a trailing .git, or the ssh form git@github.com:owner/name.git. Only a
+// link may carry more than owner/name; a bare "a/b/c" is not a repository.
+const GITHUB_LINK_START = /^(?:git@github\.com:|(?:https?:\/\/)?(?:www\.)?github\.com\/)/i
 export function repositoryName(value) {
-  const name = String(value || '').trim().replace(/^https:\/\/github\.com\//i, '').replace(/\/$/, '')
+  const text = String(value || '').trim()
+  const isLink = GITHUB_LINK_START.test(text)
+  const parts = text.replace(GITHUB_LINK_START, '').split(/[?#]/)[0].split('/').filter(Boolean)
+  if (parts.length < 2 || (!isLink && parts.length > 2)) return ''
+  const name = `${parts[0]}/${parts[1].replace(/\.git$/i, '')}`
   return /^[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : ''
+}
+
+// Repositories whose name contains the words, among the ones this GitHub account can see: how a name alone (no owner) is added.
+const REPOSITORY_SEARCH_LIMIT = 8
+export async function searchRepositories(token, words) {
+  const text = String(words || '').trim()
+  if (!text) return []
+  const data = await graph(token, `query ContributeFindRepository { search(query:${JSON.stringify(`${text} in:name`)},type:REPOSITORY,first:${REPOSITORY_SEARCH_LIMIT}) {
+    nodes { ... on Repository { nameWithOwner description viewerPermission isArchived } } } }`)
+  if (!data.search) throw new Error('GitHub did not return repositories. Try again.')
+  return data.search.nodes.filter(repo => repo?.nameWithOwner)
 }
 
 export async function discoverRepository(token, value) {

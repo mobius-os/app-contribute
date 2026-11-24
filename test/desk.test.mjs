@@ -14,6 +14,8 @@ import {
   newSince,
   railBadge,
   settleReviewRequest,
+  railRepositories,
+  repositoryMatches,
   splitProjects,
   stepOf,
 } from '../desk.js'
@@ -174,6 +176,50 @@ test('finished work keeps a repository worked with, after what is going on and l
   assert.deepEqual(groups.workedWith.map(project => project.key), ['busy', 'yesterday', 'long-ago', 'reviewed-only'])
   assert.deepEqual(groups.other.map(project => project.key), ['never'])
   assert.deepEqual(splitProjects(projects, { never: 1 }).workedWith.map(project => project.key).slice(0, 2), ['never', 'busy'], 'a card that needs the owner is current work')
+})
+
+const resting = { kind: 'app', available: true, state: 'clean', localFiles: 0, compatibleFiles: 0, conflictFiles: 0, workingFiles: 0, lastWorkedAt: null }
+
+test('a repository that lives only on GitHub is worked with when the owner worked in it, however nothing of it is installed', () => {
+  const projects = [
+    { ...resting, key: 'app', lastWorkedAt: 1000 },
+    { ...resting, key: 'external:o/site', kind: 'external', available: false, lastWorkedAt: 5000 },
+    { ...resting, key: 'external:o/never', kind: 'external', available: false },
+  ]
+  const groups = splitProjects(projects, {})
+  assert.deepEqual(groups.workedWith.map(project => project.key), ['external:o/site', 'app'])
+  assert.deepEqual(groups.external.map(project => project.key), ['external:o/never'])
+})
+
+test('the side list holds the repositories worked in, latest first, up to ten, and every one that waits on the owner', () => {
+  const worked = (key, at, extra = {}) => ({ ...resting, key, lastWorkedAt: at, ...extra })
+  const projects = [
+    worked('old', 1), worked('external:o/site', 90, { kind: 'external', available: false }), worked('new', 100),
+    { ...resting, key: 'never-worked' }, { ...resting, key: 'built-here', builtHere: true },
+    { ...resting, key: 'external:o/never', kind: 'external', available: false },
+  ]
+  const all = railRepositories(projects, {})
+  assert.deepEqual(all.top.map(project => project.key), ['new', 'external:o/site', 'old'], 'worked in, newest first, installed or not')
+  assert.deepEqual(all.rest.map(project => project.key), ['built-here', 'never-worked', 'external:o/never'], 'the rest: local-only, never worked in, GitHub only')
+  const cut = railRepositories(projects, {}, 2)
+  assert.deepEqual(cut.top.map(project => project.key), ['new', 'external:o/site'])
+  assert.deepEqual(cut.rest.map(project => project.key).slice(0, 1), ['old'], 'what the cut leaves goes first behind the fold')
+  const withMyPr = [...projects, { ...resting, key: 'my-pr', incomingReviews: [pr(1)] }]
+  assert.deepEqual(railRepositories(withMyPr, {}).top.map(project => project.key).slice(-1), ['my-pr'], 'a repository the owner has a PR on is worked in, after the ones with dated work')
+  const waiting = railRepositories(projects, { 'never-worked': 1, old: 2 }, 1)
+  assert.deepEqual(waiting.top.map(project => project.key), ['new', 'old', 'never-worked'], 'a repository that waits on the owner is never behind the fold')
+})
+
+test('the side list search matches a repository by name, never by its owner; a slash searches owner/name', () => {
+  const mobius = { name: 'Möbius', canonical_repo: 'mobius-os/mobius' }
+  const site = { name: 'mobius-os/mobius.you', canonical_repo: 'mobius-os/mobius.you' }
+  const kanban = { name: 'Kanban', canonical_repo: 'mobius-os/app-kanban' }
+  assert.equal(repositoryMatches(kanban, 'mobi'), false, 'the owner is mobius-os, which is not what was asked for')
+  assert.equal(repositoryMatches(mobius, 'MOBI'), true, 'case and accents do not matter')
+  assert.equal(repositoryMatches(site, 'you'), true, 'a repository named only by owner/name matches on its own name')
+  assert.equal(repositoryMatches(kanban, 'app-kan'), true, 'the repository\'s own name matches even where the app is called something else')
+  assert.equal(repositoryMatches(kanban, 'mobius-os/app'), true)
+  assert.equal(repositoryMatches(kanban, '  '), true)
 })
 
 test('feedback on a published PR opens the PR itself; publication decisions keep their card', async () => {
