@@ -1406,4 +1406,52 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-source-row-facts { gap:2px; color:var(--muted); font-size:var(--co-text-meta); line-height:1.4; }
  .co-quiet-projects > summary, .co-source-group-label.is-counted { min-height:44px; }
 }
+/* The page of a prepared contribution inside its tab (owner's choice, 2026-11-23; DESIGN.md "The Prepared PR page").
+   It is the tab's content, not a panel over it: no box of its own, and a Back link where a panel has its X. */
+.co-task-content.co-task-page { margin:0; padding:0; background:none; border:0; border-radius:0; }
+.co-task-page > .co-run-focus-layout { margin-top:0; }
+.co-task-back { gap:8px; margin:-6px 0 6px -4px; padding-inline:4px; color:var(--text); font-weight:600; }
+.co-pr-page { container:co-pr-page / inline-size; display:flex; flex-direction:column; align-items:flex-start; min-width:0; }
+.co-pr-page > * { max-width:100%; }
+.co-pr-page .co-pr-page-title { margin:0 0 10px; padding:0; font-size:var(--co-text-section); font-weight:650; line-height:1.28; letter-spacing:-.02em; max-width:34em; text-wrap:balance; }
+.co-pr-page-facts { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; margin:0 0 8px; }
+.co-chip.is-all_clear { background:color-mix(in srgb,var(--green) 16%,transparent); color:var(--co-ready-text); }
+.co-chip.is-changes_needed { background:color-mix(in srgb,var(--co-warn) 16%,transparent); color:var(--co-warn-text); }
+.co-pr-page .co-pr-page-line { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; margin:0 0 14px; max-width:none; color:var(--muted); font-size:var(--co-text-meta); line-height:1.4; }
+.co-pr-page-branch { min-width:0; padding:2px 8px; border-radius:var(--co-radius-pill); background:var(--surface-2,var(--surface)); color:var(--text); font-family:var(--mono,var(--font)); overflow-wrap:anywhere; }
+.co-pr-page .co-run-source-choices { margin:0 0 18px; }
+.co-pr-page-next { display:flex; align-items:flex-start; gap:14px; align-self:stretch; padding:14px 16px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); }
+.co-pr-page-state { flex:none; padding:4px 10px; border-radius:var(--co-radius-round); background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--co-you-text); font-size:var(--co-text-chip); font-weight:650; line-height:1.2; white-space:nowrap; }
+.co-pr-page .co-pr-page-next p { margin:0; max-width:62ch; color:var(--text); font-size:var(--co-text-body); line-height:1.55; }
+.co-pr-page > .co-details-toggle { margin:12px 0 6px -4px; }
+.co-pr-page-body { align-self:stretch; min-width:0; }
+.co-pr-page-body .co-detail-tabs { margin-bottom:6px; }
+.co-pr-page-body .co-detail-tabs button { display:inline-flex; align-items:center; gap:6px; }
+.co-pr-page-facts .co-plan-label { font-size:var(--co-text-meta); }
+@container co-pr-page (max-width:36rem) { .co-pr-page-next { flex-direction:column; gap:8px; } }
+
+/* A description's own type. A task pane styles every paragraph and h3 inside it (16px grey, 22px); the text is not the
+   pane's, so its rules are named here with the text's own scope, and one style and one line length cover all of it. */
+.co-root .co-markdown { color:var(--text); font-size:var(--co-text-meta); line-height:1.6; }
+.co-root .co-markdown p, .co-root .co-markdown li, .co-root .co-markdown dd { color:inherit; font-size:inherit; line-height:inherit; }
+.co-root .co-markdown > *, .co-root .co-markdown li > p { margin:0; }
+.co-root .co-markdown > * + * { margin-top:10px; }
+.co-root .co-markdown :is(p, ul, ol, blockquote) { max-width:72ch; }
+.co-root .co-markdown :is(h1, h2) { margin-block:20px 6px; padding:0; font-size:var(--co-text-body); font-weight:650; line-height:1.35; letter-spacing:0; color:var(--text); }
+.co-root .co-markdown :is(h3, h4) { margin-block:16px 4px; padding:0; font-size:var(--co-text-meta); font-weight:650; line-height:1.4; letter-spacing:0; color:var(--muted); }
+.co-root .co-markdown > :is(h1, h2, h3, h4):first-child { margin-top:0; }
+
+/* In sections (markdown-sections.js): a hairline and room between sections, term | text rows for a list of terms. */
+.co-root .co-markdown > .co-doc-section { padding-block:28px 24px; border-top:1px solid var(--border); }
+.co-root .co-markdown > .co-doc-section:first-child { padding-top:20px; border-top:0; }
+.co-root .co-doc-section > :is(h1, h2) { margin:0 0 14px; }
+.co-root .co-doc-section > * + * { margin-top:10px; }
+.co-root .co-doc-section > :is(h3, h4) { margin-top:24px; }
+.co-doc-terms { margin:0; border-top:1px solid var(--border); }
+.co-doc-term-row { display:grid; grid-template-columns:minmax(0,18rem) minmax(0,66ch); gap:4px 24px; padding:14px 0; border-bottom:1px solid var(--border); }
+.co-doc-terms dt { min-width:0; font-weight:650; line-height:1.45; }
+.co-doc-terms dd { margin:0; min-width:0; }
+.co-doc-reference { display:block; margin-top:5px; color:var(--muted); font-family:var(--mono,var(--font)); font-weight:400; overflow-wrap:break-word; }
+.co-doc-reference code { padding:0; background:none; color:inherit; font-size:inherit; }
+@container co-pr-page (max-width:36rem) { .co-doc-term-row { grid-template-columns:minmax(0,1fr); } }
 `

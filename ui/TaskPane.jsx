@@ -22,7 +22,13 @@ export function focusActionRegion(region, target = region) {
   })
 }
 
-export function TaskPane({ id, children, dock = true }) {
+// A page of a tab opens where the list was, already in view under the send bar and the tab strip, so it takes keyboard
+// focus without scrolling the page; and leaving it puts focus back on the row it was opened from (QuietRow's data-opens).
+const focusOpener = id => requestAnimationFrame(() => document.querySelector(`[data-opens="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }))
+
+// `back` names the list a pane opened from. A pane that sits inside a tab is a page of that tab: it leaves by a Back
+// link and has no X, so it never offers two ways out (owner's choice, 2026-10-27, one way out of a panel).
+export function TaskPane({ id, children, dock = true, back = '' }) {
   const task = useProjectTask()
   const content = useRef(null)
   const headingId = useId()
@@ -30,12 +36,17 @@ export function TaskPane({ id, children, dock = true }) {
   useLayoutEffect(() => {
     const heading = content.current?.querySelector('h3, h2')
     if (heading) heading.id = headingId
-    if (visible && task?.explicit) focusActionRegion(content.current)
+    if (!visible || !task?.explicit) return
+    if (back) content.current?.focus({ preventScroll: true })
+    else focusActionRegion(content.current)
   }, [visible, task?.explicit, headingId])
   if (!task) return children
   if (!visible) return null
-  const pane = <section ref={content} tabIndex={-1} className={'co-task-content' + (dock ? ' co-task-dock' : '')} data-task={id} role="region" aria-labelledby={headingId} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); task.close() } }}>
-    <button className="co-btn co-btn-quiet co-btn-icon co-inline-close" aria-label="Close action" onClick={task.close}><Icon name="close" size={18} /></button>
+  const leave = () => { task.close(); if (back) focusOpener(id) }
+  const pane = <section ref={content} tabIndex={-1} className={'co-task-content' + (dock ? ' co-task-dock' : '') + (back ? ' co-task-page' : '')} data-task={id} role="region" aria-labelledby={headingId} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); leave() } }}>
+    {back
+      ? <button type="button" className="co-btn co-btn-quiet co-task-back" aria-label={`Back to ${back}`} onClick={leave}><Icon name="left" size={16} />{back}</button>
+      : <button className="co-btn co-btn-quiet co-btn-icon co-inline-close" aria-label="Close action" onClick={task.close}><Icon name="close" size={18} /></button>}
     {children}
   </section>
   return dock ? <ReviewDialog label="Project action" onClose={task.close}>{pane}</ReviewDialog> : pane

@@ -8,6 +8,8 @@ export const NAMES = Object.freeze({
   // Things
   pr: 'PR',
   preparedPr: 'Prepared PR',
+  // The tab that lists prepared PRs, and the way back to it from one that is open.
+  preparedPrs: 'Prepared PRs',
   localChanges: 'Local changes',
   // One name for the agent's work: an agent run. Not a job, workflow, cycle, activity or progress.
   agentRun: 'Agent run',

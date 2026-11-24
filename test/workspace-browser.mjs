@@ -101,11 +101,23 @@ const pull = (number, extra = {}) => ({
   mergeable: 'MERGEABLE', reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
   latestOpinionatedReviews: { nodes: [] }, reviewThreads: { nodes: [] }, ...extra,
 })
+// A description in sections, so the prepared PR's page has something to read: headings, a plain list, term | text rows.
+// (The fixture lives in a template string, so a code span is built without a literal backtick.)
+const code = text => String.fromCharCode(96) + text + String.fromCharCode(96)
+const PREPARED_BODY = [
+  '## Why', '', 'Opening a report took several seconds, because the list of reports was read twice.', '',
+  '- the list was read once to count it and again to show it;', '- nothing kept the answer between two opens.', '',
+  '## What changes', '',
+  '- **Reader** (' + code('reader.js') + ', route ' + code('GET /reports') + '): reads each report once, then counts it from what it already has.',
+  '- **Cache.** Keeps the last answer for a minute, one per report, so a second open does not read again.',
+  '- **Sending**: nothing new is sent to anyone.', '',
+  '## Tests', '', 'New tests cover the single read and the cache, including a report that changed in between.',
+].join('\n')
 const prepared = {
   id: 'fixture-prepared', type: 'pr', status: 'prepared', repo: 'owner/project',
-  title: 'Reviewed local change', summary: 'Reviewed local change',
-  plan: { action: 'pr', repo: 'owner/project', title: 'Reviewed local change',
-    head_sha: HEAD, branch: 'fix/fixture' },
+  title: 'Reviewed local change', summary: 'Reports open in about a second, because each one is read once and kept for a minute.',
+  plan: { action: 'pr', repo: 'owner/project', title: 'Reviewed local change', body_draft: PREPARED_BODY, labels: ['enhancement', 'area: apps'],
+    diff_stat: '3 files changed, 42 insertions(+), 7 deletions(-)', head_sha: HEAD, branch: 'fix/fixture' },
   quality_review: { state: 'all_clear', reviewed_head_sha: HEAD },
 }
 const calls = { autopilot: [], exactRuns: [], restores: [], diffs: [], requests: [], starts: [], publications: [], status: [], forbidden: [], opened: [], releases: [], stops: [], messages: [], appChatStarts: [], asks: [], reviewRequests: [], merges: [], grants: [], githubRetries: 0 }
@@ -1178,6 +1190,22 @@ window.runWorkspaceChecks = async () => {
       await captureShot('prepared-tab')
       await click(query('.co-prepared-tab .co-run-quiet-row'))
       await until(() => button(opens), 'Prepared PR details did not offer publication')
+      // The opened PR is the page of its tab (owner's choice, 2026-11-23): under the send bar and the tab strip, its Back link
+      // its one way out, and the list it replaced is not drawn under it.
+      const page = query('.co-project-tabpanel .co-task-page')
+      ensure(page && !query('.co-run > .co-task-content'), 'The opened prepared PR is not the page of its tab')
+      ensure(query('[data-tab="prepared"][aria-selected="true"]') && !query('.co-prepared-tab'), 'The list stayed under the opened page')
+      ensure(query('.co-decisions').compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING && query('.co-project-tabs').compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING, 'The opened page is not under the send bar and the tab strip')
+      ensure(query('.co-task-back') && !query('[aria-label="Close action"]', page), 'The page has no Back link, or has an X beside it')
+      ensure(query('.co-task-page .co-pr-page-title') && query('.co-task-page .co-doc-section'), 'The page did not draw its title and its sections')
+      ensure(query('.co-task-page .co-doc-term-row'), 'The list of bold terms did not read as term and text rows')
+      await captureShot('prepared-page')
+      await captureShot('prepared-page-sections', query('.co-task-page .co-doc-terms'))
+      await click(query('.co-task-back'))
+      await until(() => query('.co-prepared-tab .co-run-quiet-row') && !query('.co-task-page'), 'Back did not return to the list')
+      await until(() => document.activeElement === query('.co-prepared-tab .co-run-quiet-row'), 'Back did not give focus back to the row the page was opened from')
+      await click(query('.co-prepared-tab .co-run-quiet-row'))
+      await until(() => query('.co-task-page'), 'The row did not open its page again')
       await click(button(opens))
       await until(() => button(sends),'Publication confirmation missing')
       await captureShot('send-window')
@@ -1185,6 +1213,7 @@ window.runWorkspaceChecks = async () => {
       // Browsing the tabs must not drop a confirmation, nor a send that is still running, nor its outcome.
       await openTab('All PRs'); await openTab('Prepared PRs')
       ensure(button(sends) && !button(opens),'A tab switch dropped the publication confirmation')
+      ensure(!query('.co-task-page') && query('.co-prepared-tab .co-run-quiet-row'), 'Leaving the tab left its page open instead of showing the list again')
       let release; window.holdSend = new Promise(resolve => { release = resolve })
       await click(button(sends))
       await until(() => calls.publications.length===1 && text(query('.co-run-approval')).includes('Sending'),'The held publication did not show as sending')
@@ -2481,6 +2510,7 @@ window.runTapBoxChecks = async () => {
     const still = document.createElement('style')
     still.textContent = '*,*::before,*::after { animation: none !important; transition: none !important; }'
     document.head.append(still)
+    window.deskRecords = [prepared] // a saved prepared PR, so the project has a Prepared PRs tab and a page to open
     await mountDeskApp()
     await until(() => query('.co-desk-row'), 'The Desk did not list the review request')
     const phone = getComputedStyle(query('.co-desk-chips')).display !== 'none'
@@ -2506,6 +2536,15 @@ window.runTapBoxChecks = async () => {
     await click(query('.co-source-row'))
     await until(() => document.querySelectorAll('.co-pr-row').length >= 1, 'The project did not open')
     tapBoxes('a repository page')
+    // A prepared PR's page (owner's choice, 2026-11-23): its Back link, Hide details and tabs take a full 44px tap like any control.
+    const tab = word => [...document.querySelectorAll('[role=tab]')].find(node => text(node).startsWith(word))
+    await click(tab('Prepared PRs'), 'The project has no Prepared PRs tab')
+    await click(query('.co-prepared-tab .co-run-quiet-row'), 'The Prepared PRs tab lists no row')
+    await until(() => query('.co-task-page .co-pr-page-title'), 'The prepared PR did not open as a page')
+    tapBoxes('a prepared PR page', query('.co-task-page'))
+    await click(query('.co-task-back'))
+    await click(tab('All PRs'))
+    await until(() => document.querySelectorAll('.co-pr-row').length >= 1, 'The PR list did not come back')
     // A selected PR brings the bar with Clear selection, an icon button beside Assign and Actions.
     await click(query('input[aria-label="Select owner/project #7"]'))
     await until(() => query('.co-pr-box-head [aria-label="Clear selection"]'), 'Selecting a PR did not offer Clear selection')

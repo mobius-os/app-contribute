@@ -122,6 +122,10 @@ Use a linked project repository, real status refresh, a prepare launch panel, pr
 
 A repository's PRs no longer wait for a click. Each repository's first page of open PRs is saved (per GitHub account, without the text of reviews, at most twelve repositories) and opens at once next time; the app reads them after its own desk has answered, one at a time and by tier. **Always:** the platform's repository (pinned by default) and any repository the owner turns **Auto-sync** on: read in full at every open, then asked once a minute what moved (a point), re-reading only the PRs that changed, taking in the ones that came and dropping the ones that closed. **Active:** repositories where the owner has an open or saved PR, a review request, an agent review or Respond conversation at work, or that they opened in the last seven days: read after the pinned ones. **Quiet:** everything else: not read until opened, except that one combined count tells which have no open PRs so they show their empty list at once. Every rule of the sync budget holds: nothing while the frame is hidden, nothing automatic once the account has fewer than 1,000 points, the cooldown between automatic passes; the owner's Sync still reads. A repository with no saved list shows titles first and the details behind them, read in parallel groups of ten.
 
+## A prepared PR opens in its own tab (2026-11-23)
+
+Opening a row in Prepared PRs shows that PR as the tab's own page, under the send bar and the tab strip, instead of a panel above them that stayed on top whichever tab was shown. The page has clear sections (title, facts, the source chats, what waits on the owner, then the description in sections), a Back link as its one way out, and the same send bar above it, so the decision is never below the text. The text renderer behind it is shared, so PR descriptions, comments and review findings elsewhere get the same readable headings and line length.
+
 ## GitHub alignment and live versions (2026-10-03)
 
 The PR list and detail follow GitHub's own presentation
