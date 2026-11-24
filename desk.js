@@ -261,19 +261,49 @@ export function feedbackPull(item) {
 }
 
 // The project groups, in the directory's own order: the repositories the owner works with first, the other installed ones
-// folded, externals last. Worked with is what has something going on, then what they contributed to before, the latest first
-// (lastWorkedAt, source-map.js): finished work does not make a repository "nothing to do".
+// folded, repositories nothing is installed of last. Worked with is what has something going on, then what they contributed to
+// before, the latest first (lastWorkedAt, source-map.js): finished work does not make a repository "nothing to do", and a
+// repository that lives only on GitHub is worked with exactly like an installed one: installed or not says nothing about the work.
 export function splitProjects(projects, attention = {}) {
-  const tracked = (projects || []).filter(project => project.kind !== 'external' && !project.builtHere)
+  const tracked = (projects || []).filter(project => !project.builtHere)
   const isQuiet = project => projectIsQuiet(project) && !attention[project.key]
   const quiet = tracked.filter(isQuiet)
   const workedBefore = quiet.filter(project => project.lastWorkedAt != null).sort((a, b) => b.lastWorkedAt - a.lastWorkedAt)
+  const neverWorked = quiet.filter(project => project.lastWorkedAt == null)
   return {
     workedWith: [...tracked.filter(project => !isQuiet(project)), ...workedBefore],
-    other: quiet.filter(project => project.lastWorkedAt == null),
+    other: neverWorked.filter(project => project.kind !== 'external'),
     builtHere: (projects || []).filter(project => project.builtHere),
-    external: (projects || []).filter(project => project.kind === 'external'),
+    external: neverWorked.filter(project => project.kind === 'external'),
   }
+}
+
+// The side list's repositories (owner's choice, 2026-11-24): the ones the owner worked in or has PRs on, or that wait on them, latest activity first,
+// the first RAIL_TOP of them and every one that waits on the owner however far down; everything else sits behind one fold in the same
+// list: the rest of the worked-in ones, local-only apps, installed ones never worked in, repositories only on GitHub.
+export const RAIL_TOP = 10
+export function railRepositories(projects, attention = {}, cap = RAIL_TOP) {
+  const groups = splitProjects(projects, attention)
+  // Worked in: the ledger remembers work there, the owner has PRs on it (opened, reviewed, assigned) or something there waits on them.
+  const inWork = project => project.lastWorkedAt != null || !!project.incomingReviews?.length || !!attention[project.key]
+  const tracked = [...groups.workedWith, ...groups.other, ...groups.external]
+  const latestFirst = tracked.filter(inWork).sort((a, b) => (b.lastWorkedAt ?? -1) - (a.lastWorkedAt ?? -1))
+  const shown = (project, index) => index < cap || !!attention[project.key]
+  return {
+    top: latestFirst.filter(shown),
+    rest: [...latestFirst.filter((project, index) => !shown(project, index)), ...groups.builtHere, ...tracked.filter(project => !inWork(project))],
+  }
+}
+
+const plain = text => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+// The side list's search: words match a repository's name (shown or the repository's own), never its owner, so typing "mobi" does
+// not match every repository of an owner called mobius-os. A slash searches owner/name.
+export function repositoryMatches(project, query) {
+  const wanted = plain(query).trim()
+  if (!wanted) return true
+  if (wanted.includes('/')) return plain(project.canonical_repo).includes(wanted)
+  const own = String(project.canonical_repo || '').split('/')[1]
+  return [String(project.name || '').split('/').pop(), own].some(text => plain(text).includes(wanted))
 }
 
 // The list of review runs is paged: say so when it is cut, never present it as the whole. Older finished runs are the only ones missing from a

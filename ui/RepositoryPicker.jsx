@@ -1,51 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
-import { discoverRepository } from '../collaboration.js'
-import { followRepository } from '../repositories.js'
+import { useState } from 'react'
 import { NAMES } from '../names.js'
 import { Icon } from './Icons.jsx'
-import { Shine } from './Shine.jsx'
+import { AddRepositoryWindow } from './AddRepositoryWindow.jsx'
 
-// `quiet`: the last row of the rail's Projects block; otherwise a secondary button (an empty state).
-export function RepositoryPicker({ token, connected, onAdded, quiet = false }) {
-  const [value, setValue] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+// The button that opens the Add repository window. `variant`: 'heading' (the side list's title row, one word), 'lookup' (under a
+// search that found nothing, with the typed words already in the window), or 'button' (the directory's own, with the full name).
+export function RepositoryPicker({ token, connected, onAdded, variant = 'button', initialText = '' }) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    // In the rail the form opens in flow, so in a short window it can open below what the rail shows.
-    rootRef.current?.scrollIntoView({ block: 'nearest' })
-    const close = event => {
-      if (event.key === 'Escape' || (event.type === 'pointerdown' && rootRef.current && !rootRef.current.contains(event.target))) setOpen(false)
-    }
-    document.addEventListener('keydown', close)
-    document.addEventListener('pointerdown', close)
-    return () => {
-      document.removeEventListener('keydown', close)
-      document.removeEventListener('pointerdown', close)
-    }
-  }, [open])
-  async function add(event) {
-    event.preventDefault()
-    setBusy(true); setError('')
-    try {
-      const repo = await discoverRepository(token, value)
-      const followed = await followRepository(repo.nameWithOwner)
-      onAdded?.(repo, followed)
-      setValue(''); setOpen(false)
-    } catch (error) { setError(error.message || 'Could not add this repository. Try again.') }
-    finally { setBusy(false) }
-  }
-  return <div className={'co-repository-picker' + (open ? ' is-open' : '')} ref={rootRef}>
-    <button type="button" className={'co-btn co-repository-trigger' + (quiet ? ' co-btn-quiet' : '')} aria-expanded={open} onClick={() => setOpen(value => !value)}><Icon name="plus" size={16} /><span>{NAMES.addRepository}</span></button>
-    {open ? connected ? <form onSubmit={add}>
-      <header><strong>Add a GitHub repository</strong><button type="button" className="co-btn co-btn-quiet" onClick={() => setOpen(false)}><Icon name="close" size={17} /> Close</button></header>
-      <label htmlFor="co-repository-name">Repository name or link</label>
-      <div><input id="co-repository-name" value={value} onChange={event => setValue(event.target.value)} placeholder="owner/project or GitHub URL" disabled={busy} autoComplete="off" required />
-      <button className="co-btn" disabled={busy || !value.trim()}>{busy ? <Shine>Adding…</Shine> : 'Add'}</button></div>
-      <p>Follow contributions here without installing the project.</p>
-      {error ? <p className="co-run-error" role="alert">{error}</p> : null}
-    </form> : <p className="co-repository-note">To add a repository, go to Möbius Settings → Accounts and connect GitHub.</p> : null}
-  </div>
+  const words = { heading: NAMES.addRepositoryShort, lookup: NAMES.lookUpOnGitHub }[variant]
+  return <>
+    <button type="button" className={`co-btn co-repository-trigger is-${variant}` + (variant === 'heading' ? ' co-btn-quiet' : '')} aria-haspopup="dialog"
+      aria-label={variant === 'heading' ? NAMES.addRepository : undefined} onClick={() => setOpen(true)}>
+      <Icon name={variant === 'lookup' ? 'search' : 'plus'} size={16} /><span>{words || NAMES.addRepository}</span>
+    </button>
+    {open ? <AddRepositoryWindow token={token} connected={connected} initialText={initialText} onAdded={onAdded} onClose={() => setOpen(false)} /> : null}
+  </>
 }

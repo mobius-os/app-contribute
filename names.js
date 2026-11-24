@@ -102,6 +102,7 @@ export const NAMES = Object.freeze({
   copyHash: 'Copy hash',
   cancel: 'Cancel',
   clearSearch: 'Clear search',
+  search: 'Search',
   showFullMessage: 'Show the full message',
   seeChanges: 'See changes',
   viewOnGitHub: 'View on GitHub',
@@ -109,11 +110,19 @@ export const NAMES = Object.freeze({
 
   // The app's list of followed repositories. Say repository, not project or app: "Projects" is the Möbius shell's own word for something else.
   repositories: 'Repositories',
-  moreRepositories: 'More repositories',
   workedWith: 'Worked with',
   otherRepositories: 'Other repositories',
   allRepositories: 'All repositories',
+  // The side list: the fold under the repositories worked in, the search above them and the way to the full page.
+  showFewerRepositories: 'Show fewer',
+  searchRepositories: 'Search repositories',
+  openDirectory: 'Open full directory',
   addRepository: 'Add repository',
+  // The title of the window that button opens.
+  addRepositoryTitle: 'Add a repository',
+  // The same button on the list's heading, where there is room for one word.
+  addRepositoryShort: 'Add',
+  lookUpOnGitHub: 'Look it up on GitHub',
   // The button on a repository's title that keeps its pull requests read in the background, so they are there when it is opened.
   // Named after Sync, because it is Sync done for the owner; the sentence says what it does. The state is aria-pressed, shown by colour, edge and icon together.
   autoSync: 'Auto-sync',
@@ -121,6 +130,7 @@ export const NAMES = Object.freeze({
 })
 
 // How long a PR has waited on others, as the block under Needs you says it: "Waiting 3 days on Sam" ("reviewers" when no one is named).
+export const showMoreRepositories = count => `Show ${count} more`
 export const waitingWords = (days, who) => `Waiting ${days} days on ${who}`
 
 const REVIEW_JOBS = new Set(['review', 'review_merge'])

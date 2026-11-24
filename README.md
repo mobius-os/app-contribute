@@ -194,8 +194,9 @@ only for the core and the one mode it is working in.
 ## The redesigned desk
 
 - **Four views, one count.** The side menu is Needs you, Review requests, My PRs
-  and Agent runs, then a **Repositories** block of its own (More repositories,
-  All repositories, **Add repository** last). The Needs you chips (To look at,
+  and Agent runs, then a **Repositories** block of its own (**Add** on its title row, a search
+  that filters as you type, the repositories you worked in latest first, and one
+  fold for the rest). The Needs you chips (To look at,
   Review, Merge, Fix, Review again) filter the list under them, and the badge is
   their sum; the list, the Review requests view and a project's tab and badge
   count the same rows. A review request is a row only where it is your turn (or

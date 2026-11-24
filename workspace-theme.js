@@ -285,25 +285,13 @@ export const WORKSPACE_CSS = `
 .co-source-row { box-sizing:border-box; min-height:88px; padding:13px 12px; border-radius:var(--co-radius-panel); }
 .co-source-row .co-source-glyph { grid-row:1; align-self:center; }
 .co-source-row-cue > .co-icon { flex:0 0 auto; align-self:center; margin:0; }
-.co-repository-picker { position:relative; }
 .co-repository-trigger { white-space:nowrap; }
-.co-repository-picker form { position:absolute; right:0; top:100%; z-index:5; width:min(500px,calc(100vw - 36px)); padding:20px; background:var(--bg); border:1px solid var(--border); border-radius:var(--co-radius-panel); }
-.co-repository-picker form > header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
-.co-repository-picker form > header strong { font-size:var(--co-text-body); }
-.co-repository-picker form > header .co-btn-quiet { padding-inline:4px; }
-.co-repository-picker label { display:block; margin-bottom:8px; font-size:var(--co-text-body); }
-.co-repository-picker form > div { display:flex; align-items:center; gap:12px; }
-.co-repository-picker input { min-width:0; width:100%; min-height:44px; padding:10px 12px; font-size:var(--co-text-body); color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:var(--co-radius-field); }
-.co-repository-picker p { color:var(--muted); font-size:var(--co-text-meta); line-height:1.5; }
-.co-repository-note { position:absolute; right:0; top:100%; z-index:5; width:min(320px,calc(100vw - 36px)); padding:16px; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); }
+.co-repository-trigger { white-space:nowrap; }
 @media(max-width:520px) {
  .co-view-heading { display:flex; align-items:center; gap:8px; }
  .co-view-heading h2 { white-space:nowrap; }
  .co-project-view-actions { flex-direction:row; align-items:center; gap:8px; }
  .co-project-view-actions { margin-left:auto; }
- .co-repository-picker form { position:fixed; left:8px; right:8px; top:auto; bottom:max(8px,env(safe-area-inset-bottom)); z-index:70; width:auto; max-height:calc(100dvh - 16px); overflow:auto; box-sizing:border-box; border-radius:var(--co-radius-panel); box-shadow:0 18px 58px color-mix(in srgb,#000 34%,transparent); }
- .co-repository-note { position:fixed; left:8px; right:8px; top:auto; bottom:max(8px,env(safe-area-inset-bottom)); width:auto; box-sizing:border-box; border-radius:var(--co-radius-panel); }
- .co-repository-picker form > div { display:grid; grid-template-columns:minmax(0,1fr) auto; }
 }
 .co-selection-page { width:100%; max-width:760px; margin:0 auto; padding:28px; }
 .co-selection-page > .co-btn-quiet { margin-bottom:20px; }
@@ -948,22 +936,39 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
 .co-rail-views,.co-rail-projects { display:flex; flex-direction:column; gap:2px; }
 /* The projects are a block of their own under the four views (finding 2). */
 .co-rail-projects { margin-top:22px; padding-top:6px; border-top:1px solid var(--border); }
-.co-rail-head { margin:0; padding:14px 10px 6px; color:var(--muted); font:700 var(--co-text-meta) var(--font); letter-spacing:.05em; text-transform:uppercase; }
-.co-rail-add { margin-top:6px; }
+.co-rail-headrow { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-top:8px; }
+.co-rail-head { margin:0; padding:0 10px; color:var(--muted); font:700 var(--co-text-meta) var(--font); letter-spacing:.05em; text-transform:uppercase; }
+.co-rail-headrow .co-repository-trigger { flex:none; }
+.co-rail-search { margin:0 0 6px; }
+.co-rail-status { margin:0; padding:2px 10px 6px; color:var(--muted); font-size:var(--co-text-meta); }
+/* The fold and the way to the full page: quiet rows in the list's own rhythm, the chevron turning as the rest opens or closes. */
+.co-rail-more { display:flex; align-items:center; gap:8px; width:100%; min-height:var(--co-control-height); padding:6px 10px; border:0; border-radius:var(--co-radius-control); background:none; color:var(--muted); font:500 var(--co-text-meta) var(--font); text-align:left; cursor:pointer; }
+.co-rail-more:hover { background:var(--surface-2); color:var(--text); }
+.co-rail-more[aria-current] { background:var(--accent-dim, var(--surface-2)); color:var(--accent); }
+.co-rail-more:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.co-rail-more .co-icon { transition:transform .16s; }
+.co-rail-more[aria-expanded=true] .co-icon { transform:rotate(180deg); }
+.co-rail-rule { height:1px; margin:6px 10px; border:0; background:var(--border); }
+.co-rail-projects .co-repository-trigger.is-lookup { width:100%; justify-content:center; margin-top:4px; }
+/* The Add repository window: its words sit in the shared window body; the field and the answer under it read left to right. */
+.co-add-body { gap:12px; }
+.co-add-label { font-size:var(--co-text-meta); font-weight:600; }
+.co-add-body input { min-width:0; width:100%; min-height:var(--co-tap-height); padding:10px 12px; font:400 var(--co-text-entry) var(--font); color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:var(--co-radius-field); transition:border-color .12s, box-shadow .12s; }
+.co-add-body input::placeholder { color:var(--muted); }
+.co-add-body input:focus-visible { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.co-add-answer { display:flex; flex-direction:column; gap:10px; min-height:44px; }
+.co-add-line { margin:0; color:var(--muted); font-size:var(--co-text-meta); line-height:1.5; }
+.co-add-line.is-found { padding:12px; border:1px solid var(--border); border-left:3px solid var(--green); border-radius:var(--co-radius-field); background:var(--bg); color:var(--text); }
+.co-add-choices { margin:0; padding:0; list-style:none; border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--bg); overflow:hidden; }
+.co-add-choices li + li { border-top:1px solid var(--border); }
+.co-add-choices button { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; min-height:var(--co-tap-height); padding:8px 12px; border:0; background:none; color:var(--text); font:500 var(--co-text-body) var(--font); text-align:left; cursor:pointer; overflow-wrap:anywhere; }
+.co-add-choices button:hover { background:var(--surface-2); }
+.co-add-choices button[aria-pressed=true] { background:var(--accent-dim, var(--surface-2)); }
+.co-add-choices button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.co-add-choices span { color:var(--muted); font-size:var(--co-text-meta); font-weight:400; }
 
-.co-rail-add .co-repository-trigger { width:100%; justify-content:flex-start; padding-inline:10px; }
-/* The rail scrolls, so it clips whatever floats out of it: its form and its note open in flow under the row, at the rail's width. */
-.co-rail-add .co-repository-picker form,.co-rail-add .co-repository-note { position:static; width:auto; margin-top:6px; box-sizing:border-box; }
-.co-rail-add .co-repository-picker form { padding:12px; }
-.co-rail-add .co-repository-picker form > div { flex-direction:column; align-items:stretch; }
 .co-rail-foot { margin-top:auto; padding-top:8px; border-top:1px solid var(--border); } /* the Settings row: the .co-rail-item.is-settings class is only a marker, it carries no style of its own */
 .co-desk-quiet-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0 0 12px; color:var(--muted); font-size:var(--co-text-meta); }
-.co-rail-quiet > summary { display:flex; align-items:center; gap:8px; min-height:38px; padding:6px 10px; border-radius:var(--co-radius-control); color:var(--muted); font:500 var(--co-text-meta) var(--font); cursor:pointer; list-style:none; }
-.co-rail-quiet > summary::-webkit-details-marker { display:none; }
-.co-rail-quiet > summary:hover { background:var(--surface-2); }
-.co-rail-quiet > summary span { flex:1; }
-.co-rail-quiet > summary b { font-weight:600; }
-.co-rail-item.is-all { color:var(--muted); font-size:var(--co-text-meta); }
 /* Phone only: the four views as one segmented bar, all on screen, count above the word. */
 /* The filters of Needs you and Repositories: plain text, the count first in the accent colour, the
    chosen word underlined. Every tap area stays the full control height. */
@@ -1018,11 +1023,14 @@ input[type=checkbox].co-switch:focus-visible { outline:2px solid var(--accent); 
    Only the 36px circle behind the 16px icon is drawn, so it looks as small as before and a thumb still hits it. */
 .co-search-clear { position:relative; isolation:isolate; flex:none; display:grid; place-items:center; width:var(--co-tap-height); height:var(--co-tap-height); margin:calc(-1px - var(--co-tap-reach)) 0; padding:0; border:0; background:none; color:var(--muted); cursor:pointer; }
 .co-search-clear::before { content:''; position:absolute; z-index:-1; inset:4px; border-radius:var(--co-radius-round); }
-.co-search-clear:hover,.co-search-clear:focus-visible { color:var(--text); outline:none; }
-.co-search-clear:hover::before,.co-search-clear:focus-visible::before { background:var(--surface-2,var(--bg)); }
+.co-search-go { position:relative; isolation:isolate; flex:none; display:grid; place-items:center; width:var(--co-tap-height); height:var(--co-tap-height); margin:calc(-1px - var(--co-tap-reach)) 0; padding:0; border:0; background:none; color:var(--text); cursor:pointer; }
+.co-search-go::before { content:''; position:absolute; z-index:-1; inset:4px; border-radius:var(--co-radius-round); }
+.co-search-go:disabled { color:var(--muted); cursor:default; }
+.co-search-clear:hover,.co-search-clear:focus-visible,.co-search-go:hover,.co-search-go:focus-visible { color:var(--text); outline:none; }
+.co-search-clear:hover::before,.co-search-clear:focus-visible::before,.co-search-go:hover::before,.co-search-go:focus-visible::before { background:var(--surface-2,var(--bg)); }
 .co-pr-list-controls .co-search,.co-file-tools .co-search { margin:0; flex:1; }
 .co-person-search { margin:16px 0 12px; }
-@media(prefers-reduced-motion:reduce) { .co-search { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .co-search { transition:none; } .co-rail-more .co-icon { transition:none; } }
 .co-desk-envelopes { display:flex; flex-direction:column; gap:16px; }
 .co-envelope { border:1px solid var(--border); border-radius:var(--co-radius-panel); background:var(--surface); overflow:hidden; }
 .co-envelope-head { display:flex; align-items:center; gap:10px; padding:6px 8px 6px 10px; }

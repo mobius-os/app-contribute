@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewPeople, requestReviewMany, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
+import { conversationCount, isBotAuthor, discoverPull, discoverPulls, discoverRepositories, repositoryName, searchRepositories, matchingPulls, mayAssign, mayMerge, mergeSelection, collaborationRequest, reviewRunRequest, assignPulls, loadReviewPeople, requestReviewMany, loadReviewRuns, awaitsGithub, OBSERVE_EVERY_MS, reviewRunTitle, reviewForPull, runDetailsElsewhere, notOursToObserve } from '../collaboration.js'
 import { attachSourceProjects } from '../source-map.js'
 import { frontendModules, renderModule } from './render-harness.mjs'
 const pull = (number, extra = {}) => ({ number, title: 'A clear change', url: 'https://github.com/team/repo/pull/' + number,
@@ -501,4 +501,20 @@ test('the runs are asked for as the short list, and a short run is marked while 
   const full = await loadReviewRuns('test', 80, { now: 1 })
   assert.deepEqual(full.runs.map(run => run.summary_only), [undefined], 'an older Möbius answered in full: nothing to read separately')
   assert.deepEqual(full, answer)
+})
+
+test('a repository is named by owner/name or by a link to it or to anything inside it, never by a bare word', () => {
+  for (const typed of ['mobius-os/mobius', 'Mobius-OS/Mobius', 'https://github.com/mobius-os/mobius', 'github.com/mobius-os/mobius', 'http://www.github.com/mobius-os/mobius/',
+    'https://github.com/mobius-os/mobius/pull/12?tab=files#diff', 'https://github.com/mobius-os/mobius.git', 'git@github.com:mobius-os/mobius.git']) {
+    assert.equal(repositoryName(typed), 'mobius-os/mobius', typed)
+  }
+  for (const typed of ['mobius', 'a/b/c', 'https://github.com/mobius-os', 'mobius os', '', null]) assert.equal(repositoryName(typed), '', String(typed))
+})
+
+test('a name alone is looked up on GitHub among the repositories the account can see, and nothing is asked for empty words', async t => {
+  assert.deepEqual(await searchRepositories('token', '   '), [])
+  const queries = []
+  t.mock.method(globalThis, 'fetch', async (_url, init) => { queries.push(JSON.parse(init.body).query); return new Response(JSON.stringify({ data: { search: { nodes: [{ nameWithOwner: 'o/mobius-mobile' }, null] } } })) })
+  assert.deepEqual(await searchRepositories('token', 'mobius "x'), [{ nameWithOwner: 'o/mobius-mobile' }])
+  assert.match(queries[0], /search\(query:"mobius \\"x in:name",type:REPOSITORY/, 'the typed words are one quoted string, so they cannot add search qualifiers of their own')
 })

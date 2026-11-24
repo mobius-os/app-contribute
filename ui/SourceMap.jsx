@@ -340,14 +340,13 @@ export function SourceMap({
     void openProject(project.key)
     if (item?.id) openWork(item.id)
   }
-  const externalQuestions = external.reduce((count, project) => count + (desk.asked?.[project.key] ?? project.reviewRequests?.length ?? 0), 0)
   if (loading && !snapshot && !projects.length) return <LoadingState />
   const currentView = DESK_VIEWS.find(item => item.key === desk.view)
   const viewLabel = currentView?.heading || currentView?.label || NAMES.repositories
   return (
     <section className={'co-projects-view' + (selectedProject ? ' is-focus' : '')} aria-label="Repository details">
       <div className="co-desk">
-      <DeskRail view={desk.view} counts={desk.counts} projects={projects} attention={attention} selectedKey={selected} onView={openView} onOpenProject={openProjectFromRail} addProject={addProject?.(true)} foot={railFoot} />
+      <DeskRail view={desk.view} counts={desk.counts} projects={projects} attention={attention} selectedKey={selected} onView={openView} onOpenProject={openProjectFromRail} addProject={addProject} foot={railFoot} />
       <div className="co-desk-pane">
       {desk.pull ? (
         <div className="co-pull-page">
@@ -432,11 +431,11 @@ export function SourceMap({
             </div>
           )}
           {external.length ? <details className="co-other-repositories" open={query.trim() ? true : undefined}>
-            <summary>On GitHub, not installed here <span>{external.length}{externalQuestions ? ` · ${externalQuestions} review requests` : ''}</span></summary>
+            <summary>On GitHub, not installed here <span>{external.length}</span></summary>
             <p>Shown because Contribute has saved history here, you added the repository, or a pull request currently involves you. Other repositories stay on GitHub until you add or work on them.</p>
             <ProjectGroup label="" projects={external} selectedKey="" onSelect={openProject} />
           </details> : null}
-          {addProject ? <div className="co-directory-add">{addProject(false)}</div> : null}
+          {addProject ? <div className="co-directory-add">{addProject({})}</div> : null}
           </div>
         </>
         )

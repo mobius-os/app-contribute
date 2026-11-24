@@ -203,6 +203,7 @@
     "ui/useScreenshots.js",
     "ui/SourceConversations.jsx",
     "repositories.js",
+    "ui/AddRepositoryWindow.jsx",
     "ui/RepositoryPicker.jsx",
     "review-selection.js",
     "ui/ReviewSelection.jsx",

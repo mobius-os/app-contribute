@@ -90,8 +90,9 @@ test('the app\'s repository list and its settings take their own names, not the 
   assert.equal(NAMES.repositories, 'Repositories')
   assert.equal(NAMES.settings, 'Settings', 'you are already in Contribute: the app calls it plain Settings')
   assert.match(rail, /\{NAMES\.repositories\}<\/h2>/)
-  assert.match(rail, /<span>\{NAMES\.moreRepositories\}<\/span>/)
-  assert.match(picker, /<span>\{NAMES\.addRepository\}<\/span>/)
+  assert.match(rail, /showMoreRepositories\(rest\.length\)/)
+  assert.match(rail, /NAMES\.openDirectory/)
+  assert.match(picker, /words \|\| NAMES\.addRepository/)
   assert.match(read('ui/ConnectionCard.jsx'), /<h2>\{NAMES\.settings\}<\/h2>/)
 })
 

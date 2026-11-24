@@ -1,8 +1,10 @@
-import { DESK_VIEWS, NEEDS_CHIPS, railBadge, splitProjects } from '../desk.js'
+import { useEffect, useState } from 'react'
+import { DESK_VIEWS, NEEDS_CHIPS, railBadge, railRepositories, repositoryMatches } from '../desk.js'
 import { Icon } from './Icons.jsx'
 import { FilterLine } from './FilterLine.jsx'
 import { ProjectIcon } from './ProjectIcon.jsx'
-import { NAMES } from '../names.js'
+import { SearchField } from './SearchField.jsx'
+import { NAMES, showMoreRepositories } from '../names.js'
 
 // The count a project's rail row shows: how many things in it wait on the
 // owner. `attention` already holds exactly what its Needs you card lists
@@ -47,35 +49,45 @@ function RailProjectButton({ project, attention, selectedKey, onOpenProject }) {
   )
 }
 
-// The desktop side list: four views, then the projects as a block of their own
-// (finding 2). Quiet apps, local-only apps and repositories not installed here fold
-// into one "More projects" row; Add project is the block's last row (finding 12).
-// On narrow screens CSS hides it and DeskChips takes over.
+// The desktop side list: four views, then the repositories as a block of their own. Its order is DESIGN.md's Four Views Rule: the
+// heading with Add, the search, then the repositories worked in (railRepositories) and one fold for the rest, opened in place. Typing
+// searches every repository, folded or not, as one flat list. On narrow screens CSS hides it and DeskChips takes over.
+// `addProject(options)` draws the Add repository button (and its window): RepositoryPicker.
 export function DeskRail({ view, counts, projects, attention, selectedKey, onView, onOpenProject, addProject = null, foot = null }) {
-  const groups = splitProjects(projects, attention)
-  const more = [...groups.other, ...groups.external]
-  const moreOpen = more.some(project => project.key === selectedKey)
+  const [query, setQuery] = useState('')
+  const [unfolded, setUnfolded] = useState(false)
+  const { top, rest } = railRepositories(projects, attention)
+  const searching = !!query.trim()
+  const matches = searching ? [...top, ...rest].filter(project => repositoryMatches(project, query)) : []
+  // Opening a repository from behind the fold (a search, a repository just added) unfolds the list once, so the open one is in sight; the owner can fold it again.
+  const selectedIsFolded = rest.some(project => project.key === selectedKey)
+  useEffect(() => { if (selectedIsFolded) setUnfolded(true) }, [selectedIsFolded, selectedKey])
+  const row = project => <RailProjectButton key={project.key} project={project} attention={attention} selectedKey={selectedKey} onOpenProject={onOpenProject} />
+  const openFirstMatch = () => { if (matches[0]) onOpenProject(matches[0].key) }
   return (
     <div className="co-rail">
       <nav className="co-rail-views" aria-label="Contribute views">
         {DESK_VIEWS.map(item => <RailViewButton key={item.key} view={item} current={selectedKey ? '' : view} counts={counts} onView={onView} />)}
       </nav>
       <nav className="co-rail-projects" aria-labelledby="co-rail-projects-head">
-        <h2 className="co-rail-head" id="co-rail-projects-head">{NAMES.repositories}</h2>
-        {[...groups.workedWith, ...groups.builtHere].map(project => (
-          <RailProjectButton key={project.key} project={project} attention={attention} selectedKey={selectedKey} onOpenProject={onOpenProject} />
-        ))}
-        {more.length ? (
-          <details className="co-rail-quiet" open={moreOpen || undefined}>
-            <summary><span>{NAMES.moreRepositories}</span><b>{more.length}</b><Icon name="chevron" size={13} /></summary>
-            {more.map(project => <RailProjectButton key={project.key} project={project} attention={attention} selectedKey={selectedKey} onOpenProject={onOpenProject} />)}
-          </details>
-        ) : null}
-        <button type="button" className="co-rail-item is-all" onClick={() => onView('projects')} aria-current={!selectedKey && view === 'projects' ? 'page' : undefined}>
-          <Icon name="search" size={15} />
-          <span className="co-rail-label">{NAMES.allRepositories}</span>
-        </button>
-        {addProject ? <div className="co-rail-add">{addProject}</div> : null}
+        <div className="co-rail-headrow">
+          <h2 className="co-rail-head" id="co-rail-projects-head">{NAMES.repositories}</h2>
+          {addProject?.({ variant: 'heading' })}
+        </div>
+        <SearchField label={NAMES.searchRepositories} value={query} onChange={setQuery} onSubmit={openFirstMatch} className="co-rail-search" />
+        {searching ? <>
+          <p className="co-rail-status" role="status">{matches.length ? `${matches.length} ${matches.length === 1 ? 'repository matches' : 'repositories match'}` : `Nothing called “${query.trim()}” in this list.`}</p>
+          {matches.map(row)}
+          {matches.length ? null : addProject?.({ variant: 'lookup', initialText: query.trim() })}
+        </> : <>
+          {top.map(row)}
+          {rest.length ? <button type="button" className="co-rail-more" aria-expanded={unfolded} onClick={() => setUnfolded(!unfolded)}>
+            <Icon name="chevron" size={13} /><span>{unfolded ? NAMES.showFewerRepositories : showMoreRepositories(rest.length)}</span>
+          </button> : null}
+          {unfolded ? <><hr className="co-rail-rule" />{rest.map(row)}</> : null}
+          {/* The way to the full page ends the list: behind the fold with the rest, or on its own when there is nothing to fold. */}
+          {unfolded || !rest.length ? <button type="button" className="co-rail-more" aria-current={!selectedKey && view === 'projects' ? 'page' : undefined} onClick={() => onView('projects')}>{NAMES.openDirectory}</button> : null}
+        </>}
       </nav>
       {foot ? <div className="co-rail-foot">{foot}</div> : null}
     </div>
