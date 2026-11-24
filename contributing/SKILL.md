@@ -156,9 +156,8 @@ their parent; they do not become owner-facing contribution homes.
 
 Interpret the request in context, using Hard stop #1:
 
-- **Prepare privately** means prepare and review, then stop before publication.
-  Preparing is still private: a local branch/commit and Contribute record, not
-  a fork, push, PR, issue, or comment.
+- **Prepare privately** means prepare and review. Preparing is still private:
+  no fork, push, PR, issue or comment. Continue other authorized work.
 - **Create/send a PR for this work** means prepare, review, publish, and verify
   that PR, not just prepare it for another approval. Ordinary read-only checks
   and bounded CI monitoring are verification, not another permission request;

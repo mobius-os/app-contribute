@@ -261,10 +261,13 @@ one short handoff summarizing the staged work, and for prepared, `all_clear`
 PR records print the Send card from **Offering Send in chat** in
 [publish.md](publish.md) in this chat. Printing it is part of preparation and
 needs no publication approval; do not also ask for the same send in another
-question. If this chat must resume on the owner's decision, use the one saved
-approval card instead ([SKILL.md](SKILL.md), "One decision, no duplicate
-approval"). Explain held or unsupported records in prose; never present them
-as sendable. If publication is
+question. A successful Send does not resume this chat. If continuing the
+original Goal depends on a new publication decision, finish independent
+authorized work and use the one saved approval card instead of the Send card
+([SKILL.md](SKILL.md), "One decision, no duplicate approval"); its answer
+resumes this Goal through the ordinary guarded path. Preparation or
+publication alone does not complete a larger unfinished Goal. Explain held or
+unsupported records in prose; never present them as sendable. If publication is
 already authorized, continue through [publish.md](publish.md) instead of asking
 again. A prepared review is not an app build completion. Do not navigate the
 workspace, place an app, or link a completion notification to an app as part of
