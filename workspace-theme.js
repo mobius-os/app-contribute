@@ -1204,6 +1204,26 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
 .co-frame-comet { fill:none; stroke:var(--accent); stroke-linecap:butt; animation:co-comet 15s linear infinite; }
 @keyframes co-comet { from { stroke-dashoffset:var(--L); } to { stroke-dashoffset:calc(var(--L) - var(--lap)); } }
 @media(prefers-reduced-motion:reduce) { .co-frame-comet { animation:none; } .co-arc { animation:none; } }
+/* A list row under review (ReviewFrame with look="wave"): no ring inside the flat row. A soft wave of light spreads from the status icon over the
+   whole row, then rests, and the row keeps a faint wash (the owner's choice, 2026-11-24). The layer clips the wave so the row itself
+   never clips its Actions menu. Under reduced motion the wave never runs and the wash is stronger, so the row still reads as at work.
+   A run of rows starts a beat apart, so the light travels down the list. Only opacity and transform move. */
+.co-frame.co-frame-row { border-radius:0; background:color-mix(in srgb,var(--accent) 3%,transparent); }
+.co-pr-list > .co-frame-row:last-child { border-radius:0 0 var(--co-radius-field) var(--co-radius-field); }
+.co-ripple { position:absolute; inset:0; z-index:2; overflow:hidden; border-radius:inherit; pointer-events:none;
+  --ripple-core:color-mix(in srgb,color-mix(in srgb,var(--accent) 55%,var(--text)) 30%,transparent); --ripple-edge:color-mix(in srgb,var(--accent) 16%,transparent); }
+.co-ripple::before { content:""; position:absolute; left:calc(var(--ripple-x) - var(--ripple-d) / 2); top:calc(var(--ripple-y) - var(--ripple-d) / 2); width:var(--ripple-d); height:var(--ripple-d); border-radius:50%;
+  background:radial-gradient(circle closest-side,transparent 52%,var(--ripple-edge) 70%,var(--ripple-core) 84%,transparent 100%); opacity:0; transform:scale(.01); }
+/* A pane opened inside a working row (the Assign panel, a run, the detail pane) grows the frame, and the wave sized to the far corner would wash across what you read and type. Stop the wave while the row holds a pane; the pane carries its own at-work cue. */
+.co-frame-row:has(.co-task-content) > .co-ripple { display:none; }
+.co-frame-row:nth-child(3n+2) { --ripple-delay:.45s; }
+.co-frame-row:nth-child(3n) { --ripple-delay:.9s; }
+@media(prefers-reduced-motion:no-preference) { .co-ripple::before { animation:co-ripple 3.8s cubic-bezier(.3,.1,.3,1) var(--ripple-delay,0s) infinite; } }
+@media(prefers-reduced-motion:reduce) { .co-frame.co-frame-row { background:color-mix(in srgb,var(--accent) 8%,transparent); } }
+/* Forced colours flatten the wash and the wave to nothing, and a working list row has no chip, so it would lose every at-work cue the ring used to give.
+   Mark the row with a system-colour outline instead (the amber waiting ring already survives forced colours on its own). */
+@media(forced-colors:active) { .co-ripple { display:none; } .co-frame-row { outline:2px solid Highlight; outline-offset:-2px; } }
+@keyframes co-ripple { 0% { transform:scale(.01); opacity:0; } 10% { opacity:1; } 72% { transform:scale(1); opacity:0; } 100% { transform:scale(1); opacity:0; } }
 /* A smooth gradient ring that fades out behind its head, like the comet. */
 .co-arc { display:inline-block; width:14px; height:14px; flex:none; border-radius:50%; background:conic-gradient(from 0deg,transparent 0%,color-mix(in srgb,var(--accent) 35%,transparent) 40%,var(--accent) 100%); -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2.6px),#000 calc(100% - 2.2px)); mask:radial-gradient(farthest-side,transparent calc(100% - 2.6px),#000 calc(100% - 2.2px)); animation:co-arc-spin 1.05s linear infinite; will-change:transform; }
 /* Both ends are the same kind of transform, so the browser turns it by rotating. */

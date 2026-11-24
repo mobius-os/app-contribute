@@ -44,18 +44,18 @@ function swipeStep({ project, pr, decision, records, capabilities, onOpenPull })
 
 // One PR under its project's card. The whole row opens the PR on its own page. Its status is the shared decision's
 // label (the repository list and the PR page say the same, whatever the screen); a review request keeps its own pill
-// beside it, and a PR with a review running or waiting wears the comet frame and opens on its Review tab.
+// beside it, and a PR with a review running (a wave of light from its icon) or waiting (the amber frame) opens on its Review tab.
 function DeskPullRow({ project, pr, request = false, order = '', lastLooked, facts, onOpenPull, login, records, capabilities }) {
   const comments = conversationCount(pr)
   const decision = deskStanding(pr, login, facts)
   const framed = frameOf(decision)
-  // No decision pill while an agent works: the travelling frame says it, and a running review wears no tag (the owner's choice,
+  // No decision pill while an agent works: the travelling light says it, and a running review wears no tag (the owner's choice,
   // 3 Nov). A request's own pill already says "your turn" while the PR rests; the decision adds its words when it has some.
   const labelled = framed !== 'reviewing' && (!request || chipOf(decision))
   const pills = [...(request ? [requestChip] : []), ...(labelled && !isDraftWord(pr, decisionChip(decision)) ? [decisionChip(decision)] : [])]
   const who = [`#${pr.number}`, whoOf(pr.author?.login, login) || 'Contributor', pr.updatedAt ? <TimeAgo prefix="updated " value={pr.updatedAt} short /> : null]
   return (
-    <ReviewFrame state={framed} inset={3} radius={10}>
+    <ReviewFrame state={framed} inset={3} radius={10} look="wave">
       <DeskRow
         icon={<PullStateIcon pr={pr} />}
         title={<><NewDot value={pr.updatedAt} lastLooked={lastLooked} />{pr.title}</>}
@@ -169,7 +169,7 @@ function projectRows(view, project, { login, decisionsFor, lastLooked, query, ru
     const pr = target && ownPulls.find(candidate => prKey(candidate) === prKey(target))
     const decision = pr ? deskStanding(pr, login, facts) : null
     return { chip: 'look', el: (
-      <ReviewFrame key={`decision:${item.id}`} state={frameState(reviewForRecord(runs, item.record), { own: true, ignored })} inset={3} radius={10}>
+      <ReviewFrame key={`decision:${item.id}`} state={frameState(reviewForRecord(runs, item.record), { own: true, ignored })} inset={3} radius={10} look="wave">
         <DeskAttentionRow item={item} pr={pr || null} decision={decision} login={login} onSelect={openDecision} action={fixAction(target, pr, decision)} />
       </ReviewFrame>
     ) }

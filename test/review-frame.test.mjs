@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { COMET_LAYERS, COMET_SPEED, cometLayers, cometSeconds, frameState, roundedRectPerimeter } from '../review-frame.js'
+import { COMET_LAYERS, COMET_SPEED, RIPPLE_FALLBACK_X, cometLayers, cometSeconds, frameState, rippleWave, roundedRectPerimeter } from '../review-frame.js'
 
 const status = (state, run = {}) => ({ run: { state: 'running', execution_state: 'running', ...run }, item: { state } })
 
@@ -55,4 +55,21 @@ test('the desk polls only while a review is working, and finds a saved record\'s
   assert.equal(reviewForRecord([done, working], { plan: { repo: 'team/repo' }, number: 9 }).run.id, 'a')
   assert.equal(reviewForRecord([done, working], { repo: 'team/repo', number: 4 }), null)
   assert.equal(reviewForRecord([working], {}), null)
+})
+
+test('the wave starts at the status icon and grows until it has crossed the farthest corner of the row', () => {
+  const frame = { left: 100, top: 50, width: 1000, height: 100 }
+  const icon = { left: 150, top: 70, width: 20, height: 20 }
+  const wave = rippleWave(frame, icon)
+  assert.deepEqual([wave.x, wave.y], [60, 30])
+  // The icon is near the left edge, so the far corner is the bottom right one.
+  assert.equal(wave.diameter, Math.ceil(2 * Math.hypot(940, 70)))
+  // A taller row, or a different icon, changes the size: it is measured, never fixed.
+  assert.ok(rippleWave({ ...frame, height: 300 }, icon).diameter > wave.diameter)
+})
+
+test('a row without a status icon starts its wave at the left edge, level with the middle', () => {
+  const wave = rippleWave({ left: 0, top: 0, width: 600, height: 80 })
+  assert.deepEqual([wave.x, wave.y], [RIPPLE_FALLBACK_X, 40])
+  assert.ok(wave.diameter >= 2 * (600 - RIPPLE_FALLBACK_X))
 })

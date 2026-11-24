@@ -1082,6 +1082,20 @@ window.runWorkspaceChecks = async () => {
       // Starting closes the review window and clears the selection; the run itself lives in its own conversation.
       await until(() => reviewRuns.length === 1 && !review(),'Review did not start')
       await until(() => ['7','8'].every(n => query('[data-pr="owner/project#'+n+'"]')?.closest('.co-frame')?.dataset.frame === 'reviewing'),'A started review did not show on its rows')
+      // A row at work wears a wave of light from its status icon, not a ring inside the row; the wave is big enough to cross the whole row.
+      const waveOf = n => query('[data-pr="owner/project#'+n+'"]').closest('.co-frame').querySelector('.co-ripple')
+      await until(() => ['7','8'].every(n => waveOf(n)),'A row at work showed no wave of light')
+      ensure(['7','8'].every(n => !waveOf(n).closest('.co-frame').querySelector('.co-frame-svg')),'A row at work still drew a ring inside itself')
+      ensure(['7','8'].every(n => parseFloat(waveOf(n).style.getPropertyValue('--ripple-d')) >= waveOf(n).getBoundingClientRect().width),'The wave was too small to cross its row')
+      // A pane opened inside a working row must not be washed by the wave: the wave stops while the row holds a task pane (Alen's review, 24 Nov).
+      ensure(getComputedStyle(waveOf('7')).display !== 'none','The wave was hidden on a working row with no pane open')
+      await click(query('[data-pr="owner/project#7"] .co-pr-open'))
+      await until(() => query('[data-pr="owner/project#7"]').closest('.co-frame').querySelector('.co-task-content'),'The detail pane did not open on a working row')
+      ensure(getComputedStyle(waveOf('7')).display === 'none','The wave still washed over a pane opened inside the working row')
+      await nativeEscape()
+      await until(() => !query('[data-pr="owner/project#7"]').closest('.co-frame').querySelector('.co-task-content'),'The detail pane did not close on the working row')
+      ensure(getComputedStyle(waveOf('7')).display !== 'none','The wave did not return after the pane closed')
+      await captureShot('working-rows')
       ensure(!query('input[aria-label="Select owner/project #7"]').checked && !query('input[aria-label="Select owner/project #8"]').checked,'Starting a review kept the selection')
       const write=mutationRequests().at(-1)
       ensure(write.url.endsWith('/review-runs') && write.body.mode==='review_merge' && write.body.items.length===2,'Wrong workflow request')
@@ -2402,6 +2416,10 @@ window.runDeskFrameChecks = async () => {
     await click(query('.co-desk-back'))
     await until(() => query('.co-desk-envelopes'), 'Back did not return to the Desk')
     await until(() => deskFrame('Contribution 7') === 'reviewing', 'The Desk row has no review frame after Back: ' + deskFrame('Contribution 7'))
+    // A Desk row at work wears the same wave of light, drawn from its own icon and never as a ring inside the row.
+    const deskFrameNode = [...document.querySelectorAll('.co-frame')].find(node => text(node).includes('Contribution 7'))
+    ensure(deskFrameNode.querySelector('.co-ripple') && !deskFrameNode.querySelector('.co-frame-svg'), 'The Desk row at work showed no wave of light, or still drew a ring')
+    await captureShot('working-desk-row')
     checks.push({ name: 'a review started on a PR page leaves its Desk row framed once the owner is back', status: 'pass' })
     // A review stopped elsewhere (a chat, another device) shows when the frame is shown again.
     reviewRuns[0].execution_state = 'stopped'

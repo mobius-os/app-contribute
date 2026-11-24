@@ -507,15 +507,15 @@ test('a review chip opens the PR on its Review tab, and a started review no long
   // The title opens Comments, or the Review tab while a review is running.
   assert.match(pullsSource, /onOpenPage\(pr, frameOf\(standingOf\(pr\)\) === 'reviewing' \? 'review' : 'conversation'\)/)
   assert.doesNotMatch(pullsSource, /setChoice\(null\); setSelected\(new Set\(\)\)\n\s*task\?\.open\(`task:run:\$\{result\.run\.id\}`\)/)
-  // The row wears the comet frame while an agent works; the Review tab knows your own PRs.
-  assert.match(pullsSource, /<ReviewFrame key=\{key\} state=\{review\.frame\}/)
+  // The row wears the wave of light while an agent works; the Review tab knows your own PRs.
+  assert.match(pullsSource, /<ReviewFrame key=\{key\} state=\{review\.frame\} inset=\{4\} radius=\{10\} look="wave"/)
   assert.match(pullsSource, /own: isOwnPull\(pr, conn\.login\), standing: standingOf\(pr\)/)
   assert.match(appSource, /setPullPage\(\{ key: project\?\.key \|\| '', repo, number: pr\.number, tab,/)
 })
 
 test('the desk shares one review-run list, wraps its rows in the frame, and opens a reviewed PR on its Review tab', () => {
   const deskSource = readFileSync(new URL('../ui/DeskViews.jsx', import.meta.url), 'utf8')
-  assert.match(deskSource, /<ReviewFrame state=\{framed\} inset=\{3\}/)
+  assert.match(deskSource, /<ReviewFrame state=\{framed\} inset=\{3\} radius=\{10\} look="wave"/)
   assert.match(deskSource, /onOpenPull\(project, pr, framed === 'idle' \? 'conversation' : 'review'\)/)
   assert.match(deskSource, /frameState\(reviewForRecord\(runs, item\.record\), \{ own: true, ignored \}\)/)
   // One run list serves the whole desk; the hook that reads it lives beside the review list.
