@@ -418,3 +418,41 @@ test('a detail page for an escalated PR carries the escalation under its descrip
   assert.ok(html.indexOf('Needs a call.') > html.indexOf('co-gh-description'), 'under the description')
   assert.match(html, />Resume<\/button>/)
 })
+
+// The page shows the PR machine's live answer, so a saved "Changes requested" note that the sync has not cleared yet cannot contradict it.
+const authored = (reviews, extra = {}) => ({ number: 9, state: 'OPEN', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'b'.repeat(40), baseRefName: 'main', mergeable: 'MERGEABLE',
+  author: { login: 'me' }, repository: { nameWithOwner: 'team/repo', viewerPermission: 'WRITE' }, url: 'https://github.com/team/repo/pull/9',
+  latestOpinionatedReviews: { nodes: reviews }, viewerLatestReview: null, reviewThreads: { nodes: [] },
+  commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, ...extra })
+const opinion = (login, state, oid = 'a'.repeat(40)) => ({ state, author: { login, __typename: 'User' }, commit: { oid } })
+const staleNote = { attention: { type: 'changes_requested', url: 'https://github.com/team/repo/pull/9#pullrequestreview-777' } }
+
+test('a saved Changes requested note is replaced by the green notice once the machine says the PR was approved', async t => {
+  const pr = authored([opinion('dana', 'APPROVED')])
+  const html = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr, login: 'me' }) } })
+  if (!html) return
+  assert.match(html, /class="co-pr-feedback-flag is-clear"/)
+  assert.match(html, /dana approved this version\./)
+  assert.doesNotMatch(html, /is-blocker/)
+  assert.match(html, /co-sticky-mark co-icon is-clear|co-icon co-sticky-mark is-clear/, 'the phone title bar follows the same flag')
+})
+
+test('a change request that still stands keeps the red flag, now naming who asked', async t => {
+  const pr = authored([opinion('dana', 'CHANGES_REQUESTED')])
+  const html = await render(t, 'PullRequestDetail', { pr, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr, login: 'me' }) } })
+  if (!html) return
+  assert.match(html, /class="co-pr-feedback-flag is-blocker"/)
+  assert.match(html, /dana asked for changes\. Read the review under Comments\./)
+  assert.doesNotMatch(html, /is-clear/)
+})
+
+test('a dismissed request leaves no flag at all, and unread reviews leave the saved note', async t => {
+  const dismissed = authored([])
+  const none = await render(t, 'PullRequestDetail', { pr: dismissed, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr: dismissed, login: 'me' }) } })
+  if (!none) return
+  assert.doesNotMatch(none, /co-pr-feedback-flag/)
+  const unread = authored(undefined, { latestOpinionatedReviews: null })
+  const kept = await render(t, 'PullRequestDetail', { pr: unread, cacheStore: loadedConversation(), record: staleNote, review: { standing: standingFor({ pr: unread, login: 'me' }) } })
+  assert.match(kept, /class="co-pr-feedback-flag is-blocker"/)
+  assert.match(kept, /Not addressed yet/)
+})

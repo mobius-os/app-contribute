@@ -27,6 +27,16 @@ function afterObstacle(decision, { pr, login, runs, ignored }) {
 export const standingFor = ({ pr, login, runs = [], ignored = null, chats = [], responses = [] }) =>
   afterObstacle(secondPass(decide(prFacts({ pr, login, runs, ignored, chats, responses })), responseView(responses, pr)), { pr, login, runs, ignored })
 
+// What the machine says about change requests on your own PR, for the one flag that used to read the server's saved note.
+// `{ tone: 'blocker', who }` while someone's request stands (of this version or an older one), `{ tone: 'clear', who }`
+// when none stands and someone approved this version, `null` when none stands and nobody approved (a dismissed request).
+// `undefined` is "the machine cannot say" (reviews not read completely, or not your PR): the saved note keeps speaking.
+export function changeRequestFlagOf(decision) {
+  if (!decision || decision.state === 'unknown' || decision.role !== 'author') return undefined
+  if (decision.changesFrom.length) return { tone: 'blocker', who: decision.changesFrom }
+  return decision.approvedBy.length ? { tone: 'clear', who: decision.approvedBy } : null
+}
+
 // States that exist because of a Contribute review: they hold the amber frame.
 const REVIEW_MOVES = new Set(['to_confirm', 'unconfirmed', 'needs_answer', 'stalled', 'author.findings', 'reviewer.result_ready', 'reviewer.re_review'])
 // A PR's ordinary resting states say nothing a row needs to repeat.

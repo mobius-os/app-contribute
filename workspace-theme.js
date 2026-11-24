@@ -1322,6 +1322,7 @@ a.co-related-row:hover { border-color:color-mix(in srgb,var(--accent) 36%,var(--
  .co-sticky-mark { flex:0 0 auto; color:var(--muted); }
  .co-sticky-mark.is-blocker { color:var(--danger,#d4504c); }
  .co-sticky-mark.is-news { color:var(--accent); }
+ .co-sticky-mark.is-clear { color:var(--green); }
 }
 @supports (animation-timeline: scroll()) {
  .co-agent-menu-rows, .co-dialog > .co-review-window.is-sized > .co-rw-body { -webkit-mask-image:linear-gradient(180deg,#000 calc(100% - var(--co-fade-end)),transparent); mask-image:linear-gradient(180deg,#000 calc(100% - var(--co-fade-end)),transparent); animation:co-fade-end linear both; animation-timeline:scroll(self block); }

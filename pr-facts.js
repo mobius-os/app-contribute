@@ -146,6 +146,10 @@ function queuedOf(pr, review) {
   return review?.item.state === 'queued' && review.item.head_sha === pr?.headRefOid ? true : null
 }
 
+// A finished review of another version that the platform held back, unsent, because the PR moved first (it marks the item
+// `held_back` only for a run that proposes verdicts, and only while nothing was proposed or sent for it).
+const heldOf = (item, pr) => (item.post_findings?.held_back === true && item.head_sha && item.head_sha !== pr?.headRefOid ? { head: item.head_sha } : null)
+
 // A clean private review of an older version. The result itself is only ever of the current
 // version, so this remembers that the PR was reviewed and has since moved: it needs another look.
 // Findings on an older version are old news and say nothing here.
@@ -199,7 +203,7 @@ const respondJobOf = (chats, pr) => {
 const jobFor = (runJob, chats, pr) => (runJob && runJob.state !== 'stalled' ? runJob : respondJobOf(chats, pr) || runJob)
 
 function runFacts(review, pr, own, ignored, answered) {
-  if (!review) return { job: null, result: null, earlier: null, outbox: null, sent: null }
+  if (!review) return { job: null, result: null, earlier: null, held: null, outbox: null, sent: null }
   const { run, item } = review
   const reading = reviewReading(run, item, { own, ignored, answered })
   const outbox = outboxOf(item)
@@ -208,6 +212,7 @@ function runFacts(review, pr, own, ignored, answered) {
     job: job && !(job === 'running' && outbox?.state === 'sending') ? { kind: run.mode || 'review', state: job } : null,
     result: resultOf(item, reading),
     earlier: earlierOf(item, pr),
+    held: heldOf(item, pr),
     outbox,
     sent: sentReview(item),
   }
@@ -242,6 +247,7 @@ export function prFacts({ pr, login, runs = [], ignored = null, chats = [], resp
     job: jobFor(fromRuns.job, chats, pr),
     result: fromRuns.result,
     earlier: fromRuns.earlier,
+    heldReview: fromRuns.held,
     // A review run's own draft comes first; otherwise a saved Respond answer is the draft (or the sending) there is.
     outbox: fromRuns.outbox || responseOutbox(responseFor(responses, pr), pr, review),
     // Without the connected account, whose PR this is cannot be told: nothing is decided.

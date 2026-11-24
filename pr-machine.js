@@ -59,6 +59,8 @@ function derive(facts) {
   // An approval is of this version when it is of this commit, or of the same work (the reader's proof, never guessed here).
   const approvedHere = review => review.state === 'APPROVED' && (atHead(review) || review.sameWork === true)
   const result = facts.result?.head === facts.head ? facts.result : null
+  // A finished review of another version whose findings the platform held back because the PR moved first (never sent).
+  const heldReview = facts.heldReview && facts.heldReview.head !== facts.head ? facts.heldReview : null
   // A draft belongs to the version it was written for and goes stale with it. Something sent to GitHub
   // whose outcome is not known does not: a new head neither confirms nor refutes it, so it holds
   // (and blocks the next job or Merge) until it is reconciled.
@@ -91,6 +93,7 @@ function derive(facts) {
     mineAtHead: !!facts.myReview && (facts.myReview.commit === facts.head || (facts.myReview.state === 'APPROVED' && facts.myReview.sameWork === true)),
     mineCarried: !!facts.myReview && facts.myReview.commit !== facts.head && facts.myReview.state === 'APPROVED' && facts.myReview.sameWork === true,
     result,
+    heldReview,
     earlier: facts.earlier && facts.earlier.head !== facts.head ? facts.earlier : null,
     openFindings: result?.outcome === 'findings' && !result.setAside,
     outbox,
@@ -312,6 +315,10 @@ export const ACTIONS = [
   { id: 'dismiss', by: 'you', roles: ['author', 'reviewer'], title: NAMES.discard, when: (facts, d) => outboxIs(d, 'unconfirmed') || (d.outbox.kind === 'verdict' ? '' : 'Only a verdict can be discarded.') },
   { id: 'draft_verdict', by: 'you', roles: ['reviewer'], title: 'Approve, request changes or comment…',
     when: (facts, d) => firstReason(readable(facts), d.result && !d.mineAtHead && !d.outbox ? '' : 'Review this version first.') },
+  // Sends the held-back review against the commit it covered, never as a verdict on the new version. It saves the exact proposal
+  // the owner then submits; the platform refuses a formal verdict that is not one saved proposal.
+  { id: 'post_at_reviewed_commit', by: 'you', roles: ['reviewer'], title: NAMES.postAnyway, detail: 'Sent against the commit you reviewed, never as a verdict on the new version.',
+    when: (facts, d) => firstReason(readable(facts), stillOpen(facts), jobIdle(facts), nothingInFlight(d), d.heldReview ? '' : 'No held-back review to post.') },
   { id: 'set_aside', by: 'you', roles: ['author', 'reviewer'], title: 'Set aside…',
     when: (facts, d) => firstReason(readable(facts), d.result && !d.result.setAside && (facts.role === 'reviewer' || d.openFindings) ? '' : 'Nothing to set aside.', draftOwnsFindings(d)) },
   { id: 'open_for_review', by: 'you', roles: ['author'], title: NAMES.openForReview, when: statusStops },
@@ -340,7 +347,7 @@ function headlineFor(key, facts, d) {
 }
 
 // The one entry point: facts in, { role, state, turn, label, headline, next, jobKind, coveredBy, waitingOn, actions,
-// approvedBy, carriedFrom, changesFrom, lookedAgain, approvalFrom, rereviewFrom, askable } out. `jobKind` is the kind of the PR's agent job ('' when none); `coveredBy` the kind of
+// approvedBy, heldReview, carriedFrom, changesFrom, lookedAgain, approvalFrom, rereviewFrom, askable } out. `heldReview`: { reviewed, now } when a finished review of another version was held back unsent because the PR moved (null otherwise). `jobKind` is the kind of the PR's agent job ('' when none); `coveredBy` the kind of
 // draft that owns the open findings (repair, answer, verdict; '' when none). The rest name people: who approved this version (carriedFrom:
 // those of them whose approval is of an older commit with the same work, as { by, commit }), who looked again without approving, and whose
 // review is of an older version that they have not looked past; changesFrom: who holds a change request, of this version or an older one; askable: everyone the Ask actions may name, as { by, reason, commit } (approvalFrom and rereviewFrom are the ones ticked at first).
@@ -356,7 +363,7 @@ export function decide(facts) {
   const waitingOn = state.turn !== 'other' ? '' : state.waitsOn || (facts.role === 'reviewer' ? facts.author || 'the author' : headlineWho(key, d).join(', ') || 'reviewers')
   const label = state.label.replace('{author}', facts.author || 'the author')
   return { role: facts.role, state: key, turn: state.turn, label, headline: headlineFor(key, facts, d), next: state.next || '', jobKind: facts.job?.kind || '', coveredBy: d.coveredBy, nobodyAsked: !!d.nobodyAsked, waitingOn, actions,
-    approvedBy: d.approvedAtHead, carriedFrom: d.carried, changesFrom: [...d.changesAtHead, ...d.changesOlder], lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview, askable: d.askable }
+    approvedBy: d.approvedAtHead, heldReview: d.heldReview ? { reviewed: d.heldReview.head, now: facts.head } : null, carriedFrom: d.carried, changesFrom: [...d.changesAtHead, ...d.changesOlder], lookedAgain: d.lookedAgain, approvalFrom: d.approvalFrom, rereviewFrom: d.rereview, askable: d.askable }
 }
 
 export const actionOf = (decision, id) => decision.actions.find(action => action.id === id) || null

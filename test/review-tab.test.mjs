@@ -385,3 +385,57 @@ test('a review that named an obstacle says it did not finish and why, and offers
   assert.match(html, /Review again/)
   assert.doesNotMatch(html, /Problems found|Post to GitHub|Set aside…/)
 })
+
+// A review the platform held back because the PR moved first: the reason, the machine's button and the proposal card.
+const HELD_HEAD = 'c'.repeat(40)
+const heldReview = (extra = {}) => ({ run: { id: 'r0', created_at: '2026-11-01T10:00:00Z', mode: 'review', state: 'complete', execution_state: 'completed', chat_id: 'old-chat' },
+  item: { repo: 'team/repo', number: 9, head_sha: HELD_HEAD, base_ref: 'main', state: 'needs_you', summary: 'Blocking bug in the reader.',
+    live_blocker: 'This pull request no longer matches the approved selection.', post_findings: { allowed: true, held_back: true }, ...extra } })
+const standingOfHeld = earlier => standingFor({ pr: { ...pr, state: 'OPEN', author: { login: 'sam' }, mergeable: 'MERGEABLE', repository: { ...pr.repository, viewerPermission: 'WRITE' },
+  latestOpinionatedReviews: { nodes: [] }, viewerLatestReview: null, reviewThreads: { nodes: [] }, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } },
+  login: 'me', runs: [{ ...earlier.run, items: [earlier.item] }] })
+
+test('a held-back review says why it was not sent and offers the machine’s Post it anyway', async t => {
+  const earlier = heldReview()
+  const html = await render(t, 'ReviewTab', { pr, status: null, earlier, standing: standingOfHeld(earlier), onHeld: () => {}, onVerdict: () => {} })
+  if (!html) return
+  assert.match(html, /The pull request moved from ccccccc to aaaaaaa before this review could be sent, so nothing was sent to GitHub\./)
+  assert.match(html, /Sent against the commit you reviewed, never as a verdict on the new version\./)
+  assert.match(html, /<button[^>]*class="co-btn co-btn-primary"[^>]*>Post it anyway<\/button>/)
+})
+
+test('Post it anyway is absent on a closed PR and without the handler', async t => {
+  const earlier = heldReview()
+  const standing = standingOfHeld(earlier)
+  const noHandler = await render(t, 'ReviewTab', { pr, status: null, earlier, standing })
+  if (!noHandler) return
+  assert.doesNotMatch(noHandler, /Post it anyway/)
+  const closed = await render(t, 'ReviewTab', { pr, status: null, earlier, standing, readOnly: true, onHeld: () => {} })
+  assert.doesNotMatch(closed, /Post it anyway/)
+})
+
+test('a held review whose verdict GitHub never confirmed keeps Check again and Discard on the earlier card', async t => {
+  const earlier = heldReview({ live_blocker: undefined, post_findings: { allowed: false, code: 'has_verdict' },
+    verdict_proposal: { id: 'p1', state: 'unknown', event: 'REQUEST_CHANGES', head_sha: HELD_HEAD, body: 'Blocking bug.' } })
+  const standing = standingOfHeld(earlier)
+  const html = await render(t, 'ReviewTab', { pr, status: null, earlier, standing, onHeld: () => {}, onVerdict: () => {}, onCheck: () => {} })
+  if (!html) return
+  assert.match(html, /GitHub did not confirm the verdict/)
+  assert.match(html, />Check again</)
+  assert.match(html, />Discard</, 'the owner can still dismiss the unconfirmed held verdict from the earlier card')
+  // Without the observation handler (the regression: reviewProps gave it only for a current-head run) the recovery disappears.
+  const noCheck = await render(t, 'ReviewTab', { pr, status: null, earlier, standing, onHeld: () => {}, onVerdict: () => {} })
+  assert.doesNotMatch(noCheck, />Check again</)
+})
+
+test('once the held review has its proposal the card shows the exact words to send and no second Post it anyway', async t => {
+  const earlier = heldReview({ live_blocker: undefined, post_findings: { allowed: false, code: 'has_verdict' },
+    verdict_proposal: { id: 'p1', state: 'proposed', event: 'REQUEST_CHANGES', head_sha: HELD_HEAD, moved_to: 'a'.repeat(40),
+      body: '**Möbius review: Changes requested**\n\nBlocking bug.\n\n_Reviewed at cccccccccccc; the pull request has since moved to aaaaaaaaaaaa._', comment_body: 'x' } })
+  const html = await render(t, 'ReviewTab', { pr, status: null, earlier, standing: standingOfHeld(earlier), onHeld: () => {}, onVerdict: () => {} })
+  if (!html) return
+  assert.match(html, /What it would post/)
+  assert.match(html, /has since moved to aaaaaaaaaaaa/)
+  assert.doesNotMatch(html, /Post it anyway/)
+  assert.doesNotMatch(html, /so nothing was sent to GitHub/, 'the refusal sentence ends with the proposal')
+})

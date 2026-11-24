@@ -37,6 +37,19 @@ export const postableFindings = item => postRefusalCode(item) === null
 // The reason Post to GitHub is not offered for this item, or '' when it is.
 export const postRefusal = item => POST_REFUSALS[postRefusalCode(item)] || ''
 
+// Why the saved review's verdict was never proposed or sent. The platform re-reads the PR before it saves a verdict and refuses
+// when the PR no longer matches what was reviewed; it keeps the findings private and records its reason as `live_blocker`.
+// A moved head names both versions; any other refusal is shown in the platform's own words. '' when nothing was refused.
+const shortSha = sha => String(sha || '').slice(0, 7)
+export function notPostedReason(item, headNow) {
+  const reason = String(item?.live_blocker || '').trim()
+  if (!reason) return ''
+  if (item.head_sha && headNow && item.head_sha !== headNow) {
+    return `The pull request moved from ${shortSha(item.head_sha)} to ${shortSha(headNow)} before this review could be sent, so nothing was sent to GitHub. The findings stay private.`
+  }
+  return `This review was not sent to GitHub: ${reason.replace(/[.!?]?$/, '.')} The findings stay private.`
+}
+
 // Stop is for a review that is still going or waiting on an answer. A running
 // review keeps its Stop after its own turn has ended: it hands the work to a
 // helper and sleeps until the helper reports, so a helper that hangs leaves it
