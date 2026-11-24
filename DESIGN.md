@@ -168,6 +168,8 @@ Use the inherited shell font and monospace stack. There are four sizes: 28px tit
 
 Persistent project content is mostly flat and line-separated. Muted surfaces and borders distinguish selected rows, inline tasks, and the on-demand settings workspace; do not resurrect a bottom selection tray as the primary PR action. Small shadows are reserved for transient popovers or selected detail tabs. Brief state transitions and reduced-motion handling follow the incumbent shell/component rules.
 
+**A row at work.** While an agent works on a PR in a list (the All PRs list and the Needs you rows), the row wears no ring: a ring drawn inside a flat, hairline-separated row read as a box inside the list's box (owner's choice, 2026-11-24, after comparing several looks for it). Instead a soft wave of light spreads from the row's status icon over the whole row, fades at the far edge and starts again a moment later, and the row keeps a barely-there wash between waves. A run of working rows starts a beat apart (about half a second), so the light travels down the list. Only opacity and transform move, in a layer that clips the wave, so the row itself never clips its Actions menu. Under reduced motion the wave never runs and the wash is stronger, so the row still reads as at work; in forced colours it is hidden. A review waiting on the owner keeps the still amber frame, and boxes that are not list rows (the Review tab's card, the Respond card and job box) keep the travelling comet frame. One component draws both (`ReviewFrame`, `look="wave"` for rows), so a row never remounts when its review starts or ends.
+
 **The Temporary Lift Rule.** Elevation clarifies transient controls, not every PR row or project section.
 
 ## Shapes

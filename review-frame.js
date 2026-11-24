@@ -29,6 +29,18 @@ export function cometLayers(perimeter, count = COMET_LAYERS) {
 
 export const cometSeconds = perimeter => perimeter / COMET_SPEED
 
+// A row under review shows a wave of light instead of a ring. It starts at the row's status icon and must grow
+// until it has crossed the farthest corner, so its size is measured per row, never a fixed number.
+export const RIPPLE_FALLBACK_X = 28 // where the wave starts when a row has no status icon to start from
+
+// `frame` and `icon` are bounding boxes (left, top, width, height) in the same coordinates; icon may be absent.
+export function rippleWave(frame, icon) {
+  const x = icon ? icon.left - frame.left + icon.width / 2 : RIPPLE_FALLBACK_X
+  const y = icon ? icon.top - frame.top + icon.height / 2 : frame.height / 2
+  const reach = Math.hypot(Math.max(x, frame.width - x), Math.max(y, frame.height - y))
+  return { x: Math.round(x), y: Math.round(y), diameter: Math.ceil(2 * reach) }
+}
+
 // What the frame shows around a saved record's review (a PR row uses its PR
 // machine decision instead, see pr-standing.js frameOf): it travels while an
 // agent works, holds amber while the review waits on the owner, else absent.
