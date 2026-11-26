@@ -125,11 +125,16 @@ Prepare the exact selection and its Contribute approval link:
 
 ```bash
 python3 /data/apps/contribute/review_prs.py --mode review_merge \
+  --options /tmp/review-options.json \
   'owner/repository#123' 'owner/repository#124'
 ```
 
 `--options <JSON-file>` and `--agent <JSON-file>` are passed to the platform's
-preview. The adapter calls the platform workflow with Contribute's app context
+preview. `review_merge` always needs `{"post_review": true, "propose_verdict": true}`
+(it merges only after the owner sends the drafted approval); the same pair, when
+the owner asked for a GitHub review, makes a `review` a drafted verdict. Never
+set `agent_submits_verdict`: only the owner chooses *Agent posts*, in the review
+window. The adapter calls the platform workflow with Contribute's app context
 and saves `review-selections/<request_id>.json`; it starts nothing. Show the
 resolved snapshot it returns when asking for a decision, not a promise to
 resolve prompts later. Opening the link is not consent.

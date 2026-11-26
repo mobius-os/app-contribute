@@ -50,6 +50,11 @@ test('the brief names exactly the ticked items and carries the safety rules', ()
   assert.match(brief.draft, /head moves \(new commits\) while you work, stop/)
 })
 
+test('the brief says what to do when the change is already live and has no earlier picture', () => {
+  const items = addressItems(pr, { activity: [review('miljanm', 'CHANGES_REQUESTED')] })
+  assert.match(addressBrief({ pr, items }).draft, /already live and no earlier state is left to capture: do not rebuild an older tree or stand up a proxy[^)]*\), say so in the description instead and describe the earlier state in words/)
+})
+
 test('the brief ends by saving the result for Contribute, never with an approval card, and says this is not a review', () => {
   const items = addressItems(pr, { activity: [review('miljanm', 'CHANGES_REQUESTED')] })
   const draft = addressBrief({ pr, items }).draft
