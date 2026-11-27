@@ -9,21 +9,19 @@ import { SYNC_LINE_MS, syncLine } from '../sync-summary.js'
 // The owner's press shows its progress and says what it changed; a quiet sync (the app shown again after a while) does
 // neither, and a failed quiet one leaves the last good time to age on its own. `markSynced` is for the first load,
 // which is a sync too.
+// One sync runs at a time. The owner's press is never dropped: pressed during a quiet sync, it shows Syncing… at once,
+// waits for the quiet one, then reads everything itself, because the quiet one skips GitHub reads inside their cooldown.
 export function useDeskSync({ refreshEverything, facts, booted, connected, enabled = true }) {
   const [refreshingAll, setRefreshingAll] = useState(false)
   const [refreshNote, setRefreshNote] = useState(null)
   const [syncResult, setSyncResult] = useState(null)
-  const syncingRef = useRef(false)
+  const inFlightRef = useRef(null)
   const lastSyncRef = useRef(0)
   const beforeRef = useRef(null)
   const latest = useRef(null)
   latest.current = { refreshEverything, facts, booted, connected }
 
-  const syncAll = useCallback(async ({ quiet = false } = {}) => {
-    if (syncingRef.current) return undefined
-    syncingRef.current = true
-    if (!quiet) setRefreshingAll(true)
-    const before = latest.current.facts
+  const readEverything = useCallback(async (quiet, before) => {
     try {
       const outcome = await latest.current.refreshEverything({ quiet })
       if (outcome?.ok && outcome?.upstream?.ok !== false) {
@@ -35,11 +33,26 @@ export function useDeskSync({ refreshEverything, facts, booted, connected, enabl
     } catch {
       if (!quiet) setRefreshNote(old => ({ at: old?.at || null, failed: true }))
       return null
-    } finally {
-      syncingRef.current = false
-      if (!quiet) setRefreshingAll(false)
     }
   }, [])
+
+  const syncAll = useCallback(async ({ quiet = false } = {}) => {
+    const running = inFlightRef.current
+    if (running && (quiet || !running.quiet)) return undefined
+    if (!quiet) setRefreshingAll(true)
+    const before = latest.current.facts
+    const done = (async () => {
+      if (running) await running.done
+      return readEverything(quiet, before)
+    })()
+    inFlightRef.current = { quiet, done }
+    try {
+      return await done
+    } finally {
+      if (inFlightRef.current?.done === done) inFlightRef.current = null
+      if (!quiet) setRefreshingAll(false)
+    }
+  }, [readEverything])
 
   // The state the sync set is on screen once the button settles; only then is the line compared with the start.
   useEffect(() => {
