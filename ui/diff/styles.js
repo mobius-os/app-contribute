@@ -11,17 +11,17 @@ export const DIFF_VIEWER_STYLES = `
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid var(--border, #2a2a2a);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg, #0d0d0d);
-  color: var(--text, #ececec);
+  background: var(--bg);
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11.5px;
   line-height: 1.5;
 }
 
 .diff-view:focus-visible {
-  outline: 2px solid var(--text, #ececec);
+  outline: 2px solid var(--text);
   outline-offset: -2px;
 }
 
@@ -31,15 +31,15 @@ export const DIFF_VIEWER_STYLES = `
 }
 
 .diff-view__hunk + .diff-view__hunk {
-  border-top: 1px solid var(--border, #2a2a2a);
+  border-top: 1px solid var(--border);
 }
 
 .diff-view__hunk-header {
   display: grid;
   grid-template-columns: calc(var(--diff-num) * 2) minmax(0, 1fr);
   min-width: 0;
-  background: var(--surface-2, #212121);
-  color: var(--muted, #a8a8a8);
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .diff-view__hunk-header code {
@@ -50,7 +50,7 @@ export const DIFF_VIEWER_STYLES = `
 }
 
 .diff-view__hunk-gutter {
-  border-right: 1px solid var(--border, #2a2a2a);
+  border-right: 1px solid var(--border);
 }
 
 .diff-view__line {
@@ -60,36 +60,36 @@ export const DIFF_VIEWER_STYLES = `
 }
 
 .diff-view__line--add {
-  background: color-mix(in srgb, var(--green, #16a34a) 11%, transparent);
+  background: color-mix(in srgb, var(--green) 11%, transparent);
 }
 
 .diff-view__line--del {
-  background: color-mix(in srgb, var(--danger, #ef4444) 11%, transparent);
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
 }
 
 .diff-view__line--context {
   color: color-mix(
     in srgb,
-    var(--text, #ececec) 78%,
-    var(--muted, #a8a8a8)
+    var(--text) 78%,
+    var(--muted)
   );
 }
 
 .diff-view__line--meta {
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   font-style: italic;
 }
 
 .diff-view__numbers {
   display: grid;
   grid-template-columns: repeat(2, var(--diff-num));
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   background: color-mix(
     in srgb,
-    var(--surface-2, #212121) 58%,
+    var(--surface-2) 58%,
     transparent
   );
-  border-right: 1px solid var(--border, #2a2a2a);
+  border-right: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
@@ -104,24 +104,24 @@ export const DIFF_VIEWER_STYLES = `
 .diff-view__line-number + .diff-view__line-number {
   border-left: 1px solid color-mix(
     in srgb,
-    var(--border, #2a2a2a) 60%,
+    var(--border) 60%,
     transparent
   );
 }
 
 .diff-view__sign {
   padding: 1px 0;
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   text-align: center;
   user-select: none;
 }
 
 .diff-view__line--add .diff-view__sign {
-  color: var(--green, #16a34a);
+  color: var(--green-text, var(--green));
 }
 
 .diff-view__line--del .diff-view__sign {
-  color: var(--danger, #ef4444);
+  color: var(--danger-text, var(--danger));
 }
 
 .diff-view__line-text {
@@ -133,16 +133,16 @@ export const DIFF_VIEWER_STYLES = `
 
 .diff-view--message {
   padding: 8px 10px;
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
 }
 
 .file-diff-list {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border, #2a2a2a);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg, #0d0d0d);
-  color: var(--text, #ececec);
+  background: var(--bg);
+  color: var(--text);
 }
 
 .file-diff-list__files {
@@ -155,7 +155,7 @@ export const DIFF_VIEWER_STYLES = `
 
 .file-diff-list__item + .file-diff-list__item,
 .file-diff-list__more {
-  border-top: 1px solid var(--border, #2a2a2a);
+  border-top: 1px solid var(--border);
 }
 
 .file-diff-list__row {
@@ -167,7 +167,7 @@ export const DIFF_VIEWER_STYLES = `
   padding: 8px clamp(8px, 3vw, 12px);
   border: 0;
   background: transparent;
-  color: var(--text, #ececec);
+  color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -178,7 +178,7 @@ export const DIFF_VIEWER_STYLES = `
   .file-diff-list__more:hover {
     background: color-mix(
       in srgb,
-      var(--surface-2, #212121) 72%,
+      var(--surface-2) 72%,
       transparent
     );
   }
@@ -188,7 +188,7 @@ export const DIFF_VIEWER_STYLES = `
 .file-diff-list__more:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 2px solid var(--text, #ececec);
+  outline: 2px solid var(--text);
   outline-offset: -2px;
 }
 
@@ -196,8 +196,8 @@ export const DIFF_VIEWER_STYLES = `
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border-right: 1.5px solid var(--muted, #a8a8a8);
-  border-bottom: 1.5px solid var(--muted, #a8a8a8);
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
   transform: rotate(-45deg);
   transition: transform 0.15s ease-out;
 }
@@ -225,7 +225,7 @@ export const DIFF_VIEWER_STYLES = `
   flex: 0 999 auto;
   min-width: 2ch;
   overflow: hidden;
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   direction: rtl;
   text-align: left;
   text-overflow: ellipsis;
@@ -235,7 +235,7 @@ export const DIFF_VIEWER_STYLES = `
 
 .file-diff-list__separator {
   flex: 0 0 auto;
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
 }
 
 .file-diff-list__basename {
@@ -244,7 +244,7 @@ export const DIFF_VIEWER_STYLES = `
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--text, #ececec);
+  color: var(--text);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -263,10 +263,10 @@ export const DIFF_VIEWER_STYLES = `
   border-radius: 5px;
   background: color-mix(
     in srgb,
-    var(--surface-2, #212121) 80%,
+    var(--surface-2) 80%,
     transparent
   );
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   font-size: 10.5px;
   line-height: 1.2;
 }
@@ -283,12 +283,12 @@ export const DIFF_VIEWER_STYLES = `
 }
 
 .file-diff-list__add {
-  color: var(--green, #16a34a);
+  color: var(--green-text, var(--green));
   font-weight: 600;
 }
 
 .file-diff-list__delete {
-  color: var(--danger, #ef4444);
+  color: var(--danger-text, var(--danger));
   font-weight: 600;
 }
 
@@ -299,21 +299,21 @@ export const DIFF_VIEWER_STYLES = `
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  border-top: 1px solid var(--border, #2a2a2a);
-  background: var(--surface-2, #212121);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
 .file-diff-list__message,
 .file-diff-list__note {
   margin: 0;
   padding: 9px 12px;
-  color: var(--muted, #a8a8a8);
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .file-diff-list__note {
-  border-top: 1px solid var(--border, #2a2a2a);
+  border-top: 1px solid var(--border);
 }
 
 @media (max-width: 520px) {
@@ -350,7 +350,7 @@ export const DIFF_VIEWER_STYLES = `
   border-bottom: 0;
   border-left: 0;
   background: transparent;
-  color: var(--text, #ececec);
+  color: var(--text);
   font: inherit;
   font-size: 12.5px;
   cursor: pointer;

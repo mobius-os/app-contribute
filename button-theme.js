@@ -14,11 +14,11 @@ export const BUTTON_CSS = `
 }
 .co-btn:disabled { opacity: .5; cursor: default; }
 .co-btn[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }
-.co-btn-primary { border-color: var(--accent-hover, var(--accent)); background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
+.co-btn-primary { border-color: var(--accent-fill, var(--accent-hover)); background: var(--accent-fill, var(--accent-hover)); color: var(--accent-fg); }
 .co-btn-quiet { border-color: transparent; background: transparent; color: var(--co-btn-tone, var(--muted)); padding-inline: 8px; }
 /* A quiet button can carry a tone (--co-btn-tone and its fill) without any rule of its own overriding the type. */
 .co-btn-quiet.is-toned[aria-pressed=true] { background: var(--co-btn-tone-fill, var(--surface-2, var(--surface))); color: var(--co-btn-tone, var(--text)); }
-.co-btn-danger { color: var(--danger); }
+.co-btn-danger { color: var(--danger-text, var(--danger)); }
 .co-btn-danger:not(.co-btn-quiet) { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .co-btn-icon { flex: 0 0 auto; width: var(--co-control-height); min-width: var(--co-control-height); padding: 0; }
 .co-btn-block { width: 100%; }
@@ -30,11 +30,11 @@ export const BUTTON_CSS = `
 @media (hover: hover) {
   .co-btn:not(:disabled):hover { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: var(--surface-2, var(--surface)); }
   .co-btn-primary:not(:disabled):hover {
-    border-color: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, #000);
-    background: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, #000); color: var(--accent-fg);
+    border-color: var(--accent-fill-hover, var(--accent-hover));
+    background: var(--accent-fill-hover, var(--accent-hover)); color: var(--accent-fg);
   }
   .co-btn-quiet:not(:disabled):hover { border-color: transparent; background: var(--co-btn-tone-fill, var(--surface-2, var(--surface))); color: var(--co-btn-tone, var(--text)); }
-  .co-btn-danger:not(:disabled):hover { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); }
+  .co-btn-danger:not(:disabled):hover { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger-text, var(--danger)); }
 }
 /* The Actions button is on every PR, on every screen width. Its edge is the strong one (--co-edge), so a quiet one in a row still
    reads as a button; the Actions menu is drawn in workspace-theme.js with the same edge. */

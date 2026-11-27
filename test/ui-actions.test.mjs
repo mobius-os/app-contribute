@@ -85,7 +85,7 @@ test('send actions keep a visible label instead of relying on the icon alone', (
 test('focused review actions keep one strong primary and compact phone-safe secondary controls', () => {
   assert.match(cardSource, /className="co-btn co-btn-primary co-review-btn"/)
   // The strong primary is the shared primary type (button-theme.js), not a per-card look.
-  assert.match(readFileSync(new URL('../button-theme.js', import.meta.url), 'utf8'), /\.co-btn-primary \{[^}]*background: var\(--accent-hover, var\(--accent\)\); color: var\(--accent-fg\)/)
+  assert.match(readFileSync(new URL('../button-theme.js', import.meta.url), 'utf8'), /\.co-btn-primary \{[^}]*background: var\(--accent-fill, var\(--accent-hover\)\); color: var\(--accent-fg\)/)
   assert.match(themeSource, /\.co-focus-view \.co-review-actions \{[\s\S]*?grid-template-columns: minmax\(112px, 1fr\) auto auto/)
   assert.match(themeSource, /\.co-focus-view \.co-secondary-action \{[\s\S]*?width: auto;[\s\S]*?padding-inline: 11px/)
   assert.match(themeSource, /\.co-technical-summary \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
