@@ -30,6 +30,9 @@ class FakeCore:
     self.calls.append(("prepare", tuple(references), mode, chat_id, app_id))
     return {"request_id": "selection-" + "1" * 32, "mode": mode, "source_chat_id": chat_id, "app_id": app_id, "items": [ITEM]}
   def freeze_preview(self, selection, options=None, agent=None):
+    if selection["mode"] == "review_merge" and not (options or {}).get("propose_verdict"):
+      raise ValueError("Review and merge merges only after the owner's own Approve: "
+                       "pass options with post_review and propose_verdict set to true.")  # as the platform core does
     self.calls.append(("freeze", selection["mode"], options, agent))
     return {**selection, "preview_sha256": "f" * 64, "options": {"autopilot": False}, "agent": {"provider": "codex", "model": "m", "effort": None}}
   def verify_selection(self, selection):
@@ -67,7 +70,10 @@ class AdapterTests(unittest.TestCase):
     refusals = [
       ("review", {"fix_prompt": "Fix it"}, "fix_prompt is only accepted with --mode review_fix_merge"),
       ("review", {"max_rounds": 2}, "max_rounds is only accepted with --mode review_fix_merge"),
-      ("review_merge", {"post_review": True}, "post_review is only accepted with --mode review"),
+      ("review_fix_merge", {"post_review": True}, "post_review is only accepted with --mode review or review_merge"),
+      ("review_fix_merge", {"propose_verdict": True}, "propose_verdict is only accepted with --mode review or review_merge"),
+      ("review", {"propose_verdict": False}, "propose_verdict may only be true"),
+      ("review", {"agent_submits_verdict": True}, "agent_submits_verdict is the owner's own choice"),
       ("review", {"autopilot": False}, "autopilot is not supported"),
       ("review_fix_merge", {"autopilot": True}, "autopilot is not supported"),
       ("review_fix_merge", {"max_rounds": 0}, "max_rounds must be a whole number"),
@@ -88,7 +94,8 @@ class AdapterTests(unittest.TestCase):
 
   def test_options_a_mode_accepts_are_frozen_unchanged(self):
     for mode, options in [("review", {"review_prompt": "R", "merge_prompt": "M", "post_review": True}),
-                          ("review_merge", {"review_prompt": "R", "merge_prompt": "M"}),
+                          ("review", {"post_review": True, "propose_verdict": True}),
+                          ("review_merge", {"review_prompt": "R", "merge_prompt": "M", "post_review": True, "propose_verdict": True}),
                           ("review_fix_merge", {"review_prompt": "R", "fix_prompt": "F", "max_rounds": 3}),
                           ("review_fix_merge", {"max_rounds": 2 ** 53 - 1})]:
       with self.subTest(mode=mode):
@@ -98,9 +105,10 @@ class AdapterTests(unittest.TestCase):
 
   def test_preparation_delegates_to_the_core_with_app_context_and_saves_only_the_link(self):
     core = FakeCore()
-    result = run(core, "--mode", "review_merge", "example/project#7")
+    merge_options = {"post_review": True, "propose_verdict": True}
+    result = run(core, "--mode", "review_merge", "--options", self.options_file(merge_options), "example/project#7")
     self.assertIn(("prepare", ("example/project#7",), "review_merge", "owning-chat", 80), core.calls)
-    self.assertIn(("freeze", "review_merge", None, None), core.calls)
+    self.assertIn(("freeze", "review_merge", merge_options, None), core.calls)
     saves = [call for call in core.calls if call[0] == "api" and call[2] == "PUT"]
     self.assertEqual(len(saves), 1)
     self.assertEqual(saves[0][1], "/api/storage/apps/80/review-selections/selection-" + "1" * 32 + ".json")
@@ -239,16 +247,19 @@ class RealCoreTests(unittest.TestCase):
       if path.endswith("/review-runs") and method == "POST": return {"run": {"id": "run-12345678", "items": [ITEM]}}
     core.api = api
     core.inspect_pr = lambda reference: {**ITEM, "title": "A change", "url": "https://github.com/example/project/pull/7"}
-    prepared = run(core, "--mode", "review_merge", "example/project#7")
+    merge_options = {"post_review": True, "propose_verdict": True}  # the core refuses review_merge without them
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as options_file:
+      json.dump(merge_options, options_file); options_file.flush()
+      prepared = run(core, "--mode", "review_merge", "--options", options_file.name, "example/project#7")
     preview = [call for call in calls if call[0].endswith("/review-preview")][0]
     self.assertEqual(preview[0], "/api/github/contributions/80/review-preview")
     # The core owns the preview body. A mode-aware core (G3+, whose
     # freeze_preview sends the mode) must send exactly the selected mode; an
     # earlier core sends none. The adapter never adds or changes it.
     if mode_aware(core):
-      self.assertEqual(preview[2], {"mode": "review_merge", "options": None, "agent": None})
+      self.assertEqual(preview[2], {"mode": "review_merge", "options": merge_options, "agent": None})
     else:
-      self.assertEqual(preview[2], {"options": None, "agent": None})
+      self.assertEqual(preview[2], {"options": merge_options, "agent": None})
     started = run(core, "--selection", prepared["selection"]["request_id"], "--approved-in-chat", "--approval-context", "Owner asked")
     post = [call for call in calls if call[1] == "POST" and call[0].endswith("/review-runs")][0]
     self.assertEqual(post[2], {**core.start_body(prepared["selection"]), "chat_approval": {"context": "Owner asked"}})

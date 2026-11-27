@@ -79,10 +79,14 @@ def capabilities(core, app_id):
 # The options each mode accepts, matching the app's own per-mode projection, so
 # a prepared link always re-previews to the same snapshot when it is opened.
 PROMPT_OPTIONS = {"review_prompt", "merge_prompt"}
+# Posting the review on GitHub, as a verdict the owner sends (the platform requires both for
+# review_merge). `agent_submits_verdict` is deliberately absent: only the owner can choose
+# "Agent posts", in the review window, and the platform refuses it from an agent.
+VERDICT_OPTIONS = {"post_review", "propose_verdict"}
 # The core accepts any positive integer; the app keeps a round cap only while
 # it is a safe JavaScript integer, so a larger one would leave a dead link.
 MAX_ROUNDS_LIMIT = 2 ** 53 - 1
-MODE_OPTIONS = {"review": PROMPT_OPTIONS | {"post_review"}, "review_merge": PROMPT_OPTIONS,
+MODE_OPTIONS = {"review": PROMPT_OPTIONS | VERDICT_OPTIONS, "review_merge": PROMPT_OPTIONS | VERDICT_OPTIONS,
                 "review_fix_merge": PROMPT_OPTIONS | {"fix_prompt", "max_rounds"}}
 
 
@@ -98,8 +102,10 @@ def validate_options(options, mode):
       continue
     if key in ("fix_prompt", "max_rounds"):
       raise ValueError(f"{key} is only accepted with --mode review_fix_merge.")
-    if key == "post_review":
-      raise ValueError("post_review is only accepted with --mode review.")
+    if key in VERDICT_OPTIONS:
+      raise ValueError(f"{key} is only accepted with --mode review or review_merge.")
+    if key == "agent_submits_verdict":
+      raise ValueError("agent_submits_verdict is the owner's own choice (Agent posts, in Contribute's review window); an agent cannot set it.")
     raise ValueError(f"Unknown review option: {key}.")
   for key in PROMPT_OPTIONS | {"fix_prompt"}:
     if key in options and (not isinstance(options[key], str) or not options[key].strip()):
@@ -107,8 +113,9 @@ def validate_options(options, mode):
   if "max_rounds" in options and (not isinstance(options["max_rounds"], int) or isinstance(options["max_rounds"], bool)
                                   or not 1 <= options["max_rounds"] <= MAX_ROUNDS_LIMIT):
     raise ValueError(f"max_rounds must be a whole number from 1 to {MAX_ROUNDS_LIMIT}.")
-  if "post_review" in options and options["post_review"] is not True:
-    raise ValueError("post_review may only be true; leave it out for a private review.")
+  for key in VERDICT_OPTIONS:
+    if key in options and options[key] is not True:
+      raise ValueError(f"{key} may only be true; leave it out for a private review.")
   return options
 
 
@@ -180,7 +187,7 @@ def main(argv=None, core=None):
   parser.add_argument("prs", nargs="*", help="owner/repository#123 or full PR URL")
   parser.add_argument("--app-id", type=int)
   parser.add_argument("--mode", choices=("review", "review_merge", "review_fix_merge"), help="New selection mode; default: review")
-  parser.add_argument("--options", help="JSON file: review_prompt/merge_prompt; fix_prompt/max_rounds only with --mode review_fix_merge; post_review only for review")
+  parser.add_argument("--options", help="JSON file: review_prompt/merge_prompt; fix_prompt/max_rounds only with --mode review_fix_merge; post_review/propose_verdict only for review and review_merge (review_merge needs both)")
   parser.add_argument("--agent", help="JSON file: provider/model/effort; frozen by the platform preview")
   parser.add_argument("--allow-mark-ready", action="store_true", help="Takeover preview includes marking drafts ready after review/checks; not consent itself")
   parser.add_argument("--selection", help="Use an already prepared exact selection; never refresh its versions")
